@@ -1,0 +1,111 @@
+{
+  "version": 42,
+  "style_default": "balanced",
+  "active_strategy": "balanced",
+  "hit_weight": 1.87,
+  "payout_weight": 0.1,
+  "type_quality_power": 1.4,
+  "type_quality_topk": 3,
+  "strength_blend": 0.7,
+  "coverage_target": 0.9,
+  "min_eligible": 5,
+  "trifecta_rec_min_hit_prob": 0.06,
+  "hit_floors": {
+    "win": 0.85,
+    "place": 0.85,
+    "wide": 0.7800000000000001,
+    "quinella": 0.6800000000000002
+  },
+  "style_weights": {
+    "steady": {
+      "win": 0.2,
+      "place": 0.5,
+      "wide": 0.2,
+      "quinella": 0.1
+    },
+    "balanced": {
+      "win": 0.2,
+      "place": 0.45,
+      "wide": 0.2,
+      "quinella": 0.15
+    },
+    "aggressive": {
+      "win": 0.25,
+      "place": 0.35,
+      "wide": 0.2,
+      "quinella": 0.2
+    }
+  },
+  "type_weight_adjust": {
+    "win": 0.588,
+    "place": 0.625,
+    "wide": 0.683,
+    "quinella": 1.0
+  },
+  "selector": {
+    "mode": "epsilon_greedy",
+    "epsilon": 0.2,
+    "min_samples": 3
+  },
+  "strategies": {
+    "balanced": {
+      "label": "balanced",
+      "overrides": {}
+    },
+    "steady": {
+      "label": "steady",
+      "overrides": {
+        "style_default": "steady",
+        "hit_weight": 1.45,
+        "payout_weight": 0.18,
+        "coverage_target": 0.7,
+        "min_eligible": 6
+      }
+    },
+    "value": {
+      "label": "value",
+      "overrides": {
+        "style_default": "balanced",
+        "hit_weight": 1.1,
+        "payout_weight": 0.35,
+        "coverage_target": 0.6
+      }
+    },
+    "aggressive": {
+      "label": "aggressive",
+      "overrides": {
+        "style_default": "aggressive",
+        "hit_weight": 1.0,
+        "payout_weight": 0.45,
+        "coverage_target": 0.55,
+        "min_eligible": 4
+      }
+    }
+  },
+  "pass_gate": {
+    "allow_pass": true,
+    "mode": "soft",
+    "min_portfolio_ev": 1.01,
+    "min_best_ev": 1.05,
+    "use_ci_low": true,
+    "min_best_ev_low": 1.0,
+    "hard_min_portfolio_ev": 0.98,
+    "hard_min_best_ev": 1.0,
+    "ci_low_min_payout_mult": 3.0,
+    "ci_low_max_hit_prob": 0.25
+  },
+  "ev_min": {
+    "place": 0.98,
+    "wide": 1.05,
+    "quinella": 1.1
+  },
+  "hit_min": {
+    "place": 0.06,
+    "wide": 0.03,
+    "quinella": 0.015
+  },
+  "state": {
+    "updated_at": "2026-01-18T17:08:59",
+    "tune_cursor": 33
+  }
+}

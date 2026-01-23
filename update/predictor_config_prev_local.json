@@ -1,0 +1,70 @@
+{
+  "version": 9,
+  "active_strategy": "balanced",
+  "selector": {
+    "mode": "epsilon_greedy",
+    "epsilon": 0.2,
+    "min_samples": 3
+  },
+  "optimizer": {
+    "target_score": 2.0
+  },
+  "params": {
+    "place_score_base": 0.2,
+    "place_score_weight": 0.8,
+    "place_score_fill": 0.5,
+    "time_trend_window": 3,
+    "tau_window": 300,
+    "tau_min": 300.0,
+    "tau_max": 1200.0,
+    "smooth_p": 1.1,
+    "surf_floor": 0.2,
+    "dist_floor": 0.3,
+    "record_weight_base": 0.75,
+    "record_weight_match": 0.25,
+    "recent_race_count": 5,
+    "top_score_count": 2,
+    "top3_scale": 2.4
+  },
+  "strategies": {
+    "balanced": {
+      "label": "balanced",
+      "overrides": {}
+    },
+    "steady": {
+      "label": "steady",
+      "overrides": {
+        "record_weight_base": 0.75,
+        "record_weight_match": 0.25,
+        "smooth_p": 1.1,
+        "top_score_count": 2,
+        "top3_scale": 2.8
+      }
+    },
+    "trend": {
+      "label": "trend",
+      "overrides": {
+        "time_trend_window": 5,
+        "record_weight_match": 0.35,
+        "recent_race_count": 6,
+        "top_score_count": 3
+      }
+    },
+    "distance": {
+      "label": "distance",
+      "overrides": {
+        "tau_window": 400,
+        "dist_floor": 0.2,
+        "smooth_p": 1.4,
+        "top3_scale": 3.2
+      }
+    }
+  },
+  "state": {
+    "rank_ema": 0.3523,
+    "ev_ema": 0.9884,
+    "risk_score": 0.8915,
+    "updated_at": "2026-01-06T16:46:40",
+    "tune_cursor": 12
+  }
+}
