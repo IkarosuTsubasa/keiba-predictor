@@ -557,7 +557,6 @@ def main():
         print("Missing race_id in Race URL. Please provide a URL with race_id.")
         sys.exit(1)
     history_url = require_value("History search URL (for new_history): ")
-    trigger_race = require_value("Trigger race name (for new_history): ")
 
     surface_raw = input("Surface 1=turf 2=dirt [auto]: ").strip()
     if not surface_raw:
@@ -583,17 +582,7 @@ def main():
         print(f"Selected predictor strategy: {predictor_strategy} ({predictor_reason})")
 
     os.environ["SCOPE_KEY"] = scope_key
-    history_exclude_trigger = (
-        os.environ.get("HISTORY_EXCLUDE_TRIGGER", "").strip().lower()
-        in ("1", "true", "yes", "on")
-    )
-
     race_card_env = None
-    if history_exclude_trigger:
-        race_card_env = {
-            "RACE_CARD_EXCLUDE_TRIGGER": "1",
-            "TRIGGER_RACE": trigger_race,
-        }
     run_script(
         ROOT_DIR / "race_card.py",
         [race_url],
@@ -602,7 +591,7 @@ def main():
         race_card_env,
     )
     sleep_between_scrapes()
-    run_script(ROOT_DIR / "new_history.py", [history_url, trigger_race], "new_history", ROOT_DIR)
+    run_script(ROOT_DIR / "new_history.py", [history_url], "new_history", ROOT_DIR)
     sleep_between_scrapes()
     run_script(
         ROOT_DIR / "predictor.py",
@@ -724,7 +713,7 @@ def main():
         "race_url": race_url,
         "race_id": race_id,
         "history_url": history_url,
-        "trigger_race": trigger_race,
+        "trigger_race": "",
         "scope": scope_key,
         "surface": surface,
         "distance": distance,

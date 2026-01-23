@@ -1,3 +1,4 @@
 # Ignore data directories
 /data/
 **/data/
+AGENTS.md

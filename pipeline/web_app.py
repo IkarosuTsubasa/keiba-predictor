@@ -24,8 +24,6 @@ OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
 OPTIMIZE_PREDICTOR = BASE_DIR / "optimize_predictor_params.py"
 OFFLINE_EVAL = BASE_DIR / "offline_eval.py"
 INIT_UPDATE = BASE_DIR / "init_update.py"
-COOKIE_PATH = ROOT_DIR / "cookie.txt"
-COOKIE_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
 MIN_RACE_YEAR = 2026
@@ -45,10 +43,6 @@ def load_runs(scope_key):
         except UnicodeDecodeError:
             continue
     return []
-
-
-def get_cookie_status():
-    return True, ""
 
 
 def get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT, query=""):
@@ -1055,9 +1049,7 @@ def page_template(
     summary_table_html="",
     run_summary_block="",
     stats_block="",
-    cookie_error="",
     default_scope="central_dirt",
-    run_disabled=False,
 ):
     output_block = ""
     if output_text:
@@ -1074,15 +1066,7 @@ def page_template(
             <pre>{html.escape(error_text)}</pre>
         </section>
         """ + output_block
-    run_button_attr = "disabled" if run_disabled else ""
-    cookie_block = ""
-    if cookie_error:
-        cookie_block = f"""
-        <div class="alert error">
-          <strong>Cookie 错误</strong>
-          <div>{html.escape(cookie_error)}</div>
-        </div>
-        """
+    run_button_attr = ""
     top5_block = ""
     if top5_table_html:
         top5_block = top5_table_html
@@ -1345,14 +1329,6 @@ def page_template(
         <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
         <label>历史查询链接</label>
         <input name="history_url" placeholder="https://db.netkeiba.com/...">
-        <label>触发比赛名称</label>
-        <input name="trigger_race" placeholder="示例：有馬記念(GI)">
-        <div class="radio-group">
-          <label class="radio-option">
-            <input type="checkbox" name="history_exclude_trigger" value="1">
-            历史比赛（从触发赛之后开始）
-          </label>
-        </div>
         <label>数据范围</label>
         <div class="radio-group" id="scope-radio">
           <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> 中央・沙地</label>
@@ -1387,7 +1363,6 @@ def page_template(
             </select>
           </div>
         </div>
-        {cookie_block}
         <button type="submit" {run_button_attr}>运行</button>
       </form>
     </section>
@@ -1658,8 +1633,6 @@ def render_page(
     scope_norm = normalize_scope_key(scope_key)
     default_scope = scope_norm or "central_dirt"
     run_options = build_run_options(scope_norm or scope_key)
-    cookie_ok, cookie_error = get_cookie_status()
-    run_disabled = not cookie_ok
     selected_run_id = str(selected_run_id or "").strip()
     stats_block = ""
     if scope_norm:
@@ -1790,9 +1763,7 @@ def render_page(
         summary_table_html=summary_table_html,
         run_summary_block=run_summary_block,
         stats_block=stats_block,
-        cookie_error=cookie_error,
         default_scope=default_scope,
-        run_disabled=run_disabled,
     )
 
 
@@ -1841,8 +1812,6 @@ def run_pipeline(
     race_id: str = Form(""),
     race_url: str = Form(""),
     history_url: str = Form(""),
-    trigger_race: str = Form(""),
-    history_exclude_trigger: str = Form(""),
     scope_key: str = Form(""),
     surface: str = Form(""),
     distance: str = Form(""),
@@ -1850,19 +1819,15 @@ def run_pipeline(
     budget: str = Form(""),
     style: str = Form(""),
 ):
-    cookie_ok, cookie_error = get_cookie_status()
-    if not cookie_ok:
-        return render_page(scope_key, error_text=cookie_error)
     scope_key = normalize_scope_key(scope_key)
     if not scope_key:
         return render_page("", error_text="请选择数据范围。")
     race_id = normalize_race_id(race_id or race_url)
     history_url = history_url.strip()
-    trigger_race = trigger_race.strip()
-    if not race_id or not history_url or not trigger_race:
+    if not race_id or not history_url:
         return render_page(
             scope_key,
-            error_text="Race ID, history URL, and trigger race are required.",
+            error_text="Race ID and history URL are required.",
         )
     if scope_key == "local":
         race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
@@ -1878,7 +1843,6 @@ def run_pipeline(
     inputs = [
         race_url,
         history_url,
-        trigger_race,
         surface,
         distance,
         track_cond,
@@ -1886,8 +1850,6 @@ def run_pipeline(
         style,
     ]
     extra_env = {"SCOPE_KEY": scope_key}
-    if history_exclude_trigger:
-        extra_env["HISTORY_EXCLUDE_TRIGGER"] = "1"
     code, output = run_script(
         RUN_PIPELINE,
         inputs=inputs,
@@ -1959,21 +1921,15 @@ def record_predictor(
     top2: str = Form(""),
     top3: str = Form(""),
 ):
-    cookie_ok, cookie_error = get_cookie_status()
-    run_disabled = not cookie_ok
     if not top1 or not top2 or not top3:
         return page_template(
             error_text="Top1/Top2/Top3 are required.",
-            cookie_error=cookie_error,
-            run_disabled=run_disabled,
         )
     inputs = [run_id, top1, top2, top3]
     code, output = run_script(RECORD_PREDICTOR, inputs=inputs, extra_blanks=2)
     label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=run_disabled,
     )
 
 
@@ -1981,11 +1937,8 @@ def record_predictor(
 def optimize_params():
     code, output = run_script(OPTIMIZE_PARAMS, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    cookie_ok, cookie_error = get_cookie_status()
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=not cookie_ok,
     )
 
 
@@ -1993,11 +1946,8 @@ def optimize_params():
 def optimize_predictor():
     code, output = run_script(OPTIMIZE_PREDICTOR, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    cookie_ok, cookie_error = get_cookie_status()
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=not cookie_ok,
     )
 
 
@@ -2006,11 +1956,8 @@ def offline_eval(window: str = Form("")):
     inputs = [window, ""]
     code, output = run_script(OFFLINE_EVAL, inputs=inputs, extra_blanks=1)
     label = f"Exit code: {code}"
-    cookie_ok, cookie_error = get_cookie_status()
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=not cookie_ok,
     )
 
 
@@ -2018,11 +1965,8 @@ def offline_eval(window: str = Form("")):
 def init_update():
     code, output = run_script(INIT_UPDATE, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    cookie_ok, cookie_error = get_cookie_status()
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=not cookie_ok,
     )
 
 
@@ -2030,9 +1974,6 @@ def init_update():
 def init_update_reset():
     code, output = run_script(INIT_UPDATE, inputs=[""], args=["--reset"], extra_blanks=1)
     label = f"Exit code: {code}"
-    cookie_ok, cookie_error = get_cookie_status()
     return page_template(
         output_text=f"{label}\n{output}",
-        cookie_error=cookie_error,
-        run_disabled=not cookie_ok,
     )
