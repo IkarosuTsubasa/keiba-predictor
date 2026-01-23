@@ -49,31 +49,31 @@ Browser/automation options (pipeline, Selenium)
 
 1) ?行主流程
 
-   python update/run_pipeline.py
+   python pipeline/run_pipeline.py
 
-   - ?行?序：出?表.py -> new?史?.py -> ??新.py -> odds_extract.py -> update/bet_plan_update.py
+   - ?行?序：出?表.py -> new?史?.py -> ??新.py -> odds_extract.py -> pipeline/bet_plan_update.py
 
-   - ?出：update/bet_plan_update.csv
+   - ?出：pipeline/bet_plan_update.csv
 
-   - 日志：update/data/runs.csv
+   - 日志：pipeline/data/runs.csv
 
-   - ??策略自?从 update/config_{surface}.json ??
+   - ??策略自?从 pipeline/config_{surface}.json ??
 
-   - ??策略自?从 update/predictor_config_{surface}.json ??
+   - ??策略自?从 pipeline/predictor_config_{surface}.json ??
 
-   - odds.csv 会自?快照保存到 update/data/odds_{run_id}.csv
+   - odds.csv 会自?快照保存到 pipeline/data/odds_{run_id}.csv
 
 
 
 2) 比??束后??收益
 
-   python update/record_result.py
+   python pipeline/record_result.py
 
    - ?入 run_id（默?最新）
 
    - ?入盈利/??（日元）
 
-   - 保存到：update/data/results.csv
+   - 保存到：pipeline/data/results.csv
 
    - 会自??行??参数?化
 
@@ -81,11 +81,11 @@ Browser/automation options (pipeline, Selenium)
 
 3) 比??束后????准?度（推荐）
 
-   python update/record_predictor_result.py
+   python pipeline/record_predictor_result.py
 
    - ?入真? Top3 ?名（按 1/2/3 名?序）
 
-   - 保存到：update/data/predictor_results.csv
+   - 保存到：pipeline/data/predictor_results.csv
 
    - 会自??行??参数?化
 
@@ -93,7 +93,7 @@ Browser/automation options (pipeline, Selenium)
 
 2+3 合并??（推荐）
 
-   python update/record_pipeline.py
+   python pipeline/record_pipeline.py
 
    - 一次性?入收益 + 真? Top3
 
@@ -109,21 +109,21 @@ Browser/automation options (pipeline, Selenium)
 
 4) ?化??方案参数
 
-   python update/optimize_params.py
+   python pipeline/optimize_params.py
 
-   - 更新：update/config_{surface}.json
+   - 更新：pipeline/config_{surface}.json
 
-   - 日志：update/data/config_history.csv
+   - 日志：pipeline/data/config_history.csv
 
 
 
 5) ?化??参数
 
-   python update/optimize_predictor_params.py
+   python pipeline/optimize_predictor_params.py
 
-   - 更新：update/predictor_config_{surface}.json
+   - 更新：pipeline/predictor_config_{surface}.json
 
-   - 日志：update/data/predictor_config_history.csv
+   - 日志：pipeline/data/predictor_config_history.csv
    - Env: PRED_OPT_WINDOW / PRED_OPT_MIN_SAMPLES / PRED_OPT_MAX_STD
    - Optimizer quality: 0.55*rank_score + 0.35*ev_score + 0.10*hit_rate
 
@@ -131,11 +131,11 @@ Browser/automation options (pipeline, Selenium)
 
 6) ???估（最近 N ??定性）
 
-   python update/offline_eval.py
+   python pipeline/offline_eval.py
 
    - 默?窗口 N=10，可自行?入
 
-   - ?出：update/data/offline_eval.csv
+   - ?出：pipeline/data/offline_eval.csv
 
 
 
@@ -143,7 +143,7 @@ Browser/automation options (pipeline, Selenium)
 
 - 自?更新只?整参数，不会自?改写算法??。
 
-- ??方案算法在 update/bet_plan_update.py。
+- ??方案算法在 pipeline/bet_plan_update.py。
 
 - ??算法在 ??新.py。
 
@@ -152,7 +152,7 @@ Browser/automation options (pipeline, Selenium)
 
 - ??方案?化会参考各?法命中率，???整?重。
 
-- ?法??日志：update/data/bet_ticket_results.csv、update/data/bet_type_stats.csv、update/data/race_results.csv。
+- ?法??日志：pipeline/data/bet_ticket_results.csv、pipeline/data/bet_type_stats.csv、pipeline/data/race_results.csv。
 
 - ???分??合指?：rank_score + ev_score + hit_rate（?重 0.4/0.4/0.2），并采用 EMA 作??化基准。
 - Optimizer quality uses weights: 0.55/0.35/0.10 (rank/ev/hit) for EMA/STD/DD.
@@ -165,13 +165,13 @@ Browser/automation options (pipeline, Selenium)
 
 - ?控机制：risk_score < 0.4 会??本次更新，并保存?参原因到 predictor_config_history.csv。
 
-- ?次更新前会??旧配置到 update/predictor_config_prev_{surface}.json，便于回?。
+- ?次更新前会??旧配置到 pipeline/predictor_config_prev_{surface}.json，便于回?。
 
 - ev_score 由 odds.csv 的?率估算，属于近似指?（非官方配当）。
 
-- 固定??策略：update/config_{surface}.json 里?置 selector.epsilon = 0 和 active_strategy。
+- 固定??策略：pipeline/config_{surface}.json 里?置 selector.epsilon = 0 和 active_strategy。
 
-- 固定??策略：update/predictor_config_{surface}.json 里?置 selector.epsilon = 0 和 active_strategy。
+- 固定??策略：pipeline/predictor_config_{surface}.json 里?置 selector.epsilon = 0 和 active_strategy。
 
 - 手???可使用?境?量：BET_STRATEGY / PREDICTOR_STRATEGY。
 
@@ -179,9 +179,9 @@ Browser/automation options (pipeline, Selenium)
 
 1) 首次初始化
 
-   python update/init_update.py
+   python pipeline/init_update.py
 
-   - ?建 update/data 及各?日志CSV（若不存在）
+   - ?建 pipeline/data 及各?日志CSV（若不存在）
 
    - 若配置文件不存在会写入默?配置
 
@@ -189,7 +189,7 @@ Browser/automation options (pipeline, Selenium)
 
 2) 重置日志（可?）
 
-   python update/init_update.py --reset
+   python pipeline/init_update.py --reset
 
    - 清空并重建日志CSV
 
@@ -230,7 +230,7 @@ predictions.csv（???出）
 
 
 
-update/data/predictor_results.csv（?后?价）
+pipeline/data/predictor_results.csv（?后?价）
 
 - top3_hit_count：Top3 命中数量
 
@@ -252,7 +252,7 @@ update/data/predictor_results.csv（?后?价）
 
 
 
-update/data/bet_ticket_results.csv / bet_type_stats.csv（下注命中）
+pipeline/data/bet_ticket_results.csv / bet_type_stats.csv（下注命中）
 
 - hit：是否命中
 
@@ -264,18 +264,18 @@ update/data/bet_ticket_results.csv / bet_type_stats.csv（下注命中）
 
 Surface separation
 
-- Logs: update/data/dirt/ or update/data/turf/
+- Logs: pipeline/data/dirt/ or pipeline/data/turf/
 
-- Configs: update/config_dirt.json, update/config_turf.json
+- Configs: pipeline/config_dirt.json, pipeline/config_turf.json
 
-- Predictor configs: update/predictor_config_dirt.json, update/predictor_config_turf.json
+- Predictor configs: pipeline/predictor_config_dirt.json, pipeline/predictor_config_turf.json
 
 - Use SURFACE_KEY=dirt|turf or input prompt when running scripts.
 
 
 Location separation
-- Logs: update/data/{surface}/{location}/
-- Configs: update/config_{surface}_{location}.json
-- Predictor configs: update/predictor_config_{surface}_{location}.json
+- Logs: pipeline/data/{surface}/{location}/
+- Configs: pipeline/config_{surface}_{location}.json
+- Predictor configs: pipeline/predictor_config_{surface}_{location}.json
 - Use LOCATION_KEY to select location (default=default).
 

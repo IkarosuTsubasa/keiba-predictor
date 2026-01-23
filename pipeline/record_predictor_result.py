@@ -234,7 +234,7 @@ def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     runs = load_runs()
     if not runs:
-        print("No runs found. Run update/run_pipeline.py first.")
+        print("No runs found. Run pipeline/run_pipeline.py first.")
         sys.exit(1)
 
     last_run = runs[-1]["run_id"]

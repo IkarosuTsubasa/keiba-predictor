@@ -67,7 +67,7 @@ def resolve_scope_key():
 SCOPE_KEY = resolve_scope_key()
 PRED_CONFIG_PATH = (
     Path(__file__).resolve().parent
-    / "update"
+    / "pipeline"
     / f"predictor_config_{SCOPE_KEY}.json"
 )
 DEFAULT_PARAMS = {
@@ -143,26 +143,26 @@ def load_predictor_config(path=None):
         if SCOPE_KEY == "central_turf":
             fallback.extend(
                 [
-                    Path(__file__).resolve().parent / "update" / "predictor_config_turf_default.json",
-                    Path(__file__).resolve().parent / "update" / "predictor_config_turf.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_turf_default.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_turf.json",
                 ]
             )
         elif SCOPE_KEY == "central_dirt":
             fallback.extend(
                 [
-                    Path(__file__).resolve().parent / "update" / "predictor_config_dirt_default.json",
-                    Path(__file__).resolve().parent / "update" / "predictor_config_dirt.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_dirt_default.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_dirt.json",
                 ]
             )
         elif SCOPE_KEY == "local":
             fallback.extend(
                 [
-                    Path(__file__).resolve().parent / "update" / "predictor_config_central_dirt.json",
-                    Path(__file__).resolve().parent / "update" / "predictor_config_dirt_default.json",
-                    Path(__file__).resolve().parent / "update" / "predictor_config_dirt.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_central_dirt.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_dirt_default.json",
+                    Path(__file__).resolve().parent / "pipeline" / "predictor_config_dirt.json",
                 ]
             )
-        fallback.append(Path(__file__).resolve().parent / "update" / "predictor_config.json")
+        fallback.append(Path(__file__).resolve().parent / "pipeline" / "predictor_config.json")
         for legacy in fallback:
             if legacy.exists():
                 data = json.loads(legacy.read_text(encoding="utf-8"))
