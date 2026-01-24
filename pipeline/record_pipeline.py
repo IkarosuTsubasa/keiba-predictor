@@ -182,8 +182,13 @@ def init_scope():
 def load_runs():
     if not RUNS_PATH.exists():
         return []
-    with open(RUNS_PATH, "r", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    for enc in ("utf-8-sig", "cp932", "utf-8"):
+        try:
+            with open(RUNS_PATH, "r", encoding=enc) as f:
+                return list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            continue
+    return []
 
 
 def resolve_pred_path_for_run(run, run_id, race_id, race_dir, last_run_id):

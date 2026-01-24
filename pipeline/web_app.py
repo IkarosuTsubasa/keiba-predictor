@@ -2,6 +2,7 @@ import csv
 import html
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -18,6 +19,8 @@ from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
+BET_PLAN_UPDATE = BASE_DIR / "bet_plan_update.py"
+ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PIPELINE = BASE_DIR / "record_pipeline.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
@@ -43,6 +46,21 @@ def load_runs(scope_key):
         except UnicodeDecodeError:
             continue
     return []
+
+
+def load_runs_with_header(scope_key):
+    migrate_legacy_data(BASE_DIR, scope_key)
+    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
+    if not runs_path.exists():
+        return [], [], "utf-8"
+    for enc in ("utf-8-sig", "cp932", "utf-8"):
+        try:
+            with open(runs_path, "r", encoding=enc) as f:
+                reader = csv.DictReader(f)
+                return list(reader), reader.fieldnames or [], enc
+        except UnicodeDecodeError:
+            continue
+    return [], [], "utf-8"
 
 
 def get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT, query=""):
@@ -101,6 +119,140 @@ def resolve_run(run_id, scope_key):
         if row.get("run_id") == run_id:
             return row
     return None
+
+
+def resolve_latest_run_by_race_id(race_id, scope_key):
+    race_id = normalize_race_id(race_id)
+    if not race_id:
+        return None
+    runs = load_runs(scope_key)
+    for row in reversed(runs):
+        if normalize_race_id(row.get("race_id", "")) == race_id:
+            return row
+    return None
+
+
+def resolve_plan_path(scope_key, run_id, run_row):
+    path = str(run_row.get("plan_path", "")).strip() if run_row else ""
+    if path:
+        return Path(path)
+    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
+    if race_id:
+        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
+        return race_dir / f"bet_plan_{run_id}_{race_id}.csv"
+    return get_data_dir(BASE_DIR, scope_key) / f"bet_plan_{run_id}.csv"
+
+
+def update_run_plan_path(scope_key, run_id, plan_path):
+    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
+    rows, fieldnames, enc = load_runs_with_header(scope_key)
+    if not rows or not fieldnames:
+        return False
+    updated = False
+    if "plan_path" not in fieldnames:
+        fieldnames.append("plan_path")
+    for row in rows:
+        if row.get("run_id") == run_id:
+            row["plan_path"] = str(plan_path)
+            updated = True
+            break
+    if not updated:
+        return False
+    with open(runs_path, "w", newline="", encoding=enc, errors="replace") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+    return True
+
+
+def refresh_odds_for_run(
+    run_row,
+    scope_key,
+    odds_path,
+    wide_odds_path=None,
+    fuku_odds_path=None,
+    quinella_odds_path=None,
+    trifecta_odds_path=None,
+):
+    race_url = str(run_row.get("race_url") or "").strip()
+    race_id = normalize_race_id(run_row.get("race_id", ""))
+    if not race_url and race_id:
+        if scope_key in ("central_turf", "central_dirt"):
+            base = "https://race.netkeiba.com/race/shutuba.html?race_id="
+        else:
+            base = "https://nar.netkeiba.com/race/shutuba.html?race_id="
+        race_url = f"{base}{race_id}"
+    if not race_url:
+        return False, "Race URL missing for odds update.", []
+    if not ODDS_EXTRACT.exists():
+        return False, "odds_extract.py not found.", []
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PIPELINE_HEADLESS", "0")
+    result = subprocess.run(
+        [sys.executable, str(ODDS_EXTRACT)],
+        input=f"{race_url}\n",
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        cwd=str(ROOT_DIR),
+        env=env,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, f"odds_extract failed: {detail}", []
+    if "Saved: odds.csv" not in (result.stdout or ""):
+        return False, "odds_extract produced no new odds.", []
+    tmp_path = ROOT_DIR / "odds.csv"
+    if not tmp_path.exists():
+        return False, "odds.csv not generated.", []
+    warnings = []
+    try:
+        Path(odds_path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tmp_path, odds_path)
+    except Exception as exc:
+        return False, f"Failed to update odds file: {exc}", []
+    wide_tmp = ROOT_DIR / "wide_odds.csv"
+    if wide_odds_path and wide_tmp.exists():
+        try:
+            Path(wide_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(wide_tmp, wide_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update wide odds file: {exc}", []
+    elif wide_odds_path:
+        warnings.append("wide_odds.csv not generated.")
+    fuku_tmp = ROOT_DIR / "fuku_odds.csv"
+    if fuku_odds_path and fuku_tmp.exists():
+        try:
+            Path(fuku_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(fuku_tmp, fuku_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update fuku odds file: {exc}", []
+    elif fuku_odds_path:
+        warnings.append("fuku_odds.csv not generated.")
+    quinella_tmp = ROOT_DIR / "quinella_odds.csv"
+    if quinella_odds_path and quinella_tmp.exists():
+        try:
+            Path(quinella_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(quinella_tmp, quinella_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update quinella odds file: {exc}", []
+    elif quinella_odds_path:
+        warnings.append("quinella_odds.csv not generated.")
+    trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
+    if trifecta_odds_path and trifecta_tmp.exists():
+        try:
+            Path(trifecta_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(trifecta_tmp, trifecta_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update trifecta odds file: {exc}", []
+    elif trifecta_odds_path:
+        warnings.append("trifecta_odds.csv not generated.")
+    return True, "", warnings
 
 
 def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=None):
@@ -563,6 +715,17 @@ def resolve_wide_odds_path(scope_key, run_id, run_row):
     if race_id:
         race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
         return race_dir / f"wide_odds_{run_id}_{race_id}.csv"
+    return None
+
+
+def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix):
+    path = str(run_row.get(field_name, "")).strip() if run_row else ""
+    if path:
+        return Path(path)
+    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
+    if race_id:
+        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
+        return race_dir / f"{prefix}_{run_id}_{race_id}.csv"
     return None
 
 
@@ -1412,6 +1575,36 @@ def page_template(
       </form>
     </section>
     <section class="panel">
+      <h2>Update Bet Plan (Existing Odds)</h2>
+      <form action="/update_bet_plan" method="post">
+        <label>Race ID</label>
+        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
+        <div class="grid">
+          <div>
+            <label>Budget yen (blank = run/default)</label>
+            <input name="budget" placeholder="2000">
+          </div>
+          <div>
+            <label>Bet style</label>
+            <select name="style">
+              <option value="">Auto</option>
+              <option value="steady">steady</option>
+              <option value="balanced">balanced</option>
+              <option value="aggressive">aggressive</option>
+            </select>
+          </div>
+        </div>
+        <label>Data scope</label>
+        <div class="radio-group" id="update-scope">
+          <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> Central Dirt</label>
+          <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"> Central Turf</label>
+          <label class="radio-option"><input type="radio" name="scope_key" value="local"> Local</label>
+        </div>
+        <div class="subtitle">Always fetches latest odds before updating plan.</div>
+        <button type="submit">Update Plan</button>
+      </form>
+    </section>
+    <section class="panel">
       <h2>History Viewer</h2>
       <form action="/view_run" method="post">
         <div class="grid">
@@ -1865,6 +2058,118 @@ def run_pipeline(
         bet_plan_text=bet_plan_text,
         summary_run_id=parse_run_id(output),
     )
+
+
+@app.post("/update_bet_plan", response_class=HTMLResponse)
+def update_bet_plan(
+    race_id: str = Form(""),
+    scope_key: str = Form(""),
+    budget: str = Form(""),
+    style: str = Form(""),
+):
+    scope_key = normalize_scope_key(scope_key)
+    if not scope_key:
+        return render_page("", error_text="Select a data scope to update bet plan.")
+    race_id = normalize_race_id(race_id)
+    if not race_id:
+        return render_page(scope_key, error_text="Race ID is required.")
+    run_row = resolve_latest_run_by_race_id(race_id, scope_key)
+    if run_row is None:
+        return render_page(scope_key, error_text="Run not found for the given race_id.")
+    run_id = run_row.get("run_id", "")
+    if not run_id:
+        return render_page(scope_key, error_text="Run ID missing for the selected race_id.")
+    pred_path = resolve_pred_path(scope_key, run_id, run_row)
+    if not pred_path.exists():
+        return render_page(scope_key, error_text=f"Predictions file not found: {pred_path}")
+    odds_path = resolve_odds_path(scope_key, run_id, run_row)
+    if not odds_path:
+        return render_page(scope_key, error_text="Odds path not found for this run.")
+
+    wide_path = resolve_wide_odds_path(scope_key, run_id, run_row)
+    fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
+    quinella_path = resolve_run_asset_path(scope_key, run_id, run_row, "quinella_odds_path", "quinella_odds")
+    trifecta_path = resolve_run_asset_path(scope_key, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
+    warnings = []
+    updated, msg, odds_warnings = refresh_odds_for_run(
+        run_row,
+        scope_key,
+        odds_path,
+        wide_odds_path=wide_path,
+        fuku_odds_path=fuku_path,
+        quinella_odds_path=quinella_path,
+        trifecta_odds_path=trifecta_path,
+    )
+    warnings.extend(odds_warnings)
+    if not updated:
+        return render_page(scope_key, error_text=msg)
+
+    if not odds_path.exists():
+        return render_page(scope_key, error_text=f"Odds file not found: {odds_path}")
+    if wide_path and not wide_path.exists():
+        warnings.append(f"wide odds not found: {wide_path}")
+    if fuku_path and not fuku_path.exists():
+        warnings.append(f"fuku odds not found: {fuku_path}")
+    if quinella_path and not quinella_path.exists():
+        warnings.append(f"quinella odds not found: {quinella_path}")
+
+    budget_val = to_int_or_none(budget)
+    if budget_val is None:
+        budget_val = to_int_or_none(run_row.get("budget_yen"))
+    budget_input = str(budget_val) if budget_val and budget_val > 0 else ""
+    style_input = style.strip().lower()
+    if not style_input:
+        style_input = str(run_row.get("style", "")).strip().lower()
+    if style_input not in ("steady", "balanced", "aggressive"):
+        style_input = ""
+
+    extra_env = {
+        "SCOPE_KEY": scope_key,
+        "RACE_ID": race_id,
+        "ODDS_PATH": str(odds_path),
+        "PRED_PATH": str(pred_path),
+    }
+    if wide_path:
+        extra_env["WIDE_ODDS_PATH"] = str(wide_path)
+    if fuku_path:
+        extra_env["FUKU_ODDS_PATH"] = str(fuku_path)
+    if quinella_path:
+        extra_env["QUINELLA_ODDS_PATH"] = str(quinella_path)
+
+    code, output = run_script(
+        BET_PLAN_UPDATE,
+        inputs=[budget_input, style_input],
+        extra_blanks=1,
+        extra_env=extra_env,
+    )
+
+    plan_src = BASE_DIR / "bet_plan_update.csv"
+    if code == 0 and plan_src.exists():
+        plan_dest = resolve_plan_path(scope_key, run_id, run_row)
+        plan_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(plan_src, plan_dest)
+        if not update_run_plan_path(scope_key, run_id, plan_dest):
+            warnings.append("runs.csv not updated; plan_path may be stale.")
+    else:
+        if not plan_src.exists():
+            warnings.append("bet_plan_update.csv not found after update.")
+
+    label = f"Exit code: {code}"
+    output_lines = [label]
+    if warnings:
+        output_lines.extend([f"[WARN] {item}" for item in warnings])
+    if output:
+        output_lines.append(output)
+    output_text = "\n".join(output_lines).strip()
+    bet_plan_text = extract_bet_plan(output_text)
+    return render_page(
+        scope_key,
+        output_text=output_text,
+        bet_plan_text=bet_plan_text,
+        summary_run_id=run_id,
+        selected_run_id=run_id,
+    )
+
 
 @app.post("/record_pipeline", response_class=HTMLResponse)
 def record_pipeline(

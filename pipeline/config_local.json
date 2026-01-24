@@ -1,13 +1,13 @@
 {
-  "version": 32,
+  "version": 33,
   "style_default": "balanced",
   "active_strategy": "balanced",
-  "hit_weight": 1.95,
-  "payout_weight": 0.13,
+  "hit_weight": 2.0,
+  "payout_weight": 0.1,
   "type_quality_power": 1.4,
   "type_quality_topk": 3,
   "strength_blend": 0.7,
-  "coverage_target": 0.85,
+  "coverage_target": 0.9,
   "min_eligible": 5,
   "trifecta_rec_min_hit_prob": 0.06,
   "hit_floors": {
@@ -105,7 +105,7 @@
     "quinella": 0.015
   },
   "state": {
-    "updated_at": "2026-01-23T23:43:23",
-    "tune_cursor": 18
+    "updated_at": "2026-01-24T00:55:12",
+    "tune_cursor": 19
   }
 }

@@ -1,8 +1,8 @@
 {
-  "version": 42,
+  "version": 45,
   "style_default": "balanced",
   "active_strategy": "balanced",
-  "hit_weight": 1.87,
+  "hit_weight": 1.92,
   "payout_weight": 0.1,
   "type_quality_power": 1.4,
   "type_quality_topk": 3,
@@ -13,8 +13,8 @@
   "hit_floors": {
     "win": 0.85,
     "place": 0.85,
-    "wide": 0.7800000000000001,
-    "quinella": 0.6800000000000002
+    "wide": 0.8100000000000002,
+    "quinella": 0.7100000000000002
   },
   "style_weights": {
     "steady": {
@@ -37,9 +37,9 @@
     }
   },
   "type_weight_adjust": {
-    "win": 0.588,
-    "place": 0.625,
-    "wide": 0.683,
+    "win": 0.539,
+    "place": 0.573,
+    "wide": 0.626,
     "quinella": 1.0
   },
   "selector": {
@@ -105,7 +105,7 @@
     "quinella": 0.015
   },
   "state": {
-    "updated_at": "2026-01-18T17:08:59",
-    "tune_cursor": 33
+    "updated_at": "2026-01-24T15:10:18",
+    "tune_cursor": 36
   }
 }

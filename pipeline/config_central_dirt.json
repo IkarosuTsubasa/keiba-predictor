@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
   "style_default": "balanced",
   "active_strategy": "balanced",
   "hit_weight": 1.66,
@@ -11,10 +11,10 @@
   "min_eligible": 5,
   "trifecta_rec_min_hit_prob": 0.06,
   "hit_floors": {
-    "win": 0.76,
-    "place": 0.81,
-    "wide": 0.66,
-    "quinella": 0.56
+    "win": 0.766,
+    "place": 0.8160000000000001,
+    "wide": 0.666,
+    "quinella": 0.5660000000000001
   },
   "style_weights": {
     "steady": {
@@ -105,7 +105,7 @@
     "quinella": 0.015
   },
   "state": {
-    "updated_at": "2026-01-17T04:01:36",
-    "tune_cursor": 7
+    "updated_at": "2026-01-24T15:00:20",
+    "tune_cursor": 8
   }
 }
