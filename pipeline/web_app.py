@@ -42,10 +42,35 @@ def load_runs(scope_key):
     for enc in ("utf-8-sig", "cp932", "utf-8"):
         try:
             with open(runs_path, "r", encoding=enc) as f:
-                return list(csv.DictReader(f))
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                fieldnames = reader.fieldnames or []
+                rows, _ = normalize_csv_rows(rows, fieldnames)
+                return rows
         except UnicodeDecodeError:
             continue
     return []
+
+
+def normalize_csv_fieldnames(fieldnames):
+    if not fieldnames:
+        return []
+    return [name.lstrip("\ufeff") if name else name for name in fieldnames]
+
+
+def normalize_csv_rows(rows, fieldnames):
+    norm_fieldnames = normalize_csv_fieldnames(fieldnames)
+    if norm_fieldnames == fieldnames:
+        return rows, fieldnames
+    mapping = dict(zip(fieldnames, norm_fieldnames))
+    out = []
+    for row in rows:
+        new_row = {}
+        for key, value in row.items():
+            new_key = mapping.get(key, key.lstrip("\ufeff") if key else key)
+            new_row[new_key] = value
+        out.append(new_row)
+    return out, norm_fieldnames
 
 
 def load_runs_with_header(scope_key):
@@ -57,7 +82,10 @@ def load_runs_with_header(scope_key):
         try:
             with open(runs_path, "r", encoding=enc) as f:
                 reader = csv.DictReader(f)
-                return list(reader), reader.fieldnames or [], enc
+                rows = list(reader)
+                fieldnames = reader.fieldnames or []
+                rows, fieldnames = normalize_csv_rows(rows, fieldnames)
+                return rows, fieldnames, enc
         except UnicodeDecodeError:
             continue
     return [], [], "utf-8"
@@ -130,6 +158,74 @@ def resolve_latest_run_by_race_id(race_id, scope_key):
         if normalize_race_id(row.get("race_id", "")) == race_id:
             return row
     return None
+
+
+def infer_run_id_from_path(path):
+    if not path:
+        return ""
+    match = re.search(r"(\d{8}_\d{6})", str(path))
+    return match.group(1) if match else ""
+
+
+def infer_run_id_from_row(run_row):
+    if not run_row:
+        return ""
+    for key in (
+        "predictions_path",
+        "odds_path",
+        "wide_odds_path",
+        "fuku_odds_path",
+        "quinella_odds_path",
+        "trifecta_odds_path",
+        "plan_path",
+    ):
+        run_id = infer_run_id_from_path(run_row.get(key, ""))
+        if run_id:
+            return run_id
+    return ""
+
+
+def update_run_row_fields(scope_key, run_row, updates):
+    if not run_row or not updates:
+        return False
+    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
+    rows, fieldnames, enc = load_runs_with_header(scope_key)
+    if not rows or not fieldnames:
+        return False
+    for key in updates:
+        if key not in fieldnames:
+            fieldnames.append(key)
+    target_run_id = str(run_row.get("run_id", "")).strip()
+    target_race_id = normalize_race_id(run_row.get("race_id", ""))
+    target_timestamp = str(run_row.get("timestamp", "")).strip()
+    target_pred_path = str(run_row.get("predictions_path", "")).strip()
+    matched = False
+    for row in rows:
+        row_run_id = str(row.get("run_id", "")).strip()
+        if target_run_id and row_run_id == target_run_id:
+            row.update(updates)
+            matched = True
+            break
+        row_race_id = normalize_race_id(row.get("race_id", ""))
+        row_ts = str(row.get("timestamp", "")).strip()
+        if target_race_id and target_timestamp:
+            if row_race_id != target_race_id or row_ts != target_timestamp:
+                continue
+            if target_pred_path:
+                row_pred = str(row.get("predictions_path", "")).strip()
+                if row_pred != target_pred_path:
+                    continue
+            row.update(updates)
+            matched = True
+            break
+    if not matched:
+        return False
+    with open(runs_path, "w", newline="", encoding=enc, errors="replace") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+    return True
 
 
 def resolve_plan_path(scope_key, run_id, run_row):
@@ -352,6 +448,114 @@ def to_int_or_none(value):
         return int(float(text))
     except (TypeError, ValueError):
         return None
+
+
+def format_path_mtime(path, label):
+    if not path:
+        return f"{label}: (missing path)"
+    path = Path(path)
+    if not path.exists():
+        return f"{label}: {path} (missing)"
+    ts = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+    return f"{label}: {path} (mtime={ts})"
+
+
+def parse_odds_value(value):
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def load_odds_snapshot(path):
+    if not path:
+        return {}
+    path = Path(path)
+    if not path.exists():
+        return {}
+    for enc in ("utf-8-sig", "cp932", "utf-8"):
+        try:
+            with open(path, "r", encoding=enc) as f:
+                reader = csv.DictReader(f)
+                out = {}
+                for row in reader:
+                    horse_no = str(row.get("horse_no", "")).strip()
+                    name = str(row.get("name", "")).strip()
+                    odds_raw = str(row.get("odds", "")).strip()
+                    key = ""
+                    if horse_no:
+                        key = f"no:{horse_no}"
+                    elif name:
+                        key = f"name:{normalize_name(name)}"
+                    if not key:
+                        continue
+                    out[key] = {
+                        "horse_no": horse_no,
+                        "name": name,
+                        "odds_raw": odds_raw,
+                        "odds_val": parse_odds_value(odds_raw),
+                    }
+                return out
+        except UnicodeDecodeError:
+            continue
+    return {}
+
+
+def odds_changed(prev_item, curr_item):
+    if prev_item.get("odds_val") is not None and curr_item.get("odds_val") is not None:
+        return abs(prev_item["odds_val"] - curr_item["odds_val"]) > 1e-9
+    return str(prev_item.get("odds_raw", "")) != str(curr_item.get("odds_raw", ""))
+
+
+def odds_item_label(item):
+    horse_no = str(item.get("horse_no", "")).strip()
+    name = str(item.get("name", "")).strip()
+    if horse_no and name:
+        return f"{horse_no} {name}"
+    return horse_no or name or "(unknown)"
+
+
+def odds_sort_key(item):
+    horse_no = str(item.get("horse_no", "")).strip()
+    name = str(item.get("name", "")).strip()
+    try:
+        return (0, int(float(horse_no)), name)
+    except (TypeError, ValueError):
+        return (1, horse_no, name)
+
+
+def format_odds_diff(prev_snapshot, curr_snapshot, limit=50):
+    if not prev_snapshot:
+        return ["odds_diff: no previous odds"]
+    if not curr_snapshot:
+        return ["odds_diff: no new odds"]
+    added = []
+    removed = []
+    changed = []
+    for key, curr in curr_snapshot.items():
+        prev = prev_snapshot.get(key)
+        if not prev:
+            added.append(curr)
+        elif odds_changed(prev, curr):
+            changed.append((prev, curr))
+    for key, prev in prev_snapshot.items():
+        if key not in curr_snapshot:
+            removed.append(prev)
+    lines = [
+        f"odds_diff: changed={len(changed)} added={len(added)} removed={len(removed)}"
+    ]
+    for prev, curr in sorted(changed, key=lambda pair: odds_sort_key(pair[1])):
+        lines.append(
+            f"~ {odds_item_label(curr)}: {prev.get('odds_raw', '')} -> {curr.get('odds_raw', '')}"
+        )
+    for item in sorted(added, key=odds_sort_key):
+        lines.append(f"+ {odds_item_label(item)}: {item.get('odds_raw', '')}")
+    for item in sorted(removed, key=odds_sort_key):
+        lines.append(f"- {odds_item_label(item)}: {item.get('odds_raw', '')}")
+    if len(lines) > limit + 1:
+        more = len(lines) - (limit + 1)
+        return lines[: limit + 1] + [f"... truncated {more} lines"]
+    return lines
 
 
 def build_table_html(rows, columns, title):
@@ -2076,7 +2280,12 @@ def update_bet_plan(
     run_row = resolve_latest_run_by_race_id(race_id, scope_key)
     if run_row is None:
         return render_page(scope_key, error_text="Run not found for the given race_id.")
-    run_id = run_row.get("run_id", "")
+    run_id = str(run_row.get("run_id", "")).strip()
+    if not run_id:
+        run_id = infer_run_id_from_row(run_row)
+        if run_id:
+            update_run_row_fields(scope_key, run_row, {"run_id": run_id})
+            run_row["run_id"] = run_id
     if not run_id:
         return render_page(scope_key, error_text="Run ID missing for the selected race_id.")
     pred_path = resolve_pred_path(scope_key, run_id, run_row)
@@ -2090,6 +2299,7 @@ def update_bet_plan(
     fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
     quinella_path = resolve_run_asset_path(scope_key, run_id, run_row, "quinella_odds_path", "quinella_odds")
     trifecta_path = resolve_run_asset_path(scope_key, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
+    prev_odds_snapshot = load_odds_snapshot(odds_path)
     warnings = []
     updated, msg, odds_warnings = refresh_odds_for_run(
         run_row,
@@ -2154,10 +2364,18 @@ def update_bet_plan(
         if not plan_src.exists():
             warnings.append("bet_plan_update.csv not found after update.")
 
+    curr_odds_snapshot = load_odds_snapshot(odds_path)
+    diff_lines = format_odds_diff(prev_odds_snapshot, curr_odds_snapshot)
     label = f"Exit code: {code}"
     output_lines = [label]
     if warnings:
         output_lines.extend([f"[WARN] {item}" for item in warnings])
+    output_lines.append(format_path_mtime(odds_path, "odds_path"))
+    output_lines.append(format_path_mtime(wide_path, "wide_odds_path"))
+    output_lines.append(format_path_mtime(fuku_path, "fuku_odds_path"))
+    output_lines.append(format_path_mtime(quinella_path, "quinella_odds_path"))
+    output_lines.append(format_path_mtime(trifecta_path, "trifecta_odds_path"))
+    output_lines.extend(diff_lines)
     if output:
         output_lines.append(output)
     output_text = "\n".join(output_lines).strip()

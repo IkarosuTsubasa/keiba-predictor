@@ -24,7 +24,7 @@ BLOCK_PATTERNS = (
     "request blocked",
     "err_too_many_requests",
 )
-SLEEP_RANGE_SECONDS = (1.6, 3.6)
+SLEEP_RANGE_SECONDS = (0.6, 1.6)
 
 
 def configure_utf8_io():

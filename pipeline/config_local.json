@@ -1,5 +1,5 @@
 {
-  "version": 33,
+  "version": 35,
   "style_default": "balanced",
   "active_strategy": "balanced",
   "hit_weight": 2.0,
@@ -14,7 +14,7 @@
     "win": 0.85,
     "place": 0.85,
     "wide": 0.85,
-    "quinella": 0.8360000000000003
+    "quinella": 0.85
   },
   "style_weights": {
     "steady": {
@@ -37,8 +37,8 @@
     }
   },
   "type_weight_adjust": {
-    "win": 0.728,
-    "place": 0.999,
+    "win": 0.667,
+    "place": 0.915,
     "wide": 0.557,
     "quinella": 1.0
   },
@@ -105,7 +105,7 @@
     "quinella": 0.015
   },
   "state": {
-    "updated_at": "2026-01-24T00:55:12",
-    "tune_cursor": 19
+    "updated_at": "2026-01-24T19:03:59",
+    "tune_cursor": 21
   }
 }

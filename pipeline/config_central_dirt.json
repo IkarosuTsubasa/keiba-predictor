@@ -1,8 +1,8 @@
 {
-  "version": 16,
+  "version": 23,
   "style_default": "balanced",
   "active_strategy": "balanced",
-  "hit_weight": 1.66,
+  "hit_weight": 1.68,
   "payout_weight": 0.1,
   "type_quality_power": 1.4,
   "type_quality_topk": 3,
@@ -11,10 +11,10 @@
   "min_eligible": 5,
   "trifecta_rec_min_hit_prob": 0.06,
   "hit_floors": {
-    "win": 0.766,
-    "place": 0.8160000000000001,
-    "wide": 0.666,
-    "quinella": 0.5660000000000001
+    "win": 0.778,
+    "place": 0.8280000000000001,
+    "wide": 0.678,
+    "quinella": 0.5780000000000001
   },
   "style_weights": {
     "steady": {
@@ -37,9 +37,9 @@
     }
   },
   "type_weight_adjust": {
-    "win": 0.839,
-    "place": 0.839,
-    "wide": 0.839,
+    "win": 0.797,
+    "place": 0.797,
+    "wide": 0.797,
     "quinella": 1.0
   },
   "selector": {
@@ -105,7 +105,7 @@
     "quinella": 0.015
   },
   "state": {
-    "updated_at": "2026-01-24T15:00:20",
-    "tune_cursor": 8
+    "updated_at": "2026-02-21T15:24:06",
+    "tune_cursor": 15
   }
 }

@@ -39,7 +39,7 @@ BLOCK_PATTERNS = (
     "request blocked",
     "err_too_many_requests",
 )
-SLEEP_RANGE_SECONDS = (1.6, 3.6)
+SLEEP_RANGE_SECONDS = (0.6, 1.6)
 # ===== 从 cookie.txt 加载 JSON 格式的 cookie =====
 def load_cookies_from_json_file(path="cookie.txt"):
     try:

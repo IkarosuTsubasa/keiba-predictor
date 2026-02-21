@@ -75,6 +75,19 @@ def should_headless():
     return True
 
 
+def get_chrome_profile():
+    profile_dir = (
+        os.environ.get("PIPELINE_CHROME_PROFILE", "").strip()
+        or os.environ.get("CHROME_USER_DATA_DIR", "").strip()
+        or os.environ.get("CHROME_PROFILE", "").strip()
+    )
+    profile_name = (
+        os.environ.get("PIPELINE_CHROME_PROFILE_NAME", "").strip()
+        or os.environ.get("CHROME_PROFILE_NAME", "").strip()
+    )
+    return profile_dir, profile_name
+
+
 def assert_not_blocked(page_source, title, url):
     haystack = f"{title}\n{page_source}".lower()
     for pattern in BLOCK_PATTERNS:
@@ -562,6 +575,11 @@ def main():
             options.add_argument("--headless")
             options.add_argument("--disable-gpu")
         options.add_argument("--lang=ja-JP")
+        profile_dir, profile_name = get_chrome_profile()
+        if profile_dir:
+            options.add_argument(f"--user-data-dir={profile_dir}")
+            if profile_name:
+                options.add_argument(f"--profile-directory={profile_name}")
 
     try:
         driver = webdriver.Chrome(options=options)
