@@ -424,6 +424,38 @@ def normalize_race_id(value):
     return re.sub(r"\D", "", raw)
 
 
+def is_run_id(value):
+    return bool(re.fullmatch(r"\d{8}_\d{6}", str(value or "").strip()))
+
+
+def find_run_in_scope(scope_key, id_text):
+    if not scope_key or not id_text:
+        return None
+    runs = load_runs(scope_key)
+    if not runs:
+        return None
+    id_text = str(id_text).strip()
+    race_id = normalize_race_id(id_text)
+    for row in reversed(runs):
+        run_id = str(row.get("run_id", "")).strip()
+        if run_id and run_id == id_text:
+            return row
+        if race_id and normalize_race_id(row.get("race_id", "")) == race_id:
+            return row
+    return None
+
+
+def infer_scope_and_run(id_text):
+    id_text = str(id_text or "").strip()
+    if not id_text:
+        return "", None
+    for scope_key in ("central_dirt", "central_turf", "local"):
+        run_row = find_run_in_scope(scope_key, id_text)
+        if run_row:
+            return scope_key, run_row
+    return "", None
+
+
 def load_csv_rows(path):
     if not path.exists():
         return []
@@ -1624,19 +1656,151 @@ def page_template(
     #scope-radio .radio-option, #record-scope .radio-option, #view-scope .radio-option {{
       white-space: nowrap;
     }}
+    #scope-radio {{
+      gap: 12px;
+    }}
+    #scope-radio .radio-option {{
+      padding: 0;
+      border: none;
+      background: transparent;
+    }}
+    #scope-radio .radio-option .radio-text {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 108px;
+      padding: 12px 16px;
+      min-height: 40px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #f7efe6;
+      font-size: 12px;
+      line-height: 1.3;
+      text-align: center;
+      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }}
+    #scope-radio .radio-option input {{
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }}
+    #scope-radio .radio-option input:checked + .radio-text {{
+      background: #e8f1ea;
+      border-color: rgba(46, 106, 79, 0.6);
+      color: #1f4b39;
+      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
+      transform: translateY(-1px);
+    }}
+    #scope-radio .radio-option input:focus + .radio-text {{
+      outline: 2px solid rgba(46, 106, 79, 0.25);
+      outline-offset: 2px;
+    }}
+    #scope-radio .radio-option:hover {{
+      transform: none;
+      border-color: transparent;
+      background: transparent;
+    }}
+    #track-cond {{
+      gap: 10px;
+    }}
+    #track-cond .radio-option {{
+      padding: 0;
+      border: none;
+      background: transparent;
+    }}
+    #track-cond .radio-option .radio-text {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 64px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #f7efe6;
+      font-size: 12px;
+      line-height: 1.2;
+      text-align: center;
+      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }}
+    #track-cond .radio-option input {{
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }}
+    #track-cond .radio-option input:checked + .radio-text {{
+      background: #e8f1ea;
+      border-color: rgba(46, 106, 79, 0.6);
+      color: #1f4b39;
+      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
+      transform: translateY(-1px);
+    }}
+    #track-cond .radio-option input:focus + .radio-text {{
+      outline: 2px solid rgba(46, 106, 79, 0.25);
+      outline-offset: 2px;
+    }}
+    #track-cond .radio-option:hover {{
+      transform: none;
+      border-color: transparent;
+      background: transparent;
+    }}
+    #action-type {{
+      gap: 12px;
+    }}
+    #action-type .radio-option {{
+      padding: 0;
+      border: none;
+      background: transparent;
+    }}
+    #action-type .radio-option .radio-text {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 108px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #f7efe6;
+      font-size: 12px;
+      line-height: 1.2;
+      text-align: center;
+      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }}
+    #action-type .radio-option input {{
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }}
+    #action-type .radio-option input:checked + .radio-text {{
+      background: #e8f1ea;
+      border-color: rgba(46, 106, 79, 0.6);
+      color: #1f4b39;
+      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
+      transform: translateY(-1px);
+    }}
+    #action-type .radio-option input:focus + .radio-text {{
+      outline: 2px solid rgba(46, 106, 79, 0.25);
+      outline-offset: 2px;
+    }}
+    #action-type .radio-option:hover {{
+      transform: none;
+      border-color: transparent;
+      background: transparent;
+    }}
     .radio-option {{
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      border-radius: 999px;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 10px;
       border: 1px solid var(--border);
       background: #f7efe6;
       cursor: pointer;
+      font-size: 12px;
       transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease;
     }}
     .radio-option input {{
       accent-color: var(--accent);
+      transform: scale(0.9);
     }}
     .radio-option:hover {{
       transform: translateY(-1px);
@@ -1698,9 +1862,18 @@ def page_template(
         <input name="history_url" placeholder="https://db.netkeiba.com/...">
         <label>数据范围</label>
         <div class="radio-group" id="scope-radio">
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> 中央・沙地</label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"> 中央・草地</label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="local"> 地方</label>
+          <label class="radio-option">
+            <input type="radio" name="scope_key" value="central_dirt">
+            <span class="radio-text">中央・沙地</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="scope_key" value="central_turf">
+            <span class="radio-text">中央・草地</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="scope_key" value="local">
+            <span class="radio-text">地方</span>
+          </label>
         </div>
         <div class="grid">
           <div>
@@ -1709,11 +1882,23 @@ def page_template(
           </div>
           <div>
             <label>马场（良/稍重/重/不良）</label>
-            <div class="radio-group">
-              <label class="radio-option"><input type="radio" name="track_cond" value="良" checked> 良</label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="稍重"> 稍重</label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="重"> 重</label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="不良"> 不良</label>
+            <div class="radio-group" id="track-cond">
+              <label class="radio-option">
+                <input type="radio" name="track_cond" value="良" checked>
+                <span class="radio-text">良</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="track_cond" value="稍重">
+                <span class="radio-text">稍重</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="track_cond" value="重">
+                <span class="radio-text">重</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="track_cond" value="不良">
+                <span class="radio-text">不良</span>
+              </label>
             </div>
           </div>
           <div>
@@ -1734,104 +1919,64 @@ def page_template(
       </form>
     </section>
 
+    
     <section class="panel">
-      <h2>赛后记录（盈亏 + 前三）</h2>
-      <form action="/record_pipeline" method="post">
-        <div class="grid">
-          <div>
-            <label>Run ID（留空=最新）</label>
-            <input id="run_id_search" type="text" placeholder="Search run id / race id / date">
-            <select id="run_id_select" name="run_id">
-              <option value="">（自动=最新）</option>
-              {run_options}
-            </select>
-          </div>
-          <div>
-            <label>数据范围</label>
-            <div class="radio-group" id="record-scope">
-              <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> 中央・沙地</label>
-              <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"> 中央・草地</label>
-              <label class="radio-option"><input type="radio" name="scope_key" value="local"> 地方</label>
-            </div>
-          </div>
-          <div>
-            <label>盈亏（日元，留空=估算）</label>
-            <input name="profit">
-          </div>
+      <h2>单场入口</h2>
+      <form id="single-action-form" action="/view_run" method="post">
+        <label>运行ID / 比赛ID</label>
+        <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="例如 202501010101 或 20250101_123456">
+        <input type="hidden" id="action_run_id" name="run_id">
+        <input type="hidden" id="action_race_id" name="race_id">
+        <label>操作类型</label>
+        <div class="radio-group" id="action-type">
+          <label class="radio-option">
+            <input type="radio" name="action_type" value="view" checked>
+            <span class="radio-text">查看</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="action_type" value="update">
+            <span class="radio-text">更新投注计划</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="action_type" value="record">
+            <span class="radio-text">赛后记录</span>
+          </label>
         </div>
-        <label>备注（可选）</label>
-        <input name="note">
-        <div class="grid">
+        <div class="subtitle">数据范围会根据 ID 自动判断。</div>
+        <div class="grid" id="action-update-fields" style="display:none;">
           <div>
-            <label>实际第 1 名</label>
-            <input name="top1">
-          </div>
-          <div>
-            <label>实际第 2 名</label>
-            <input name="top2">
-          </div>
-          <div>
-            <label>实际第 3 名</label>
-            <input name="top3">
-          </div>
-        </div>
-        <button type="submit">记录</button>
-      </form>
-    </section>
-    <section class="panel">
-      <h2>Update Bet Plan (Existing Odds)</h2>
-      <form action="/update_bet_plan" method="post">
-        <label>Race ID</label>
-        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
-        <div class="grid">
-          <div>
-            <label>Budget yen (blank = run/default)</label>
+            <label>预算（日元，可空）</label>
             <input name="budget" placeholder="2000">
           </div>
           <div>
-            <label>Bet style</label>
+            <label>投注风格</label>
             <select name="style">
-              <option value="">Auto</option>
+              <option value="">自动</option>
               <option value="steady">steady</option>
               <option value="balanced">balanced</option>
               <option value="aggressive">aggressive</option>
             </select>
           </div>
         </div>
-        <label>Data scope</label>
-        <div class="radio-group" id="update-scope">
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> Central Dirt</label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"> Central Turf</label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="local"> Local</label>
-        </div>
-        <div class="subtitle">Always fetches latest odds before updating plan.</div>
-        <button type="submit">Update Plan</button>
-      </form>
-    </section>
-    <section class="panel">
-      <h2>History Viewer</h2>
-      <form action="/view_run" method="post">
-        <div class="grid">
+        <div class="grid" id="action-record-fields" style="display:none;">
           <div>
-            <label>Run ID (blank = latest)</label>
-            <input id="view_run_search" type="text" placeholder="Search run id / race id / date">
-            <select id="view_run_select" name="run_id" data-selected-run="{view_selected_run_id}">
-              <option value="">Auto = latest</option>
-              {view_run_options}
-            </select>
+            <label>实际第1名</label>
+            <input name="top1">
           </div>
           <div>
-            <label>Data scope</label>
-            <div class="radio-group" id="view-scope">
-              <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"> Central Dirt</label>
-              <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"> Central Turf</label>
-              <label class="radio-option"><input type="radio" name="scope_key" value="local"> Local</label>
-            </div>
+            <label>实际第2名</label>
+            <input name="top2">
+          </div>
+          <div>
+            <label>实际第3名</label>
+            <input name="top3">
           </div>
         </div>
-        <button type="submit">View</button>
+        <button type="submit" id="action-submit">执行</button>
       </form>
     </section>
+
+
     {top5_block}
     {summary_block}
     {bet_plan_block}
@@ -1840,178 +1985,68 @@ def page_template(
     {output_block}
   </main>
   <script>
-    const runSelect = document.getElementById("run_id_select");
-    const runSearch = document.getElementById("run_id_search");
-    const recordScope = document.getElementById("record-scope");
-    const recordRadios = recordScope ? recordScope.querySelectorAll('input[name="scope_key"]') : [];
-    const defaultScope = "{default_scope}";
-    const runLimit = {DEFAULT_RUN_LIMIT};
-    const runSearchLimit = {MAX_RUN_LIMIT};
+    const actionForm = document.getElementById("single-action-form");
+    const actionInput = document.getElementById("action_id_input");
+    const actionRunId = document.getElementById("action_run_id");
+    const actionRaceId = document.getElementById("action_race_id");
+    const actionTypeRadios = document.querySelectorAll('input[name="action_type"]');
+    const updateFields = document.getElementById("action-update-fields");
+    const recordFields = document.getElementById("action-record-fields");
+    const actionSubmit = document.getElementById("action-submit");
 
-    function getActiveScope() {{
-      const checked = recordScope ? recordScope.querySelector('input[name="scope_key"]:checked') : null;
-      if (checked && checked.value) {{
-        return checked.value;
+    function syncActionIds() {{
+      const value = actionInput ? actionInput.value.trim() : "";
+      if (actionRunId) {{
+        actionRunId.value = value;
       }}
-      return defaultScope;
-    }}
-
-    function getSearchQuery() {{
-      return runSearch ? runSearch.value.trim() : "";
-    }}
-
-    async function refreshRuns(scopeKey, query, limit) {{
-      if (!runSelect || !scopeKey) {{
-        return;
-      }}
-      try {{
-        const params = new URLSearchParams();
-        params.set("scope_key", scopeKey);
-        if (limit) {{
-          params.set("limit", String(limit));
-        }}
-        if (query) {{
-          params.set("q", query);
-        }}
-        const resp = await fetch(`/api/runs?${{params.toString()}}`);
-        const data = await resp.json();
-        runSelect.innerHTML = "";
-        const autoOpt = document.createElement("option");
-        autoOpt.value = "";
-        autoOpt.textContent = "（自动=最新）";
-        runSelect.appendChild(autoOpt);
-        if (!data.length) {{
-          const emptyOpt = document.createElement("option");
-          emptyOpt.value = "";
-          emptyOpt.textContent = "无记录";
-          emptyOpt.disabled = true;
-          runSelect.appendChild(emptyOpt);
-          return;
-        }}
-        data.forEach((item) => {{
-          const opt = document.createElement("option");
-          opt.value = item.run_id || "";
-          opt.textContent = item.label || item.run_id || "";
-          runSelect.appendChild(opt);
-        }});
-      }} catch (err) {{
-        console.error(err);
+      if (actionRaceId) {{
+        actionRaceId.value = value;
       }}
     }}
-    function scheduleRefresh() {{
-      const scopeKey = getActiveScope();
-      const query = getSearchQuery();
-      const limit = query ? runSearchLimit : runLimit;
-      refreshRuns(scopeKey, query, limit);
+
+    function getActionType() {{
+      const checked = document.querySelector('input[name="action_type"]:checked');
+      return checked ? checked.value : "view";
     }}
 
-    let searchTimer = null;
-    if (runSearch) {{
-      runSearch.addEventListener("input", () => {{
-        if (searchTimer) {{
-          clearTimeout(searchTimer);
+    function refreshActionUI() {{
+      const actionType = getActionType();
+      if (updateFields) {{
+        updateFields.style.display = actionType === "update" ? "grid" : "none";
+      }}
+      if (recordFields) {{
+        recordFields.style.display = actionType === "record" ? "grid" : "none";
+      }}
+      if (actionForm) {{
+        if (actionType === "update") {{
+          actionForm.action = "/update_bet_plan";
+          if (actionSubmit) {{
+            actionSubmit.textContent = "更新";
+          }}
+        }} else if (actionType === "record") {{
+          actionForm.action = "/record_pipeline";
+          if (actionSubmit) {{
+            actionSubmit.textContent = "记录";
+          }}
+        }} else {{
+          actionForm.action = "/view_run";
+          if (actionSubmit) {{
+            actionSubmit.textContent = "查看";
+          }}
         }}
-        searchTimer = setTimeout(scheduleRefresh, 200);
+      }}
+    }}
+
+    if (actionInput) {{
+      actionInput.addEventListener("input", syncActionIds);
+      syncActionIds();
+    }}
+    if (actionTypeRadios.length) {{
+      actionTypeRadios.forEach((radio) => {{
+        radio.addEventListener("change", refreshActionUI);
       }});
     }}
-    if (recordRadios.length) {{
-      recordRadios.forEach((radio) => {{
-        radio.addEventListener("change", () => {{
-          scheduleRefresh();
-        }});
-      }});
-    }}
-    if (runSelect) {{
-      scheduleRefresh();
-    }}
-    const viewRunSelect = document.getElementById("view_run_select");
-    const viewRunSearch = document.getElementById("view_run_search");
-    const viewScope = document.getElementById("view-scope");
-    const viewRadios = viewScope ? viewScope.querySelectorAll('input[name="scope_key"]') : [];
-    const viewSelected = viewRunSelect ? viewRunSelect.dataset.selectedRun || "" : "";
-    let viewAppliedInitial = false;
-
-    function getViewScope() {{
-      const checked = viewScope ? viewScope.querySelector('input[name="scope_key"]:checked') : null;
-      if (checked && checked.value) {{
-        return checked.value;
-      }}
-      return defaultScope;
-    }}
-
-    function getViewQuery() {{
-      return viewRunSearch ? viewRunSearch.value.trim() : "";
-    }}
-
-    async function refreshViewRuns(scopeKey, query, limit) {{
-      if (!viewRunSelect || !scopeKey) {{
-        return;
-      }}
-      try {{
-        const params = new URLSearchParams();
-        params.set("scope_key", scopeKey);
-        if (limit) {{
-          params.set("limit", String(limit));
-        }}
-        if (query) {{
-          params.set("q", query);
-        }}
-        const resp = await fetch(`/api/runs?${{params.toString()}}`);
-        const data = await resp.json();
-        viewRunSelect.innerHTML = "";
-        const autoOpt = document.createElement("option");
-        autoOpt.value = "";
-        autoOpt.textContent = "Auto = latest";
-        viewRunSelect.appendChild(autoOpt);
-        if (!data.length) {{
-          const emptyOpt = document.createElement("option");
-          emptyOpt.value = "";
-          emptyOpt.textContent = "No runs";
-          emptyOpt.disabled = true;
-          viewRunSelect.appendChild(emptyOpt);
-          return;
-        }}
-        data.forEach((item) => {{
-          const opt = document.createElement("option");
-          opt.value = item.run_id || "";
-          opt.textContent = item.label || item.run_id || "";
-          viewRunSelect.appendChild(opt);
-        }});
-        if (!viewAppliedInitial && viewSelected) {{
-          viewRunSelect.value = viewSelected;
-          viewAppliedInitial = true;
-        }}
-      }} catch (err) {{
-        console.error(err);
-      }}
-    }}
-
-    function scheduleViewRefresh() {{
-      const scopeKey = getViewScope();
-      const query = getViewQuery();
-      const limit = query ? runSearchLimit : runLimit;
-      refreshViewRuns(scopeKey, query, limit);
-    }}
-
-    let viewSearchTimer = null;
-    if (viewRunSearch) {{
-      viewRunSearch.addEventListener("input", () => {{
-        if (viewSearchTimer) {{
-          clearTimeout(viewSearchTimer);
-        }}
-        viewSearchTimer = setTimeout(scheduleViewRefresh, 200);
-      }});
-    }}
-    if (viewRadios.length) {{
-      viewRadios.forEach((radio) => {{
-        radio.addEventListener("change", () => {{
-          scheduleViewRefresh();
-        }});
-      }});
-    }}
-    if (viewRunSelect) {{
-      scheduleViewRefresh();
-    }}
+    refreshActionUI();
   </script>
 </body>
 </html>
@@ -2174,15 +2209,23 @@ def view_run(
     run_id: str = Form(""),
     scope_key: str = Form(""),
 ):
-    scope_key = normalize_scope_key(scope_key)
-    if not scope_key:
-        return render_page("", error_text="Select a data scope to view history.")
     run_id = run_id.strip()
-    run_row = resolve_run(run_id, scope_key)
+    scope_key = normalize_scope_key(scope_key)
+    run_row = None
+    if not scope_key:
+        scope_key, run_row = infer_scope_and_run(run_id)
+    if not scope_key:
+        return render_page("", error_text="请输入 Run ID / Race ID 以查看历史记录。")
+    if run_row is None:
+        run_row = resolve_run(run_id, scope_key)
+    if run_row is None:
+        race_id = normalize_race_id(run_id)
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="Run ID not found for the selected scope.",
+            error_text="找不到对应的 Run ID / Race ID。",
             selected_run_id=run_id,
         )
     resolved_run_id = run_row.get("run_id", run_id)
@@ -2271,15 +2314,25 @@ def update_bet_plan(
     budget: str = Form(""),
     style: str = Form(""),
 ):
+    raw_id = (race_id or "").strip()
     scope_key = normalize_scope_key(scope_key)
+    run_row = None
     if not scope_key:
-        return render_page("", error_text="Select a data scope to update bet plan.")
-    race_id = normalize_race_id(race_id)
-    if not race_id:
-        return render_page(scope_key, error_text="Race ID is required.")
-    run_row = resolve_latest_run_by_race_id(race_id, scope_key)
+        scope_key, run_row = infer_scope_and_run(raw_id)
+    if not scope_key:
+        return render_page("", error_text="请输入 Run ID / Race ID 以更新。")
+    race_id = "" if is_run_id(raw_id) else normalize_race_id(raw_id)
     if run_row is None:
-        return render_page(scope_key, error_text="Run not found for the given race_id.")
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
+        elif raw_id:
+            run_row = resolve_run(raw_id, scope_key)
+    if run_row is None:
+        return render_page(scope_key, error_text="找不到对应的 Run ID / Race ID。")
+    if not race_id:
+        race_id = normalize_race_id(run_row.get("race_id", ""))
+    if not race_id:
+        return render_page(scope_key, error_text="Race ID 缺失，无法更新。")
     run_id = str(run_row.get("run_id", "")).strip()
     if not run_id:
         run_id = infer_run_id_from_row(run_row)
@@ -2404,25 +2457,29 @@ def record_pipeline(
             scope_key,
             error_text="必须填写实际第1/2/3名。",
         )
+    run_id = run_id.strip()
     scope_key = normalize_scope_key(scope_key)
+    run_row = None
     if not scope_key:
-        return render_page("", error_text="请选择数据范围。")
-    run_row = resolve_run(run_id.strip(), scope_key)
+        scope_key, run_row = infer_scope_and_run(run_id)
+    if not scope_key:
+        return render_page("", error_text="请输入 Run ID / Race ID 以记录。")
+    if run_row is None:
+        run_row = resolve_run(run_id, scope_key)
+    if run_row is None:
+        race_id = normalize_race_id(run_id)
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="找不到 Run ID，请先运行流程。",
+            error_text="找不到对应的 Run ID / Race ID。",
         )
     odds_path = run_row.get("odds_path", "")
-    resolved_run_id = run_row.get("run_id", run_id.strip())
+    resolved_run_id = run_row.get("run_id", run_id)
     if not odds_path:
         odds_path = str(get_data_dir(BASE_DIR, scope_key) / f"odds_{resolved_run_id}.csv")
-    if not profit.strip() and (not odds_path or not Path(odds_path).exists()):
-        return render_page(
-            scope_key,
-            error_text="盈亏为空且赔率快照不存在，请输入盈亏或先运行流程。",
-        )
-    inputs = [run_id, profit, note, top1, top2, top3]
+    inputs = [resolved_run_id, profit, note, top1, top2, top3]
     code, output = run_script(
         RECORD_PIPELINE,
         inputs=inputs,
