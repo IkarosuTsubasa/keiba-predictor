@@ -280,9 +280,9 @@ def refresh_odds_for_run(
             base = "https://nar.netkeiba.com/race/shutuba.html?race_id="
         race_url = f"{base}{race_id}"
     if not race_url:
-        return False, "Race URL missing for odds update.", []
+        return False, "赔率更新缺少比赛URL。", []
     if not ODDS_EXTRACT.exists():
-        return False, "odds_extract.py not found.", []
+        return False, "找不到 odds_extract.py。", []
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
@@ -311,14 +311,14 @@ def refresh_odds_for_run(
         Path(odds_path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(tmp_path, odds_path)
     except Exception as exc:
-        return False, f"Failed to update odds file: {exc}", []
+        return False, f"更新三连胜赔率文件失败：{exc}", []
     wide_tmp = ROOT_DIR / "wide_odds.csv"
     if wide_odds_path and wide_tmp.exists():
         try:
             Path(wide_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(wide_tmp, wide_odds_path)
         except Exception as exc:
-            return False, f"Failed to update wide odds file: {exc}", []
+            return False, f"更新 wide 赔率文件失败：{exc}", []
     elif wide_odds_path:
         warnings.append("wide_odds.csv not generated.")
     fuku_tmp = ROOT_DIR / "fuku_odds.csv"
@@ -327,7 +327,7 @@ def refresh_odds_for_run(
             Path(fuku_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fuku_tmp, fuku_odds_path)
         except Exception as exc:
-            return False, f"Failed to update fuku odds file: {exc}", []
+            return False, f"更新复胜赔率文件失败：{exc}", []
     elif fuku_odds_path:
         warnings.append("fuku_odds.csv not generated.")
     quinella_tmp = ROOT_DIR / "quinella_odds.csv"
@@ -336,7 +336,7 @@ def refresh_odds_for_run(
             Path(quinella_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(quinella_tmp, quinella_odds_path)
         except Exception as exc:
-            return False, f"Failed to update quinella odds file: {exc}", []
+            return False, f"更新连胜赔率文件失败：{exc}", []
     elif quinella_odds_path:
         warnings.append("quinella_odds.csv not generated.")
     trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
@@ -345,7 +345,7 @@ def refresh_odds_for_run(
             Path(trifecta_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(trifecta_tmp, trifecta_odds_path)
         except Exception as exc:
-            return False, f"Failed to update trifecta odds file: {exc}", []
+            return False, f"更新三连胜赔率文件失败：{exc}", []
     elif trifecta_odds_path:
         warnings.append("trifecta_odds.csv not generated.")
     return True, "", warnings
@@ -776,7 +776,15 @@ def extract_year_prefix(value):
 
 def build_run_race_map(scope_key):
     runs = load_runs(scope_key)
-    return {row.get("run_id", ""): row.get("race_id", "") for row in runs if row.get("run_id")}
+    out = {}
+    for row in runs:
+        run_id = str(row.get("run_id", "")).strip()
+        if not run_id:
+            run_id = infer_run_id_from_row(row)
+        if not run_id:
+            continue
+        out[run_id] = row.get("race_id", "")
+    return out
 
 
 def load_daily_profit_summary(scope_key, days=30):
@@ -1192,6 +1200,10 @@ def load_bet_type_profit_summary(scope_key):
             continue
         race_id = run_race_map.get(run_id, "")
         race_year = extract_year_prefix(race_id)
+        if race_year is None:
+            race_year = extract_year_prefix(run_id)
+        if race_year is None:
+            race_year = extract_year_prefix(row.get("timestamp", ""))
         if race_year is None or race_year < MIN_RACE_YEAR:
             continue
         try:
@@ -1414,13 +1426,13 @@ def build_gate_notice_html(status, reason):
     if status == "soft_fail":
         return (
             '<div class="alert"><strong>Pass Gate Soft</strong>'
-            "High risk: soft gate failed; showing tickets anyway."
+            "高风险：软门未通过，仍显示投注。"
             f"{reason_html}</div>"
         )
     if status == "hard_fail":
         return (
             '<div class="alert"><strong>Pass Gate Hard</strong>'
-            "Hard gate blocked tickets."
+            "硬门阻止出票。"
             f"{reason_html}</div>"
         )
     return ""
@@ -1429,9 +1441,9 @@ def build_gate_notice_html(status, reason):
 def build_gate_notice_text(status, reason):
     reason_text = f" | {reason}" if reason else ""
     if status == "soft_fail":
-        return f"[WARN] PASS_GATE_SOFT: HIGH_RISK (showing tickets){reason_text}"
+        return f"[警告] 软门：高风险（仍显示投注）{reason_text}"
     if status == "hard_fail":
-        return f"[WARN] PASS_GATE_HARD: BLOCKED{reason_text}"
+        return f"[警告] 硬门：已阻止{reason_text}"
     return ""
 
 
@@ -1454,14 +1466,14 @@ def page_template(
     if output_text:
         output_block = f"""
         <section class="panel">
-            <h2>Output</h2>
+            <h2>输出</h2>
             <pre>{html.escape(output_text)}</pre>
         </section>
         """
     if error_text:
         output_block = f"""
         <section class="panel error">
-            <h2>Error</h2>
+            <h2>输出</h2>
             <pre>{html.escape(error_text)}</pre>
         </section>
         """ + output_block
@@ -1472,7 +1484,7 @@ def page_template(
     elif top5_text:
         top5_block = f"""
         <section class="panel">
-            <h2>Top5 Predictions</h2>
+            <h2>Top5 预测</h2>
             <pre>{html.escape(top5_text)}</pre>
         </section>
         """
@@ -1482,7 +1494,7 @@ def page_template(
     elif bet_plan_text:
         bet_plan_block = f"""
         <section class="panel">
-            <h2>Bet Plan</h2>
+            <h2>投注计划</h2>
             <pre>{html.escape(bet_plan_text)}</pre>
         </section>
         """
@@ -1848,7 +1860,7 @@ def page_template(
   </style>
 </head>
 <body>
-  <header>
+    <header>
     <h1>赛马本地控制台</h1>
     <div class="subtitle">在网页上运行流程与记录结果。</div>
   </header>
@@ -1856,8 +1868,8 @@ def page_template(
     <section class="panel">
       <h2>运行流程</h2>
       <form action="/run_pipeline" method="post">
-        <label>Race ID</label>
-        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
+        <label>比赛ID</label>
+        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="例如 202501010101">
         <label>历史查询链接</label>
         <input name="history_url" placeholder="https://db.netkeiba.com/...">
         <label>数据范围</label>
@@ -1906,12 +1918,12 @@ def page_template(
             <input name="budget" placeholder="2000">
           </div>
           <div>
-            <label>风格</label>
+            <label>投注风格</label>
             <select name="style">
-              <option value="">（默认）</option>
+              <option value="">自动</option>
               <option value="steady">稳健</option>
-              <option value="balanced">平衡</option>
-              <option value="aggressive">进取</option>
+              <option value="balanced">均衡</option>
+              <option value="aggressive">激进</option>
             </select>
           </div>
         </div>
@@ -1919,7 +1931,6 @@ def page_template(
       </form>
     </section>
 
-    
     <section class="panel">
       <h2>单场入口</h2>
       <form id="single-action-form" action="/view_run" method="post">
@@ -1952,9 +1963,9 @@ def page_template(
             <label>投注风格</label>
             <select name="style">
               <option value="">自动</option>
-              <option value="steady">steady</option>
-              <option value="balanced">balanced</option>
-              <option value="aggressive">aggressive</option>
+              <option value="steady">稳健</option>
+              <option value="balanced">均衡</option>
+              <option value="aggressive">激进</option>
             </select>
           </div>
         </div>
@@ -1977,7 +1988,7 @@ def page_template(
     </section>
 
 
-    {top5_block}
+{top5_block}
     {summary_block}
     {bet_plan_block}
     {run_summary_block}
@@ -2082,7 +2093,7 @@ def render_page(
                 build_table_html(
                     daily_profit_rows,
                     ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "Daily Profit",
+                    "投注计划",
                 )
             )
         if wide_box_rows:
@@ -2090,7 +2101,7 @@ def render_page(
                 build_table_html(
                     wide_box_rows,
                     ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "Wide Box Profit (Top5, 1000 yen)",
+                    "Top5 枠连盈亏（1000日元）",
                 )
             )
         if bet_type_profit_rows:
@@ -2098,7 +2109,7 @@ def render_page(
                 build_table_html(
                     bet_type_profit_rows,
                     ["bet_type", "amount_yen", "est_profit_yen", "roi"],
-                    "Win/Place/Wide Profit (2026+)",
+                    "单胜/复胜/扩连盈亏（2026+）",
                 )
             )
         if bet_type_rows:
@@ -2131,12 +2142,12 @@ def render_page(
     bet_rows = []
     if run_id:
         top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, run_row)
-        top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
+        top5_table_html = build_table_html(top_rows, top_cols, "Top5 预测")
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
             summary_table_html = build_table_html(summary_rows, ["指标", "数值"], "模型状态")
         bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
-        bet_plan_table_html = build_table_html(bet_rows, bet_cols, "Bet Plan")
+        bet_plan_table_html = build_table_html(bet_rows, bet_cols, "投注计划")
     gate_status, gate_reason = detect_gate_status(bet_rows)
     gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
     gate_notice_text = build_gate_notice_text(gate_status, gate_reason)
@@ -2165,7 +2176,7 @@ def render_page(
                         "est_payout_yen",
                         "profit_yen",
                     ],
-                    "本场 Bet Plan 盈亏明细",
+                    "本场 投注计划 盈亏明细",
                 )
             )
         predictor_rows = load_run_predictor_summary(scope_norm, summary_id)
@@ -2215,7 +2226,7 @@ def view_run(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="请输入 Run ID / Race ID 以查看历史记录。")
+        return render_page("", error_text="请输入 运行ID/比赛ID 以查看历史记录。")
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -2225,7 +2236,7 @@ def view_run(
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="找不到对应的 Run ID / Race ID。",
+            error_text="找不到对应的 运行ID/比赛ID。",
             selected_run_id=run_id,
         )
     resolved_run_id = run_row.get("run_id", run_id)
@@ -2267,7 +2278,7 @@ def run_pipeline(
     if not race_id or not history_url:
         return render_page(
             scope_key,
-            error_text="Race ID and history URL are required.",
+            error_text="需要填写比赛ID和历史查询链接。",
         )
     if scope_key == "local":
         race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
@@ -2295,7 +2306,7 @@ def run_pipeline(
         inputs=inputs,
         extra_env=extra_env,
     )
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     top5_text = extract_top5(output)
     bet_plan_text = extract_bet_plan(output)
     return render_page(
@@ -2320,7 +2331,7 @@ def update_bet_plan(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(raw_id)
     if not scope_key:
-        return render_page("", error_text="请输入 Run ID / Race ID 以更新。")
+        return render_page("", error_text="请输入 运行ID/比赛ID 以更新。")
     race_id = "" if is_run_id(raw_id) else normalize_race_id(raw_id)
     if run_row is None:
         if race_id:
@@ -2328,11 +2339,11 @@ def update_bet_plan(
         elif raw_id:
             run_row = resolve_run(raw_id, scope_key)
     if run_row is None:
-        return render_page(scope_key, error_text="找不到对应的 Run ID / Race ID。")
+        return render_page(scope_key, error_text="找不到对应的 运行ID/比赛ID。")
     if not race_id:
         race_id = normalize_race_id(run_row.get("race_id", ""))
     if not race_id:
-        return render_page(scope_key, error_text="Race ID 缺失，无法更新。")
+        return render_page(scope_key, error_text="比赛ID缺失，无法更新。")
     run_id = str(run_row.get("run_id", "")).strip()
     if not run_id:
         run_id = infer_run_id_from_row(run_row)
@@ -2340,13 +2351,13 @@ def update_bet_plan(
             update_run_row_fields(scope_key, run_row, {"run_id": run_id})
             run_row["run_id"] = run_id
     if not run_id:
-        return render_page(scope_key, error_text="Run ID missing for the selected race_id.")
+        return render_page(scope_key, error_text="该比赛缺少运行ID。")
     pred_path = resolve_pred_path(scope_key, run_id, run_row)
     if not pred_path.exists():
-        return render_page(scope_key, error_text=f"Predictions file not found: {pred_path}")
+        return render_page(scope_key, error_text=f"预测文件不存在：{pred_path}")
     odds_path = resolve_odds_path(scope_key, run_id, run_row)
     if not odds_path:
-        return render_page(scope_key, error_text="Odds path not found for this run.")
+        return render_page(scope_key, error_text="未找到该运行的赔率路径。")
 
     wide_path = resolve_wide_odds_path(scope_key, run_id, run_row)
     fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
@@ -2368,7 +2379,7 @@ def update_bet_plan(
         return render_page(scope_key, error_text=msg)
 
     if not odds_path.exists():
-        return render_page(scope_key, error_text=f"Odds file not found: {odds_path}")
+        return render_page(scope_key, error_text=f"硬门阻止出票。?{odds_path}")
     if wide_path and not wide_path.exists():
         warnings.append(f"wide odds not found: {wide_path}")
     if fuku_path and not fuku_path.exists():
@@ -2412,14 +2423,14 @@ def update_bet_plan(
         plan_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(plan_src, plan_dest)
         if not update_run_plan_path(scope_key, run_id, plan_dest):
-            warnings.append("runs.csv not updated; plan_path may be stale.")
+            warnings.append("runs.csv 未更新，plan_path 可能过期。")
     else:
         if not plan_src.exists():
-            warnings.append("bet_plan_update.csv not found after update.")
+            warnings.append("更新后未生成 bet_plan_update.csv。")
 
     curr_odds_snapshot = load_odds_snapshot(odds_path)
     diff_lines = format_odds_diff(prev_odds_snapshot, curr_odds_snapshot)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     output_lines = [label]
     if warnings:
         output_lines.extend([f"[WARN] {item}" for item in warnings])
@@ -2463,7 +2474,7 @@ def record_pipeline(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="请输入 Run ID / Race ID 以记录。")
+        return render_page("", error_text="请输入 运行ID/比赛ID 以记录。")
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -2473,7 +2484,7 @@ def record_pipeline(
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="找不到对应的 Run ID / Race ID。",
+            error_text="找不到对应的 运行ID/比赛ID。",
         )
     odds_path = run_row.get("odds_path", "")
     resolved_run_id = run_row.get("run_id", run_id)
@@ -2486,7 +2497,7 @@ def record_pipeline(
         extra_blanks=4,
         extra_env={"SCOPE_KEY": scope_key},
     )
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return render_page(
         scope_key,
         output_text=f"{label}\n{output}",
@@ -2503,11 +2514,11 @@ def record_predictor(
 ):
     if not top1 or not top2 or not top3:
         return page_template(
-            error_text="Top1/Top2/Top3 are required.",
+            error_text="必须填写第1/2/3名。",
         )
     inputs = [run_id, top1, top2, top3]
     code, output = run_script(RECORD_PREDICTOR, inputs=inputs, extra_blanks=2)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2516,7 +2527,7 @@ def record_predictor(
 @app.post("/optimize_params", response_class=HTMLResponse)
 def optimize_params():
     code, output = run_script(OPTIMIZE_PARAMS, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2525,7 +2536,7 @@ def optimize_params():
 @app.post("/optimize_predictor", response_class=HTMLResponse)
 def optimize_predictor():
     code, output = run_script(OPTIMIZE_PREDICTOR, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2535,7 +2546,7 @@ def optimize_predictor():
 def offline_eval(window: str = Form("")):
     inputs = [window, ""]
     code, output = run_script(OFFLINE_EVAL, inputs=inputs, extra_blanks=1)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2544,7 +2555,7 @@ def offline_eval(window: str = Form("")):
 @app.post("/init_update", response_class=HTMLResponse)
 def init_update():
     code, output = run_script(INIT_UPDATE, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2553,7 +2564,7 @@ def init_update():
 @app.post("/init_update_reset", response_class=HTMLResponse)
 def init_update_reset():
     code, output = run_script(INIT_UPDATE, inputs=[""], args=["--reset"], extra_blanks=1)
-    label = f"Exit code: {code}"
+    label = f"退出码：{code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
