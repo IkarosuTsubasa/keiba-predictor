@@ -127,14 +127,14 @@ def build_run_options(scope_key, selected_run_id=""):
     scope_key = normalize_scope_key(scope_key)
     selected_run_id = str(selected_run_id or "")
     if not scope_key:
-        return '<option value="" disabled>请选择数据范围</option>'
+        return '<option value="" disabled>Select data scope</option>'
     for item in get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT):
         value = html.escape(item["run_id"])
         label = html.escape(item["label"])
         selected_attr = ' selected' if selected_run_id and item["run_id"] == selected_run_id else ""
         options.append(f'<option value="{value}"{selected_attr}>{label}</option>')
     if not options:
-        options.append('<option value="" disabled>无记录</option>')
+        options.append('<option value="" disabled>No runs</option>')
     return "\n".join(options)
 
 def resolve_run(run_id, scope_key):
@@ -275,14 +275,14 @@ def refresh_odds_for_run(
     race_id = normalize_race_id(run_row.get("race_id", ""))
     if not race_url and race_id:
         if scope_key in ("central_turf", "central_dirt"):
-            base = "https://race.netkeiba.com/race/shutuba.html?race_id="
+            base = "https://race.netkeiba.com/race/shutuba.htmlheavyrace_id="
         else:
-            base = "https://nar.netkeiba.com/race/shutuba.html?race_id="
+            base = "https://nar.netkeiba.com/race/shutuba.htmlheavyrace_id="
         race_url = f"{base}{race_id}"
     if not race_url:
-        return False, "赔率更新缺少比赛URL。", []
+        return False, "Race URL missing for odds update.", []
     if not ODDS_EXTRACT.exists():
-        return False, "找不到 odds_extract.py。", []
+        return False, "odds_extract.py not found.", []
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
@@ -311,14 +311,14 @@ def refresh_odds_for_run(
         Path(odds_path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(tmp_path, odds_path)
     except Exception as exc:
-        return False, f"更新三连胜赔率文件失败：{exc}", []
+        return False, f"Failed to update odds file: {exc}", []
     wide_tmp = ROOT_DIR / "wide_odds.csv"
     if wide_odds_path and wide_tmp.exists():
         try:
             Path(wide_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(wide_tmp, wide_odds_path)
         except Exception as exc:
-            return False, f"更新 wide 赔率文件失败：{exc}", []
+            return False, f"Failed to update wide odds file: {exc}", []
     elif wide_odds_path:
         warnings.append("wide_odds.csv not generated.")
     fuku_tmp = ROOT_DIR / "fuku_odds.csv"
@@ -327,7 +327,7 @@ def refresh_odds_for_run(
             Path(fuku_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(fuku_tmp, fuku_odds_path)
         except Exception as exc:
-            return False, f"更新复胜赔率文件失败：{exc}", []
+            return False, f"Failed to update place odds file: {exc}", []
     elif fuku_odds_path:
         warnings.append("fuku_odds.csv not generated.")
     quinella_tmp = ROOT_DIR / "quinella_odds.csv"
@@ -336,7 +336,7 @@ def refresh_odds_for_run(
             Path(quinella_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(quinella_tmp, quinella_odds_path)
         except Exception as exc:
-            return False, f"更新连胜赔率文件失败：{exc}", []
+            return False, f"Failed to update quinella odds file: {exc}", []
     elif quinella_odds_path:
         warnings.append("quinella_odds.csv not generated.")
     trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
@@ -345,7 +345,7 @@ def refresh_odds_for_run(
             Path(trifecta_odds_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(trifecta_tmp, trifecta_odds_path)
         except Exception as exc:
-            return False, f"更新三连胜赔率文件失败：{exc}", []
+            return False, f"Failed to update trifecta odds file: {exc}", []
     elif trifecta_odds_path:
         warnings.append("trifecta_odds.csv not generated.")
     return True, "", warnings
@@ -617,7 +617,12 @@ def build_table_html(rows, columns, title):
 
 
 def build_metric_table(rows, title):
-    return build_table_html(rows, ["指标", "数值"], title)
+    if not rows:
+        return ""
+    sample = rows[0]
+    if "metric" in sample and "value" in sample:
+        return build_table_html(rows, ["metric", "value"], title)
+    return build_table_html(rows, ["metric", "value"], title)
 
 
 def load_top5_table(scope_key, run_id, run_row=None):
@@ -672,7 +677,7 @@ def load_prediction_summary(scope_key, run_id, run_row=None):
     summary = []
     for key in summary_keys:
         if key in row:
-            summary.append({"指标": key, "数值": row.get(key, "")})
+            summary.append({"metric": key, "value": row.get(key, "")})
     summary.extend(load_mc_uncertainty_summary(scope_key, run_id, run_row))
     return summary
 
@@ -703,9 +708,9 @@ def load_mc_uncertainty_summary(scope_key, run_id, run_row=None):
     horse_no = str(target.get("horse_no", "")).strip()
     label = f"{bet_type} {horse_no}".strip()
     summary = [
-        {"指标": f"MC SE ({label})", "数值": target.get("hit_prob_se", "")},
-        {"指标": f"MC CI95 Low ({label})", "数值": target.get("hit_prob_ci95_low", "")},
-        {"指标": f"MC CI95 High ({label})", "数值": target.get("hit_prob_ci95_high", "")},
+        {"metric": f"MC SE ({label})", "value": target.get("hit_prob_se", "")},
+        {"metric": f"MC CI95 Low ({label})", "value": target.get("hit_prob_ci95_low", "")},
+        {"metric": f"MC CI95 High ({label})", "value": target.get("hit_prob_ci95_high", "")},
     ]
 
 
@@ -742,10 +747,10 @@ def load_profit_summary(scope_key):
     if total_base > 0:
         roi = round((total_base + total_profit) / total_base, 4)
     return [
-        {"指标": "记录场次", "数值": sample_count},
-        {"指标": "累计投入 (yen)", "数值": total_base},
-        {"指标": "累计盈亏 (yen)", "数值": total_profit},
-        {"指标": "累计 ROI", "数值": roi},
+        {"metric": "runs", "value": sample_count},
+        {"metric": "total_stake_yen", "value": total_base},
+        {"metric": "total_profit_yen", "value": total_profit},
+        {"metric": "overall_roi", "value": roi},
     ]
 
 
@@ -848,6 +853,119 @@ def load_daily_profit_summary(scope_key, days=30):
             }
         )
     return out
+
+
+def load_daily_profit_summary_all_scopes(days=30):
+    daily = {}
+    for scope_key in ("central_dirt", "central_turf", "local"):
+        rows = load_daily_profit_summary(scope_key, days=days)
+        for row in rows:
+            date_key = str(row.get("date", "")).strip()
+            if not date_key:
+                continue
+            item = daily.setdefault(
+                date_key,
+                {"date": date_key, "runs": 0, "profit_yen": 0, "base_amount": 0},
+            )
+            item["runs"] += to_int_or_none(row.get("runs")) or 0
+            item["profit_yen"] += to_int_or_none(row.get("profit_yen")) or 0
+            item["base_amount"] += to_int_or_none(row.get("base_amount")) or 0
+    if not daily:
+        return []
+    out = []
+    for date_key in sorted(daily.keys(), reverse=True):
+        item = daily[date_key]
+        base = item["base_amount"]
+        profit = item["profit_yen"]
+        roi = round((base + profit) / base, 4) if base > 0 else ""
+        out.append(
+            {
+                "date": date_key,
+                "runs": item["runs"],
+                "profit_yen": profit,
+                "base_amount": base,
+                "roi": roi,
+            }
+        )
+    return out
+
+
+def build_daily_profit_chart_html(rows, title):
+    if not rows:
+        return ""
+    # show up to recent 30 days; chart draws left->right in time order
+    data = list(reversed(rows[:30]))
+    if len(data) < 2:
+        return ""
+    profits = [to_int_or_none(r.get("profit_yen")) or 0 for r in data]
+    max_abs = max(abs(v) for v in profits) if profits else 1
+    if max_abs <= 0:
+        max_abs = 1
+
+    w = 860
+    h = 250
+    pad_l = 44
+    pad_r = 16
+    pad_t = 20
+    pad_b = 34
+    inner_w = w - pad_l - pad_r
+    inner_h = h - pad_t - pad_b
+    zero_y = pad_t + inner_h * 0.5
+    bar_w = max(4, int(inner_w / max(1, len(data)) * 0.58))
+
+    def x_at(i):
+        if len(data) == 1:
+            return pad_l + inner_w / 2
+        return pad_l + (inner_w * i / (len(data) - 1))
+
+    def y_at(v):
+        return zero_y - (float(v) / max_abs) * (inner_h * 0.46)
+
+    polyline_pts = []
+    bars = []
+    labels = []
+    for i, row in enumerate(data):
+        x = x_at(i)
+        v = to_int_or_none(row.get("profit_yen")) or 0
+        y = y_at(v)
+        polyline_pts.append(f"{x:.1f},{y:.1f}")
+        top = min(zero_y, y)
+        height = max(1.0, abs(zero_y - y))
+        color = "#2e7d5b" if v >= 0 else "#c85f45"
+        bars.append(
+            f'<rect x="{x - bar_w/2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{height:.1f}" '
+            f'fill="{color}" opacity="0.34"></rect>'
+        )
+        if i == 0 or i == len(data) - 1 or i % 5 == 0:
+            date_str = html.escape(str(row.get("date", ""))[5:])
+            labels.append(
+                f'<text x="{x:.1f}" y="{h - 10}" text-anchor="middle" font-size="10" fill="#6c665f">{date_str}</text>'
+            )
+
+    polyline = " ".join(polyline_pts)
+    bars_html = "".join(bars)
+    labels_html = "".join(labels)
+    title_html = html.escape(title)
+    y_top_val = f"{max_abs}"
+    y_bottom_val = f"-{max_abs}"
+
+    return f"""
+        <section class="panel">
+            <h2>{title_html}</h2>
+            <div class="table-wrap">
+                <svg viewBox="0 0 {w} {h}" width="100%" height="auto" role="img" aria-label="{title_html}">
+                    <line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{h-pad_b}" stroke="#d9ccbc" stroke-width="1"></line>
+                    <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{w-pad_r}" y2="{zero_y:.1f}" stroke="#d9ccbc" stroke-width="1"></line>
+                    <line x1="{pad_l}" y1="{h-pad_b}" x2="{w-pad_r}" y2="{h-pad_b}" stroke="#d9ccbc" stroke-width="1"></line>
+                    <text x="{pad_l-8}" y="{pad_t+4}" text-anchor="end" font-size="10" fill="#6c665f">{y_top_val}</text>
+                    <text x="{pad_l-8}" y="{h-pad_b+4}" text-anchor="end" font-size="10" fill="#6c665f">{y_bottom_val}</text>
+                    {bars_html}
+                    <polyline points="{polyline}" fill="none" stroke="#1f4b39" stroke-width="2.2"></polyline>
+                    {labels_html}
+                </svg>
+            </div>
+        </section>
+        """
 
 
 def normalize_name(value):
@@ -1189,7 +1307,7 @@ def load_bet_type_profit_summary(scope_key):
     if not rows:
         return []
     run_race_map = build_run_race_map(scope_key)
-    labels = {"win": "win (单胜)", "place": "place (复胜)", "wide": "wide"}
+    labels = {"win": "win", "place": "place", "wide": "wide"}
     totals = {key: {"amount": 0, "profit": 0} for key in labels}
     for row in rows:
         bet_type = str(row.get("bet_type", "")).strip().lower()
@@ -1287,14 +1405,14 @@ def load_predictor_summary(scope_key):
     top3_hit_rate = round(top3_hit / (3 * total), 4) if total else ""
     top5_hit_rate = round(top5_hit / (3 * top5_total), 4) if top5_total else ""
     summary = [
-        {"指标": "样本场次", "数值": total},
-        {"指标": "Top3 命中率", "数值": top3_hit_rate},
-        {"指标": "Top1 命中率", "数值": top1_rate},
-        {"指标": "Top1 入 Top3", "数值": top1_in_top3_rate},
-        {"指标": "Top3 全中率", "数值": top3_exact_rate},
+        {"metric": "samples", "value": total},
+        {"metric": "top3_hit_rate", "value": top3_hit_rate},
+        {"metric": "top1_hit_rate", "value": top1_rate},
+        {"metric": "top1_in_top3_rate", "value": top1_in_top3_rate},
+        {"metric": "top3_exact_rate", "value": top3_exact_rate},
     ]
     if top5_hit_rate != "":
-        summary.insert(2, {"指标": "Top5 入 Top3 命中率", "数值": top5_hit_rate})
+        summary.insert(2, {"metric": "top5_to_top3_hit_rate", "value": top5_hit_rate})
     return summary
 
 
@@ -1308,9 +1426,9 @@ def load_run_result_summary(scope_key, run_id):
     if not row:
         return []
     return [
-        {"指标": "本场盈亏 (yen)", "数值": row.get("profit_yen", "")},
-        {"指标": "本场投入 (yen)", "数值": row.get("base_amount", "")},
-        {"指标": "本场 ROI", "数值": row.get("roi", "")},
+        {"metric": "run_profit_yen", "value": row.get("profit_yen", "")},
+        {"metric": "run_stake_yen", "value": row.get("base_amount", "")},
+        {"metric": "run_roi", "value": row.get("roi", "")},
     ]
 
 
@@ -1373,13 +1491,13 @@ def load_run_predictor_summary(scope_key, run_id):
     top5_hit_count = compute_top5_hit_count(scope_key, row)
     top5_hit = round(top5_hit_count / 3.0, 4) if top5_hit_count is not None else ""
     summary = [
-        {"指标": "本场 Top3 命中率", "数值": round(top3_hit, 4) if top3_hit != "" else ""},
-        {"指标": "本场 Top1 命中", "数值": row.get("top1_hit", "")},
-        {"指标": "Top1 入 Top3", "数值": row.get("top1_in_top3", "")},
-        {"指标": "Top3 全中", "数值": row.get("top3_exact", "")},
+        {"metric": "run_top3_hit_rate", "value": round(top3_hit, 4) if top3_hit != "" else ""},
+        {"metric": "run_top1_hit", "value": row.get("top1_hit", "")},
+        {"metric": "top1_in_top3", "value": row.get("top1_in_top3", "")},
+        {"metric": "top3_exact", "value": row.get("top3_exact", "")},
     ]
     if top5_hit != "":
-        summary.insert(1, {"指标": "本场 Top5 入 Top3 命中率", "数值": top5_hit})
+        summary.insert(1, {"metric": "run_top5_to_top3_hit_rate", "value": top5_hit})
     return summary
 
 
@@ -1426,13 +1544,13 @@ def build_gate_notice_html(status, reason):
     if status == "soft_fail":
         return (
             '<div class="alert"><strong>Pass Gate Soft</strong>'
-            "高风险：软门未通过，仍显示投注。"
+            "High risk: soft gate failed; still showing tickets."
             f"{reason_html}</div>"
         )
     if status == "hard_fail":
         return (
             '<div class="alert"><strong>Pass Gate Hard</strong>'
-            "硬门阻止出票。"
+            "Hard gate blocked tickets."
             f"{reason_html}</div>"
         )
     return ""
@@ -1441,9 +1559,9 @@ def build_gate_notice_html(status, reason):
 def build_gate_notice_text(status, reason):
     reason_text = f" | {reason}" if reason else ""
     if status == "soft_fail":
-        return f"[警告] 软门：高风险（仍显示投注）{reason_text}"
+        return f"[WARN] SOFT_GATE: high risk (showing tickets){reason_text}"
     if status == "hard_fail":
-        return f"[警告] 硬门：已阻止{reason_text}"
+        return f"[WARN] HARD_GATE: blocked{reason_text}"
     return ""
 
 
@@ -1466,54 +1584,57 @@ def page_template(
     if output_text:
         output_block = f"""
         <section class="panel">
-            <h2>输出</h2>
+            <h2>Output</h2>
             <pre>{html.escape(output_text)}</pre>
         </section>
         """
     if error_text:
         output_block = f"""
         <section class="panel error">
-            <h2>输出</h2>
+            <h2>Error</h2>
             <pre>{html.escape(error_text)}</pre>
         </section>
         """ + output_block
     run_button_attr = ""
+
     top5_block = ""
     if top5_table_html:
         top5_block = top5_table_html
     elif top5_text:
         top5_block = f"""
         <section class="panel">
-            <h2>Top5 预测</h2>
+            <h2>Top5 Predictions</h2>
             <pre>{html.escape(top5_text)}</pre>
         </section>
         """
+
     bet_plan_block = ""
     if bet_plan_table_html:
         bet_plan_block = bet_plan_table_html
     elif bet_plan_text:
         bet_plan_block = f"""
         <section class="panel">
-            <h2>投注计划</h2>
+            <h2>Bet Plan</h2>
             <pre>{html.escape(bet_plan_text)}</pre>
         </section>
         """
+
     summary_block = ""
     if bet_plan_block and summary_table_html:
         bet_plan_block = f"{bet_plan_block}{summary_table_html}"
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>赛马本地控制台</title>
+  <title>Keiba Local Console</title>
   <style>
     :root {{
       --bg: #f4efe6;
       --panel: #fffaf2;
       --ink: #1f1f1c;
       --accent: #2e6a4f;
-      --accent-2: #d46f4d;
       --muted: #6c665f;
       --border: #e6d8c8;
       --shadow: 0 14px 30px rgba(22, 24, 20, 0.08);
@@ -1528,467 +1649,158 @@ def page_template(
         radial-gradient(800px 500px at 90% -5%, #e2f1e8 0%, transparent 55%),
         linear-gradient(180deg, #f8f4ef 0%, #efe6db 100%);
       min-height: 100vh;
-      position: relative;
     }}
-    body::before {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      background-image: repeating-linear-gradient(
-        135deg,
-        rgba(0, 0, 0, 0.025) 0px,
-        rgba(0, 0, 0, 0.025) 1px,
-        transparent 1px,
-        transparent 10px
-      );
-      opacity: 0.35;
-      pointer-events: none;
-    }}
-    header {{
-      padding: 28px 24px 6px;
-      max-width: 980px;
-      margin: 0 auto;
-      position: relative;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 32px;
-      letter-spacing: 0.4px;
-    }}
-    .subtitle {{
-      color: var(--muted);
-      margin-top: 6px;
-      font-style: italic;
-    }}
-    .wrap {{
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 12px 24px 48px;
-      display: grid;
-      gap: 18px;
-    }}
+    header {{ padding: 30px 24px 8px; text-align: center; }}
+    h1 {{ margin: 0; font-size: 32px; letter-spacing: 0.2px; }}
+    .subtitle {{ color: var(--muted); margin-top: 8px; font-size: 13px; }}
+    .wrap {{ max-width: 1100px; margin: 0 auto; padding: 12px 24px 40px; display: grid; gap: 14px; }}
     .panel {{
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 18px;
+      border-radius: 16px;
       box-shadow: var(--shadow);
-      backdrop-filter: blur(4px);
-      animation: fadeIn 0.6s ease both;
+      padding: 14px;
+      animation: fadeIn .25s ease;
     }}
-    .panel:nth-of-type(2) {{ animation-delay: 0.05s; }}
-    .panel:nth-of-type(3) {{ animation-delay: 0.1s; }}
-    .panel h2 {{
-      margin: 0 0 12px;
-      font-size: 18px;
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }}
-    .alert {{
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: #ffe8e3;
-      border: 1px solid #f1b7aa;
-      color: #7a2e1d;
-      font-size: 13px;
-    }}
-    .alert strong {{
-      display: block;
-      margin-bottom: 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-    }}
-    form {{
-      display: grid;
-      gap: 12px;
-    }}
-    label {{
-      font-size: 14px;
-      color: var(--muted);
-    }}
+    .panel h2 {{ margin: 0 0 10px; font-size: 18px; }}
+    label {{ display: block; font-size: 12px; color: var(--muted); margin: 8px 0 6px; }}
     input, select, textarea {{
       width: 100%;
-      padding: 10px 12px;
-      border: 1px solid #e2d3c2;
-      border-radius: 12px;
-      font-size: 14px;
-      background: #fffdfa;
-      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
-    }}
-    input:focus, select:focus, textarea:focus {{
-      outline: 2px solid rgba(46, 106, 79, 0.25);
-      border-color: rgba(46, 106, 79, 0.45);
-    }}
-    textarea {{
-      min-height: 70px;
-      resize: vertical;
-    }}
-    .grid {{
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    }}
-    .radio-group {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }}
-    .table-wrap {{
-      overflow-x: auto;
-    }}
-    .data-table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      min-width: 680px;
-    }}
-    .data-table th,
-    .data-table td {{
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-      font-variant-numeric: tabular-nums;
-    }}
-    .data-table th {{
-      background: #f3e9de;
-      color: #2f2a24;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }}
-    .data-table tbody tr:nth-child(even) {{
-      background: #fbf6ef;
-    }}
-    #scope-radio, #record-scope, #view-scope {{
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      padding-bottom: 2px;
-    }}
-    #scope-radio .radio-option, #record-scope .radio-option, #view-scope .radio-option {{
-      white-space: nowrap;
-    }}
-    #scope-radio {{
-      gap: 12px;
-    }}
-    #scope-radio .radio-option {{
-      padding: 0;
-      border: none;
-      background: transparent;
-    }}
-    #scope-radio .radio-option .radio-text {{
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 108px;
-      padding: 12px 16px;
-      min-height: 40px;
-      border-radius: 14px;
       border: 1px solid var(--border);
-      background: #f7efe6;
-      font-size: 12px;
-      line-height: 1.3;
-      text-align: center;
-      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-    }}
-    #scope-radio .radio-option input {{
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }}
-    #scope-radio .radio-option input:checked + .radio-text {{
-      background: #e8f1ea;
-      border-color: rgba(46, 106, 79, 0.6);
-      color: #1f4b39;
-      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
-      transform: translateY(-1px);
-    }}
-    #scope-radio .radio-option input:focus + .radio-text {{
-      outline: 2px solid rgba(46, 106, 79, 0.25);
-      outline-offset: 2px;
-    }}
-    #scope-radio .radio-option:hover {{
-      transform: none;
-      border-color: transparent;
-      background: transparent;
-    }}
-    #track-cond {{
-      gap: 10px;
-    }}
-    #track-cond .radio-option {{
-      padding: 0;
-      border: none;
-      background: transparent;
-    }}
-    #track-cond .radio-option .radio-text {{
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 64px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: #f7efe6;
-      font-size: 12px;
-      line-height: 1.2;
-      text-align: center;
-      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-    }}
-    #track-cond .radio-option input {{
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }}
-    #track-cond .radio-option input:checked + .radio-text {{
-      background: #e8f1ea;
-      border-color: rgba(46, 106, 79, 0.6);
-      color: #1f4b39;
-      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
-      transform: translateY(-1px);
-    }}
-    #track-cond .radio-option input:focus + .radio-text {{
-      outline: 2px solid rgba(46, 106, 79, 0.25);
-      outline-offset: 2px;
-    }}
-    #track-cond .radio-option:hover {{
-      transform: none;
-      border-color: transparent;
-      background: transparent;
-    }}
-    #action-type {{
-      gap: 12px;
-    }}
-    #action-type .radio-option {{
-      padding: 0;
-      border: none;
-      background: transparent;
-    }}
-    #action-type .radio-option .radio-text {{
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 108px;
-      padding: 10px 14px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: #f7efe6;
-      font-size: 12px;
-      line-height: 1.2;
-      text-align: center;
-      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-    }}
-    #action-type .radio-option input {{
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }}
-    #action-type .radio-option input:checked + .radio-text {{
-      background: #e8f1ea;
-      border-color: rgba(46, 106, 79, 0.6);
-      color: #1f4b39;
-      box-shadow: 0 6px 14px rgba(46, 106, 79, 0.18);
-      transform: translateY(-1px);
-    }}
-    #action-type .radio-option input:focus + .radio-text {{
-      outline: 2px solid rgba(46, 106, 79, 0.25);
-      outline-offset: 2px;
-    }}
-    #action-type .radio-option:hover {{
-      transform: none;
-      border-color: transparent;
-      background: transparent;
-    }}
-    .radio-option {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
       border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #f7efe6;
-      cursor: pointer;
-      font-size: 12px;
-      transition: transform 0.2s ease, border 0.2s ease, background 0.2s ease;
+      padding: 8px 10px;
+      font-size: 14px;
+      background: #fffdf9;
+      color: var(--ink);
     }}
-    .radio-option input {{
-      accent-color: var(--accent);
-      transform: scale(0.9);
+    textarea {{ min-height: 70px; resize: vertical; }}
+    .grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
+    .radio-group {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+    .radio-option {{ display: inline-flex; align-items: center; gap: 6px; padding: 0; border: none; background: transparent; cursor: pointer; }}
+    .radio-option .radio-text {{
+      display: flex; align-items: center; justify-content: center;
+      min-width: 96px; padding: 10px 12px; border-radius: 12px;
+      border: 1px solid var(--border); background: #f7efe6;
+      font-size: 12px; line-height: 1.2; text-align: center;
+      transition: transform .2s ease, border .2s ease, background .2s ease, box-shadow .2s ease;
     }}
-    .radio-option:hover {{
+    .radio-option input {{ position: absolute; opacity: 0; pointer-events: none; }}
+    .radio-option input:checked + .radio-text {{
+      background: #e8f1ea;
+      border-color: rgba(46,106,79,.6);
+      color: #1f4b39;
+      box-shadow: 0 6px 14px rgba(46,106,79,.18);
       transform: translateY(-1px);
-      border-color: rgba(46, 106, 79, 0.4);
-      background: #f2e6db;
     }}
+    .table-wrap {{ overflow-x: auto; }}
+    .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 680px; }}
+    .data-table th, .data-table td {{ padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }}
+    .data-table th {{ background: #f3e9de; position: sticky; top: 0; }}
+    pre {{
+      white-space: pre-wrap; background: #f4efe9; padding: 12px;
+      border-radius: 10px; border: 1px dashed var(--border);
+      margin: 0; max-height: 320px; overflow: auto;
+    }}
+    .error {{ border-color: #d98b6b; background: #fff6f0; }}
     button {{
       background: linear-gradient(120deg, var(--accent), #1f4b39);
-      border: none;
-      color: white;
-      padding: 11px 16px;
-      font-size: 14px;
-      border-radius: 12px;
-      cursor: pointer;
-      box-shadow: 0 10px 18px rgba(34, 79, 60, 0.22);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      border: none; color: white; padding: 11px 16px; font-size: 14px;
+      border-radius: 12px; cursor: pointer;
     }}
-    button:hover {{
-      transform: translateY(-1px);
-      box-shadow: 0 14px 24px rgba(34, 79, 60, 0.3);
-    }}
-    pre {{
-      white-space: pre-wrap;
-      background: #f4efe9;
-      padding: 12px;
-      border-radius: 10px;
-      border: 1px dashed var(--border);
-      margin: 0;
-      max-height: 320px;
-      overflow: auto;
-    }}
-    .error {{
-      border-color: #d98b6b;
-      background: #fff6f0;
-    }}
-    @keyframes fadeIn {{
-      from {{ opacity: 0; transform: translateY(8px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
-    @media (max-width: 720px) {{
-      header {{ padding: 24px 18px 6px; }}
-      .wrap {{ padding: 10px 18px 36px; }}
-      h1 {{ font-size: 26px; }}
-    }}
+    @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+    @media (max-width: 720px) {{ header {{ padding: 24px 18px 6px; }} .wrap {{ padding: 10px 18px 36px; }} h1 {{ font-size: 26px; }} }}
   </style>
 </head>
 <body>
-    <header>
-    <h1>赛马本地控制台</h1>
-    <div class="subtitle">在网页上运行流程与记录结果。</div>
+  <header>
+    <h1>Keiba Local Console</h1>
+    <div class="subtitle">Run pipeline and record results from a single web UI.</div>
   </header>
   <main class="wrap">
     <section class="panel">
-      <h2>运行流程</h2>
+      <h2>Run Pipeline</h2>
       <form action="/run_pipeline" method="post">
-        <label>比赛ID</label>
-        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="例如 202501010101">
-        <label>历史查询链接</label>
+        <label>Race ID</label>
+        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
+        <label>History URL</label>
         <input name="history_url" placeholder="https://db.netkeiba.com/...">
-        <label>数据范围</label>
+        <label>Data Scope</label>
         <div class="radio-group" id="scope-radio">
-          <label class="radio-option">
-            <input type="radio" name="scope_key" value="central_dirt">
-            <span class="radio-text">中央・沙地</span>
-          </label>
-          <label class="radio-option">
-            <input type="radio" name="scope_key" value="central_turf">
-            <span class="radio-text">中央・草地</span>
-          </label>
-          <label class="radio-option">
-            <input type="radio" name="scope_key" value="local">
-            <span class="radio-text">地方</span>
-          </label>
+          <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"><span class="radio-text">Central Dirt</span></label>
+          <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"><span class="radio-text">Central Turf</span></label>
+          <label class="radio-option"><input type="radio" name="scope_key" value="local"><span class="radio-text">Local</span></label>
         </div>
         <div class="grid">
           <div>
-            <label>距离（米）</label>
+            <label>Distance (m)</label>
             <input name="distance" placeholder="1600">
           </div>
           <div>
-            <label>马场（良/稍重/重/不良）</label>
+            <label>Track Condition</label>
             <div class="radio-group" id="track-cond">
-              <label class="radio-option">
-                <input type="radio" name="track_cond" value="良" checked>
-                <span class="radio-text">良</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="track_cond" value="稍重">
-                <span class="radio-text">稍重</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="track_cond" value="重">
-                <span class="radio-text">重</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="track_cond" value="不良">
-                <span class="radio-text">不良</span>
-              </label>
+              <label class="radio-option"><input type="radio" name="track_cond" value="good" checked><span class="radio-text">Good</span></label>
+              <label class="radio-option"><input type="radio" name="track_cond" value="slightly_heavy"><span class="radio-text">Slightly Heavy</span></label>
+              <label class="radio-option"><input type="radio" name="track_cond" value="heavy"><span class="radio-text">Heavy</span></label>
+              <label class="radio-option"><input type="radio" name="track_cond" value="bad"><span class="radio-text">Bad</span></label>
             </div>
           </div>
           <div>
-            <label>预算（日元）</label>
+            <label>Budget (JPY)</label>
             <input name="budget" placeholder="2000">
           </div>
           <div>
-            <label>投注风格</label>
+            <label>Bet Style</label>
             <select name="style">
-              <option value="">自动</option>
-              <option value="steady">稳健</option>
-              <option value="balanced">均衡</option>
-              <option value="aggressive">激进</option>
+              <option value="">Auto</option>
+              <option value="steady">steady</option>
+              <option value="balanced">balanced</option>
+              <option value="aggressive">aggressive</option>
             </select>
           </div>
         </div>
-        <button type="submit" {run_button_attr}>运行</button>
+        <button type="submit" {run_button_attr}>Run</button>
       </form>
     </section>
 
     <section class="panel">
-      <h2>单场入口</h2>
+      <h2>Single Run Actions</h2>
       <form id="single-action-form" action="/view_run" method="post">
-        <label>运行ID / 比赛ID</label>
-        <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="例如 202501010101 或 20250101_123456">
+        <label>Run ID / Race ID</label>
+        <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
         <input type="hidden" id="action_run_id" name="run_id">
         <input type="hidden" id="action_race_id" name="race_id">
-        <label>操作类型</label>
+        <label>Action Type</label>
         <div class="radio-group" id="action-type">
-          <label class="radio-option">
-            <input type="radio" name="action_type" value="view" checked>
-            <span class="radio-text">查看</span>
-          </label>
-          <label class="radio-option">
-            <input type="radio" name="action_type" value="update">
-            <span class="radio-text">更新投注计划</span>
-          </label>
-          <label class="radio-option">
-            <input type="radio" name="action_type" value="record">
-            <span class="radio-text">赛后记录</span>
-          </label>
+          <label class="radio-option"><input type="radio" name="action_type" value="view" checked><span class="radio-text">View</span></label>
+          <label class="radio-option"><input type="radio" name="action_type" value="update"><span class="radio-text">Update Bet Plan</span></label>
+          <label class="radio-option"><input type="radio" name="action_type" value="record"><span class="radio-text">Record Result</span></label>
         </div>
-        <div class="subtitle">数据范围会根据 ID 自动判断。</div>
+        <div class="subtitle">Data scope is inferred from Run ID / Race ID automatically.</div>
         <div class="grid" id="action-update-fields" style="display:none;">
           <div>
-            <label>预算（日元，可空）</label>
+            <label>Budget (JPY, optional)</label>
             <input name="budget" placeholder="2000">
           </div>
           <div>
-            <label>投注风格</label>
+            <label>Bet Style</label>
             <select name="style">
-              <option value="">自动</option>
-              <option value="steady">稳健</option>
-              <option value="balanced">均衡</option>
-              <option value="aggressive">激进</option>
+              <option value="">Auto</option>
+              <option value="steady">steady</option>
+              <option value="balanced">balanced</option>
+              <option value="aggressive">aggressive</option>
             </select>
           </div>
         </div>
         <div class="grid" id="action-record-fields" style="display:none;">
-          <div>
-            <label>实际第1名</label>
-            <input name="top1">
-          </div>
-          <div>
-            <label>实际第2名</label>
-            <input name="top2">
-          </div>
-          <div>
-            <label>实际第3名</label>
-            <input name="top3">
-          </div>
+          <div><label>Actual 1st</label><input name="top1"></div>
+          <div><label>Actual 2nd</label><input name="top2"></div>
+          <div><label>Actual 3rd</label><input name="top3"></div>
         </div>
-        <button type="submit" id="action-submit">执行</button>
+        <button type="submit" id="action-submit">Run</button>
       </form>
     </section>
 
-
-{top5_block}
+    {top5_block}
     {summary_block}
     {bet_plan_block}
     {run_summary_block}
@@ -2007,12 +1819,8 @@ def page_template(
 
     function syncActionIds() {{
       const value = actionInput ? actionInput.value.trim() : "";
-      if (actionRunId) {{
-        actionRunId.value = value;
-      }}
-      if (actionRaceId) {{
-        actionRaceId.value = value;
-      }}
+      if (actionRunId) actionRunId.value = value;
+      if (actionRaceId) actionRaceId.value = value;
     }}
 
     function getActionType() {{
@@ -2022,28 +1830,18 @@ def page_template(
 
     function refreshActionUI() {{
       const actionType = getActionType();
-      if (updateFields) {{
-        updateFields.style.display = actionType === "update" ? "grid" : "none";
-      }}
-      if (recordFields) {{
-        recordFields.style.display = actionType === "record" ? "grid" : "none";
-      }}
+      if (updateFields) updateFields.style.display = actionType === "update" ? "grid" : "none";
+      if (recordFields) recordFields.style.display = actionType === "record" ? "grid" : "none";
       if (actionForm) {{
         if (actionType === "update") {{
           actionForm.action = "/update_bet_plan";
-          if (actionSubmit) {{
-            actionSubmit.textContent = "更新";
-          }}
+          if (actionSubmit) actionSubmit.textContent = "Update";
         }} else if (actionType === "record") {{
           actionForm.action = "/record_pipeline";
-          if (actionSubmit) {{
-            actionSubmit.textContent = "记录";
-          }}
+          if (actionSubmit) actionSubmit.textContent = "Record";
         }} else {{
           actionForm.action = "/view_run";
-          if (actionSubmit) {{
-            actionSubmit.textContent = "查看";
-          }}
+          if (actionSubmit) actionSubmit.textContent = "View";
         }}
       }}
     }}
@@ -2053,9 +1851,7 @@ def page_template(
       syncActionIds();
     }}
     if (actionTypeRadios.length) {{
-      actionTypeRadios.forEach((radio) => {{
-        radio.addEventListener("change", refreshActionUI);
-      }});
+      actionTypeRadios.forEach((radio) => radio.addEventListener("change", refreshActionUI));
     }}
     refreshActionUI();
   </script>
@@ -2081,19 +1877,34 @@ def render_page(
     if scope_norm:
         profit_rows = load_profit_summary(scope_norm)
         daily_profit_rows = load_daily_profit_summary(scope_norm)
+        all_scope_daily_rows = load_daily_profit_summary_all_scopes(days=30)
         wide_box_rows = load_wide_box_daily_profit_summary(scope_norm)
         bet_type_profit_rows = load_bet_type_profit_summary(scope_norm)
         bet_type_rows = load_bet_type_summary(scope_norm)
         predictor_rows = load_predictor_summary(scope_norm)
         parts = []
         if profit_rows:
-            parts.append(build_metric_table(profit_rows, "累计盈亏"))
+            parts.append(build_metric_table(profit_rows, "Overall Profit Summary"))
         if daily_profit_rows:
             parts.append(
                 build_table_html(
                     daily_profit_rows,
                     ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "投注计划",
+                    "Daily Profit",
+                )
+            )
+        if all_scope_daily_rows:
+            parts.append(
+                build_daily_profit_chart_html(
+                    all_scope_daily_rows,
+                    "All Scopes Daily Profit Trend",
+                )
+            )
+            parts.append(
+                build_table_html(
+                    all_scope_daily_rows,
+                    ["date", "runs", "profit_yen", "base_amount", "roi"],
+                    "All Scopes Daily Totals",
                 )
             )
         if wide_box_rows:
@@ -2101,7 +1912,7 @@ def render_page(
                 build_table_html(
                     wide_box_rows,
                     ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "Top5 枠连盈亏（1000日元）",
+                    "Top5 Wide Box Profit (1000 JPY)",
                 )
             )
         if bet_type_profit_rows:
@@ -2109,13 +1920,19 @@ def render_page(
                 build_table_html(
                     bet_type_profit_rows,
                     ["bet_type", "amount_yen", "est_profit_yen", "roi"],
-                    "单胜/复胜/扩连盈亏（2026+）",
+                    "Win/Place/Wide Profit (2026+)",
                 )
             )
         if bet_type_rows:
-            parts.append(build_table_html(bet_type_rows, ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"], "Bet Type 命中率"))
+            parts.append(
+                build_table_html(
+                    bet_type_rows,
+                    ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
+                    "Bet Type Hit Rate",
+                )
+            )
         if predictor_rows:
-            parts.append(build_metric_table(predictor_rows, "预测命中率"))
+            parts.append(build_metric_table(predictor_rows, "Predictor Hit Rate"))
         stats_block = "\n".join(parts)
     run_id = ""
     run_row = None
@@ -2142,12 +1959,12 @@ def render_page(
     bet_rows = []
     if run_id:
         top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, run_row)
-        top5_table_html = build_table_html(top_rows, top_cols, "Top5 预测")
+        top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
-            summary_table_html = build_table_html(summary_rows, ["指标", "数值"], "模型状态")
+            summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")
         bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
-        bet_plan_table_html = build_table_html(bet_rows, bet_cols, "投注计划")
+        bet_plan_table_html = build_table_html(bet_rows, bet_cols, "Bet Plan")
     gate_status, gate_reason = detect_gate_status(bet_rows)
     gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
     gate_notice_text = build_gate_notice_text(gate_status, gate_reason)
@@ -2161,7 +1978,7 @@ def render_page(
         parts = []
         result_rows = load_run_result_summary(scope_norm, summary_id)
         if result_rows:
-            parts.append(build_metric_table(result_rows, "本场盈亏"))
+            parts.append(build_metric_table(result_rows, "Run Profit"))
         bet_ticket_rows = load_run_bet_ticket_summary(scope_norm, summary_id)
         if bet_ticket_rows:
             parts.append(
@@ -2176,19 +1993,19 @@ def render_page(
                         "est_payout_yen",
                         "profit_yen",
                     ],
-                    "本场 投注计划 盈亏明细",
+                    "Run Bet Plan PnL Details",
                 )
             )
         predictor_rows = load_run_predictor_summary(scope_norm, summary_id)
         if predictor_rows:
-            parts.append(build_metric_table(predictor_rows, "本场预测命中率"))
+            parts.append(build_metric_table(predictor_rows, "Run Predictor Hit Rate"))
         bet_type_rows = load_run_bet_type_summary(scope_norm, summary_id)
         if bet_type_rows:
             parts.append(
                 build_table_html(
                     bet_type_rows,
                     ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
-                    "本场 Bet Type 命中率",
+                    "Run Bet Type Hit Rate",
                 )
             )
         if parts:
@@ -2226,7 +2043,7 @@ def view_run(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="请输入 运行ID/比赛ID 以查看历史记录。")
+        return render_page("", error_text="Enter Run ID or Race ID to view history.")
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -2236,7 +2053,7 @@ def view_run(
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="找不到对应的 运行ID/比赛ID。",
+            error_text="Run ID / Race ID not found.",
             selected_run_id=run_id,
         )
     resolved_run_id = run_row.get("run_id", run_id)
@@ -2272,18 +2089,18 @@ def run_pipeline(
 ):
     scope_key = normalize_scope_key(scope_key)
     if not scope_key:
-        return render_page("", error_text="请选择数据范围。")
+        return render_page("", error_text="Please select a data scope.")
     race_id = normalize_race_id(race_id or race_url)
     history_url = history_url.strip()
     if not race_id or not history_url:
         return render_page(
             scope_key,
-            error_text="需要填写比赛ID和历史查询链接。",
+            error_text="Race ID and History URL are required.",
         )
     if scope_key == "local":
-        race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
+        race_url = f"https://nar.netkeiba.com/race/shutuba.htmlheavyrace_id={race_id}"
     else:
-        race_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}"
+        race_url = f"https://race.netkeiba.com/race/shutuba.htmlheavyrace_id={race_id}"
     if not surface.strip():
         if scope_key == "central_turf":
             surface = "1"
@@ -2291,6 +2108,15 @@ def run_pipeline(
             surface = "2"
         else:
             surface = "1"
+    track_cond_norm = str(track_cond or "").strip().lower()
+    track_cond_map = {
+        "good": "good",
+        "slightly_heavy": "slightly_heavy",
+        "heavy": "heavy",
+        "bad": "bad",
+    }
+    if track_cond_norm in track_cond_map:
+        track_cond = track_cond_map[track_cond_norm]
     inputs = [
         race_url,
         history_url,
@@ -2306,7 +2132,7 @@ def run_pipeline(
         inputs=inputs,
         extra_env=extra_env,
     )
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     top5_text = extract_top5(output)
     bet_plan_text = extract_bet_plan(output)
     return render_page(
@@ -2331,7 +2157,7 @@ def update_bet_plan(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(raw_id)
     if not scope_key:
-        return render_page("", error_text="请输入 运行ID/比赛ID 以更新。")
+        return render_page("", error_text="Enter Run ID or Race ID to update.")
     race_id = "" if is_run_id(raw_id) else normalize_race_id(raw_id)
     if run_row is None:
         if race_id:
@@ -2339,11 +2165,11 @@ def update_bet_plan(
         elif raw_id:
             run_row = resolve_run(raw_id, scope_key)
     if run_row is None:
-        return render_page(scope_key, error_text="找不到对应的 运行ID/比赛ID。")
+        return render_page(scope_key, error_text="Run ID / Race ID not found.")
     if not race_id:
         race_id = normalize_race_id(run_row.get("race_id", ""))
     if not race_id:
-        return render_page(scope_key, error_text="比赛ID缺失，无法更新。")
+        return render_page(scope_key, error_text="Race ID missing; cannot update.")
     run_id = str(run_row.get("run_id", "")).strip()
     if not run_id:
         run_id = infer_run_id_from_row(run_row)
@@ -2351,13 +2177,13 @@ def update_bet_plan(
             update_run_row_fields(scope_key, run_row, {"run_id": run_id})
             run_row["run_id"] = run_id
     if not run_id:
-        return render_page(scope_key, error_text="该比赛缺少运行ID。")
+        return render_page(scope_key, error_text="Missing run_id for this race.")
     pred_path = resolve_pred_path(scope_key, run_id, run_row)
     if not pred_path.exists():
-        return render_page(scope_key, error_text=f"预测文件不存在：{pred_path}")
+        return render_page(scope_key, error_text=f"Predictions file not found: {pred_path}")
     odds_path = resolve_odds_path(scope_key, run_id, run_row)
     if not odds_path:
-        return render_page(scope_key, error_text="未找到该运行的赔率路径。")
+        return render_page(scope_key, error_text="Odds path not found for this run.")
 
     wide_path = resolve_wide_odds_path(scope_key, run_id, run_row)
     fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
@@ -2379,7 +2205,7 @@ def update_bet_plan(
         return render_page(scope_key, error_text=msg)
 
     if not odds_path.exists():
-        return render_page(scope_key, error_text=f"硬门阻止出票。?{odds_path}")
+        return render_page(scope_key, error_text=f"Odds file not found: {odds_path}")
     if wide_path and not wide_path.exists():
         warnings.append(f"wide odds not found: {wide_path}")
     if fuku_path and not fuku_path.exists():
@@ -2423,14 +2249,14 @@ def update_bet_plan(
         plan_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(plan_src, plan_dest)
         if not update_run_plan_path(scope_key, run_id, plan_dest):
-            warnings.append("runs.csv 未更新，plan_path 可能过期。")
+            warnings.append("runs.csv not updated; plan_path may be stale.")
     else:
         if not plan_src.exists():
-            warnings.append("更新后未生成 bet_plan_update.csv。")
+            warnings.append("bet_plan_update.csv not found after update.")
 
     curr_odds_snapshot = load_odds_snapshot(odds_path)
     diff_lines = format_odds_diff(prev_odds_snapshot, curr_odds_snapshot)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     output_lines = [label]
     if warnings:
         output_lines.extend([f"[WARN] {item}" for item in warnings])
@@ -2466,7 +2292,7 @@ def record_pipeline(
     if not top1 or not top2 or not top3:
         return render_page(
             scope_key,
-            error_text="必须填写实际第1/2/3名。",
+            error_text="Actual 1st/2nd/3rd are required.",
         )
     run_id = run_id.strip()
     scope_key = normalize_scope_key(scope_key)
@@ -2474,7 +2300,7 @@ def record_pipeline(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="请输入 运行ID/比赛ID 以记录。")
+        return render_page("", error_text="Enter Run ID or Race ID to record results.")
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -2484,7 +2310,7 @@ def record_pipeline(
     if run_row is None:
         return render_page(
             scope_key,
-            error_text="找不到对应的 运行ID/比赛ID。",
+            error_text="Run ID / Race ID not found.",
         )
     odds_path = run_row.get("odds_path", "")
     resolved_run_id = run_row.get("run_id", run_id)
@@ -2497,7 +2323,7 @@ def record_pipeline(
         extra_blanks=4,
         extra_env={"SCOPE_KEY": scope_key},
     )
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return render_page(
         scope_key,
         output_text=f"{label}\n{output}",
@@ -2514,11 +2340,11 @@ def record_predictor(
 ):
     if not top1 or not top2 or not top3:
         return page_template(
-            error_text="必须填写第1/2/3名。",
+            error_text="Top1/Top2/Top3 are required.",
         )
     inputs = [run_id, top1, top2, top3]
     code, output = run_script(RECORD_PREDICTOR, inputs=inputs, extra_blanks=2)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2527,7 +2353,7 @@ def record_predictor(
 @app.post("/optimize_params", response_class=HTMLResponse)
 def optimize_params():
     code, output = run_script(OPTIMIZE_PARAMS, inputs=[""], extra_blanks=1)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2536,7 +2362,7 @@ def optimize_params():
 @app.post("/optimize_predictor", response_class=HTMLResponse)
 def optimize_predictor():
     code, output = run_script(OPTIMIZE_PREDICTOR, inputs=[""], extra_blanks=1)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2546,7 +2372,7 @@ def optimize_predictor():
 def offline_eval(window: str = Form("")):
     inputs = [window, ""]
     code, output = run_script(OFFLINE_EVAL, inputs=inputs, extra_blanks=1)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2555,7 +2381,7 @@ def offline_eval(window: str = Form("")):
 @app.post("/init_update", response_class=HTMLResponse)
 def init_update():
     code, output = run_script(INIT_UPDATE, inputs=[""], extra_blanks=1)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
@@ -2564,7 +2390,7 @@ def init_update():
 @app.post("/init_update_reset", response_class=HTMLResponse)
 def init_update_reset():
     code, output = run_script(INIT_UPDATE, inputs=[""], args=["--reset"], extra_blanks=1)
-    label = f"退出码：{code}"
+    label = f"Exit code: {code}"
     return page_template(
         output_text=f"{label}\n{output}",
     )
