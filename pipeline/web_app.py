@@ -179,9 +179,9 @@ def refresh_odds_for_run(
     race_id = normalize_race_id(run_row.get("race_id", ""))
     if not race_url and race_id:
         if scope_key in ("central_turf", "central_dirt"):
-            base = "https://race.netkeiba.com/race/shutuba.htmlheavyrace_id="
+            base = "https://race.netkeiba.com/race/shutuba.html?race_id="
         else:
-            base = "https://nar.netkeiba.com/race/shutuba.htmlheavyrace_id="
+            base = "https://nar.netkeiba.com/race/shutuba.html?race_id="
         race_url = f"{base}{race_id}"
     if not race_url:
         return False, "Race URL missing for odds update.", []
@@ -830,9 +830,9 @@ def run_pipeline(
             error_text="Race ID and History URL are required.",
         )
     if scope_key == "local":
-        race_url = f"https://nar.netkeiba.com/race/shutuba.htmlheavyrace_id={race_id}"
+        race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
     else:
-        race_url = f"https://race.netkeiba.com/race/shutuba.htmlheavyrace_id={race_id}"
+        race_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}"
     if not surface.strip():
         if scope_key == "central_turf":
             surface = "1"
