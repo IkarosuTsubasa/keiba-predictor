@@ -6,14 +6,27 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
-from itertools import combinations
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
+from web_data import odds_service, run_resolver, run_store, summary_service, view_data
+from web_ui.components import (
+    build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
+    build_gate_notice_html as ui_build_gate_notice_html,
+    build_gate_notice_text as ui_build_gate_notice_text,
+    build_metric_table as ui_build_metric_table,
+    build_table_html as ui_build_table_html,
+    detect_gate_status as ui_detect_gate_status,
+)
+from web_ui.template import page_template as ui_page_template
+from web_ui.stats_block import (
+    build_run_summary_block as ui_build_run_summary_block,
+    build_stats_block as ui_build_stats_block,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,42 +66,15 @@ def load_runs(scope_key):
 
 
 def normalize_csv_fieldnames(fieldnames):
-    if not fieldnames:
-        return []
-    return [name.lstrip("\ufeff") if name else name for name in fieldnames]
+    return run_store.normalize_csv_fieldnames(fieldnames)
 
 
 def normalize_csv_rows(rows, fieldnames):
-    norm_fieldnames = normalize_csv_fieldnames(fieldnames)
-    if norm_fieldnames == fieldnames:
-        return rows, fieldnames
-    mapping = dict(zip(fieldnames, norm_fieldnames))
-    out = []
-    for row in rows:
-        new_row = {}
-        for key, value in row.items():
-            new_key = mapping.get(key, key.lstrip("\ufeff") if key else key)
-            new_row[new_key] = value
-        out.append(new_row)
-    return out, norm_fieldnames
+    return run_store.normalize_csv_rows(rows, fieldnames)
 
 
 def load_runs_with_header(scope_key):
-    migrate_legacy_data(BASE_DIR, scope_key)
-    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
-    if not runs_path.exists():
-        return [], [], "utf-8"
-    for enc in ("utf-8-sig", "cp932", "utf-8"):
-        try:
-            with open(runs_path, "r", encoding=enc) as f:
-                reader = csv.DictReader(f)
-                rows = list(reader)
-                fieldnames = reader.fieldnames or []
-                rows, fieldnames = normalize_csv_rows(rows, fieldnames)
-                return rows, fieldnames, enc
-        except UnicodeDecodeError:
-            continue
-    return [], [], "utf-8"
+    return run_store.load_runs_with_header(migrate_legacy_data, get_data_dir, BASE_DIR, scope_key)
 
 
 def get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT, query=""):
@@ -138,128 +124,46 @@ def build_run_options(scope_key, selected_run_id=""):
     return "\n".join(options)
 
 def resolve_run(run_id, scope_key):
-    runs = load_runs(scope_key)
-    if not runs:
-        return None
-    if not run_id:
-        return runs[-1]
-    for row in runs:
-        if row.get("run_id") == run_id:
-            return row
-    return None
+    return run_resolver.resolve_run(load_runs, run_id, scope_key)
 
 
 def resolve_latest_run_by_race_id(race_id, scope_key):
-    race_id = normalize_race_id(race_id)
-    if not race_id:
-        return None
-    runs = load_runs(scope_key)
-    for row in reversed(runs):
-        if normalize_race_id(row.get("race_id", "")) == race_id:
-            return row
-    return None
+    return run_resolver.resolve_latest_run_by_race_id(load_runs, normalize_race_id, race_id, scope_key)
 
 
 def infer_run_id_from_path(path):
-    if not path:
-        return ""
-    match = re.search(r"(\d{8}_\d{6})", str(path))
-    return match.group(1) if match else ""
+    return run_resolver.infer_run_id_from_path(path)
 
 
 def infer_run_id_from_row(run_row):
-    if not run_row:
-        return ""
-    for key in (
-        "predictions_path",
-        "odds_path",
-        "wide_odds_path",
-        "fuku_odds_path",
-        "quinella_odds_path",
-        "trifecta_odds_path",
-        "plan_path",
-    ):
-        run_id = infer_run_id_from_path(run_row.get(key, ""))
-        if run_id:
-            return run_id
-    return ""
+    return run_resolver.infer_run_id_from_row(run_row)
 
 
 def update_run_row_fields(scope_key, run_row, updates):
-    if not run_row or not updates:
-        return False
-    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
-    rows, fieldnames, enc = load_runs_with_header(scope_key)
-    if not rows or not fieldnames:
-        return False
-    for key in updates:
-        if key not in fieldnames:
-            fieldnames.append(key)
-    target_run_id = str(run_row.get("run_id", "")).strip()
-    target_race_id = normalize_race_id(run_row.get("race_id", ""))
-    target_timestamp = str(run_row.get("timestamp", "")).strip()
-    target_pred_path = str(run_row.get("predictions_path", "")).strip()
-    matched = False
-    for row in rows:
-        row_run_id = str(row.get("run_id", "")).strip()
-        if target_run_id and row_run_id == target_run_id:
-            row.update(updates)
-            matched = True
-            break
-        row_race_id = normalize_race_id(row.get("race_id", ""))
-        row_ts = str(row.get("timestamp", "")).strip()
-        if target_race_id and target_timestamp:
-            if row_race_id != target_race_id or row_ts != target_timestamp:
-                continue
-            if target_pred_path:
-                row_pred = str(row.get("predictions_path", "")).strip()
-                if row_pred != target_pred_path:
-                    continue
-            row.update(updates)
-            matched = True
-            break
-    if not matched:
-        return False
-    with open(runs_path, "w", newline="", encoding=enc, errors="replace") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({name: row.get(name, "") for name in fieldnames})
-    return True
+    return run_store.update_run_row_fields(
+        get_data_dir,
+        BASE_DIR,
+        load_runs_with_header,
+        normalize_race_id,
+        scope_key,
+        run_row,
+        updates,
+    )
 
 
 def resolve_plan_path(scope_key, run_id, run_row):
-    path = str(run_row.get("plan_path", "")).strip() if run_row else ""
-    if path:
-        return Path(path)
-    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
-    if race_id:
-        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
-        return race_dir / f"bet_plan_{run_id}_{race_id}.csv"
-    return get_data_dir(BASE_DIR, scope_key) / f"bet_plan_{run_id}.csv"
+    return run_resolver.resolve_plan_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def update_run_plan_path(scope_key, run_id, plan_path):
-    runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
-    rows, fieldnames, enc = load_runs_with_header(scope_key)
-    if not rows or not fieldnames:
-        return False
-    updated = False
-    if "plan_path" not in fieldnames:
-        fieldnames.append("plan_path")
-    for row in rows:
-        if row.get("run_id") == run_id:
-            row["plan_path"] = str(plan_path)
-            updated = True
-            break
-    if not updated:
-        return False
-    with open(runs_path, "w", newline="", encoding=enc, errors="replace") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({name: row.get(name, "") for name in fieldnames})
-    return True
+    return run_store.update_run_plan_path(
+        get_data_dir,
+        BASE_DIR,
+        load_runs_with_header,
+        scope_key,
+        run_id,
+        plan_path,
+    )
 
 
 def refresh_odds_for_run(
@@ -429,31 +333,11 @@ def is_run_id(value):
 
 
 def find_run_in_scope(scope_key, id_text):
-    if not scope_key or not id_text:
-        return None
-    runs = load_runs(scope_key)
-    if not runs:
-        return None
-    id_text = str(id_text).strip()
-    race_id = normalize_race_id(id_text)
-    for row in reversed(runs):
-        run_id = str(row.get("run_id", "")).strip()
-        if run_id and run_id == id_text:
-            return row
-        if race_id and normalize_race_id(row.get("race_id", "")) == race_id:
-            return row
-    return None
+    return run_resolver.find_run_in_scope(load_runs, normalize_race_id, scope_key, id_text)
 
 
 def infer_scope_and_run(id_text):
-    id_text = str(id_text or "").strip()
-    if not id_text:
-        return "", None
-    for scope_key in ("central_dirt", "central_turf", "local"):
-        run_row = find_run_in_scope(scope_key, id_text)
-        if run_row:
-            return scope_key, run_row
-    return "", None
+    return run_resolver.infer_scope_and_run(load_runs, normalize_race_id, id_text)
 
 
 def load_csv_rows(path):
@@ -493,1076 +377,261 @@ def format_path_mtime(path, label):
 
 
 def parse_odds_value(value):
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
+    return odds_service.parse_odds_value(value)
 
 
 def load_odds_snapshot(path):
-    if not path:
-        return {}
-    path = Path(path)
-    if not path.exists():
-        return {}
-    for enc in ("utf-8-sig", "cp932", "utf-8"):
-        try:
-            with open(path, "r", encoding=enc) as f:
-                reader = csv.DictReader(f)
-                out = {}
-                for row in reader:
-                    horse_no = str(row.get("horse_no", "")).strip()
-                    name = str(row.get("name", "")).strip()
-                    odds_raw = str(row.get("odds", "")).strip()
-                    key = ""
-                    if horse_no:
-                        key = f"no:{horse_no}"
-                    elif name:
-                        key = f"name:{normalize_name(name)}"
-                    if not key:
-                        continue
-                    out[key] = {
-                        "horse_no": horse_no,
-                        "name": name,
-                        "odds_raw": odds_raw,
-                        "odds_val": parse_odds_value(odds_raw),
-                    }
-                return out
-        except UnicodeDecodeError:
-            continue
-    return {}
+    return odds_service.load_odds_snapshot(normalize_name, path)
 
 
 def odds_changed(prev_item, curr_item):
-    if prev_item.get("odds_val") is not None and curr_item.get("odds_val") is not None:
-        return abs(prev_item["odds_val"] - curr_item["odds_val"]) > 1e-9
-    return str(prev_item.get("odds_raw", "")) != str(curr_item.get("odds_raw", ""))
+    return odds_service.odds_changed(prev_item, curr_item)
 
 
 def odds_item_label(item):
-    horse_no = str(item.get("horse_no", "")).strip()
-    name = str(item.get("name", "")).strip()
-    if horse_no and name:
-        return f"{horse_no} {name}"
-    return horse_no or name or "(unknown)"
+    return odds_service.odds_item_label(item)
 
 
 def odds_sort_key(item):
-    horse_no = str(item.get("horse_no", "")).strip()
-    name = str(item.get("name", "")).strip()
-    try:
-        return (0, int(float(horse_no)), name)
-    except (TypeError, ValueError):
-        return (1, horse_no, name)
+    return odds_service.odds_sort_key(item)
 
 
 def format_odds_diff(prev_snapshot, curr_snapshot, limit=50):
-    if not prev_snapshot:
-        return ["odds_diff: no previous odds"]
-    if not curr_snapshot:
-        return ["odds_diff: no new odds"]
-    added = []
-    removed = []
-    changed = []
-    for key, curr in curr_snapshot.items():
-        prev = prev_snapshot.get(key)
-        if not prev:
-            added.append(curr)
-        elif odds_changed(prev, curr):
-            changed.append((prev, curr))
-    for key, prev in prev_snapshot.items():
-        if key not in curr_snapshot:
-            removed.append(prev)
-    lines = [
-        f"odds_diff: changed={len(changed)} added={len(added)} removed={len(removed)}"
-    ]
-    for prev, curr in sorted(changed, key=lambda pair: odds_sort_key(pair[1])):
-        lines.append(
-            f"~ {odds_item_label(curr)}: {prev.get('odds_raw', '')} -> {curr.get('odds_raw', '')}"
-        )
-    for item in sorted(added, key=odds_sort_key):
-        lines.append(f"+ {odds_item_label(item)}: {item.get('odds_raw', '')}")
-    for item in sorted(removed, key=odds_sort_key):
-        lines.append(f"- {odds_item_label(item)}: {item.get('odds_raw', '')}")
-    if len(lines) > limit + 1:
-        more = len(lines) - (limit + 1)
-        return lines[: limit + 1] + [f"... truncated {more} lines"]
-    return lines
+    return odds_service.format_odds_diff(prev_snapshot, curr_snapshot, limit=limit)
 
 
 def build_table_html(rows, columns, title):
-    if not rows or not columns:
-        return ""
-    head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in columns)
-    body_rows = []
-    for row in rows:
-        cells = []
-        for col in columns:
-            val = row.get(col, "")
-            cells.append(f"<td>{html.escape(str(val))}</td>")
-        body_rows.append(f"<tr>{''.join(cells)}</tr>")
-    return f"""
-        <section class="panel">
-            <h2>{html.escape(title)}</h2>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead><tr>{head_cells}</tr></thead>
-                    <tbody>
-                        {''.join(body_rows)}
-                    </tbody>
-                </table>
-            </div>
-        </section>
-        """
+    return ui_build_table_html(rows, columns, title)
 
 
 def build_metric_table(rows, title):
-    if not rows:
-        return ""
-    sample = rows[0]
-    if "metric" in sample and "value" in sample:
-        return build_table_html(rows, ["metric", "value"], title)
-    return build_table_html(rows, ["metric", "value"], title)
+    return ui_build_metric_table(rows, title)
 
 
 def load_top5_table(scope_key, run_id, run_row=None):
-    path = ""
-    if run_row:
-        path = run_row.get("predictions_path", "")
-    if not path:
-        path = str(get_data_dir(BASE_DIR, scope_key) / f"predictions_{run_id}.csv")
-    path = Path(path)
-    rows = load_csv_rows(path)
-    if not rows:
-        return [], []
-    score_key = pick_score_key(rows)
-    if score_key:
-        rows_sorted = sorted(rows, key=lambda r: to_float(r.get(score_key)), reverse=True)
-    else:
-        rows_sorted = rows
-    top_rows = rows_sorted[:5]
-    preferred_cols = [
-        "HorseName",
-        "Top3Prob_model",
-        "Top3Prob_lgbm",
-        "Top3Prob_lr",
-        "agg_score",
-        "best_TimeIndexEff",
-        "avg_TimeIndexEff",
-        "dist_close",
-    ]
-    if score_key and score_key not in preferred_cols:
-        preferred_cols.append(score_key)
-    global_cols = {"confidence_score", "rank_ema", "ev_ema", "risk_score"}
-    columns = [col for col in preferred_cols if col in rows[0]]
-    if not columns:
-        columns = [col for col in rows[0].keys() if col not in global_cols][:6]
-    else:
-        columns = columns[:6]
-    return top_rows, columns
+    return view_data.load_top5_table(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        scope_key,
+        run_id,
+        run_row,
+    )
 
 
 def load_prediction_summary(scope_key, run_id, run_row=None):
-    path = ""
-    if run_row:
-        path = run_row.get("predictions_path", "")
-    if not path:
-        path = str(get_data_dir(BASE_DIR, scope_key) / f"predictions_{run_id}.csv")
-    path = Path(path)
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    row = rows[0]
-    summary_keys = ["confidence_score", "rank_ema", "ev_ema", "risk_score"]
-    summary = []
-    for key in summary_keys:
-        if key in row:
-            summary.append({"metric": key, "value": row.get(key, "")})
-    summary.extend(load_mc_uncertainty_summary(scope_key, run_id, run_row))
-    return summary
+    return view_data.load_prediction_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        load_mc_uncertainty_summary,
+        scope_key,
+        run_id,
+        run_row,
+    )
 
 
 def load_mc_uncertainty_summary(scope_key, run_id, run_row=None):
-    path = ""
-    if run_row:
-        path = run_row.get("plan_path", "")
-    if not path:
-        path = str(get_data_dir(BASE_DIR, scope_key) / f"bet_plan_{run_id}.csv")
-    rows = load_csv_rows(Path(path))
-    if not rows:
-        return []
-    filtered = [
-        row
-        for row in rows
-        if str(row.get("bet_type", "")).strip().lower() != "trifecta_rec"
-    ]
-    filtered = [
-        row
-        for row in filtered
-        if row.get("hit_prob_se") or row.get("hit_prob_ci95_low") or row.get("hit_prob_ci95_high")
-    ]
-    if not filtered:
-        return []
-    target = max(filtered, key=lambda r: to_float(r.get("hit_prob_est")))
-    bet_type = str(target.get("bet_type", "")).strip()
-    horse_no = str(target.get("horse_no", "")).strip()
-    label = f"{bet_type} {horse_no}".strip()
-    summary = [
-        {"metric": f"MC SE ({label})", "value": target.get("hit_prob_se", "")},
-        {"metric": f"MC CI95 Low ({label})", "value": target.get("hit_prob_ci95_low", "")},
-        {"metric": f"MC CI95 High ({label})", "value": target.get("hit_prob_ci95_high", "")},
-    ]
-
-
-    return summary
+    return view_data.load_mc_uncertainty_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        scope_key,
+        run_id,
+        run_row,
+    )
 
 
 def load_profit_summary(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "results.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    latest = {}
-    for row in rows:
-        run_id = row.get("run_id", "")
-        if run_id:
-            latest[run_id] = row
-    rows = list(latest.values())
-    total_profit = 0
-    total_base = 0
-    sample_count = 0
-    for row in rows:
-        try:
-            profit = int(float(row.get("profit_yen", 0)))
-        except (TypeError, ValueError):
-            profit = 0
-        try:
-            base = int(float(row.get("base_amount", 0)))
-        except (TypeError, ValueError):
-            base = 0
-        total_profit += profit
-        total_base += base
-        sample_count += 1
-    roi = ""
-    if total_base > 0:
-        roi = round((total_base + total_profit) / total_base, 4)
-    return [
-        {"metric": "runs", "value": sample_count},
-        {"metric": "total_stake_yen", "value": total_base},
-        {"metric": "total_profit_yen", "value": total_profit},
-        {"metric": "overall_roi", "value": roi},
-    ]
-
-
-def extract_date_prefix(value):
-    match = re.match(r"(\d{8})", str(value or ""))
-    if not match:
-        return None
-    raw = match.group(1)
-    try:
-        return datetime.strptime(raw, "%Y%m%d").date()
-    except ValueError:
-        return None
-
-
-def extract_run_date(run_id):
-    return extract_date_prefix(run_id)
-
-
-def extract_year_prefix(value):
-    match = re.match(r"(\d{4})", str(value or ""))
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
+    return summary_service.load_profit_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
 
 
 def build_run_race_map(scope_key):
-    runs = load_runs(scope_key)
-    out = {}
-    for row in runs:
-        run_id = str(row.get("run_id", "")).strip()
-        if not run_id:
-            run_id = infer_run_id_from_row(row)
-        if not run_id:
-            continue
-        out[run_id] = row.get("race_id", "")
-    return out
+    return summary_service.build_run_race_map(load_runs, infer_run_id_from_row, scope_key)
 
 
 def load_daily_profit_summary(scope_key, days=30):
-    path = get_data_dir(BASE_DIR, scope_key) / "results.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    latest = {}
-    for row in rows:
-        run_id = row.get("run_id", "")
-        if run_id:
-            latest[run_id] = row
-    rows = list(latest.values())
-    run_race_map = build_run_race_map(scope_key)
-    cutoff = None
-    if days is not None:
-        try:
-            days = int(days)
-        except (TypeError, ValueError):
-            days = 30
-        if days > 0:
-            cutoff = datetime.now().date() - timedelta(days=days - 1)
-    daily = {}
-    for row in rows:
-        run_id = row.get("run_id", "")
-        race_id = run_race_map.get(run_id, "")
-        race_year = extract_year_prefix(race_id)
-        if race_year is not None and race_year < MIN_RACE_YEAR:
-            continue
-        date_obj = extract_run_date(run_id)
-        if not date_obj:
-            continue
-        if cutoff and date_obj < cutoff:
-            continue
-        try:
-            profit = int(float(row.get("profit_yen", 0)))
-        except (TypeError, ValueError):
-            profit = 0
-        try:
-            base = int(float(row.get("base_amount", 0)))
-        except (TypeError, ValueError):
-            base = 0
-        item = daily.setdefault(date_obj, {"runs": 0, "profit": 0, "base": 0})
-        item["runs"] += 1
-        item["profit"] += profit
-        item["base"] += base
-    if not daily:
-        return []
-    items = sorted(daily.items(), key=lambda pair: pair[0], reverse=True)
-    out = []
-    for date_obj, item in items:
-        base = item["base"]
-        roi = round((base + item["profit"]) / base, 4) if base > 0 else ""
-        out.append(
-            {
-                "date": date_obj.strftime("%Y-%m-%d"),
-                "runs": item["runs"],
-                "profit_yen": item["profit"],
-                "base_amount": base,
-                "roi": roi,
-            }
-        )
-    return out
+    return summary_service.load_daily_profit_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        build_run_race_map,
+        MIN_RACE_YEAR,
+        scope_key,
+        days=days,
+    )
 
 
 def load_daily_profit_summary_all_scopes(days=30):
-    daily = {}
-    for scope_key in ("central_dirt", "central_turf", "local"):
-        rows = load_daily_profit_summary(scope_key, days=days)
-        for row in rows:
-            date_key = str(row.get("date", "")).strip()
-            if not date_key:
-                continue
-            item = daily.setdefault(
-                date_key,
-                {"date": date_key, "runs": 0, "profit_yen": 0, "base_amount": 0},
-            )
-            item["runs"] += to_int_or_none(row.get("runs")) or 0
-            item["profit_yen"] += to_int_or_none(row.get("profit_yen")) or 0
-            item["base_amount"] += to_int_or_none(row.get("base_amount")) or 0
-    if not daily:
-        return []
-    out = []
-    for date_key in sorted(daily.keys(), reverse=True):
-        item = daily[date_key]
-        base = item["base_amount"]
-        profit = item["profit_yen"]
-        roi = round((base + profit) / base, 4) if base > 0 else ""
-        out.append(
-            {
-                "date": date_key,
-                "runs": item["runs"],
-                "profit_yen": profit,
-                "base_amount": base,
-                "roi": roi,
-            }
-        )
-    return out
+    return summary_service.load_daily_profit_summary_all_scopes(load_daily_profit_summary, to_int_or_none, days=days)
 
 
 def build_daily_profit_chart_html(rows, title):
-    if not rows:
-        return ""
-    # show up to recent 30 days; chart draws left->right in time order
-    data = list(reversed(rows[:30]))
-    if len(data) < 2:
-        return ""
-    profits = [to_int_or_none(r.get("profit_yen")) or 0 for r in data]
-    max_abs = max(abs(v) for v in profits) if profits else 1
-    if max_abs <= 0:
-        max_abs = 1
-
-    w = 860
-    h = 250
-    pad_l = 44
-    pad_r = 16
-    pad_t = 20
-    pad_b = 34
-    inner_w = w - pad_l - pad_r
-    inner_h = h - pad_t - pad_b
-    zero_y = pad_t + inner_h * 0.5
-    bar_w = max(4, int(inner_w / max(1, len(data)) * 0.58))
-
-    def x_at(i):
-        if len(data) == 1:
-            return pad_l + inner_w / 2
-        return pad_l + (inner_w * i / (len(data) - 1))
-
-    def y_at(v):
-        return zero_y - (float(v) / max_abs) * (inner_h * 0.46)
-
-    polyline_pts = []
-    bars = []
-    labels = []
-    for i, row in enumerate(data):
-        x = x_at(i)
-        v = to_int_or_none(row.get("profit_yen")) or 0
-        y = y_at(v)
-        polyline_pts.append(f"{x:.1f},{y:.1f}")
-        top = min(zero_y, y)
-        height = max(1.0, abs(zero_y - y))
-        color = "#2e7d5b" if v >= 0 else "#c85f45"
-        bars.append(
-            f'<rect x="{x - bar_w/2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{height:.1f}" '
-            f'fill="{color}" opacity="0.34"></rect>'
-        )
-        if i == 0 or i == len(data) - 1 or i % 5 == 0:
-            date_str = html.escape(str(row.get("date", ""))[5:])
-            labels.append(
-                f'<text x="{x:.1f}" y="{h - 10}" text-anchor="middle" font-size="10" fill="#6c665f">{date_str}</text>'
-            )
-
-    polyline = " ".join(polyline_pts)
-    bars_html = "".join(bars)
-    labels_html = "".join(labels)
-    title_html = html.escape(title)
-    y_top_val = f"{max_abs}"
-    y_bottom_val = f"-{max_abs}"
-
-    return f"""
-        <section class="panel">
-            <h2>{title_html}</h2>
-            <div class="table-wrap">
-                <svg viewBox="0 0 {w} {h}" width="100%" height="auto" role="img" aria-label="{title_html}">
-                    <line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{h-pad_b}" stroke="#d9ccbc" stroke-width="1"></line>
-                    <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{w-pad_r}" y2="{zero_y:.1f}" stroke="#d9ccbc" stroke-width="1"></line>
-                    <line x1="{pad_l}" y1="{h-pad_b}" x2="{w-pad_r}" y2="{h-pad_b}" stroke="#d9ccbc" stroke-width="1"></line>
-                    <text x="{pad_l-8}" y="{pad_t+4}" text-anchor="end" font-size="10" fill="#6c665f">{y_top_val}</text>
-                    <text x="{pad_l-8}" y="{h-pad_b+4}" text-anchor="end" font-size="10" fill="#6c665f">{y_bottom_val}</text>
-                    {bars_html}
-                    <polyline points="{polyline}" fill="none" stroke="#1f4b39" stroke-width="2.2"></polyline>
-                    {labels_html}
-                </svg>
-            </div>
-        </section>
-        """
+    return ui_build_daily_profit_chart_html(rows, title)
 
 
 def normalize_name(value):
-    return "".join(str(value or "").split())
+    return summary_service.normalize_name(value)
 
 
 def pick_score_key(rows):
-    if not rows:
-        return ""
-    sample = rows[0]
-    for key in ("Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
-        if key in sample:
-            return key
-    return ""
+    return view_data.pick_score_key(rows)
 
 
 def load_top5_names(path):
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    score_key = pick_score_key(rows)
-    if score_key:
-        rows = sorted(rows, key=lambda r: to_float(r.get(score_key)), reverse=True)
-    names = []
-    seen = set()
-    for row in rows:
-        name = row.get("HorseName") or row.get("name")
-        if not name:
-            continue
-        norm = normalize_name(name)
-        if not norm or norm in seen:
-            continue
-        seen.add(norm)
-        names.append(name)
-        if len(names) >= 5:
-            break
-    return names
+    return summary_service.load_top5_names(load_csv_rows, to_float, path)
 
 
 def load_odds_name_to_no(path):
-    rows = load_csv_rows(path)
-    if not rows:
-        return {}
-    out = {}
-    for row in rows:
-        name = row.get("name") or row.get("HorseName") or row.get("horse_name")
-        horse_no = row.get("horse_no") or row.get("horse")
-        if not name or horse_no is None:
-            continue
-        try:
-            horse_no = int(float(horse_no))
-        except (TypeError, ValueError):
-            continue
-        out[normalize_name(name)] = horse_no
-    return out
+    return summary_service.load_odds_name_to_no(load_csv_rows, path)
 
 
 def load_wide_odds_map(path):
-    rows = load_csv_rows(path)
-    if not rows:
-        return {}
-    odds_key = "odds_mid" if "odds_mid" in rows[0] else "odds"
-    out = {}
-    for row in rows:
-        a = row.get("horse_no_a") or row.get("horse_a")
-        b = row.get("horse_no_b") or row.get("horse_b")
-        if a is None or b is None:
-            continue
-        try:
-            a_i = int(float(a))
-            b_i = int(float(b))
-        except (TypeError, ValueError):
-            continue
-        try:
-            odds = float(row.get(odds_key, 0))
-        except (TypeError, ValueError):
-            odds = 0.0
-        if odds <= 0:
-            continue
-        if a_i > b_i:
-            a_i, b_i = b_i, a_i
-        out[(a_i, b_i)] = odds
-    return out
+    return summary_service.load_wide_odds_map(load_csv_rows, path)
 
 
 def resolve_pred_path(scope_key, run_id, run_row):
-    path = run_row.get("predictions_path", "") if run_row else ""
-    if not path:
-        path = str(get_data_dir(BASE_DIR, scope_key) / f"predictions_{run_id}.csv")
-    return Path(path)
+    return run_resolver.resolve_pred_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def resolve_odds_path(scope_key, run_id, run_row):
-    path = run_row.get("odds_path", "") if run_row else ""
-    if path:
-        return Path(path)
-    race_id = str(run_row.get("race_id", "") or "")
-    if race_id:
-        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
-        return race_dir / f"odds_{run_id}_{race_id}.csv"
-    return None
+    return run_resolver.resolve_odds_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def resolve_wide_odds_path(scope_key, run_id, run_row):
-    path = run_row.get("wide_odds_path", "") if run_row else ""
-    if path:
-        return Path(path)
-    race_id = str(run_row.get("race_id", "") or "")
-    if race_id:
-        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
-        return race_dir / f"wide_odds_{run_id}_{race_id}.csv"
-    return None
+    return run_resolver.resolve_wide_odds_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix):
-    path = str(run_row.get(field_name, "")).strip() if run_row else ""
-    if path:
-        return Path(path)
-    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
-    if race_id:
-        race_dir = get_data_dir(BASE_DIR, scope_key) / race_id
-        return race_dir / f"{prefix}_{run_id}_{race_id}.csv"
-    return None
+    return run_resolver.resolve_run_asset_path(
+        get_data_dir,
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        field_name,
+        prefix,
+    )
 
 
 def load_race_results(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "race_results.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return {}
-    return {row.get("run_id", ""): row for row in rows if row.get("run_id")}
+    return summary_service.load_race_results(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
 
 
 def compute_wide_box_profit(scope_key, run_row, race_row, budget_yen=1000):
-    run_id = run_row.get("run_id", "")
-    if not run_id:
-        return None
-    pred_path = resolve_pred_path(scope_key, run_id, run_row)
-    if not pred_path.exists():
-        return None
-    top5_names = load_top5_names(pred_path)
-    if len(top5_names) < 5:
-        return None
-    odds_path = resolve_odds_path(scope_key, run_id, run_row)
-    if not odds_path or not odds_path.exists():
-        return None
-    name_to_no = load_odds_name_to_no(odds_path)
-    if not name_to_no:
-        return None
-    wide_path = resolve_wide_odds_path(scope_key, run_id, run_row)
-    if not wide_path or not wide_path.exists():
-        return None
-    wide_map = load_wide_odds_map(wide_path)
-    if not wide_map:
-        return None
-
-    actual_names = [
-        race_row.get("actual_top1"),
-        race_row.get("actual_top2"),
-        race_row.get("actual_top3"),
-    ]
-    actual_norm = [normalize_name(n) for n in actual_names if n]
-    if len(actual_norm) < 3:
-        return None
-    try:
-        actual_nos = {name_to_no[n] for n in actual_norm}
-    except KeyError:
-        return None
-    if len(actual_nos) < 2:
-        return None
-
-    pred_norm = [normalize_name(n) for n in top5_names]
-    try:
-        pred_nos = [name_to_no[n] for n in pred_norm]
-    except KeyError:
-        return None
-    combos = list(combinations(pred_nos, 2))
-    if not combos:
-        return None
-    per_ticket = int(budget_yen // len(combos))
-    if per_ticket <= 0:
-        return None
-    total_amount = per_ticket * len(combos)
-    total_payout = 0.0
-    for a, b in combos:
-        if a not in actual_nos or b not in actual_nos:
-            continue
-        key = (a, b) if a <= b else (b, a)
-        odds = wide_map.get(key, 0.0)
-        if odds:
-            total_payout += per_ticket * odds
-    profit = int(round(total_payout - total_amount))
-    return {"amount": total_amount, "profit": profit}
+    return summary_service.compute_wide_box_profit(
+        scope_key,
+        run_row,
+        race_row,
+        budget_yen,
+        resolve_pred_path,
+        resolve_odds_path,
+        resolve_wide_odds_path,
+        load_top5_names,
+        load_odds_name_to_no,
+        load_wide_odds_map,
+    )
 
 
 def load_wide_box_daily_profit_summary(scope_key, days=30, budget_yen=1000):
-    rows = load_csv_rows(get_data_dir(BASE_DIR, scope_key) / "wide_box_results.csv")
-    run_race_map = build_run_race_map(scope_key)
-    if rows:
-        cutoff = None
-        if days is not None:
-            try:
-                days = int(days)
-            except (TypeError, ValueError):
-                days = 30
-            if days > 0:
-                cutoff = datetime.now().date() - timedelta(days=days - 1)
-        daily = {}
-        for row in rows:
-            run_id = row.get("run_id", "")
-            race_id = run_race_map.get(run_id, "")
-            race_year = extract_year_prefix(race_id)
-            if race_year is not None and race_year < MIN_RACE_YEAR:
-                continue
-            date_obj = extract_run_date(run_id)
-            if not date_obj:
-                continue
-            if cutoff and date_obj < cutoff:
-                continue
-            try:
-                profit = int(float(row.get("profit_yen", 0)))
-            except (TypeError, ValueError):
-                profit = 0
-            try:
-                base = int(float(row.get("amount_yen", 0)))
-            except (TypeError, ValueError):
-                base = 0
-            item = daily.setdefault(date_obj, {"runs": 0, "profit": 0, "base": 0})
-            item["runs"] += 1
-            item["profit"] += profit
-            item["base"] += base
-        if not daily:
-            return []
-        items = sorted(daily.items(), key=lambda pair: pair[0], reverse=True)
-        out = []
-        for date_obj, item in items:
-            base = item["base"]
-            roi = round((base + item["profit"]) / base, 4) if base > 0 else ""
-            out.append(
-                {
-                    "date": date_obj.strftime("%Y-%m-%d"),
-                    "runs": item["runs"],
-                    "profit_yen": item["profit"],
-                    "base_amount": base,
-                    "roi": roi,
-                }
-            )
-        return out
-
-    runs = load_runs(scope_key)
-    if not runs:
-        return []
-    results = load_race_results(scope_key)
-    cutoff = None
-    if days is not None:
-        try:
-            days = int(days)
-        except (TypeError, ValueError):
-            days = 30
-        if days > 0:
-            cutoff = datetime.now().date() - timedelta(days=days - 1)
-    daily = {}
-    for run in runs:
-        run_id = run.get("run_id", "")
-        race_id = run.get("race_id", "")
-        race_year = extract_year_prefix(race_id)
-        if race_year is not None and race_year < MIN_RACE_YEAR:
-            continue
-        date_obj = extract_run_date(run_id)
-        if not date_obj:
-            continue
-        if cutoff and date_obj < cutoff:
-            continue
-        race_row = results.get(run_id)
-        if not race_row:
-            continue
-        info = compute_wide_box_profit(scope_key, run, race_row, budget_yen=budget_yen)
-        if not info:
-            continue
-        item = daily.setdefault(date_obj, {"runs": 0, "profit": 0, "base": 0})
-        item["runs"] += 1
-        item["profit"] += info["profit"]
-        item["base"] += info["amount"]
-    if not daily:
-        return []
-    items = sorted(daily.items(), key=lambda pair: pair[0], reverse=True)
-    out = []
-    for date_obj, item in items:
-        base = item["base"]
-        roi = round((base + item["profit"]) / base, 4) if base > 0 else ""
-        out.append(
-            {
-                "date": date_obj.strftime("%Y-%m-%d"),
-                "runs": item["runs"],
-                "profit_yen": item["profit"],
-                "base_amount": base,
-                "roi": roi,
-            }
-        )
-    return out
+    return summary_service.load_wide_box_daily_profit_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        load_runs,
+        build_run_race_map,
+        load_race_results,
+        compute_wide_box_profit,
+        MIN_RACE_YEAR,
+        scope_key,
+        days=days,
+        budget_yen=budget_yen,
+    )
 
 
 def load_bet_type_summary(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "bet_type_stats.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    stats = {}
-    for row in rows:
-        bet_type = str(row.get("bet_type", "")).strip() or "unknown"
-        bets = int(float(row.get("bets", 0) or 0))
-        hits = int(float(row.get("hits", 0) or 0))
-        amount = int(float(row.get("amount_yen", 0) or 0))
-        est_profit = int(float(row.get("est_profit_yen", 0) or 0))
-        item = stats.setdefault(bet_type, {"bets": 0, "hits": 0, "amount": 0, "est_profit": 0})
-        item["bets"] += bets
-        item["hits"] += hits
-        item["amount"] += amount
-        item["est_profit"] += est_profit
-    out = []
-    for bet_type, item in sorted(stats.items()):
-        hit_rate = round(item["hits"] / item["bets"], 4) if item["bets"] else ""
-        out.append(
-            {
-                "bet_type": bet_type,
-                "bets": item["bets"],
-                "hits": item["hits"],
-                "hit_rate": hit_rate,
-                "amount_yen": item["amount"],
-                "est_profit_yen": item["est_profit"],
-            }
-        )
-    return out
+    return summary_service.load_bet_type_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
 
 
 def load_bet_type_profit_summary(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "bet_type_stats.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    run_race_map = build_run_race_map(scope_key)
-    labels = {"win": "win", "place": "place", "wide": "wide"}
-    totals = {key: {"amount": 0, "profit": 0} for key in labels}
-    for row in rows:
-        bet_type = str(row.get("bet_type", "")).strip().lower()
-        if bet_type not in totals:
-            continue
-        run_id = str(row.get("run_id", "")).strip()
-        if not run_id:
-            continue
-        race_id = run_race_map.get(run_id, "")
-        race_year = extract_year_prefix(race_id)
-        if race_year is None:
-            race_year = extract_year_prefix(run_id)
-        if race_year is None:
-            race_year = extract_year_prefix(row.get("timestamp", ""))
-        if race_year is None or race_year < MIN_RACE_YEAR:
-            continue
-        try:
-            amount = int(float(row.get("amount_yen", 0) or 0))
-        except (TypeError, ValueError):
-            amount = 0
-        try:
-            profit = int(float(row.get("est_profit_yen", 0) or 0))
-        except (TypeError, ValueError):
-            profit = 0
-        totals[bet_type]["amount"] += amount
-        totals[bet_type]["profit"] += profit
-    out = []
-    for bet_type in ("win", "place", "wide"):
-        item = totals.get(bet_type)
-        if not item:
-            continue
-        amount = item["amount"]
-        profit = item["profit"]
-        roi = round((amount + profit) / amount, 4) if amount > 0 else ""
-        out.append(
-            {
-                "bet_type": labels[bet_type],
-                "amount_yen": amount,
-                "est_profit_yen": profit,
-                "roi": roi,
-            }
-        )
-    return out
+    return summary_service.load_bet_type_profit_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        build_run_race_map,
+        MIN_RACE_YEAR,
+        scope_key,
+    )
 
 
 def compute_top5_hit_count(scope_key, row):
-    hit_count = to_int_or_none(row.get("top5_hit_count"))
-    if hit_count is not None:
-        return hit_count
-    run_id = str(row.get("run_id", "") or "")
-    pred_path = row.get("predictions_path", "")
-    if not pred_path and run_id:
-        pred_path = str(get_data_dir(BASE_DIR, scope_key) / f"predictions_{run_id}.csv")
-    if not pred_path:
-        return None
-    pred_path = Path(pred_path)
-    if not pred_path.exists():
-        return None
-    top5_names = load_top5_names(pred_path)
-    if not top5_names:
-        return None
-    actual_names = [
-        row.get("actual_top1"),
-        row.get("actual_top2"),
-        row.get("actual_top3"),
-    ]
-    actual_norm = [normalize_name(n) for n in actual_names if n]
-    if len(actual_norm) < 3:
-        return None
-    pred_norm = [normalize_name(n) for n in top5_names if n]
-    return len(set(pred_norm) & set(actual_norm))
+    return summary_service.compute_top5_hit_count(
+        get_data_dir,
+        BASE_DIR,
+        to_int_or_none,
+        load_top5_names,
+        scope_key,
+        row,
+    )
 
 
 def load_predictor_summary(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
-    rows = load_csv_rows(path)
-    if not rows:
-        return []
-    total = len(rows)
-    top1_hit = sum(int(float(r.get("top1_hit", 0) or 0)) for r in rows)
-    top1_in_top3 = sum(int(float(r.get("top1_in_top3", 0) or 0)) for r in rows)
-    top3_exact = sum(int(float(r.get("top3_exact", 0) or 0)) for r in rows)
-    top3_hit = sum(int(float(r.get("top3_hit_count", 0) or 0)) for r in rows)
-    top5_hit = 0
-    top5_total = 0
-    for row in rows:
-        hit_count = compute_top5_hit_count(scope_key, row)
-        if hit_count is None:
-            continue
-        top5_hit += hit_count
-        top5_total += 1
-    top1_rate = round(top1_hit / total, 4) if total else ""
-    top1_in_top3_rate = round(top1_in_top3 / total, 4) if total else ""
-    top3_exact_rate = round(top3_exact / total, 4) if total else ""
-    top3_hit_rate = round(top3_hit / (3 * total), 4) if total else ""
-    top5_hit_rate = round(top5_hit / (3 * top5_total), 4) if top5_total else ""
-    summary = [
-        {"metric": "samples", "value": total},
-        {"metric": "top3_hit_rate", "value": top3_hit_rate},
-        {"metric": "top1_hit_rate", "value": top1_rate},
-        {"metric": "top1_in_top3_rate", "value": top1_in_top3_rate},
-        {"metric": "top3_exact_rate", "value": top3_exact_rate},
-    ]
-    if top5_hit_rate != "":
-        summary.insert(2, {"metric": "top5_to_top3_hit_rate", "value": top5_hit_rate})
-    return summary
+    return summary_service.load_predictor_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        compute_top5_hit_count,
+        scope_key,
+    )
 
 
 def load_run_result_summary(scope_key, run_id):
-    path = get_data_dir(BASE_DIR, scope_key) / "results.csv"
-    rows = load_csv_rows(path)
-    row = None
-    for item in rows:
-        if item.get("run_id") == run_id:
-            row = item
-    if not row:
-        return []
-    return [
-        {"metric": "run_profit_yen", "value": row.get("profit_yen", "")},
-        {"metric": "run_stake_yen", "value": row.get("base_amount", "")},
-        {"metric": "run_roi", "value": row.get("roi", "")},
-    ]
+    return summary_service.load_run_result_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
 
 
 def load_run_bet_type_summary(scope_key, run_id):
-    path = get_data_dir(BASE_DIR, scope_key) / "bet_type_stats.csv"
-    rows = [r for r in load_csv_rows(path) if r.get("run_id") == run_id]
-    if not rows:
-        return []
-    out = []
-    for row in rows:
-        out.append(
-            {
-                "bet_type": row.get("bet_type", ""),
-                "bets": row.get("bets", ""),
-                "hits": row.get("hits", ""),
-                "hit_rate": row.get("hit_rate", ""),
-                "amount_yen": row.get("amount_yen", ""),
-                "est_profit_yen": row.get("est_profit_yen", ""),
-            }
-        )
-    return out
+    return summary_service.load_run_bet_type_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
 
 
 def load_run_bet_ticket_summary(scope_key, run_id):
-    path = get_data_dir(BASE_DIR, scope_key) / "bet_ticket_results.csv"
-    rows = [r for r in load_csv_rows(path) if r.get("run_id") == run_id]
-    if not rows:
-        return []
-    out = []
-    for row in rows:
-        try:
-            amount = int(float(row.get("amount_yen", 0) or 0))
-        except ValueError:
-            amount = 0
-        try:
-            est_payout = int(float(row.get("est_payout_yen", 0) or 0))
-        except ValueError:
-            est_payout = 0
-        out.append(
-            {
-                "bet_type": row.get("bet_type", ""),
-                "horse_no": row.get("horse_no", ""),
-                "horse_name": row.get("horse_name", ""),
-                "amount_yen": amount,
-                "hit": row.get("hit", ""),
-                "est_payout_yen": est_payout,
-                "profit_yen": est_payout - amount,
-            }
-        )
-    return out
+    return summary_service.load_run_bet_ticket_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
 
 
 def load_run_predictor_summary(scope_key, run_id):
-    path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
-    rows = load_csv_rows(path)
-    row = next((r for r in rows if r.get("run_id") == run_id), None)
-    if not row:
-        return []
-    top3_hit = to_float(row.get("top3_hit_count")) / 3.0 if row.get("top3_hit_count") is not None else ""
-    top5_hit_count = compute_top5_hit_count(scope_key, row)
-    top5_hit = round(top5_hit_count / 3.0, 4) if top5_hit_count is not None else ""
-    summary = [
-        {"metric": "run_top3_hit_rate", "value": round(top3_hit, 4) if top3_hit != "" else ""},
-        {"metric": "run_top1_hit", "value": row.get("top1_hit", "")},
-        {"metric": "top1_in_top3", "value": row.get("top1_in_top3", "")},
-        {"metric": "top3_exact", "value": row.get("top3_exact", "")},
-    ]
-    if top5_hit != "":
-        summary.insert(1, {"metric": "run_top5_to_top3_hit_rate", "value": top5_hit})
-    return summary
+    return summary_service.load_run_predictor_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        compute_top5_hit_count,
+        scope_key,
+        run_id,
+    )
 
 
 def load_bet_plan_table(scope_key, run_id, run_row=None):
-    path = ""
-    if run_row:
-        path = run_row.get("plan_path", "")
-    if not path:
-        path = str(get_data_dir(BASE_DIR, scope_key) / f"bet_plan_{run_id}.csv")
-    path = Path(path)
-    rows = load_csv_rows(path)
-    if not rows:
-        return [], []
-    columns = [
-        "bet_type",
-        "horse_no",
-        "horse_name",
-        "amount_yen",
-        "expected_return_yen",
-        "hit_prob_est",
-        "hit_prob_se",
-        "hit_prob_ci95_low",
-        "hit_prob_ci95_high",
-        "units",
-        "gate_status",
-        "risk_note",
-        "gate_reason",
-    ]
-    columns = [col for col in columns if col in rows[0]] or list(rows[0].keys())
-    return rows, columns
+    return view_data.load_bet_plan_table(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        scope_key,
+        run_id,
+        run_row,
+    )
 
 
 def detect_gate_status(rows):
-    for row in rows:
-        status = str(row.get("gate_status", "")).strip().lower()
-        if status:
-            reason = str(row.get("gate_reason", "")).strip()
-            return status, reason
-    return "", ""
+    return ui_detect_gate_status(rows)
 
 
 def build_gate_notice_html(status, reason):
-    reason_html = f"<div>{html.escape(reason)}</div>" if reason else ""
-    if status == "soft_fail":
-        return (
-            '<div class="alert"><strong>Pass Gate Soft</strong>'
-            "High risk: soft gate failed; still showing tickets."
-            f"{reason_html}</div>"
-        )
-    if status == "hard_fail":
-        return (
-            '<div class="alert"><strong>Pass Gate Hard</strong>'
-            "Hard gate blocked tickets."
-            f"{reason_html}</div>"
-        )
-    return ""
+    return ui_build_gate_notice_html(status, reason)
 
 
 def build_gate_notice_text(status, reason):
-    reason_text = f" | {reason}" if reason else ""
-    if status == "soft_fail":
-        return f"[WARN] SOFT_GATE: high risk (showing tickets){reason_text}"
-    if status == "hard_fail":
-        return f"[WARN] HARD_GATE: blocked{reason_text}"
-    return ""
+    return ui_build_gate_notice_text(status, reason)
 
 
 def page_template(
@@ -1580,284 +649,21 @@ def page_template(
     stats_block="",
     default_scope="central_dirt",
 ):
-    output_block = ""
-    if output_text:
-        output_block = f"""
-        <section class="panel">
-            <h2>Output</h2>
-            <pre>{html.escape(output_text)}</pre>
-        </section>
-        """
-    if error_text:
-        output_block = f"""
-        <section class="panel error">
-            <h2>Error</h2>
-            <pre>{html.escape(error_text)}</pre>
-        </section>
-        """ + output_block
-    run_button_attr = ""
-
-    top5_block = ""
-    if top5_table_html:
-        top5_block = top5_table_html
-    elif top5_text:
-        top5_block = f"""
-        <section class="panel">
-            <h2>Top5 Predictions</h2>
-            <pre>{html.escape(top5_text)}</pre>
-        </section>
-        """
-
-    bet_plan_block = ""
-    if bet_plan_table_html:
-        bet_plan_block = bet_plan_table_html
-    elif bet_plan_text:
-        bet_plan_block = f"""
-        <section class="panel">
-            <h2>Bet Plan</h2>
-            <pre>{html.escape(bet_plan_text)}</pre>
-        </section>
-        """
-
-    summary_block = ""
-    if bet_plan_block and summary_table_html:
-        bet_plan_block = f"{bet_plan_block}{summary_table_html}"
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Keiba Local Console</title>
-  <style>
-    :root {{
-      --bg: #f4efe6;
-      --panel: #fffaf2;
-      --ink: #1f1f1c;
-      --accent: #2e6a4f;
-      --muted: #6c665f;
-      --border: #e6d8c8;
-      --shadow: 0 14px 30px rgba(22, 24, 20, 0.08);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: "Palatino Linotype", "Book Antiqua", Palatino, "Times New Roman", serif;
-      color: var(--ink);
-      background:
-        radial-gradient(1200px 600px at 12% -10%, #f6e5d2 0%, transparent 60%),
-        radial-gradient(800px 500px at 90% -5%, #e2f1e8 0%, transparent 55%),
-        linear-gradient(180deg, #f8f4ef 0%, #efe6db 100%);
-      min-height: 100vh;
-    }}
-    header {{ padding: 30px 24px 8px; text-align: center; }}
-    h1 {{ margin: 0; font-size: 32px; letter-spacing: 0.2px; }}
-    .subtitle {{ color: var(--muted); margin-top: 8px; font-size: 13px; }}
-    .wrap {{ max-width: 1100px; margin: 0 auto; padding: 12px 24px 40px; display: grid; gap: 14px; }}
-    .panel {{
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow);
-      padding: 14px;
-      animation: fadeIn .25s ease;
-    }}
-    .panel h2 {{ margin: 0 0 10px; font-size: 18px; }}
-    label {{ display: block; font-size: 12px; color: var(--muted); margin: 8px 0 6px; }}
-    input, select, textarea {{
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 8px 10px;
-      font-size: 14px;
-      background: #fffdf9;
-      color: var(--ink);
-    }}
-    textarea {{ min-height: 70px; resize: vertical; }}
-    .grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
-    .radio-group {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-    .radio-option {{ display: inline-flex; align-items: center; gap: 6px; padding: 0; border: none; background: transparent; cursor: pointer; }}
-    .radio-option .radio-text {{
-      display: flex; align-items: center; justify-content: center;
-      min-width: 96px; padding: 10px 12px; border-radius: 12px;
-      border: 1px solid var(--border); background: #f7efe6;
-      font-size: 12px; line-height: 1.2; text-align: center;
-      transition: transform .2s ease, border .2s ease, background .2s ease, box-shadow .2s ease;
-    }}
-    .radio-option input {{ position: absolute; opacity: 0; pointer-events: none; }}
-    .radio-option input:checked + .radio-text {{
-      background: #e8f1ea;
-      border-color: rgba(46,106,79,.6);
-      color: #1f4b39;
-      box-shadow: 0 6px 14px rgba(46,106,79,.18);
-      transform: translateY(-1px);
-    }}
-    .table-wrap {{ overflow-x: auto; }}
-    .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 680px; }}
-    .data-table th, .data-table td {{ padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }}
-    .data-table th {{ background: #f3e9de; position: sticky; top: 0; }}
-    pre {{
-      white-space: pre-wrap; background: #f4efe9; padding: 12px;
-      border-radius: 10px; border: 1px dashed var(--border);
-      margin: 0; max-height: 320px; overflow: auto;
-    }}
-    .error {{ border-color: #d98b6b; background: #fff6f0; }}
-    button {{
-      background: linear-gradient(120deg, var(--accent), #1f4b39);
-      border: none; color: white; padding: 11px 16px; font-size: 14px;
-      border-radius: 12px; cursor: pointer;
-    }}
-    @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-    @media (max-width: 720px) {{ header {{ padding: 24px 18px 6px; }} .wrap {{ padding: 10px 18px 36px; }} h1 {{ font-size: 26px; }} }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Keiba Local Console</h1>
-    <div class="subtitle">Run pipeline and record results from a single web UI.</div>
-  </header>
-  <main class="wrap">
-    <section class="panel">
-      <h2>Run Pipeline</h2>
-      <form action="/run_pipeline" method="post">
-        <label>Race ID</label>
-        <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
-        <label>History URL</label>
-        <input name="history_url" placeholder="https://db.netkeiba.com/...">
-        <label>Data Scope</label>
-        <div class="radio-group" id="scope-radio">
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_dirt"><span class="radio-text">Central Dirt</span></label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="central_turf"><span class="radio-text">Central Turf</span></label>
-          <label class="radio-option"><input type="radio" name="scope_key" value="local"><span class="radio-text">Local</span></label>
-        </div>
-        <div class="grid">
-          <div>
-            <label>Distance (m)</label>
-            <input name="distance" placeholder="1600">
-          </div>
-          <div>
-            <label>Track Condition</label>
-            <div class="radio-group" id="track-cond">
-              <label class="radio-option"><input type="radio" name="track_cond" value="good" checked><span class="radio-text">Good</span></label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="slightly_heavy"><span class="radio-text">Slightly Heavy</span></label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="heavy"><span class="radio-text">Heavy</span></label>
-              <label class="radio-option"><input type="radio" name="track_cond" value="bad"><span class="radio-text">Bad</span></label>
-            </div>
-          </div>
-          <div>
-            <label>Budget (JPY)</label>
-            <input name="budget" placeholder="2000">
-          </div>
-          <div>
-            <label>Bet Style</label>
-            <select name="style">
-              <option value="">Auto</option>
-              <option value="steady">steady</option>
-              <option value="balanced">balanced</option>
-              <option value="aggressive">aggressive</option>
-            </select>
-          </div>
-        </div>
-        <button type="submit" {run_button_attr}>Run</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <h2>Single Run Actions</h2>
-      <form id="single-action-form" action="/view_run" method="post">
-        <label>Run ID / Race ID</label>
-        <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
-        <input type="hidden" id="action_run_id" name="run_id">
-        <input type="hidden" id="action_race_id" name="race_id">
-        <label>Action Type</label>
-        <div class="radio-group" id="action-type">
-          <label class="radio-option"><input type="radio" name="action_type" value="view" checked><span class="radio-text">View</span></label>
-          <label class="radio-option"><input type="radio" name="action_type" value="update"><span class="radio-text">Update Bet Plan</span></label>
-          <label class="radio-option"><input type="radio" name="action_type" value="record"><span class="radio-text">Record Result</span></label>
-        </div>
-        <div class="subtitle">Data scope is inferred from Run ID / Race ID automatically.</div>
-        <div class="grid" id="action-update-fields" style="display:none;">
-          <div>
-            <label>Budget (JPY, optional)</label>
-            <input name="budget" placeholder="2000">
-          </div>
-          <div>
-            <label>Bet Style</label>
-            <select name="style">
-              <option value="">Auto</option>
-              <option value="steady">steady</option>
-              <option value="balanced">balanced</option>
-              <option value="aggressive">aggressive</option>
-            </select>
-          </div>
-        </div>
-        <div class="grid" id="action-record-fields" style="display:none;">
-          <div><label>Actual 1st</label><input name="top1"></div>
-          <div><label>Actual 2nd</label><input name="top2"></div>
-          <div><label>Actual 3rd</label><input name="top3"></div>
-        </div>
-        <button type="submit" id="action-submit">Run</button>
-      </form>
-    </section>
-
-    {top5_block}
-    {summary_block}
-    {bet_plan_block}
-    {run_summary_block}
-    {stats_block}
-    {output_block}
-  </main>
-  <script>
-    const actionForm = document.getElementById("single-action-form");
-    const actionInput = document.getElementById("action_id_input");
-    const actionRunId = document.getElementById("action_run_id");
-    const actionRaceId = document.getElementById("action_race_id");
-    const actionTypeRadios = document.querySelectorAll('input[name="action_type"]');
-    const updateFields = document.getElementById("action-update-fields");
-    const recordFields = document.getElementById("action-record-fields");
-    const actionSubmit = document.getElementById("action-submit");
-
-    function syncActionIds() {{
-      const value = actionInput ? actionInput.value.trim() : "";
-      if (actionRunId) actionRunId.value = value;
-      if (actionRaceId) actionRaceId.value = value;
-    }}
-
-    function getActionType() {{
-      const checked = document.querySelector('input[name="action_type"]:checked');
-      return checked ? checked.value : "view";
-    }}
-
-    function refreshActionUI() {{
-      const actionType = getActionType();
-      if (updateFields) updateFields.style.display = actionType === "update" ? "grid" : "none";
-      if (recordFields) recordFields.style.display = actionType === "record" ? "grid" : "none";
-      if (actionForm) {{
-        if (actionType === "update") {{
-          actionForm.action = "/update_bet_plan";
-          if (actionSubmit) actionSubmit.textContent = "Update";
-        }} else if (actionType === "record") {{
-          actionForm.action = "/record_pipeline";
-          if (actionSubmit) actionSubmit.textContent = "Record";
-        }} else {{
-          actionForm.action = "/view_run";
-          if (actionSubmit) actionSubmit.textContent = "View";
-        }}
-      }}
-    }}
-
-    if (actionInput) {{
-      actionInput.addEventListener("input", syncActionIds);
-      syncActionIds();
-    }}
-    if (actionTypeRadios.length) {{
-      actionTypeRadios.forEach((radio) => radio.addEventListener("change", refreshActionUI));
-    }}
-    refreshActionUI();
-  </script>
-</body>
-</html>
-"""
+    return ui_page_template(
+        output_text=output_text,
+        error_text=error_text,
+        run_options=run_options,
+        view_run_options=view_run_options,
+        view_selected_run_id=view_selected_run_id,
+        top5_text=top5_text,
+        bet_plan_text=bet_plan_text,
+        top5_table_html=top5_table_html,
+        bet_plan_table_html=bet_plan_table_html,
+        summary_table_html=summary_table_html,
+        run_summary_block=run_summary_block,
+        stats_block=stats_block,
+        default_scope=default_scope,
+    )
 
 
 def render_page(
@@ -1873,67 +679,19 @@ def render_page(
     default_scope = scope_norm or "central_dirt"
     run_options = build_run_options(scope_norm or scope_key)
     selected_run_id = str(selected_run_id or "").strip()
-    stats_block = ""
-    if scope_norm:
-        profit_rows = load_profit_summary(scope_norm)
-        daily_profit_rows = load_daily_profit_summary(scope_norm)
-        all_scope_daily_rows = load_daily_profit_summary_all_scopes(days=30)
-        wide_box_rows = load_wide_box_daily_profit_summary(scope_norm)
-        bet_type_profit_rows = load_bet_type_profit_summary(scope_norm)
-        bet_type_rows = load_bet_type_summary(scope_norm)
-        predictor_rows = load_predictor_summary(scope_norm)
-        parts = []
-        if profit_rows:
-            parts.append(build_metric_table(profit_rows, "Overall Profit Summary"))
-        if daily_profit_rows:
-            parts.append(
-                build_table_html(
-                    daily_profit_rows,
-                    ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "Daily Profit",
-                )
-            )
-        if all_scope_daily_rows:
-            parts.append(
-                build_daily_profit_chart_html(
-                    all_scope_daily_rows,
-                    "All Scopes Daily Profit Trend",
-                )
-            )
-            parts.append(
-                build_table_html(
-                    all_scope_daily_rows,
-                    ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "All Scopes Daily Totals",
-                )
-            )
-        if wide_box_rows:
-            parts.append(
-                build_table_html(
-                    wide_box_rows,
-                    ["date", "runs", "profit_yen", "base_amount", "roi"],
-                    "Top5 Wide Box Profit (1000 JPY)",
-                )
-            )
-        if bet_type_profit_rows:
-            parts.append(
-                build_table_html(
-                    bet_type_profit_rows,
-                    ["bet_type", "amount_yen", "est_profit_yen", "roi"],
-                    "Win/Place/Wide Profit (2026+)",
-                )
-            )
-        if bet_type_rows:
-            parts.append(
-                build_table_html(
-                    bet_type_rows,
-                    ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
-                    "Bet Type Hit Rate",
-                )
-            )
-        if predictor_rows:
-            parts.append(build_metric_table(predictor_rows, "Predictor Hit Rate"))
-        stats_block = "\n".join(parts)
+    stats_block = ui_build_stats_block(
+        scope_norm,
+        load_profit_summary=load_profit_summary,
+        load_daily_profit_summary=load_daily_profit_summary,
+        load_daily_profit_summary_all_scopes=load_daily_profit_summary_all_scopes,
+        load_wide_box_daily_profit_summary=load_wide_box_daily_profit_summary,
+        load_bet_type_profit_summary=load_bet_type_profit_summary,
+        load_bet_type_summary=load_bet_type_summary,
+        load_predictor_summary=load_predictor_summary,
+        build_metric_table=build_metric_table,
+        build_table_html=build_table_html,
+        build_daily_profit_chart_html=build_daily_profit_chart_html,
+    )
     run_id = ""
     run_row = None
     if scope_norm:
@@ -1974,42 +732,16 @@ def render_page(
         bet_plan_text = f"{gate_notice_text}\n{bet_plan_text}"
     run_summary_block = ""
     summary_id = summary_run_id or (run_row.get("run_id") if run_row else "")
-    if summary_id and scope_norm:
-        parts = []
-        result_rows = load_run_result_summary(scope_norm, summary_id)
-        if result_rows:
-            parts.append(build_metric_table(result_rows, "Run Profit"))
-        bet_ticket_rows = load_run_bet_ticket_summary(scope_norm, summary_id)
-        if bet_ticket_rows:
-            parts.append(
-                build_table_html(
-                    bet_ticket_rows,
-                    [
-                        "bet_type",
-                        "horse_no",
-                        "horse_name",
-                        "amount_yen",
-                        "hit",
-                        "est_payout_yen",
-                        "profit_yen",
-                    ],
-                    "Run Bet Plan PnL Details",
-                )
-            )
-        predictor_rows = load_run_predictor_summary(scope_norm, summary_id)
-        if predictor_rows:
-            parts.append(build_metric_table(predictor_rows, "Run Predictor Hit Rate"))
-        bet_type_rows = load_run_bet_type_summary(scope_norm, summary_id)
-        if bet_type_rows:
-            parts.append(
-                build_table_html(
-                    bet_type_rows,
-                    ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
-                    "Run Bet Type Hit Rate",
-                )
-            )
-        if parts:
-            run_summary_block = "\n".join(parts)
+    run_summary_block = ui_build_run_summary_block(
+        scope_norm,
+        summary_id,
+        load_run_result_summary=load_run_result_summary,
+        load_run_bet_ticket_summary=load_run_bet_ticket_summary,
+        load_run_predictor_summary=load_run_predictor_summary,
+        load_run_bet_type_summary=load_run_bet_type_summary,
+        build_metric_table=build_metric_table,
+        build_table_html=build_table_html,
+    )
     return page_template(
         output_text=output_text,
         error_text=error_text,
