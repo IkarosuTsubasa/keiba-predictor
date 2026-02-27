@@ -1086,8 +1086,7 @@ def main():
     if not Path(plan_path).exists():
         plan_path = str(BASE_DIR / "bet_plan_update.csv")
     plan_file = Path(plan_path)
-    total_amount_yen = 0
-    total_est_payout = 0.0
+    budget_totals = {}
     if not plan_file.exists():
         print(f"Plan file not found: {plan_file}")
     else:
@@ -1098,12 +1097,16 @@ def main():
             bet_type = str(row.get("bet_type", "")).strip().lower()
             if bet_type == "trifecta_rec":
                 continue
+            budget_raw = row.get("budget_yen", "")
+            try:
+                budget_yen = int(float(budget_raw))
+            except (TypeError, ValueError):
+                budget_yen = 2000
             horse_no = str(row.get("horse_no", "")).strip()
             horse_name_raw = str(row.get("horse_name", "")).strip()
             names = [normalize_name(n) for n in split_names(horse_name_raw)]
             hit = eval_ticket(bet_type, names, actual_names)
             amount_yen = int(float(row.get("amount_yen", 0)))
-            total_amount_yen += amount_yen
             horse_nums = split_numbers(horse_no)
             payout_mult = estimate_payout_multiplier(
                 bet_type,
@@ -1116,10 +1119,16 @@ def main():
                 horse_nos=horse_nums,
             )
             est_payout = amount_yen * payout_mult if hit else 0.0
-            total_est_payout += est_payout
+            budget_item = budget_totals.setdefault(
+                budget_yen,
+                {"amount": 0, "est_payout": 0.0},
+            )
+            budget_item["amount"] += amount_yen
+            budget_item["est_payout"] += est_payout
 
             ticket_row = {
                 "run_id": run_id,
+                "budget_yen": budget_yen,
                 "bet_type": bet_type,
                 "horse_no": horse_no,
                 "horse_name": horse_name_raw,
@@ -1130,7 +1139,7 @@ def main():
             ticket_rows.append(ticket_row)
 
             stats = bet_type_stats.setdefault(
-                bet_type,
+                (budget_yen, bet_type),
                 {"bets": 0, "hits": 0, "amount": 0, "est_payout": 0.0},
             )
             stats["bets"] += 1
@@ -1139,11 +1148,12 @@ def main():
             stats["est_payout"] += est_payout
 
         stat_rows = []
-        for bet_type, stats in bet_type_stats.items():
+        for (budget_yen, bet_type), stats in bet_type_stats.items():
             hit_rate = stats["hits"] / stats["bets"] if stats["bets"] else 0
             stat_row = {
                 "run_id": run_id,
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "budget_yen": budget_yen,
                 "bet_type": bet_type,
                 "bets": stats["bets"],
                 "hits": stats["hits"],
@@ -1163,6 +1173,13 @@ def main():
             )
             print("Recorded bet-type stats.")
 
+    if not budget_totals:
+        total_amount_yen = 0
+        total_est_payout = 0.0
+    else:
+        total_amount_yen = sum(item["amount"] for item in budget_totals.values())
+        total_est_payout = sum(item["est_payout"] for item in budget_totals.values())
+
     if profit_yen is None:
         has_odds_data = bool(
             odds_map or wide_odds_map or fuku_odds_map or quinella_odds_map or trifecta_odds_map
@@ -1178,31 +1195,51 @@ def main():
             print("Unable to estimate profit; please enter it manually.")
             profit_yen = prompt_profit(allow_blank=False)
 
-    base_amount = total_amount_yen
-    if base_amount <= 0:
-        try:
-            base_amount = int(float(run.get("amount_yen", 0)))
-        except ValueError:
-            base_amount = 0
-    if base_amount <= 0:
-        try:
-            base_amount = int(float(run.get("budget_yen", 0)))
-        except ValueError:
-            base_amount = 0
+    result_rows = []
+    if budget_totals:
+        if profit_yen is not None:
+            print("[WARN] Multi-budget plan detected; manual profit is ignored. Using odds-based estimate per budget.")
+        for budget_yen in sorted(budget_totals.keys()):
+            base_amount = int(budget_totals[budget_yen]["amount"])
+            est_profit = int(round(budget_totals[budget_yen]["est_payout"] - base_amount))
+            roi = round((base_amount + est_profit) / base_amount, 4) if base_amount > 0 else ""
+            result_rows.append(
+                {
+                    "run_id": run_id,
+                    "strategy": strategy,
+                    "budget_yen": budget_yen,
+                    "profit_yen": est_profit,
+                    "base_amount": base_amount,
+                    "roi": roi,
+                    "note": note if note else "est_by_odds",
+                }
+            )
+    else:
+        base_amount = total_amount_yen
+        if base_amount <= 0:
+            try:
+                base_amount = int(float(run.get("amount_yen", 0)))
+            except ValueError:
+                base_amount = 0
+        if base_amount <= 0:
+            try:
+                base_amount = int(float(run.get("budget_yen", 0)))
+            except ValueError:
+                base_amount = 0
+        roi = round((base_amount + profit_yen) / base_amount, 4) if base_amount > 0 else ""
+        result_rows.append(
+            {
+                "run_id": run_id,
+                "strategy": strategy,
+                "budget_yen": 2000,
+                "profit_yen": profit_yen,
+                "base_amount": base_amount,
+                "roi": roi,
+                "note": note,
+            }
+        )
 
-    roi = ""
-    if base_amount > 0:
-        roi = round((base_amount + profit_yen) / base_amount, 4)
-
-    result_row = {
-        "run_id": run_id,
-        "strategy": strategy,
-        "profit_yen": profit_yen,
-        "base_amount": base_amount,
-        "roi": roi,
-        "note": note,
-    }
-    replace_rows_for_run(RESULTS_PATH, list(result_row.keys()), run_id, result_row)
+    replace_rows_for_run(RESULTS_PATH, list(result_rows[0].keys()), run_id, result_rows)
     print(f"Recorded result for {run_id}")
 
     run_tool(BASE_DIR / "optimize_params.py")

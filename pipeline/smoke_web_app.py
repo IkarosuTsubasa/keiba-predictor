@@ -29,7 +29,7 @@ def main():
     assert_true("Top5 Predictions" in view_html or "Bet Plan" in view_html, "view_run did not render run blocks")
 
     # 3) update_bet_plan route (validation path, no external odds fetch)
-    update_html = web_app.update_bet_plan(race_id="", scope_key="", budget="", style="")
+    update_html = web_app.update_bet_plan(race_id="", scope_key="")
     assert_true("Enter Run ID or Race ID to update." in update_html, "update_bet_plan validation text mismatch")
 
     # 4) record_pipeline route (validation path)

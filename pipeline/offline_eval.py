@@ -112,29 +112,39 @@ def main():
 
     pred_results = load_csv(PRED_RESULTS_PATH)
     pred_map = {row.get("run_id"): row for row in pred_results}
-
-    rois = []
-    profits = []
-    win_count = 0
-    loss_count = 0
-    flat_count = 0
+    result_rows = []
     for run_id in run_ids:
-        row = results_map.get(run_id)
-        if not row:
-            continue
-        roi = to_float(row.get("roi"))
-        if roi is not None:
-            rois.append(roi)
-        profit = to_int(row.get("profit_yen"))
-        if profit is None:
-            continue
-        profits.append(profit)
-        if profit > 0:
-            win_count += 1
-        elif profit < 0:
-            loss_count += 1
-        else:
-            flat_count += 1
+        for row in results:
+            if row.get("run_id") == run_id:
+                result_rows.append(row)
+
+    def summarize_profit(rows):
+        rois = []
+        profits = []
+        win_count = 0
+        loss_count = 0
+        flat_count = 0
+        for row in rows:
+            roi = to_float(row.get("roi"))
+            if roi is not None:
+                rois.append(roi)
+            profit = to_int(row.get("profit_yen"))
+            if profit is None:
+                continue
+            profits.append(profit)
+            if profit > 0:
+                win_count += 1
+            elif profit < 0:
+                loss_count += 1
+            else:
+                flat_count += 1
+        return {
+            "rois": rois,
+            "profits": profits,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "flat_count": flat_count,
+        }
 
     hit_counts = []
     top1_hits = []
@@ -157,13 +167,7 @@ def main():
         if exact is not None:
             top3_exact.append(exact)
 
-    roi_avg = mean(rois)
-    roi_std = std(rois)
-    roi_min = min(rois) if rois else None
-    roi_max = max(rois) if rois else None
-
-    profit_avg = mean(profits)
-    total_profit = sum(profits) if profits else 0
+    overall = summarize_profit(result_rows)
 
     pred_hit_avg = mean(hit_counts)
     pred_top1_rate = mean(top1_hits)
@@ -172,18 +176,42 @@ def main():
 
     print("\nOffline evaluation (recent runs)")
     print(f"Window: {window} | Runs: {len(run_ids)}")
-    print(f"ROI samples: {len(rois)} | Predictor samples: {len(hit_counts)}")
-    if rois:
+    print(f"ROI samples: {len(overall['rois'])} | Predictor samples: {len(hit_counts)}")
+    if overall["rois"]:
+        roi_avg = mean(overall["rois"])
+        roi_std = std(overall["rois"])
+        roi_min = min(overall["rois"])
+        roi_max = max(overall["rois"])
+        profit_avg = mean(overall["profits"])
+        total_profit = sum(overall["profits"]) if overall["profits"] else 0
         print(
             f"ROI avg={roi_avg:.4f}, std={roi_std:.4f}, "
             f"min={roi_min:.4f}, max={roi_max:.4f}"
         )
         print(
             f"Profit avg={profit_avg:.1f} yen, total={total_profit} yen, "
-            f"win/loss/flat={win_count}/{loss_count}/{flat_count}"
+            f"win/loss/flat={overall['win_count']}/{overall['loss_count']}/{overall['flat_count']}"
         )
     else:
         print("No ROI data.")
+
+    budget_groups = {}
+    for row in result_rows:
+        budget = to_int(row.get("budget_yen"))
+        if budget is None:
+            budget = 2000
+        budget_groups.setdefault(budget, []).append(row)
+    for budget in sorted(budget_groups.keys()):
+        stats = summarize_profit(budget_groups[budget])
+        if not stats["rois"]:
+            continue
+        roi_avg = mean(stats["rois"])
+        roi_std = std(stats["rois"])
+        total_profit = sum(stats["profits"]) if stats["profits"] else 0
+        print(
+            f"[Budget {budget}] ROI avg={roi_avg:.4f}, std={roi_std:.4f}, "
+            f"profit_total={total_profit} yen, samples={len(stats['rois'])}"
+        )
 
     if hit_counts:
         print(
@@ -195,27 +223,43 @@ def main():
     else:
         print("No predictor data.")
 
-    row = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "window": window,
-        "runs": len(run_ids),
-        "roi_samples": len(rois),
-        "roi_avg": round(roi_avg, 6) if roi_avg is not None else "",
-        "roi_std": round(roi_std, 6) if roi_avg is not None else "",
-        "roi_min": round(roi_min, 6) if roi_min is not None else "",
-        "roi_max": round(roi_max, 6) if roi_max is not None else "",
-        "profit_avg": round(profit_avg, 2) if profit_avg is not None else "",
-        "profit_total": total_profit,
-        "win_count": win_count,
-        "loss_count": loss_count,
-        "flat_count": flat_count,
-        "pred_samples": len(hit_counts),
-        "pred_hit_avg": round(pred_hit_avg, 3) if pred_hit_avg is not None else "",
-        "pred_top1_rate": round(pred_top1_rate, 3) if pred_top1_rate is not None else "",
-        "pred_top1_in_top3_rate": round(pred_top1_in_top3_rate, 3) if pred_top1_in_top3_rate is not None else "",
-        "pred_exact_rate": round(pred_exact_rate, 3) if pred_exact_rate is not None else "",
-    }
-    append_csv(OUT_PATH, list(row.keys()), row)
+    rows_to_save = []
+    targets = {"all": result_rows}
+    for budget, rows in budget_groups.items():
+        targets[str(budget)] = rows
+    for budget_key, rows in targets.items():
+        stats = summarize_profit(rows)
+        roi_avg = mean(stats["rois"])
+        roi_std = std(stats["rois"])
+        roi_min = min(stats["rois"]) if stats["rois"] else None
+        roi_max = max(stats["rois"]) if stats["rois"] else None
+        profit_avg = mean(stats["profits"])
+        total_profit = sum(stats["profits"]) if stats["profits"] else 0
+        rows_to_save.append(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "budget_yen": budget_key,
+                "window": window,
+                "runs": len(run_ids),
+                "roi_samples": len(stats["rois"]),
+                "roi_avg": round(roi_avg, 6) if roi_avg is not None else "",
+                "roi_std": round(roi_std, 6) if roi_avg is not None else "",
+                "roi_min": round(roi_min, 6) if roi_min is not None else "",
+                "roi_max": round(roi_max, 6) if roi_max is not None else "",
+                "profit_avg": round(profit_avg, 2) if profit_avg is not None else "",
+                "profit_total": total_profit,
+                "win_count": stats["win_count"],
+                "loss_count": stats["loss_count"],
+                "flat_count": stats["flat_count"],
+                "pred_samples": len(hit_counts),
+                "pred_hit_avg": round(pred_hit_avg, 3) if pred_hit_avg is not None else "",
+                "pred_top1_rate": round(pred_top1_rate, 3) if pred_top1_rate is not None else "",
+                "pred_top1_in_top3_rate": round(pred_top1_in_top3_rate, 3) if pred_top1_in_top3_rate is not None else "",
+                "pred_exact_rate": round(pred_exact_rate, 3) if pred_exact_rate is not None else "",
+            }
+        )
+    for row in rows_to_save:
+        append_csv(OUT_PATH, list(row.keys()), row)
     print(f"Saved: {OUT_PATH}")
     input("Press Enter to exit...")
 

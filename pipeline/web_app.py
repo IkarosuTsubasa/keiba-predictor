@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_ui.components import (
+    build_bet_plan_table_html as ui_build_bet_plan_table_html,
     build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
     build_gate_notice_html as ui_build_gate_notice_html,
     build_gate_notice_text as ui_build_gate_notice_text,
@@ -408,6 +409,10 @@ def build_metric_table(rows, title):
     return ui_build_metric_table(rows, title)
 
 
+def build_bet_plan_table_html(rows, columns, title):
+    return ui_build_bet_plan_table_html(rows, columns, title)
+
+
 def load_top5_table(scope_key, run_id, run_row=None):
     return view_data.load_top5_table(
         get_data_dir,
@@ -722,7 +727,7 @@ def render_page(
         if summary_rows:
             summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")
         bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
-        bet_plan_table_html = build_table_html(bet_rows, bet_cols, "Bet Plan")
+        bet_plan_table_html = build_bet_plan_table_html(bet_rows, bet_cols, "Bet Plan")
     gate_status, gate_reason = detect_gate_status(bet_rows)
     gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
     gate_notice_text = build_gate_notice_text(gate_status, gate_reason)
@@ -816,8 +821,6 @@ def run_pipeline(
     surface: str = Form(""),
     distance: str = Form(""),
     track_cond: str = Form(""),
-    budget: str = Form(""),
-    style: str = Form(""),
 ):
     scope_key = normalize_scope_key(scope_key)
     if not scope_key:
@@ -855,8 +858,6 @@ def run_pipeline(
         surface,
         distance,
         track_cond,
-        budget,
-        style,
     ]
     extra_env = {"SCOPE_KEY": scope_key}
     code, output = run_script(
@@ -880,8 +881,6 @@ def run_pipeline(
 def update_bet_plan(
     race_id: str = Form(""),
     scope_key: str = Form(""),
-    budget: str = Form(""),
-    style: str = Form(""),
 ):
     raw_id = (race_id or "").strip()
     scope_key = normalize_scope_key(scope_key)
@@ -945,21 +944,12 @@ def update_bet_plan(
     if quinella_path and not quinella_path.exists():
         warnings.append(f"quinella odds not found: {quinella_path}")
 
-    budget_val = to_int_or_none(budget)
-    if budget_val is None:
-        budget_val = to_int_or_none(run_row.get("budget_yen"))
-    budget_input = str(budget_val) if budget_val and budget_val > 0 else ""
-    style_input = style.strip().lower()
-    if not style_input:
-        style_input = str(run_row.get("style", "")).strip().lower()
-    if style_input not in ("steady", "balanced", "aggressive"):
-        style_input = ""
-
     extra_env = {
         "SCOPE_KEY": scope_key,
         "RACE_ID": race_id,
         "ODDS_PATH": str(odds_path),
         "PRED_PATH": str(pred_path),
+        "BET_BUDGETS": "2000,5000,10000,50000",
     }
     if wide_path:
         extra_env["WIDE_ODDS_PATH"] = str(wide_path)
@@ -970,7 +960,7 @@ def update_bet_plan(
 
     code, output = run_script(
         BET_PLAN_UPDATE,
-        inputs=[budget_input, style_input],
+        inputs=[],
         extra_blanks=1,
         extra_env=extra_env,
     )

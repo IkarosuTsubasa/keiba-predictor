@@ -31,6 +31,7 @@ CONFIG_PATH = None
 PRED_CONFIG_PATH = None
 PRED_RESULTS_PATH = None
 SCRAPE_DELAY_RANGE = (1.5, 3.5)
+DEFAULT_BUDGETS = [2000, 5000, 10000, 50000]
 
 
 def configure_utf8_io():
@@ -460,6 +461,14 @@ def choose_strategy(config):
 
     roi_sum = {name: 0.0 for name in strategies}
     for row in results:
+        budget_raw = str(row.get("budget_yen", "")).strip()
+        if budget_raw:
+            try:
+                budget_val = int(float(budget_raw))
+            except (TypeError, ValueError):
+                budget_val = None
+            if budget_val is not None and budget_val != 2000:
+                continue
         run_id = row.get("run_id")
         strategy = run_strategy.get(run_id)
         if strategy not in strategies:
@@ -570,9 +579,6 @@ def main():
     distance = map_distance(input("Distance meters [1600]: "))
     track_cond = input("Track condition (良/稍重/重/不良) [良]: ").strip()
 
-    budget = input("Budget yen [2000]: ").strip()
-    style = input("Bet style (steady/balanced/aggressive) [balanced]: ").strip()
-
     strategy_name, strategy_reason, _ = choose_strategy(config)
     if strategy_name:
         print(f"Selected strategy: {strategy_name} ({strategy_reason})")
@@ -625,9 +631,10 @@ def main():
     bet_plan_env = {"RACE_ID": race_id}
     if strategy_name:
         bet_plan_env["BET_STRATEGY"] = strategy_name
+    bet_plan_env["BET_BUDGETS"] = ",".join(str(v) for v in DEFAULT_BUDGETS)
     run_script(
         BASE_DIR / "bet_plan_update.py",
-        [budget, style],
+        [],
         "bet_plan_update",
         BASE_DIR,
         bet_plan_env,
@@ -703,9 +710,17 @@ def main():
                 tickets = 0
                 amount_yen = 0
             else:
-                tickets = int(len(df))
-                if "amount_yen" in df.columns:
-                    amount_yen = int(df["amount_yen"].sum())
+                metric_df = df
+                if "budget_yen" in metric_df.columns:
+                    metric_df = metric_df[
+                        pd.to_numeric(metric_df["budget_yen"], errors="coerce").fillna(0).astype(int) == 2000
+                    ]
+                metric_df = metric_df[
+                    metric_df["bet_type"].astype(str).str.lower() != "trifecta_rec"
+                ] if "bet_type" in metric_df.columns else metric_df
+                tickets = int(len(metric_df))
+                if "amount_yen" in metric_df.columns:
+                    amount_yen = int(pd.to_numeric(metric_df["amount_yen"], errors="coerce").fillna(0).sum())
 
     row = {
         "run_id": run_id,
@@ -717,8 +732,8 @@ def main():
         "scope": scope_key,
         "surface": surface,
         "distance": distance,
-        "budget_yen": budget or "2000",
-        "style": style or "balanced",
+        "budget_yen": ",".join(str(v) for v in DEFAULT_BUDGETS),
+        "style": "auto",
         "strategy": strategy_name,
         "strategy_reason": strategy_reason,
         "predictor_strategy": predictor_strategy,

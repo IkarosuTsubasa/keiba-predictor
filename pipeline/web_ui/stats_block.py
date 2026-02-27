@@ -30,7 +30,7 @@ def build_stats_block(
         parts.append(
             build_table_html(
                 daily_profit_rows,
-                ["date", "runs", "profit_yen", "base_amount", "roi"],
+                ["date", "budget_yen", "runs", "profit_yen", "base_amount", "roi"],
                 "Daily Profit",
             )
         )
@@ -60,7 +60,7 @@ def build_stats_block(
         parts.append(
             build_table_html(
                 bet_type_profit_rows,
-                ["bet_type", "amount_yen", "est_profit_yen", "roi"],
+                ["budget_yen", "bet_type", "amount_yen", "est_profit_yen", "roi"],
                 "Win/Place/Wide Profit (2026+)",
             )
         )
@@ -68,7 +68,7 @@ def build_stats_block(
         parts.append(
             build_table_html(
                 bet_type_rows,
-                ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
+                ["budget_yen", "bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
                 "Bet Type Hit Rate",
             )
         )
@@ -102,6 +102,7 @@ def build_run_summary_block(
             build_table_html(
                 bet_ticket_rows,
                 [
+                    "budget_yen",
                     "bet_type",
                     "horse_no",
                     "horse_name",
@@ -123,9 +124,8 @@ def build_run_summary_block(
         parts.append(
             build_table_html(
                 bet_type_rows,
-                ["bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
+                ["budget_yen", "bet_type", "bets", "hits", "hit_rate", "amount_yen", "est_profit_yen"],
                 "Run Bet Type Hit Rate",
             )
         )
     return "\n".join(parts) if parts else ""
-

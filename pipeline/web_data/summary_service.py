@@ -76,6 +76,16 @@ def build_run_race_map(load_runs, infer_run_id_from_row, scope_key):
     return out
 
 
+def parse_budget_yen(value, default=2000):
+    text = str(value or "").strip()
+    if not text:
+        return int(default)
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def load_profit_summary(get_data_dir, base_dir, load_csv_rows, scope_key):
     path = get_data_dir(base_dir, scope_key) / "results.csv"
     rows = load_csv_rows(path)
@@ -83,14 +93,16 @@ def load_profit_summary(get_data_dir, base_dir, load_csv_rows, scope_key):
         return []
     latest = {}
     for row in rows:
-        run_id = row.get("run_id", "")
-        if run_id:
-            latest[run_id] = row
+        run_id = str(row.get("run_id", "")).strip()
+        if not run_id:
+            continue
+        budget = parse_budget_yen(row.get("budget_yen", ""))
+        latest[(run_id, budget)] = row
     rows = list(latest.values())
-    total_profit = 0
-    total_base = 0
-    sample_count = 0
+
+    by_budget = {}
     for row in rows:
+        budget = parse_budget_yen(row.get("budget_yen", ""))
         try:
             profit = int(float(row.get("profit_yen", 0)))
         except (TypeError, ValueError):
@@ -99,18 +111,30 @@ def load_profit_summary(get_data_dir, base_dir, load_csv_rows, scope_key):
             base = int(float(row.get("base_amount", 0)))
         except (TypeError, ValueError):
             base = 0
-        total_profit += profit
-        total_base += base
-        sample_count += 1
-    roi = ""
-    if total_base > 0:
-        roi = round((total_base + total_profit) / total_base, 4)
-    return [
-        {"metric": "runs", "value": sample_count},
+        item = by_budget.setdefault(budget, {"runs": 0, "profit": 0, "base": 0})
+        item["runs"] += 1
+        item["profit"] += profit
+        item["base"] += base
+
+    total_runs = sum(item["runs"] for item in by_budget.values())
+    total_profit = sum(item["profit"] for item in by_budget.values())
+    total_base = sum(item["base"] for item in by_budget.values())
+    total_roi = round((total_base + total_profit) / total_base, 4) if total_base > 0 else ""
+
+    out = [
+        {"metric": "runs", "value": total_runs},
         {"metric": "total_stake_yen", "value": total_base},
         {"metric": "total_profit_yen", "value": total_profit},
-        {"metric": "overall_roi", "value": roi},
+        {"metric": "overall_roi", "value": total_roi},
     ]
+    for budget in sorted(by_budget.keys()):
+        item = by_budget[budget]
+        roi = round((item["base"] + item["profit"]) / item["base"], 4) if item["base"] > 0 else ""
+        out.append({"metric": f"runs_{budget}", "value": item["runs"]})
+        out.append({"metric": f"stake_{budget}", "value": item["base"]})
+        out.append({"metric": f"profit_{budget}", "value": item["profit"]})
+        out.append({"metric": f"roi_{budget}", "value": roi})
+    return out
 
 
 def load_daily_profit_summary(
@@ -128,9 +152,11 @@ def load_daily_profit_summary(
         return []
     latest = {}
     for row in rows:
-        run_id = row.get("run_id", "")
-        if run_id:
-            latest[run_id] = row
+        run_id = str(row.get("run_id", "")).strip()
+        if not run_id:
+            continue
+        budget = parse_budget_yen(row.get("budget_yen", ""))
+        latest[(run_id, budget)] = row
     rows = list(latest.values())
     run_race_map = build_run_race_map_func(scope_key)
     run_record_date_map = build_run_record_date_map(
@@ -165,20 +191,26 @@ def load_daily_profit_summary(
             base = int(float(row.get("base_amount", 0)))
         except (TypeError, ValueError):
             base = 0
-        item = daily.setdefault(date_obj, {"runs": 0, "profit": 0, "base": 0})
+        budget = parse_budget_yen(row.get("budget_yen", ""))
+        item = daily.setdefault((date_obj, budget), {"runs": 0, "profit": 0, "base": 0})
         item["runs"] += 1
         item["profit"] += profit
         item["base"] += base
+        all_item = daily.setdefault((date_obj, "all"), {"runs": 0, "profit": 0, "base": 0})
+        all_item["runs"] += 1
+        all_item["profit"] += profit
+        all_item["base"] += base
     if not daily:
         return []
-    items = sorted(daily.items(), key=lambda pair: pair[0], reverse=True)
+    items = sorted(daily.items(), key=lambda pair: (pair[0][0], str(pair[0][1])), reverse=True)
     out = []
-    for date_obj, item in items:
+    for (date_obj, budget), item in items:
         base = item["base"]
         roi = round((base + item["profit"]) / base, 4) if base > 0 else ""
         out.append(
             {
                 "date": date_obj.strftime("%Y-%m-%d"),
+                "budget_yen": budget,
                 "runs": item["runs"],
                 "profit_yen": item["profit"],
                 "base_amount": base,
@@ -193,6 +225,8 @@ def load_daily_profit_summary_all_scopes(load_daily_profit_summary_func, to_int_
     for scope_key in ("central_dirt", "central_turf", "local"):
         rows = load_daily_profit_summary_func(scope_key, days=days)
         for row in rows:
+            if str(row.get("budget_yen", "all")) != "all":
+                continue
             date_key = str(row.get("date", "")).strip()
             if not date_key:
                 continue
@@ -488,20 +522,22 @@ def load_bet_type_summary(get_data_dir, base_dir, load_csv_rows, scope_key):
     stats = {}
     for row in rows:
         bet_type = str(row.get("bet_type", "")).strip() or "unknown"
+        budget = parse_budget_yen(row.get("budget_yen", ""))
         bets = int(float(row.get("bets", 0) or 0))
         hits = int(float(row.get("hits", 0) or 0))
         amount = int(float(row.get("amount_yen", 0) or 0))
         est_profit = int(float(row.get("est_profit_yen", 0) or 0))
-        item = stats.setdefault(bet_type, {"bets": 0, "hits": 0, "amount": 0, "est_profit": 0})
+        item = stats.setdefault((budget, bet_type), {"bets": 0, "hits": 0, "amount": 0, "est_profit": 0})
         item["bets"] += bets
         item["hits"] += hits
         item["amount"] += amount
         item["est_profit"] += est_profit
     out = []
-    for bet_type, item in sorted(stats.items()):
+    for (budget, bet_type), item in sorted(stats.items(), key=lambda x: (x[0][0], x[0][1])):
         hit_rate = round(item["hits"] / item["bets"], 4) if item["bets"] else ""
         out.append(
             {
+                "budget_yen": budget,
                 "bet_type": bet_type,
                 "bets": item["bets"],
                 "hits": item["hits"],
@@ -527,11 +563,12 @@ def load_bet_type_profit_summary(
         return []
     run_race_map = build_run_race_map_func(scope_key)
     labels = {"win": "win", "place": "place", "wide": "wide"}
-    totals = {key: {"amount": 0, "profit": 0} for key in labels}
+    totals = {}
     for row in rows:
         bet_type = str(row.get("bet_type", "")).strip().lower()
-        if bet_type not in totals:
+        if bet_type not in labels:
             continue
+        budget = parse_budget_yen(row.get("budget_yen", ""))
         run_id = str(row.get("run_id", "")).strip()
         if not run_id:
             continue
@@ -551,18 +588,17 @@ def load_bet_type_profit_summary(
             profit = int(float(row.get("est_profit_yen", 0) or 0))
         except (TypeError, ValueError):
             profit = 0
-        totals[bet_type]["amount"] += amount
-        totals[bet_type]["profit"] += profit
+        item = totals.setdefault((budget, bet_type), {"amount": 0, "profit": 0})
+        item["amount"] += amount
+        item["profit"] += profit
     out = []
-    for bet_type in ("win", "place", "wide"):
-        item = totals.get(bet_type)
-        if not item:
-            continue
+    for (budget, bet_type), item in sorted(totals.items(), key=lambda x: (x[0][0], x[0][1])):
         amount = item["amount"]
         profit = item["profit"]
         roi = round((amount + profit) / amount, 4) if amount > 0 else ""
         out.append(
             {
+                "budget_yen": budget,
                 "bet_type": labels[bet_type],
                 "amount_yen": amount,
                 "est_profit_yen": profit,
@@ -641,17 +677,17 @@ def load_predictor_summary(get_data_dir, base_dir, load_csv_rows, compute_top5_h
 def load_run_result_summary(get_data_dir, base_dir, load_csv_rows, scope_key, run_id):
     path = get_data_dir(base_dir, scope_key) / "results.csv"
     rows = load_csv_rows(path)
-    row = None
-    for item in rows:
-        if item.get("run_id") == run_id:
-            row = item
-    if not row:
+    rows = [item for item in rows if item.get("run_id") == run_id]
+    if not rows:
         return []
-    return [
-        {"metric": "run_profit_yen", "value": row.get("profit_yen", "")},
-        {"metric": "run_stake_yen", "value": row.get("base_amount", "")},
-        {"metric": "run_roi", "value": row.get("roi", "")},
-    ]
+    out = []
+    for row in sorted(rows, key=lambda r: parse_budget_yen(r.get("budget_yen", ""))):
+        budget = parse_budget_yen(row.get("budget_yen", ""))
+        suffix = f"_{budget}"
+        out.append({"metric": f"run_profit_yen{suffix}", "value": row.get("profit_yen", "")})
+        out.append({"metric": f"run_stake_yen{suffix}", "value": row.get("base_amount", "")})
+        out.append({"metric": f"run_roi{suffix}", "value": row.get("roi", "")})
+    return out
 
 
 def load_run_bet_type_summary(get_data_dir, base_dir, load_csv_rows, scope_key, run_id):
@@ -663,6 +699,7 @@ def load_run_bet_type_summary(get_data_dir, base_dir, load_csv_rows, scope_key, 
     for row in rows:
         out.append(
             {
+                "budget_yen": parse_budget_yen(row.get("budget_yen", "")),
                 "bet_type": row.get("bet_type", ""),
                 "bets": row.get("bets", ""),
                 "hits": row.get("hits", ""),
@@ -691,6 +728,7 @@ def load_run_bet_ticket_summary(get_data_dir, base_dir, load_csv_rows, scope_key
             est_payout = 0
         out.append(
             {
+                "budget_yen": parse_budget_yen(row.get("budget_yen", "")),
                 "bet_type": row.get("bet_type", ""),
                 "horse_no": row.get("horse_no", ""),
                 "horse_name": row.get("horse_name", ""),

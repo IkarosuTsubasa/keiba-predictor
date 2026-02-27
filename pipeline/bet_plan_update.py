@@ -54,6 +54,7 @@ NO_BET_LOG_PATH = BASE_DIR / f"no_bet_log_{SCOPE_KEY}.csv"
 UNIT_YEN = 100
 SIM_RUNS = 3000
 SIM_SEED = 42
+DEFAULT_BUDGETS = [2000, 5000, 10000, 50000]
 
 # --- Monte Carlo uncertainty helpers (SE / 95% CI) ---
 def mc_se(p: float, runs: int) -> float:
@@ -75,6 +76,7 @@ NO_TRIFECTA_REC_LABEL = "no \u4e09\u8fde\u590d \u63a8\u8350"
 NO_BET_LOG_FIELDS = [
     "scope",
     "race_id",
+    "budget_yen",
     "bet_type",
     "horse_pair",
     "model_prob",
@@ -205,6 +207,27 @@ def prompt_style(label, default_value):
     if raw in ("a", "aggressive", "risk"):
         return "aggressive"
     return "balanced"
+
+
+def resolve_budget_list():
+    raw = str(os.environ.get("BET_BUDGETS", "")).strip()
+    if not raw:
+        return list(DEFAULT_BUDGETS)
+    budgets = []
+    seen = set()
+    for token in re.split(r"[,\s]+", raw):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            value = int(float(token))
+        except (TypeError, ValueError):
+            continue
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        budgets.append(value)
+    return budgets or list(DEFAULT_BUDGETS)
 
 
 def pause_exit():
@@ -680,6 +703,7 @@ def build_plan(merged, budget_yen, config, race_id=""):
             {
                 "scope": SCOPE_KEY,
                 "race_id": race_id,
+                "budget_yen": budget_yen,
                 "bet_type": bet_type,
                 "horse_pair": horse_pair,
                 "model_prob": round(float(hit_prob), 6) if hit_prob is not None else "",
@@ -895,6 +919,7 @@ def build_plan(merged, budget_yen, config, race_id=""):
                 expected_return = int(round(amount_yen * hit_prob))
             ev_ratio_est = (hit_prob * payout_mult) if payout_mult is not None else hit_prob
             tickets.append({
+                "budget_yen": int(budget_yen),
                 "bet_type": bet_type,
                 "horse_no": horse_no,
                 "horse_name": horse_name,
@@ -1006,6 +1031,7 @@ def build_plan(merged, budget_yen, config, race_id=""):
                 {
                     "scope": SCOPE_KEY,
                     "race_id": race_id,
+                    "budget_yen": budget_yen,
                     "bet_type": "pass",
                     "horse_pair": "",
                     "model_prob": "",
@@ -1029,6 +1055,7 @@ def build_plan(merged, budget_yen, config, race_id=""):
                 {
                     "scope": SCOPE_KEY,
                     "race_id": race_id,
+                    "budget_yen": budget_yen,
                     "bet_type": "pass",
                     "horse_pair": "",
                     "model_prob": "",
@@ -1047,6 +1074,7 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
     if not tri_map:
         se, lo, hi = mc_ci95(0.0, runs_used)
         return {
+            "budget_yen": "",
             "bet_type": "trifecta_rec",
             "horse_no": "",
             "horse_name": NO_TRIFECTA_REC_LABEL,
@@ -1070,6 +1098,7 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
     if not best_key or best_hit < min_hit_prob:
         se, lo, hi = mc_ci95(best_hit, runs_used)
         return {
+            "budget_yen": "",
             "bet_type": "trifecta_rec",
             "horse_no": "",
             "horse_name": NO_TRIFECTA_REC_LABEL,
@@ -1092,6 +1121,7 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
     horse_name = " / ".join([n for n in names if n])
     se, lo, hi = mc_ci95(best_hit, runs_used)
     return {
+        "budget_yen": "",
         "bet_type": "trifecta_rec",
         "horse_no": horse_no,
         "horse_name": horse_name,
@@ -1108,12 +1138,8 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
 def main():
     config = load_config()
     config, strategy_used = apply_strategy_from_env(config)
-    style_default = config.get("style_default", "balanced")
     race_id = resolve_race_id()
-
-    budget_yen = prompt_int("Budget yen [2000]: ", 2000)
-    style = prompt_style("Bet style (steady/balanced/aggressive) [balanced]: ", style_default)
-    config["style_default"] = style
+    budget_list = resolve_budget_list()
 
     odds_path = Path(os.environ.get("ODDS_PATH") or ODDS_PATH)
     pred_path = Path(os.environ.get("PRED_PATH") or PRED_PATH)
@@ -1161,41 +1187,52 @@ def main():
         for name in missing["HorseName"].tolist():
             print(" -", name)
 
-    tickets, trifecta_rec, no_bet_rows = build_plan(
-        merged,
-        budget_yen=budget_yen,
-        config=config,
-        race_id=race_id,
-    )
-    if any(row.get("no_bet_reason") == "pass_gate_soft" for row in no_bet_rows):
-        print("[WARN] pass_gate soft failed; keeping tickets (low edge).")
-    if any(row.get("no_bet_reason") == "pass_gate" for row in no_bet_rows):
-        print("[WARN] pass_gate hard failed; tickets blocked (review only).")
-    if not tickets and not trifecta_rec:
+    out_rows = []
+    all_no_bet_rows = []
+    for budget_yen in budget_list:
+        tickets, trifecta_rec, no_bet_rows = build_plan(
+            merged,
+            budget_yen=budget_yen,
+            config=config,
+            race_id=race_id,
+        )
+        if any(row.get("no_bet_reason") == "pass_gate_soft" for row in no_bet_rows):
+            print(f"[WARN] pass_gate soft failed ({budget_yen}); keeping tickets (low edge).")
+        if any(row.get("no_bet_reason") == "pass_gate" for row in no_bet_rows):
+            print(f"[WARN] pass_gate hard failed ({budget_yen}); tickets blocked (review only).")
+        all_no_bet_rows.extend(no_bet_rows)
+        out_rows.extend(tickets)
+        if trifecta_rec:
+            tri = dict(trifecta_rec)
+            tri["budget_yen"] = int(budget_yen)
+            out_rows.append(tri)
+
+    if not out_rows:
         print("No tickets generated.")
-        append_no_bet_logs(NO_BET_LOG_PATH, no_bet_rows)
+        append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
         pause_exit()
         return
 
-    out_rows = list(tickets)
-    if trifecta_rec:
-        out_rows.append(trifecta_rec)
     out_df = pd.DataFrame(out_rows)
     out_df.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
+    print(f"Budgets: {', '.join(str(v) for v in budget_list)}")
     print("Bet plan:")
     for _, row in out_df.iterrows():
+        budget_yen = int(float(row.get("budget_yen", 0) or 0))
         line = (
-            f"{row['bet_type']}\t{row['horse_no']}\t{row['horse_name']}\t"
+            f"[{budget_yen}] {row['bet_type']}\t{row['horse_no']}\t{row['horse_name']}\t"
             f"{int(row['amount_yen'])} yen\t(exp~{int(row['expected_return_yen'])} yen)"
         )
         safe_print(line)
-    total_exp = int(out_df["expected_return_yen"].sum())
-    print(f"Expected return (est.): {total_exp} yen")
+    for budget_yen in budget_list:
+        df_budget = out_df[out_df["budget_yen"].astype(str) == str(budget_yen)]
+        total_exp = int(df_budget["expected_return_yen"].sum()) if not df_budget.empty else 0
+        print(f"Expected return (est., {budget_yen}): {total_exp} yen")
     print(f"Saved: {OUT_PATH}")
-    append_no_bet_logs(NO_BET_LOG_PATH, no_bet_rows)
+    append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
     pause_exit()
 
 

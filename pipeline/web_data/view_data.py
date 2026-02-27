@@ -70,9 +70,11 @@ def load_mc_uncertainty_summary(get_data_dir, base_dir, load_csv_rows, to_float,
     if not filtered:
         return []
     target = max(filtered, key=lambda r: to_float(r.get("hit_prob_est")))
+    budget = str(target.get("budget_yen", "")).strip()
     bet_type = str(target.get("bet_type", "")).strip()
     horse_no = str(target.get("horse_no", "")).strip()
-    label = f"{bet_type} {horse_no}".strip()
+    label_parts = [f"[{budget}]" if budget else "", bet_type, horse_no]
+    label = " ".join(part for part in label_parts if part).strip()
     return [
         {"metric": f"MC SE ({label})", "value": target.get("hit_prob_se", "")},
         {"metric": f"MC CI95 Low ({label})", "value": target.get("hit_prob_ci95_low", "")},
@@ -119,6 +121,7 @@ def load_bet_plan_table(get_data_dir, base_dir, load_csv_rows, scope_key, run_id
     if not rows:
         return [], []
     columns = [
+        "budget_yen",
         "bet_type",
         "horse_no",
         "horse_name",

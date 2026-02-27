@@ -132,6 +132,29 @@ def page_template(
     .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 680px; }}
     .data-table th, .data-table td {{ padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }}
     .data-table th {{ background: #f3e9de; position: sticky; top: 0; }}
+    .budget-tab-list {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 12px; }}
+    .budget-tab {{
+      border: 1px solid var(--border);
+      background: #f7efe6;
+      color: #5a534c;
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: 12px;
+      cursor: pointer;
+    }}
+    .budget-tab.is-active {{
+      background: #e8f1ea;
+      border-color: rgba(46,106,79,.6);
+      color: #1f4b39;
+      box-shadow: 0 4px 10px rgba(46,106,79,.16);
+    }}
+    .budget-group {{ border: 1px dashed var(--border); border-radius: 12px; padding: 10px; margin-bottom: 10px; background: #fffdf9; }}
+    .budget-group:last-child {{ margin-bottom: 0; }}
+    .budget-group-panel {{ display: none; }}
+    .budget-group-panel.is-active {{ display: block; }}
+    .budget-group-head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }}
+    .budget-group-head h3 {{ margin: 0; font-size: 15px; color: #1f4b39; }}
+    .budget-group-meta {{ font-size: 12px; color: var(--muted); }}
     pre {{
       white-space: pre-wrap; background: #f4efe9; padding: 12px;
       border-radius: 10px; border: 1px dashed var(--border);
@@ -180,20 +203,8 @@ def page_template(
               <label class="radio-option"><input type="radio" name="track_cond" value="bad"><span class="radio-text">Bad</span></label>
             </div>
           </div>
-          <div>
-            <label>Budget (JPY)</label>
-            <input name="budget" placeholder="2000">
-          </div>
-          <div>
-            <label>Bet Style</label>
-            <select name="style">
-              <option value="">Auto</option>
-              <option value="steady">steady</option>
-              <option value="balanced">balanced</option>
-              <option value="aggressive">aggressive</option>
-            </select>
-          </div>
         </div>
+        <div class="subtitle">Bet Plan: fixed auto budgets 2000 / 5000 / 10000 / 50000.</div>
         <button type="submit" {run_button_attr}>Run</button>
       </form>
     </section>
@@ -212,21 +223,7 @@ def page_template(
           <label class="radio-option"><input type="radio" name="action_type" value="record"><span class="radio-text">Record Result</span></label>
         </div>
         <div class="subtitle">Data scope is inferred from Run ID / Race ID automatically.</div>
-        <div class="grid" id="action-update-fields" style="display:none;">
-          <div>
-            <label>Budget (JPY, optional)</label>
-            <input name="budget" placeholder="2000">
-          </div>
-          <div>
-            <label>Bet Style</label>
-            <select name="style">
-              <option value="">Auto</option>
-              <option value="steady">steady</option>
-              <option value="balanced">balanced</option>
-              <option value="aggressive">aggressive</option>
-            </select>
-          </div>
-        </div>
+        <div class="subtitle" id="action-update-fields" style="display:none;">Update Bet Plan uses fixed auto budgets: 2000 / 5000 / 10000 / 50000.</div>
         <div class="grid" id="action-record-fields" style="display:none;">
           <div><label>Actual 1st</label><input name="top1"></div>
           <div><label>Actual 2nd</label><input name="top2"></div>
@@ -290,6 +287,21 @@ def page_template(
       actionTypeRadios.forEach((radio) => radio.addEventListener("change", refreshActionUI));
     }}
     refreshActionUI();
+
+    const budgetTabs = document.querySelectorAll(".budget-tab");
+    if (budgetTabs.length) {{
+      budgetTabs.forEach((tab) => {{
+        tab.addEventListener("click", () => {{
+          const key = tab.getAttribute("data-budget-tab");
+          document.querySelectorAll(".budget-tab").forEach((item) => {{
+            item.classList.toggle("is-active", item === tab);
+          }});
+          document.querySelectorAll(".budget-group-panel").forEach((panel) => {{
+            panel.classList.toggle("is-active", panel.getAttribute("data-budget-panel") === key);
+          }});
+        }});
+      }});
+    }}
   </script>
 </body>
 </html>

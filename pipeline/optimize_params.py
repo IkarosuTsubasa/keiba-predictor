@@ -136,7 +136,20 @@ def main():
     window = int(os.environ.get("BET_OPT_WINDOW", 10))
     min_samples = int(os.environ.get("BET_OPT_MIN_SAMPLES", 5))
     max_roi_std = float(os.environ.get("BET_OPT_MAX_ROI_STD", 0.8))
-    recent = results[-window:]
+    target_budget = int(os.environ.get("BET_OPT_BUDGET", 2000))
+    filtered = []
+    for row in results:
+        raw_budget = str(row.get("budget_yen", "")).strip()
+        if not raw_budget:
+            filtered.append(row)
+            continue
+        try:
+            budget = int(float(raw_budget))
+        except (TypeError, ValueError):
+            continue
+        if budget == target_budget:
+            filtered.append(row)
+    recent = filtered[-window:]
     recent_run_ids = [row.get("run_id") for row in recent if row.get("run_id")]
 
     # --- Compute ROI statistics (optionally stake-weighted) ---
