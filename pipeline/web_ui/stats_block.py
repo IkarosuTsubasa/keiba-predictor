@@ -25,7 +25,13 @@ def build_stats_block(
 
     parts = []
     if profit_rows:
-        parts.append(build_metric_table(profit_rows, "Overall Profit Summary"))
+        parts.append(
+            build_table_html(
+                profit_rows,
+                ["budget_yen", "runs", "total_stake_yen", "total_profit_yen", "overall_roi"],
+                "Overall Profit Summary",
+            )
+        )
     if daily_profit_rows:
         parts.append(
             build_table_html(
@@ -94,7 +100,13 @@ def build_run_summary_block(
     parts = []
     result_rows = load_run_result_summary(scope_norm, summary_id)
     if result_rows:
-        parts.append(build_metric_table(result_rows, "Run Profit"))
+        parts.append(
+            build_table_html(
+                result_rows,
+                ["budget_yen", "run_profit_yen", "run_stake_yen", "run_roi"],
+                "Run Profit",
+            )
+        )
 
     bet_ticket_rows = load_run_bet_ticket_summary(scope_norm, summary_id)
     if bet_ticket_rows:

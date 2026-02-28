@@ -122,18 +122,26 @@ def load_profit_summary(get_data_dir, base_dir, load_csv_rows, scope_key):
     total_roi = round((total_base + total_profit) / total_base, 4) if total_base > 0 else ""
 
     out = [
-        {"metric": "runs", "value": total_runs},
-        {"metric": "total_stake_yen", "value": total_base},
-        {"metric": "total_profit_yen", "value": total_profit},
-        {"metric": "overall_roi", "value": total_roi},
+        {
+            "budget_yen": "all",
+            "runs": total_runs,
+            "total_stake_yen": total_base,
+            "total_profit_yen": total_profit,
+            "overall_roi": total_roi,
+        }
     ]
     for budget in sorted(by_budget.keys()):
         item = by_budget[budget]
         roi = round((item["base"] + item["profit"]) / item["base"], 4) if item["base"] > 0 else ""
-        out.append({"metric": f"runs_{budget}", "value": item["runs"]})
-        out.append({"metric": f"stake_{budget}", "value": item["base"]})
-        out.append({"metric": f"profit_{budget}", "value": item["profit"]})
-        out.append({"metric": f"roi_{budget}", "value": roi})
+        out.append(
+            {
+                "budget_yen": budget,
+                "runs": item["runs"],
+                "total_stake_yen": item["base"],
+                "total_profit_yen": item["profit"],
+                "overall_roi": roi,
+            }
+        )
     return out
 
 
@@ -225,7 +233,14 @@ def load_daily_profit_summary_all_scopes(load_daily_profit_summary_func, to_int_
     for scope_key in ("central_dirt", "central_turf", "local"):
         rows = load_daily_profit_summary_func(scope_key, days=days)
         for row in rows:
-            if str(row.get("budget_yen", "all")) != "all":
+            budget_raw = str(row.get("budget_yen", "")).strip().lower()
+            if not budget_raw or budget_raw == "all":
+                continue
+            try:
+                budget = int(float(budget_raw))
+            except (TypeError, ValueError):
+                continue
+            if budget != 2000:
                 continue
             date_key = str(row.get("date", "")).strip()
             if not date_key:
@@ -683,10 +698,14 @@ def load_run_result_summary(get_data_dir, base_dir, load_csv_rows, scope_key, ru
     out = []
     for row in sorted(rows, key=lambda r: parse_budget_yen(r.get("budget_yen", ""))):
         budget = parse_budget_yen(row.get("budget_yen", ""))
-        suffix = f"_{budget}"
-        out.append({"metric": f"run_profit_yen{suffix}", "value": row.get("profit_yen", "")})
-        out.append({"metric": f"run_stake_yen{suffix}", "value": row.get("base_amount", "")})
-        out.append({"metric": f"run_roi{suffix}", "value": row.get("roi", "")})
+        out.append(
+            {
+                "budget_yen": budget,
+                "run_profit_yen": row.get("profit_yen", ""),
+                "run_stake_yen": row.get("base_amount", ""),
+                "run_roi": row.get("roi", ""),
+            }
+        )
     return out
 
 

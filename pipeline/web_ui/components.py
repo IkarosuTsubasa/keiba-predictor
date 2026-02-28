@@ -21,7 +21,7 @@ def _sum_number(rows, col):
     return total
 
 
-def build_table_html(rows, columns, title):
+def _build_plain_table_html(rows, columns, title):
     if not rows or not columns:
         return ""
     head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in columns)
@@ -47,13 +47,65 @@ def build_table_html(rows, columns, title):
         """
 
 
+def build_table_html(rows, columns, title):
+    if not rows or not columns:
+        return ""
+    budgets = [str(r.get("budget_yen", "")).strip() for r in rows if str(r.get("budget_yen", "")).strip()]
+    uniq_budgets = _sort_budget_values(set(budgets))
+    if "budget_yen" not in columns or len(uniq_budgets) <= 1:
+        return _build_plain_table_html(rows, columns, title)
+
+    display_columns = [c for c in columns if c != "budget_yen"] or columns
+    head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in display_columns)
+    group_key = html.escape(f"{title.lower().replace(' ', '-')}-budget")
+    tabs = []
+    panels = []
+    for idx, budget in enumerate(uniq_budgets):
+        group_rows = [r for r in rows if str(r.get("budget_yen", "")).strip() == str(budget)]
+        if not group_rows:
+            continue
+        active_class = " is-active" if idx == 0 else ""
+        budget_key = html.escape(str(budget))
+        tabs.append(
+            f'<button type="button" class="budget-tab{active_class}" '
+            f'data-budget-tab="{budget_key}">{budget_key} JPY</button>'
+        )
+        body_rows = []
+        for row in group_rows:
+            cells = []
+            for col in display_columns:
+                cells.append(f"<td>{html.escape(str(row.get(col, '')))}</td>")
+            body_rows.append(f"<tr>{''.join(cells)}</tr>")
+        panels.append(
+            f"""
+            <div class="budget-group budget-group-panel{active_class}" data-budget-panel="{budget_key}">
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr>{head_cells}</tr></thead>
+                  <tbody>{''.join(body_rows)}</tbody>
+                </table>
+              </div>
+            </div>
+            """
+        )
+    if not panels:
+        return _build_plain_table_html(rows, columns, title)
+    return f"""
+        <section class="panel budget-section" data-budget-group="{group_key}">
+            <h2>{html.escape(title)}</h2>
+            <div class="budget-tab-list">{''.join(tabs)}</div>
+            {''.join(panels)}
+        </section>
+        """
+
+
 def build_bet_plan_table_html(rows, columns, title="Bet Plan"):
     if not rows or not columns:
         return ""
     budgets = [str(r.get("budget_yen", "")).strip() for r in rows if str(r.get("budget_yen", "")).strip()]
     uniq_budgets = _sort_budget_values(set(budgets))
     if len(uniq_budgets) <= 1:
-        return build_table_html(rows, columns, title)
+        return _build_plain_table_html(rows, columns, title)
 
     display_columns = [c for c in columns if c != "budget_yen"] or columns
     head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in display_columns)
@@ -95,9 +147,10 @@ def build_bet_plan_table_html(rows, columns, title="Bet Plan"):
             """
         )
     if not group_blocks:
-        return build_table_html(rows, columns, title)
+        return _build_plain_table_html(rows, columns, title)
+    group_key = html.escape(f"{title.lower().replace(' ', '-')}-budget")
     return f"""
-        <section class="panel">
+        <section class="panel budget-section" data-budget-group="{group_key}">
             <h2>{html.escape(title)}</h2>
             <div class="budget-tab-list">{''.join(budget_tabs)}</div>
             {''.join(group_blocks)}

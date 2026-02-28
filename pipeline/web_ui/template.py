@@ -288,20 +288,22 @@ def page_template(
     }}
     refreshActionUI();
 
-    const budgetTabs = document.querySelectorAll(".budget-tab");
-    if (budgetTabs.length) {{
-      budgetTabs.forEach((tab) => {{
+    document.querySelectorAll(".budget-section").forEach((section) => {{
+      const tabs = section.querySelectorAll(".budget-tab");
+      const panels = section.querySelectorAll(".budget-group-panel");
+      if (!tabs.length) return;
+      tabs.forEach((tab) => {{
         tab.addEventListener("click", () => {{
           const key = tab.getAttribute("data-budget-tab");
-          document.querySelectorAll(".budget-tab").forEach((item) => {{
+          tabs.forEach((item) => {{
             item.classList.toggle("is-active", item === tab);
           }});
-          document.querySelectorAll(".budget-group-panel").forEach((panel) => {{
+          panels.forEach((panel) => {{
             panel.classList.toggle("is-active", panel.getAttribute("data-budget-panel") === key);
           }});
         }});
       }});
-    }}
+    }});
   </script>
 </body>
 </html>
