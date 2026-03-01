@@ -1,5 +1,6 @@
 import csv
 import html
+import io
 import os
 import re
 import shutil
@@ -348,6 +349,21 @@ def load_csv_rows(path):
         return list(csv.DictReader(f))
 
 
+def load_text_file(path):
+    if not path:
+        return ""
+    path = Path(path)
+    if not path.exists():
+        return ""
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            with open(path, "r", encoding=enc) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    return ""
+
+
 def to_float(value):
     try:
         return float(value)
@@ -647,9 +663,128 @@ def _escape_md_cell(value):
     return str(value or "").strip().replace("|", "\\|")
 
 
-def build_mark_note_text(rows):
-    if not rows:
-        return ""
+def _predict_col_desc(col):
+    desc_map = {
+        "HorseName": "馬名",
+        "Age": "年齢",
+        "SexMale": "性別フラグ（牡）",
+        "SexFemale": "性別フラグ（牝）",
+        "SexGelding": "性別フラグ（騸）",
+        "TargetDistance": "対象距離（m）",
+        "fieldsize_med": "想定頭数の中央値",
+        "best_TimeIndexEff": "タイム指数効率（最良）",
+        "avg_TimeIndexEff": "タイム指数効率（平均）",
+        "dist_close": "距離適性の近さ",
+        "Top3Prob_lr": "ロジスティック回帰の3着内確率",
+        "Top3Prob_lgbm": "LightGBMの3着内確率",
+        "Top3Prob_model": "統合モデルの3着内確率",
+        "Top3Prob_est": "推定3着内確率",
+        "Top3Prob": "3着内確率",
+        "jscore_current": "騎手評価スコア（当該レース時点）",
+        "agg_score": "総合評価スコア",
+        "score": "評価スコア",
+        "confidence_score": "予測信頼度スコア",
+        "stability_score": "予測安定性スコア",
+        "validity_score": "予測妥当性スコア",
+        "consistency_score": "予測整合性スコア",
+        "rank_ema": "順位実績のEMA指標",
+        "ev_ema": "期待値のEMA指標",
+        "risk_score": "リスク評価スコア",
+    }
+    if col in desc_map:
+        return desc_map[col]
+    if col.startswith("ti_"):
+        return "タイム指数系特徴量"
+    if col.startswith("jscore_"):
+        return "騎手/補正スコア系特徴量"
+    if col.startswith("ps_"):
+        return "走法・ポジション系特徴量"
+    if col.startswith("run_"):
+        return "直近走パフォーマンス特徴量"
+    if col.startswith("cup_"):
+        return "同条件（クラス/距離/馬場）傾向特徴量"
+    if col.startswith("top3_ti_"):
+        return "上位3着タイム指数の分位特徴量"
+    return "モデル特徴量（内部定義）"
+
+
+def _build_predictions_column_guide(cols):
+    if not cols:
+        return []
+    out = []
+    for col in cols:
+        name = str(col or "").strip()
+        if not name:
+            continue
+        if name == "HorseName":
+            continue
+        out.append(f"{name}: {_predict_col_desc(name)}")
+    return out
+
+
+def _to_float_or_zero(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _select_prediction_score_key(fieldnames):
+    for key in ("Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
+        if key in fieldnames:
+            return key
+    return ""
+
+
+def _build_curated_predictions_csv(predictions_csv_text, top_n=None):
+    text = str(predictions_csv_text or "").replace("\ufeff", "").strip()
+    if not text:
+        return "", [], 0
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+        fieldnames = list(reader.fieldnames or [])
+    except Exception:
+        return "", [], 0
+    if not rows or not fieldnames:
+        return "", [], 0
+
+    score_key = _select_prediction_score_key(fieldnames)
+    if score_key:
+        rows = sorted(rows, key=lambda r: _to_float_or_zero(r.get(score_key)), reverse=True)
+    if top_n is not None:
+        top_n = max(1, int(top_n))
+        rows = rows[:top_n]
+
+    preferred_cols = [
+        "horse_no",
+        "HorseName",
+        "Top3Prob_model",
+        "Top3Prob_lgbm",
+        "Top3Prob_lr",
+        "jscore_current",
+        "agg_score",
+        "confidence_score",
+        "risk_score",
+        "rank_ema",
+        "ev_ema",
+        "best_TimeIndexEff",
+        "avg_TimeIndexEff",
+        "dist_close",
+    ]
+    cols = [c for c in preferred_cols if c in fieldnames]
+    if not cols:
+        cols = fieldnames[:10]
+
+    sio = io.StringIO()
+    writer = csv.DictWriter(sio, fieldnames=cols, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({c: row.get(c, "") for c in cols})
+    return sio.getvalue().strip(), cols, len(rows)
+
+
+def build_mark_note_text(rows, predictions_filename="", predictions_csv_text=""):
     bet_type_labels = {
         "win": "単勝",
         "place": "複勝",
@@ -659,7 +794,7 @@ def build_mark_note_text(rows):
         "": "なし",
     }
     lines = []
-    for row in rows:
+    for row in rows or []:
         mark = _escape_md_cell(row.get("mark", ""))
         horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
         horse_name = _escape_md_cell(row.get("horse_name", ""))
@@ -671,6 +806,21 @@ def build_mark_note_text(rows):
         bet_types = "・".join(bet_type_labels.get(item, item) for item in bet_type_items)
         lines.append(f"- {mark} {horse_no}番 {horse_name}")
         lines.append(f"  予想順位: {pred_rank} / 買い目: {bet_types}")
+
+    csv_text, selected_cols, _ = _build_curated_predictions_csv(predictions_csv_text, top_n=None)
+    if csv_text:
+        if lines:
+            lines.append("")
+        col_guide = _build_predictions_column_guide(selected_cols)
+        if col_guide:
+            lines.append("↓↓↓予測データ詳細（CSV）↓↓↓")
+            lines.append("")
+            for item in col_guide:
+                lines.append(item)
+                lines.append("")
+        lines.append("```csv")
+        lines.append(csv_text.replace("```", "'''"))
+        lines.append("```")
     return "\n".join(lines).strip()
 
 
@@ -774,7 +924,9 @@ def render_page(
         top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
         mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, run_row)
         mark_table_html = build_table_html(mark_rows, mark_cols, "Integrated Marks (◎○▲△☆)")
-        mark_note_text = build_mark_note_text(mark_rows)
+        pred_path = resolve_pred_path(scope_norm or scope_key, run_id, run_row)
+        pred_csv_text = load_text_file(pred_path)
+        mark_note_text = build_mark_note_text(mark_rows, pred_path.name if pred_path else "", pred_csv_text)
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
             summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")

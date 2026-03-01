@@ -24,10 +24,10 @@
       "quinella": 0.1
     },
     "balanced": {
-      "win": 0.2,
-      "place": 0.45,
-      "wide": 0.2,
-      "quinella": 0.15
+      "win": 0.36,
+      "place": 0.2,
+      "wide": 0.26,
+      "quinella": 0.18
     },
     "aggressive": {
       "win": 0.25,
@@ -38,7 +38,7 @@
   },
   "type_weight_adjust": {
     "win": 0.667,
-    "place": 0.915,
+    "place": 0.25,
     "wide": 0.557,
     "quinella": 1.0
   },
