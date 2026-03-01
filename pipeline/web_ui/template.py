@@ -10,6 +10,8 @@ def page_template(
     top5_text="",
     bet_plan_text="",
     top5_table_html="",
+    mark_table_html="",
+    mark_note_text="",
     bet_plan_table_html="",
     summary_table_html="",
     run_summary_block="",
@@ -43,6 +45,26 @@ def page_template(
             <pre>{html.escape(top5_text)}</pre>
         </section>
         """
+
+    mark_block = ""
+    if mark_table_html:
+        note_copy_block = ""
+        if mark_note_text:
+            note_copy_block = f"""
+            <section class="panel">
+                <h2>Note Copy</h2>
+                <div class="copy-row">
+                    <button type="button" id="copy-note-marks">一键复制（Note）</button>
+                    <span id="copy-note-status" class="copy-status"></span>
+                </div>
+                <textarea id="note-marks-text" class="hidden-copy-source" readonly>{html.escape(mark_note_text)}</textarea>
+                <details>
+                    <summary>Note 文案预览</summary>
+                    <pre>{html.escape(mark_note_text)}</pre>
+                </details>
+            </section>
+            """
+        mark_block = f"{mark_table_html}{note_copy_block}"
 
     bet_plan_block = ""
     if bet_plan_table_html:
@@ -161,6 +183,9 @@ def page_template(
       margin: 0; max-height: 320px; overflow: auto;
     }}
     .error {{ border-color: #d98b6b; background: #fff6f0; }}
+    .copy-row {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }}
+    .copy-status {{ font-size: 12px; color: var(--muted); }}
+    .hidden-copy-source {{ position: absolute; left: -9999px; top: -9999px; opacity: 0; width: 1px; height: 1px; pointer-events: none; }}
     button {{
       background: linear-gradient(120deg, var(--accent), #1f4b39);
       border: none; color: white; padding: 11px 16px; font-size: 14px;
@@ -234,6 +259,7 @@ def page_template(
     </section>
 
     {top5_block}
+    {mark_block}
     {summary_block}
     {bet_plan_block}
     {run_summary_block}
@@ -304,6 +330,34 @@ def page_template(
         }});
       }});
     }});
+
+    const copyNoteBtn = document.getElementById("copy-note-marks");
+    const copyNoteStatus = document.getElementById("copy-note-status");
+    const copySource = document.getElementById("note-marks-text");
+    if (copyNoteBtn && copySource) {{
+      copyNoteBtn.addEventListener("click", async () => {{
+        const text = copySource.value || "";
+        if (!text) {{
+          if (copyNoteStatus) copyNoteStatus.textContent = "无可复制内容";
+          return;
+        }}
+        try {{
+          if (navigator.clipboard && window.isSecureContext) {{
+            await navigator.clipboard.writeText(text);
+          }} else {{
+            copySource.focus();
+            copySource.select();
+            document.execCommand("copy");
+          }}
+          if (copyNoteStatus) copyNoteStatus.textContent = "已复制";
+          setTimeout(() => {{
+            if (copyNoteStatus) copyNoteStatus.textContent = "";
+          }}, 1500);
+        }} catch (e) {{
+          if (copyNoteStatus) copyNoteStatus.textContent = "复制失败，请手动复制预览内容";
+        }}
+      }});
+    }}
   </script>
 </body>
 </html>

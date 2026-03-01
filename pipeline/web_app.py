@@ -627,8 +627,51 @@ def load_bet_plan_table(scope_key, run_id, run_row=None):
     )
 
 
+def load_mark_recommendation_table(scope_key, run_id, run_row=None):
+    return view_data.load_mark_recommendation_table(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        scope_key,
+        run_id,
+        run_row,
+    )
+
+
 def detect_gate_status(rows):
     return ui_detect_gate_status(rows)
+
+
+def _escape_md_cell(value):
+    return str(value or "").strip().replace("|", "\\|")
+
+
+def build_mark_note_text(rows):
+    if not rows:
+        return ""
+    bet_type_labels = {
+        "win": "単勝",
+        "place": "複勝",
+        "wide": "ワイド",
+        "quinella": "馬連",
+        "-": "なし",
+        "": "なし",
+    }
+    lines = []
+    for row in rows:
+        mark = _escape_md_cell(row.get("mark", ""))
+        horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
+        horse_name = _escape_md_cell(row.get("horse_name", ""))
+        pred_rank = _escape_md_cell(row.get("pred_rank", "")) or "-"
+        bet_types_raw = _escape_md_cell(row.get("bet_types", "")) or "-"
+        bet_type_items = [t.strip().lower() for t in bet_types_raw.split(",") if t.strip()]
+        if not bet_type_items:
+            bet_type_items = ["-"]
+        bet_types = "・".join(bet_type_labels.get(item, item) for item in bet_type_items)
+        lines.append(f"- {mark} {horse_no}番 {horse_name}")
+        lines.append(f"  予想順位: {pred_rank} / 買い目: {bet_types}")
+    return "\n".join(lines).strip()
 
 
 def build_gate_notice_html(status, reason):
@@ -648,6 +691,8 @@ def page_template(
     top5_text="",
     bet_plan_text="",
     top5_table_html="",
+    mark_table_html="",
+    mark_note_text="",
     bet_plan_table_html="",
     summary_table_html="",
     run_summary_block="",
@@ -663,6 +708,8 @@ def page_template(
         top5_text=top5_text,
         bet_plan_text=bet_plan_text,
         top5_table_html=top5_table_html,
+        mark_table_html=mark_table_html,
+        mark_note_text=mark_note_text,
         bet_plan_table_html=bet_plan_table_html,
         summary_table_html=summary_table_html,
         run_summary_block=run_summary_block,
@@ -717,12 +764,17 @@ def render_page(
     view_selected_run_id = selected_run_id or run_id or summary_run_id
     view_run_options = build_run_options(scope_norm or scope_key, view_selected_run_id)
     top5_table_html = ""
+    mark_table_html = ""
+    mark_note_text = ""
     bet_plan_table_html = ""
     summary_table_html = ""
     bet_rows = []
     if run_id:
         top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, run_row)
         top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
+        mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, run_row)
+        mark_table_html = build_table_html(mark_rows, mark_cols, "Integrated Marks (◎○▲△☆)")
+        mark_note_text = build_mark_note_text(mark_rows)
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
             summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")
@@ -756,6 +808,8 @@ def render_page(
         top5_text=top5_text if not top5_table_html else "",
         bet_plan_text=bet_plan_text if not bet_plan_table_html else "",
         top5_table_html=top5_table_html,
+        mark_table_html=mark_table_html,
+        mark_note_text=mark_note_text,
         bet_plan_table_html=bet_plan_table_html,
         summary_table_html=summary_table_html,
         run_summary_block=run_summary_block,
