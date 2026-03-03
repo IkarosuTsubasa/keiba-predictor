@@ -29,9 +29,15 @@ DEFAULT_CONFIG = {
     "p_mix_w": 0.6,
     "rank_temperature": 1.0,
     "K_place": 3.0,
+    "place_bias": 0.0,
+    "place_power": 1.0,
     "C_wide": 1.6,
     "C_quinella": 1.6,
     "odds_penalty": 0.0,
+    "win_odds_penalty": None,
+    "place_odds_penalty": 0.02,
+    "wide_odds_penalty": 0.05,
+    "quinella_odds_penalty": None,
     "kelly_scale": 0.25,
     "min_ev_per_ticket": 0.02,
     "min_p_hit_threshold": 0.05,
@@ -39,6 +45,7 @@ DEFAULT_CONFIG = {
     "max_race_share": 0.40,
     "min_yen_unit": 100,
     "max_single_horses": 8,
+    "max_tickets_per_race": 0,
 }
 
 
@@ -56,9 +63,17 @@ def _normalize_cfg(config: dict) -> dict:
     cfg["p_mix_w"] = min(1.0, max(0.0, _safe_float(cfg.get("p_mix_w"), 0.6)))
     cfg["rank_temperature"] = max(1e-6, _safe_float(cfg.get("rank_temperature"), 1.0))
     cfg["K_place"] = max(0.0, _safe_float(cfg.get("K_place"), 3.0))
+    cfg["place_bias"] = min(1.0, max(0.0, _safe_float(cfg.get("place_bias"), 0.0)))
+    cfg["place_power"] = max(0.1, _safe_float(cfg.get("place_power"), 1.0))
     cfg["C_wide"] = max(0.0, _safe_float(cfg.get("C_wide"), 1.6))
     cfg["C_quinella"] = max(0.0, _safe_float(cfg.get("C_quinella"), 1.6))
     cfg["odds_penalty"] = min(0.99, max(0.0, _safe_float(cfg.get("odds_penalty"), 0.0)))
+    for key in ("win_odds_penalty", "place_odds_penalty", "wide_odds_penalty", "quinella_odds_penalty"):
+        raw = cfg.get(key)
+        if raw is None:
+            cfg[key] = cfg["odds_penalty"]
+        else:
+            cfg[key] = min(0.99, max(0.0, _safe_float(raw, cfg["odds_penalty"])))
     cfg["kelly_scale"] = min(1.0, max(0.0, _safe_float(cfg.get("kelly_scale"), 0.25)))
     cfg["min_ev_per_ticket"] = _safe_float(cfg.get("min_ev_per_ticket"), 0.02)
     cfg["min_p_hit_threshold"] = min(1.0, max(0.0, _safe_float(cfg.get("min_p_hit_threshold"), 0.05)))
@@ -66,6 +81,7 @@ def _normalize_cfg(config: dict) -> dict:
     cfg["max_race_share"] = min(1.0, max(0.0, _safe_float(cfg.get("max_race_share"), 0.40)))
     cfg["min_yen_unit"] = max(1, int(_safe_float(cfg.get("min_yen_unit"), 100)))
     cfg["max_single_horses"] = max(1, int(_safe_float(cfg.get("max_single_horses"), 8)))
+    cfg["max_tickets_per_race"] = max(0, int(_safe_float(cfg.get("max_tickets_per_race"), 0)))
     return cfg
 
 
@@ -170,6 +186,59 @@ def _build_mapping(items: List[BetCandidate]) -> Dict[Tuple[str, ...], int]:
     return out
 
 
+def _append_note(note: str, extra: str) -> str:
+    if not note:
+        return extra
+    return f"{note};{extra}"
+
+
+def _calc_priority_score(edge: float, p_hit: float, odds_used: float) -> float:
+    return float(edge) * float(p_hit) * math.log(max(1.000001, float(odds_used)))
+
+
+def _calc_place_prob(p_win: float, cfg: Dict) -> float:
+    p = max(0.0, min(1.0, float(p_win)))
+    score = float(cfg["place_bias"]) + (p ** float(cfg["place_power"])) * float(cfg["K_place"])
+    return min(1.0, max(0.0, score))
+
+
+def _scale_candidates_to_race_cap(candidates: List[BetCandidate], race_cap: int, min_unit: int) -> List[BetCandidate]:
+    if race_cap <= 0 or not candidates:
+        return candidates
+    total_stake = int(sum(x.stake_yen for x in candidates))
+    if total_stake <= race_cap:
+        return candidates
+
+    scale = float(race_cap) / float(total_stake)
+    scaled = []
+    for item in candidates:
+        new_stake = _floor_to_unit(item.stake_yen * scale, min_unit)
+        if new_stake >= min_unit:
+            item.stake_yen = int(new_stake)
+            item.notes = _append_note(item.notes, "scaled")
+            scaled.append(item)
+    if not scaled:
+        return []
+
+    used = int(sum(x.stake_yen for x in scaled))
+    remain = race_cap - used
+    if remain >= min_unit:
+        # Remaining unit budget goes to higher-priority tickets first.
+        ordered = sorted(
+            scaled,
+            key=lambda x: _calc_priority_score(x.edge, x.p_hit, x.odds_used),
+            reverse=True,
+        )
+        idx = 0
+        n = len(ordered)
+        while remain >= min_unit and n > 0:
+            ordered[idx % n].stake_yen += min_unit
+            ordered[idx % n].notes = _append_note(ordered[idx % n].notes, "scaled_fill")
+            remain -= min_unit
+            idx += 1
+    return scaled
+
+
 def generate_bet_plan_v2(
     pred_df,
     odds: Dict,
@@ -206,7 +275,10 @@ def generate_bet_plan_v2(
     else:
         work["race_id"] = "__single_race__"
 
-    odds_penalty = cfg["odds_penalty"]
+    win_penalty = cfg["win_odds_penalty"]
+    place_penalty = cfg["place_odds_penalty"]
+    wide_penalty = cfg["wide_odds_penalty"]
+    quinella_penalty = cfg["quinella_odds_penalty"]
     all_items: List[BetCandidate] = []
 
     for race_id, group in work.groupby("race_id", sort=False):
@@ -234,7 +306,7 @@ def generate_bet_plan_v2(
 
         for horse in horse_list:
             p = float(p_map.get(horse, 0.0))
-            odds_win = _lookup_single_odds(odds.get("win", {}), horse, odds_penalty)
+            odds_win = _lookup_single_odds(odds.get("win", {}), horse, win_penalty)
             if odds_win > 1.0:
                 edge = p * odds_win - 1.0
                 if edge >= cfg["min_ev_per_ticket"] and p >= cfg["min_p_hit_threshold"]:
@@ -245,12 +317,22 @@ def generate_bet_plan_v2(
                     if cap > 0:
                         stake = min(stake, cap)
                     if stake >= cfg["min_yen_unit"]:
+                        priority = _calc_priority_score(edge, p, odds_win)
                         race_candidates.append(
-                            BetCandidate("win", (horse,), float(odds_win), float(p), float(edge), float(kelly_f), int(stake), "")
+                            BetCandidate(
+                                "win",
+                                (horse,),
+                                float(odds_win),
+                                float(p),
+                                float(edge),
+                                float(kelly_f),
+                                int(stake),
+                                f"priority={priority:.6f}",
+                            )
                         )
 
-            p_place = min(1.0, p * cfg["K_place"])
-            odds_place = _lookup_single_odds(odds.get("place", {}), horse, odds_penalty)
+            p_place = _calc_place_prob(p, cfg)
+            odds_place = _lookup_single_odds(odds.get("place", {}), horse, place_penalty)
             if odds_place > 1.0:
                 edge = p_place * odds_place - 1.0
                 if edge >= cfg["min_ev_per_ticket"] and p_place >= cfg["min_p_hit_threshold"]:
@@ -261,6 +343,7 @@ def generate_bet_plan_v2(
                     if cap > 0:
                         stake = min(stake, cap)
                     if stake >= cfg["min_yen_unit"]:
+                        priority = _calc_priority_score(edge, p_place, odds_place)
                         race_candidates.append(
                             BetCandidate(
                                 "place",
@@ -270,7 +353,7 @@ def generate_bet_plan_v2(
                                 float(edge),
                                 float(kelly_f),
                                 int(stake),
-                                "",
+                                f"priority={priority:.6f}",
                             )
                         )
 
@@ -280,7 +363,7 @@ def generate_bet_plan_v2(
             x, y = _sort_horse_pair(a, b)
 
             p_wide = min(1.0, pa * pb * cfg["C_wide"])
-            odds_wide = _lookup_pair_odds(odds.get("wide", {}), x, y, odds_penalty)
+            odds_wide = _lookup_pair_odds(odds.get("wide", {}), x, y, wide_penalty)
             if odds_wide > 1.0:
                 edge = p_wide * odds_wide - 1.0
                 if edge >= cfg["min_ev_per_ticket"] and p_wide >= cfg["min_p_hit_threshold"]:
@@ -291,6 +374,7 @@ def generate_bet_plan_v2(
                     if cap > 0:
                         stake = min(stake, cap)
                     if stake >= cfg["min_yen_unit"]:
+                        priority = _calc_priority_score(edge, p_wide, odds_wide)
                         race_candidates.append(
                             BetCandidate(
                                 "wide",
@@ -300,12 +384,12 @@ def generate_bet_plan_v2(
                                 float(edge),
                                 float(kelly_f),
                                 int(stake),
-                                "",
+                                f"priority={priority:.6f}",
                             )
                         )
 
             p_q = min(1.0, pa * pb * cfg["C_quinella"])
-            odds_q = _lookup_pair_odds(odds.get("quinella", {}), x, y, odds_penalty)
+            odds_q = _lookup_pair_odds(odds.get("quinella", {}), x, y, quinella_penalty)
             if odds_q > 1.0:
                 edge = p_q * odds_q - 1.0
                 if edge >= cfg["min_ev_per_ticket"] and p_q >= cfg["min_p_hit_threshold"]:
@@ -316,6 +400,7 @@ def generate_bet_plan_v2(
                     if cap > 0:
                         stake = min(stake, cap)
                     if stake >= cfg["min_yen_unit"]:
+                        priority = _calc_priority_score(edge, p_q, odds_q)
                         race_candidates.append(
                             BetCandidate(
                                 "quinella",
@@ -325,26 +410,28 @@ def generate_bet_plan_v2(
                                 float(edge),
                                 float(kelly_f),
                                 int(stake),
-                                "",
+                                f"priority={priority:.6f}",
                             )
                         )
 
         if not race_candidates:
             continue
 
+        race_candidates.sort(
+            key=lambda x: _calc_priority_score(x.edge, x.p_hit, x.odds_used),
+            reverse=True,
+        )
+        max_tickets = int(cfg.get("max_tickets_per_race", 0))
+        if max_tickets > 0 and len(race_candidates) > max_tickets:
+            race_candidates = race_candidates[:max_tickets]
+
         race_cap = _floor_to_unit(bankroll * cfg["max_race_share"], cfg["min_yen_unit"])
+        race_candidates = _scale_candidates_to_race_cap(
+            candidates=race_candidates,
+            race_cap=race_cap,
+            min_unit=cfg["min_yen_unit"],
+        )
         total_stake = int(sum(x.stake_yen for x in race_candidates))
-        if race_cap > 0 and total_stake > race_cap:
-            scale = float(race_cap) / float(total_stake)
-            scaled = []
-            for item in race_candidates:
-                new_stake = _floor_to_unit(item.stake_yen * scale, cfg["min_yen_unit"])
-                if new_stake >= cfg["min_yen_unit"]:
-                    item.stake_yen = int(new_stake)
-                    item.notes = (item.notes + ";scaled" if item.notes else "scaled")
-                    scaled.append(item)
-            race_candidates = scaled
-            total_stake = int(sum(x.stake_yen for x in race_candidates))
 
         if total_stake <= 0:
             continue
@@ -358,4 +445,3 @@ def generate_bet_plan_v2(
         return BetPlanResult(items=[], mapping={})
     mapping = _build_mapping(all_items)
     return BetPlanResult(items=all_items, mapping=mapping)
-

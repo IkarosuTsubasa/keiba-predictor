@@ -92,9 +92,15 @@ BET_ENGINE_V2_DEFAULTS = {
     "p_mix_w": 0.6,
     "rank_temperature": 1.0,
     "K_place": 3.0,
+    "place_bias": 0.0,
+    "place_power": 1.0,
     "C_wide": 1.6,
     "C_quinella": 1.6,
     "odds_penalty": 0.0,
+    "win_odds_penalty": 0.0,
+    "place_odds_penalty": 0.02,
+    "wide_odds_penalty": 0.05,
+    "quinella_odds_penalty": 0.0,
     "kelly_scale": 0.25,
     "min_ev_per_ticket": 0.02,
     "min_p_hit_threshold": 0.05,
@@ -102,6 +108,7 @@ BET_ENGINE_V2_DEFAULTS = {
     "max_race_share": 0.40,
     "min_yen_unit": 100,
     "max_single_horses": 8,
+    "max_tickets_per_race": 0,
 }
 
 
