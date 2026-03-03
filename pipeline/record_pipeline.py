@@ -1106,7 +1106,16 @@ def main():
             horse_name_raw = str(row.get("horse_name", "")).strip()
             names = [normalize_name(n) for n in split_names(horse_name_raw)]
             hit = eval_ticket(bet_type, names, actual_names)
-            amount_yen = int(float(row.get("amount_yen", 0)))
+            amount_raw = row.get("amount_yen", "")
+            try:
+                amount_yen = int(float(amount_raw))
+            except (TypeError, ValueError):
+                amount_yen = 0
+            if amount_yen <= 0:
+                try:
+                    amount_yen = int(float(row.get("stake_yen", 0)))
+                except (TypeError, ValueError):
+                    amount_yen = 0
             horse_nums = split_numbers(horse_no)
             payout_mult = estimate_payout_multiplier(
                 bet_type,
@@ -1133,6 +1142,10 @@ def main():
                 "horse_no": horse_no,
                 "horse_name": horse_name_raw,
                 "amount_yen": amount_yen,
+                "stake_yen": amount_yen,
+                "p_hit": row.get("p_hit", ""),
+                "odds_used": row.get("odds_used", ""),
+                "edge": row.get("edge", ""),
                 "hit": hit,
                 "est_payout_yen": int(round(est_payout)),
             }

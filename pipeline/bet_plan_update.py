@@ -7,11 +7,13 @@ import os
 import random
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from surface_scope import get_data_dir, migrate_legacy_data
+from bet_engine_v2 import generate_bet_plan_v2
+from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -85,6 +87,22 @@ NO_BET_LOG_FIELDS = [
     "no_bet_reason",
     "market_prob_close",
 ]
+
+BET_ENGINE_V2_DEFAULTS = {
+    "p_mix_w": 0.6,
+    "rank_temperature": 1.0,
+    "K_place": 3.0,
+    "C_wide": 1.6,
+    "C_quinella": 1.6,
+    "odds_penalty": 0.0,
+    "kelly_scale": 0.25,
+    "min_ev_per_ticket": 0.02,
+    "min_p_hit_threshold": 0.05,
+    "max_ticket_share": 0.20,
+    "max_race_share": 0.40,
+    "min_yen_unit": 100,
+    "max_single_horses": 8,
+}
 
 
 def safe_print(text):
@@ -165,6 +183,270 @@ def load_config(path=None):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
+def load_predictor_config():
+    path = get_predictor_config_path(BASE_DIR, SCOPE_KEY)
+    if not path.exists():
+        fallback = []
+        if SCOPE_KEY == "central_turf":
+            fallback.extend(
+                [
+                    BASE_DIR / "predictor_config_turf_default.json",
+                    BASE_DIR / "predictor_config_turf.json",
+                ]
+            )
+        elif SCOPE_KEY == "central_dirt":
+            fallback.extend(
+                [
+                    BASE_DIR / "predictor_config_dirt_default.json",
+                    BASE_DIR / "predictor_config_dirt.json",
+                ]
+            )
+        elif SCOPE_KEY == "local":
+            fallback.extend(
+                [
+                    BASE_DIR / "predictor_config_central_dirt.json",
+                    BASE_DIR / "predictor_config_dirt_default.json",
+                    BASE_DIR / "predictor_config_dirt.json",
+                ]
+            )
+        fallback.append(BASE_DIR / "predictor_config.json")
+        for legacy in fallback:
+            if legacy.exists():
+                data = json.loads(legacy.read_text(encoding="utf-8"))
+                path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                return ensure_bet_engine_v2_config_defaults(path, data)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return ensure_bet_engine_v2_config_defaults(path, data)
+    except Exception:
+        return ensure_bet_engine_v2_config_defaults(path, {})
+
+
+def get_bet_engine_v2_config(predictor_config):
+    cfg = dict(BET_ENGINE_V2_DEFAULTS)
+    node = predictor_config.get("bet_engine_v2", {}) if isinstance(predictor_config, dict) else {}
+    if isinstance(node, dict):
+        cfg.update(node)
+    return cfg
+
+
+def canonical_horse_key(value):
+    horse_no = parse_horse_no(value)
+    if horse_no is not None:
+        return str(horse_no)
+    text = str(value or "").strip()
+    return text
+
+
+def canonical_pair(a, b):
+    a_str = str(a)
+    b_str = str(b)
+    a_no = parse_horse_no(a_str)
+    b_no = parse_horse_no(b_str)
+    if a_no is not None and b_no is not None:
+        if a_no <= b_no:
+            return str(a_no), str(b_no)
+        return str(b_no), str(a_no)
+    if a_str <= b_str:
+        return a_str, b_str
+    return b_str, a_str
+
+
+def build_place_odds_payload(path):
+    out = {}
+    if not path.exists():
+        return out
+    try:
+        df = pd.read_csv(path, encoding="utf-8-sig")
+    except Exception:
+        return out
+    if "horse_no" not in df.columns:
+        return out
+    for _, row in df.iterrows():
+        horse_no = parse_horse_no(row.get("horse_no"))
+        if horse_no is None:
+            continue
+        key = str(horse_no)
+        low = safe_float(row.get("odds_low"))
+        high = safe_float(row.get("odds_high"))
+        mid = safe_float(row.get("odds_mid"))
+        if low > 0 and high > 0:
+            out[key] = (min(low, high), max(low, high))
+        elif low > 0:
+            out[key] = low
+        elif mid > 0:
+            out[key] = mid
+    return out
+
+
+def build_pair_odds_payload(path):
+    out = {}
+    if not path.exists():
+        return out
+    try:
+        df = pd.read_csv(path, encoding="utf-8-sig")
+    except Exception:
+        return out
+    if "horse_no_a" not in df.columns or "horse_no_b" not in df.columns:
+        return out
+    for _, row in df.iterrows():
+        a = parse_horse_no(row.get("horse_no_a"))
+        b = parse_horse_no(row.get("horse_no_b"))
+        if a is None or b is None or a == b:
+            continue
+        key = canonical_pair(a, b)
+        low = safe_float(row.get("odds_low"))
+        high = safe_float(row.get("odds_high"))
+        mid = safe_float(row.get("odds_mid"))
+        single = safe_float(row.get("odds"))
+        if low > 0 and high > 0:
+            out[key] = (min(low, high), max(low, high))
+        elif low > 0:
+            out[key] = low
+        elif mid > 0:
+            out[key] = mid
+        elif single > 0:
+            out[key] = single
+    return out
+
+
+def build_bet_engine_v2_inputs(merged, fuku_odds_path, wide_odds_path, quinella_odds_path):
+    d = merged.copy()
+    d["horse_key"] = d["horse_no"].apply(canonical_horse_key)
+    d["rank_score"] = pd.to_numeric(d.get("rank_score"), errors="coerce")
+    d["Top3Prob_model"] = pd.to_numeric(d.get("Top3Prob_model"), errors="coerce")
+    if d["rank_score"].isna().all():
+        d["rank_score"] = d["Top3Prob_model"]
+    d["Top3Prob_model"] = d["Top3Prob_model"].fillna(0.0)
+    d["rank_score"] = d["rank_score"].fillna(d["Top3Prob_model"])
+    d["race_id"] = "__single_race__"
+    pred_df = d[["horse_key", "rank_score", "Top3Prob_model", "HorseName", "horse_no", "race_id"]].copy()
+
+    win_map = {}
+    for _, row in d.iterrows():
+        key = str(row.get("horse_key", "")).strip()
+        if not key:
+            continue
+        odds_val = safe_float(row.get("odds_num"))
+        if odds_val > 0:
+            win_map[key] = odds_val
+
+    place_map = build_place_odds_payload(fuku_odds_path)
+    wide_map = build_pair_odds_payload(wide_odds_path)
+    quinella_map = build_pair_odds_payload(quinella_odds_path)
+
+    odds_payload = {
+        "win": win_map,
+        "place": place_map,
+        "wide": wide_map,
+        "quinella": quinella_map,
+    }
+    return pred_df, odds_payload
+
+
+def ensure_bet_engine_v2_config_defaults(cfg_path, predictor_config):
+    data = predictor_config if isinstance(predictor_config, dict) else {}
+    node = data.get("bet_engine_v2")
+    changed = False
+    if not isinstance(node, dict):
+        node = {}
+        changed = True
+    for key, value in BET_ENGINE_V2_DEFAULTS.items():
+        if key not in node:
+            node[key] = value
+            changed = True
+    if changed:
+        data["bet_engine_v2"] = node
+        try:
+            cfg_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    return data
+
+
+def build_horse_meta_map(merged):
+    meta = {}
+    for _, row in merged.iterrows():
+        key = canonical_horse_key(row.get("horse_no", ""))
+        if not key:
+            continue
+        horse_no = parse_horse_no(row.get("horse_no", ""))
+        horse_no_text = str(horse_no) if horse_no is not None else str(key)
+        horse_name = str(row.get("HorseName", "")).strip()
+        meta[key] = {"horse_no": horse_no_text, "horse_name": horse_name}
+    return meta
+
+
+def build_rows_from_bet_plan_v2(result, budget_yen, horse_meta):
+    out_rows = []
+    item_rows = []
+    for item in result.items:
+        horse_keys = [str(h) for h in item.horses]
+        horse_no_labels = []
+        horse_names = []
+        for hk in horse_keys:
+            meta = horse_meta.get(hk, {})
+            horse_no_labels.append(str(meta.get("horse_no", hk)))
+            name = str(meta.get("horse_name", "")).strip()
+            if name:
+                horse_names.append(name)
+
+        horse_no = "-".join(horse_no_labels)
+        horse_name = " / ".join(horse_names)
+        amount_yen = int(item.stake_yen)
+        units = int(amount_yen // UNIT_YEN) if UNIT_YEN > 0 else 0
+        expected_return = int(round(amount_yen * float(item.p_hit) * float(item.odds_used)))
+        ev_ratio_est = float(item.edge) + 1.0
+        row = {
+            "budget_yen": int(budget_yen),
+            "bet_type": item.bet_type,
+            "horse_no": horse_no,
+            "horse_name": horse_name,
+            "units": units,
+            "amount_yen": amount_yen,
+            "hit_prob_est": round(float(item.p_hit), 4),
+            "hit_prob_se": "",
+            "hit_prob_ci95_low": "",
+            "hit_prob_ci95_high": "",
+            "payout_mult": round(float(item.odds_used), 4),
+            "ev_ratio_est": round(float(ev_ratio_est), 4),
+            "expected_return_yen": expected_return,
+            "odds_used": round(float(item.odds_used), 6),
+            "p_hit": round(float(item.p_hit), 6),
+            "edge": round(float(item.edge), 6),
+            "kelly_f": round(float(item.kelly_f), 6),
+            "stake_yen": amount_yen,
+            "notes": str(item.notes or ""),
+        }
+        out_rows.append(row)
+        item_rows.append(
+            {
+                "budget_yen": int(budget_yen),
+                "bet_type": item.bet_type,
+                "horses": horse_no,
+                "odds_used": round(float(item.odds_used), 6),
+                "p_hit": round(float(item.p_hit), 6),
+                "edge": round(float(item.edge), 6),
+                "stake_yen": amount_yen,
+                "notes": str(item.notes or ""),
+            }
+        )
+    return out_rows, item_rows
+
+
+def calc_plan_summary(item_rows):
+    total_stake = int(sum(int(r.get("stake_yen", 0) or 0) for r in item_rows))
+    ticket_count = int(len(item_rows))
+    edge_sum = float(sum(float(r.get("edge", 0.0) or 0.0) for r in item_rows))
+    weighted_edge = float(
+        sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in item_rows)
+    )
+    return total_stake, ticket_count, edge_sum, weighted_edge
 
 def apply_strategy_from_env(config):
     strategies = config.get("strategies", {})
@@ -1138,6 +1420,8 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
 def main():
     config = load_config()
     config, strategy_used = apply_strategy_from_env(config)
+    predictor_config = load_predictor_config()
+    bet_engine_v2_cfg = get_bet_engine_v2_config(predictor_config)
     race_id = resolve_race_id()
     budget_list = resolve_budget_list()
 
@@ -1180,6 +1464,12 @@ def main():
     merged["odds_num"] = pd.to_numeric(merged.get("odds"), errors="coerce")
     prob_col = pick_prob_column(merged.columns)
     merged["Top3Prob_used"] = get_prob_series(merged, prob_col)
+    if "Top3Prob_model" not in merged.columns:
+        merged["Top3Prob_model"] = merged["Top3Prob_used"]
+    merged["Top3Prob_model"] = pd.to_numeric(merged["Top3Prob_model"], errors="coerce").fillna(0.0)
+    if "rank_score" not in merged.columns:
+        merged["rank_score"] = merged["Top3Prob_model"]
+    merged["rank_score"] = pd.to_numeric(merged["rank_score"], errors="coerce").fillna(merged["Top3Prob_model"])
 
     missing = merged[merged["horse_no"].isna()]
     if not missing.empty:
@@ -1187,51 +1477,112 @@ def main():
         for name in missing["HorseName"].tolist():
             print(" -", name)
 
+    pred_df, odds_payload = build_bet_engine_v2_inputs(
+        merged,
+        fuku_odds_path=fuku_odds_path,
+        wide_odds_path=wide_odds_path,
+        quinella_odds_path=quinella_odds_path,
+    )
+    horse_meta = build_horse_meta_map(merged)
+
+    run_id = str(os.environ.get("RUN_ID", "")).strip() or datetime.now().strftime("%Y%m%d_%H%M%S")
+    scope_data_dir = get_data_dir(BASE_DIR, SCOPE_KEY)
+    scope_data_dir.mkdir(parents=True, exist_ok=True)
+    items_path = scope_data_dir / f"bet_plan_items_{run_id}.csv"
+
     out_rows = []
+    item_rows_all = []
     all_no_bet_rows = []
+    plan_columns = [
+        "budget_yen",
+        "bet_type",
+        "horse_no",
+        "horse_name",
+        "units",
+        "amount_yen",
+        "hit_prob_est",
+        "hit_prob_se",
+        "hit_prob_ci95_low",
+        "hit_prob_ci95_high",
+        "payout_mult",
+        "ev_ratio_est",
+        "expected_return_yen",
+        "odds_used",
+        "p_hit",
+        "edge",
+        "kelly_f",
+        "stake_yen",
+        "notes",
+    ]
+    item_columns = [
+        "run_id",
+        "scope",
+        "race_id",
+        "budget_yen",
+        "bet_type",
+        "horses",
+        "odds_used",
+        "p_hit",
+        "edge",
+        "stake_yen",
+        "notes",
+    ]
+
     for budget_yen in budget_list:
-        tickets, trifecta_rec, no_bet_rows = build_plan(
-            merged,
+        result = generate_bet_plan_v2(
+            pred_df=pred_df,
+            odds=odds_payload,
             budget_yen=budget_yen,
-            config=config,
-            race_id=race_id,
+            scope_key=SCOPE_KEY,
+            config=bet_engine_v2_cfg,
         )
-        if any(row.get("no_bet_reason") == "pass_gate_soft" for row in no_bet_rows):
-            print(f"[WARN] pass_gate soft failed ({budget_yen}); keeping tickets (low edge).")
-        if any(row.get("no_bet_reason") == "pass_gate" for row in no_bet_rows):
-            print(f"[WARN] pass_gate hard failed ({budget_yen}); tickets blocked (review only).")
-        all_no_bet_rows.extend(no_bet_rows)
-        out_rows.extend(tickets)
-        if trifecta_rec:
-            tri = dict(trifecta_rec)
-            tri["budget_yen"] = int(budget_yen)
-            out_rows.append(tri)
+        budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
+            result=result,
+            budget_yen=budget_yen,
+            horse_meta=horse_meta,
+        )
+        out_rows.extend(budget_rows)
+        for row in budget_item_rows:
+            row["run_id"] = run_id
+            row["scope"] = SCOPE_KEY
+            row["race_id"] = race_id
+            item_rows_all.append(row)
+        total_stake, ticket_count, edge_sum, weighted_edge = calc_plan_summary(budget_item_rows)
+        print(
+            f"[summary][{budget_yen}] total_stake={total_stake} "
+            f"ticket_count={ticket_count} estimated_total_edge_sum={weighted_edge:.2f} edge_sum={edge_sum:.4f}"
+        )
 
-    if not out_rows:
-        print("No tickets generated.")
-        append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
-        pause_exit()
-        return
-
-    out_df = pd.DataFrame(out_rows)
+    out_df = pd.DataFrame(out_rows, columns=plan_columns)
     out_df.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
+    items_df = pd.DataFrame(item_rows_all, columns=item_columns)
+    items_df.to_csv(items_path, index=False, encoding="utf-8-sig")
+    total_stake_all, ticket_count_all, edge_sum_all, weighted_edge_all = calc_plan_summary(item_rows_all)
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
     print(f"Budgets: {', '.join(str(v) for v in budget_list)}")
-    print("Bet plan:")
-    for _, row in out_df.iterrows():
-        budget_yen = int(float(row.get("budget_yen", 0) or 0))
-        line = (
-            f"[{budget_yen}] {row['bet_type']}\t{row['horse_no']}\t{row['horse_name']}\t"
-            f"{int(row['amount_yen'])} yen\t(exp~{int(row['expected_return_yen'])} yen)"
-        )
-        safe_print(line)
-    for budget_yen in budget_list:
-        df_budget = out_df[out_df["budget_yen"].astype(str) == str(budget_yen)]
-        total_exp = int(df_budget["expected_return_yen"].sum()) if not df_budget.empty else 0
-        print(f"Expected return (est., {budget_yen}): {total_exp} yen")
+    if out_df.empty:
+        print("No tickets generated.")
+    else:
+        print("Bet plan:")
+        for _, row in out_df.iterrows():
+            budget_yen = int(float(row.get("budget_yen", 0) or 0))
+            line = (
+                f"[{budget_yen}] {row['bet_type']}\t{row['horse_no']}\t{row['horse_name']}\t"
+                f"{int(row['amount_yen'])} yen\t(exp~{int(row['expected_return_yen'])} yen)"
+            )
+            safe_print(line)
+        for budget_yen in budget_list:
+            df_budget = out_df[out_df["budget_yen"].astype(str) == str(budget_yen)]
+            total_exp = int(df_budget["expected_return_yen"].sum()) if not df_budget.empty else 0
+            print(f"Expected return (est., {budget_yen}): {total_exp} yen")
+    print(
+        f"[summary][all] total_stake={total_stake_all} ticket_count={ticket_count_all} "
+        f"estimated_total_edge_sum={weighted_edge_all:.2f} edge_sum={edge_sum_all:.4f}"
+    )
     print(f"Saved: {OUT_PATH}")
+    print(f"Saved items: {items_path}")
     append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
     pause_exit()
 

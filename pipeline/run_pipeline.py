@@ -628,7 +628,8 @@ def main():
         print(f"[ERROR] {msg}")
         print("Abort before recording run to avoid polluting data.")
         sys.exit(1)
-    bet_plan_env = {"RACE_ID": race_id}
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bet_plan_env = {"RACE_ID": race_id, "RUN_ID": run_id}
     if strategy_name:
         bet_plan_env["BET_STRATEGY"] = strategy_name
     bet_plan_env["BET_BUDGETS"] = ",".join(str(v) for v in DEFAULT_BUDGETS)
@@ -641,7 +642,6 @@ def main():
         extra_lines=1,
     )
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     race_suffix = f"_{race_id}"
     race_dir = DATA_DIR / race_id
     race_dir.mkdir(parents=True, exist_ok=True)
