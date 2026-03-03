@@ -14,7 +14,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.metrics import roc_auc_score, log_loss
 from datetime import datetime
-from lightgbm import LGBMClassifier
+from lightgbm import LGBMClassifier, LGBMRanker
 
 
 def configure_utf8_io():
@@ -86,12 +86,88 @@ DEFAULT_PARAMS = {
     "record_weight_match": 0.3,
     "recent_race_count": 5,
     "top_score_count": 3,
-    "top3_scale": 3.0
+    "top3_scale": 3.0,
+    "model_mode": "hybrid",
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5,
+    "ranker_label_mode": "top5_gain",
+    "ranker_blend_alpha": 0.6,
+    "ranker_n_estimators": 300,
+    "ranker_learning_rate": 0.05,
+    "ranker_num_leaves": 31,
+    "ranker_min_child_samples": 20,
+    "ranker_subsample": 0.8,
+    "ranker_colsample_bytree": 0.8,
 }
 
 
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
+
+
+def safe_param_float(params, key, default):
+    try:
+        return float(params.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def safe_param_int(params, key, default):
+    try:
+        return int(float(params.get(key, default)))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def normalize_model_mode(raw):
+    text = str(raw or "").strip().lower()
+    if text in {"rank", "ranker"}:
+        return "ranker"
+    if text in {"hybrid", "mix", "blend"}:
+        return "hybrid"
+    return "classifier"
+
+
+def _sigmoid(x):
+    x = np.clip(x, -20.0, 20.0)
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def normalize_rank_score_by_race(scores, race_keys):
+    s = pd.Series(scores, dtype=float)
+    keys = pd.Series(race_keys, index=s.index).fillna("").astype(str)
+    keys = keys.replace("", "__single_race__")
+
+    def _normalize(group):
+        arr = group.to_numpy(dtype=float)
+        std = float(np.nanstd(arr))
+        if not np.isfinite(std) or std < 1e-12:
+            z = np.zeros_like(arr, dtype=float)
+        else:
+            mean = float(np.nanmean(arr))
+            z = (arr - mean) / std
+        return pd.Series(_sigmoid(z), index=group.index, dtype=float)
+
+    out = s.groupby(keys, group_keys=False).apply(_normalize)
+    return out.reindex(s.index).to_numpy(dtype=float)
+
+
+def build_ranker_relevance(rank_series, mode="top5_gain"):
+    rank = pd.to_numeric(rank_series, errors="coerce")
+    valid = rank.notna() & (rank >= 1)
+    rel = pd.Series(np.nan, index=rank.index, dtype=float)
+    mode_key = str(mode or "top5_gain").strip().lower()
+    if mode_key == "field_inverse":
+        if valid.any():
+            max_rank = float(rank[valid].max())
+            rel.loc[valid] = (max_rank - rank.loc[valid] + 1.0).clip(lower=0.0)
+    elif mode_key == "top3_gain":
+        rel.loc[valid] = np.where(rank.loc[valid] <= 3, 4.0 - rank.loc[valid], 0.0)
+    else:
+        # top5_gain: 1st..5th => 5..1, else 0
+        mapped = 6.0 - rank.loc[valid]
+        rel.loc[valid] = mapped.where(mapped > 0.0, 0.0)
+    return rel
 
 
 def shrink_proba_around_half(p: np.ndarray, beta: float = 0.5) -> np.ndarray:
@@ -117,7 +193,8 @@ def compute_confidence_from_pred(pred_df, state):
     risk_score = state.get("risk_score", 0.5)
     validity = clamp(0.6 * rank_ema + 0.4 * ev_ema, 0.0, 1.0)
     stability = clamp(risk_score, 0.0, 1.0)
-    probs = pred_df.sort_values("Top3Prob_model", ascending=False)["Top3Prob_model"].tolist()
+    score_col = "rank_score" if "rank_score" in pred_df.columns else "Top3Prob_model"
+    probs = pred_df.sort_values(score_col, ascending=False)[score_col].tolist()
     consistency = 0.0
     if probs:
         if len(probs) >= 3:
@@ -1385,19 +1462,29 @@ pos_count = int((train_df["y"] == 1).sum())
 neg_count = int((train_df["y"] == 0).sum())
 print(f"[INFO] Model training rows: {len(train_df)} (pos={pos_count}, neg={neg_count})")
 
+model_mode = normalize_model_mode(PARAMS.get("model_mode", "hybrid"))
+need_classifier = model_mode in {"classifier", "hybrid"}
+need_ranker = model_mode in {"ranker", "hybrid"}
+print(f"[INFO] model_mode={model_mode} (classifier={need_classifier}, ranker={need_ranker})")
+
 base_prob = float(train_df["y"].mean()) if len(train_df) else 0.0
 if not np.isfinite(base_prob):
     base_prob = 0.0
-use_model = pos_count > 0 and neg_count > 0
+use_classifier_model = need_classifier and pos_count > 0 and neg_count > 0
 
-evaluate_grouped_holdout(train_df, FEATURES, group_col="race_id")
+if need_classifier:
+    evaluate_grouped_holdout(train_df, FEATURES, group_col="race_id")
+else:
+    print("[INFO] Grouped classifier eval skipped: model_mode does not use classifier.")
 
 
 sample_weight = compute_sample_weight(train_df, RACE_TRACK_COND)
 
+pipe = None
 lgb_model = None
+ranker_model = None
 
-if use_model:
+if use_classifier_model:
     pipe = build_model_pipeline()
     X, y = train_df[FEATURES], train_df["y"]
     if sample_weight is not None:
@@ -1427,8 +1514,92 @@ if use_model:
         lgb_model.fit(X, y)
     else:
         lgb_model.fit(X, y)
+elif need_classifier:
+    print("[WARN] Only one label class; classifier fallback to constant probability.")
+
+if need_ranker:
+    if "race_id" not in train_df.columns:
+        print("[WARN] Ranker skipped: missing race_id column.")
+    else:
+        rank_df = train_df.copy()
+        rank_df["race_id"] = rank_df["race_id"].fillna("").astype(str).str.strip()
+        rank_df = rank_df[rank_df["race_id"] != ""].copy()
+        rank_source = rank_df["Rank"] if "Rank" in rank_df.columns else pd.Series(np.nan, index=rank_df.index)
+        rank_df["y_rel"] = build_ranker_relevance(
+            rank_source,
+            mode=PARAMS.get("ranker_label_mode", "top5_gain"),
+        )
+        rank_df = rank_df.dropna(subset=["y_rel"]).copy()
+        if rank_df.empty:
+            print("[WARN] Ranker skipped: no valid relevance labels.")
+        else:
+            race_sizes = rank_df.groupby("race_id").size()
+            valid_races = race_sizes[race_sizes >= 2].index
+            rank_df = rank_df[rank_df["race_id"].isin(valid_races)].copy()
+            race_count = int(rank_df["race_id"].nunique())
+            if race_count < 2:
+                print("[WARN] Ranker skipped: not enough race groups for train/valid split.")
+            else:
+                try:
+                    gss_rank = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+                    train_idx, valid_idx = next(
+                        gss_rank.split(rank_df, rank_df["y_rel"], rank_df["race_id"])
+                    )
+                except Exception as exc:
+                    print(f"[WARN] Ranker split failed: {exc}")
+                    train_idx, valid_idx = None, None
+
+                if train_idx is not None and valid_idx is not None:
+                    rank_train = rank_df.iloc[train_idx].copy().sort_values("race_id")
+                    rank_valid = rank_df.iloc[valid_idx].copy().sort_values("race_id")
+
+                    group_train = rank_train.groupby("race_id").size().tolist()
+                    group_valid = rank_valid.groupby("race_id").size().tolist()
+                    if not group_train or not group_valid:
+                        print("[WARN] Ranker skipped: empty train/valid groups after split.")
+                    else:
+                        ranker_model = LGBMRanker(
+                            objective="lambdarank",
+                            metric="ndcg",
+                            n_estimators=max(50, safe_param_int(PARAMS, "ranker_n_estimators", 300)),
+                            learning_rate=clamp(
+                                safe_param_float(PARAMS, "ranker_learning_rate", 0.05),
+                                0.001,
+                                0.5,
+                            ),
+                            num_leaves=max(8, safe_param_int(PARAMS, "ranker_num_leaves", 31)),
+                            min_child_samples=max(
+                                1,
+                                safe_param_int(PARAMS, "ranker_min_child_samples", 20),
+                            ),
+                            subsample=clamp(
+                                safe_param_float(PARAMS, "ranker_subsample", 0.8),
+                                0.3,
+                                1.0,
+                            ),
+                            colsample_bytree=clamp(
+                                safe_param_float(PARAMS, "ranker_colsample_bytree", 0.8),
+                                0.3,
+                                1.0,
+                            ),
+                            random_state=42,
+                            n_jobs=-1,
+                        )
+                        ranker_model.fit(
+                            rank_train[FEATURES],
+                            rank_train["y_rel"],
+                            group=group_train,
+                            eval_set=[(rank_valid[FEATURES], rank_valid["y_rel"])],
+                            eval_group=[group_valid],
+                            eval_at=[1, 3, 5],
+                        )
+                        print(
+                            "[INFO] Ranker trained: "
+                            f"train_races={len(group_train)} valid_races={len(group_valid)} "
+                            f"train_rows={len(rank_train)} valid_rows={len(rank_valid)}"
+                        )
 else:
-    print("[WARN] Only one label class; fallback to constant probability.")
+    print("[INFO] Ranker disabled by model_mode.")
 
 # ====================================================
 # 8. Predict Runners
@@ -1447,28 +1618,68 @@ if all_nan_cols:
     for col in all_nan_cols:
         profiles[col] = 0.0
 
-if use_model:
+if use_classifier_model and pipe is not None:
     proba_lr = pipe.predict_proba(profiles[FEATURES])[:, 1]
+    profiles["Top3Prob_raw_lr"] = proba_lr
 
     if lgb_model is not None:
         raw_lgb = lgb_model.predict_proba(profiles[FEATURES])[:, 1]
+        profiles["Top3Prob_raw_lgb"] = raw_lgb
 
-        # ① 先把 LGBM 的概率围绕 0.5 压缩一下，避免 0.9/0.97 这种极端值主宰一切
-        lgb_beta = 0.5  # 可以先用 0.5，之后根据手感改到 0.3~0.7
+        # 命中率阶段：按配置控制 LGBM 概率压缩强度
+        lgb_beta = clamp(safe_param_float(PARAMS, "lgb_squash_beta", 0.5), 0.0, 1.0)
         proba_lgb = shrink_proba_around_half(raw_lgb, beta=lgb_beta)
 
-        # ② 再做 0.5 融合
-        alpha = 0.3
-        profiles["Top3Prob_lr"] = proba_lr
-        profiles["Top3Prob_lgbm"] = proba_lgb
+        # 命中率阶段：最终排序概率只看 Top3Prob_model
+        alpha = clamp(safe_param_float(PARAMS, "blend_alpha", 0.3), 0.0, 1.0)
         profiles["Top3Prob_model"] = alpha * proba_lgb + (1.0 - alpha) * proba_lr
     else:
-        profiles["Top3Prob_lr"] = proba_lr
         profiles["Top3Prob_model"] = proba_lr
 else:
-    profiles["Top3Prob_model"] = base_prob
+    fallback = np.full(len(profiles), base_prob, dtype=float)
+    profiles["Top3Prob_raw_lr"] = fallback
+    profiles["Top3Prob_model"] = fallback
 
-pred_out = profiles.sort_values("Top3Prob_model", ascending=False)
+profiles["model_mode"] = model_mode
+race_keys_pred = build_race_key_series(profiles).fillna("").astype(str).replace("", "__single_race__")
+
+if ranker_model is not None:
+    raw_rank_score = ranker_model.predict(profiles[FEATURES])
+    profiles["rank_score_raw"] = raw_rank_score
+    rank_score_norm = normalize_rank_score_by_race(raw_rank_score, race_keys_pred)
+    profiles["rank_score_norm"] = rank_score_norm
+else:
+    profiles["rank_score_raw"] = np.nan
+    profiles["rank_score_norm"] = np.nan
+    rank_score_norm = None
+
+if model_mode == "ranker":
+    if rank_score_norm is not None:
+        profiles["rank_score"] = rank_score_norm
+    else:
+        print("[WARN] Ranker mode fallback: ranker model unavailable, using Top3Prob_model.")
+        profiles["rank_score"] = pd.to_numeric(profiles["Top3Prob_model"], errors="coerce").fillna(base_prob)
+    profiles["score_is_probability"] = 0
+elif model_mode == "hybrid":
+    if rank_score_norm is not None:
+        ranker_alpha = clamp(safe_param_float(PARAMS, "ranker_blend_alpha", 0.6), 0.0, 1.0)
+        base_score = pd.to_numeric(profiles["Top3Prob_model"], errors="coerce").fillna(base_prob).to_numpy(dtype=float)
+        profiles["rank_score"] = ranker_alpha * rank_score_norm + (1.0 - ranker_alpha) * base_score
+        profiles["score_is_probability"] = 0
+    else:
+        print("[WARN] Hybrid mode fallback: ranker model unavailable, using Top3Prob_model.")
+        profiles["rank_score"] = pd.to_numeric(profiles["Top3Prob_model"], errors="coerce").fillna(base_prob)
+        profiles["score_is_probability"] = 1
+else:
+    profiles["rank_score"] = pd.to_numeric(profiles["Top3Prob_model"], errors="coerce").fillna(base_prob)
+    profiles["score_is_probability"] = 1
+
+# backward-compatible aliases for existing scripts/UI
+profiles["Top3Prob_lr"] = profiles["Top3Prob_raw_lr"]
+if "Top3Prob_raw_lgb" in profiles.columns:
+    profiles["Top3Prob_lgbm"] = profiles["Top3Prob_raw_lgb"]
+
+pred_out = profiles.sort_values("rank_score", ascending=False)
 
 conf_state = load_state_from_config(_config)
 conf = compute_confidence_from_pred(pred_out, conf_state)

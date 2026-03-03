@@ -24,7 +24,18 @@
     "record_weight_match": 0.15,
     "recent_race_count": 7,
     "top_score_count": 2,
-    "top3_scale": 2.6
+    "top3_scale": 2.6,
+    "model_mode": "hybrid",
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5,
+    "ranker_label_mode": "top5_gain",
+    "ranker_blend_alpha": 0.6,
+    "ranker_n_estimators": 300,
+    "ranker_learning_rate": 0.05,
+    "ranker_num_leaves": 31,
+    "ranker_min_child_samples": 20,
+    "ranker_subsample": 0.8,
+    "ranker_colsample_bytree": 0.8
   },
   "strategies": {
     "balanced": {

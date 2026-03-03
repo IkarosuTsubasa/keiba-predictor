@@ -1,6 +1,4 @@
 import csv
-import json
-import math
 import os
 import subprocess
 import sys
@@ -15,13 +13,19 @@ from surface_scope import (
 
 import pandas as pd
 
+from predictor_metrics import (
+    compute_brier_score,
+    compute_hit_at_k,
+    compute_mrr_top3,
+    compute_top3_hits_at_k,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 DATA_DIR = None
 PRED_CONFIG_PATH = None
 PRED_RESULTS_PATH = None
-ODDS_PATH = ROOT_DIR / "odds.csv"
 
 
 def init_scope():
@@ -109,10 +113,53 @@ def normalize_name(value):
 
 
 def pick_score_column(columns):
-    for key in ("Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
+    for key in ("rank_score", "Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
         if key in columns:
             return key
     return ""
+
+
+def infer_score_is_probability(df, score_key):
+    if "score_is_probability" in df.columns:
+        series = df["score_is_probability"].dropna()
+        if not series.empty:
+            text = str(series.iloc[0]).strip().lower()
+            return text in {"1", "true", "t", "yes", "y"}
+    return score_key in {"Top3Prob_model", "Top3Prob_est", "Top3Prob"}
+
+
+def build_eval_frames(run_id, pred_df, horse_col, score_col, actual_names_norm):
+    race_id = str(run_id or "").strip() or "__single_race__"
+    actual_rank = {}
+    for idx, name in enumerate(actual_names_norm, start=1):
+        if name and name not in actual_rank:
+            actual_rank[name] = idx
+
+    work = pred_df[[horse_col, score_col]].copy()
+    work["horse_key"] = work[horse_col].apply(normalize_name)
+    work = work[work["horse_key"] != ""].copy()
+    work["Top3Prob_model"] = pd.to_numeric(work[score_col], errors="coerce")
+    work = work[work["Top3Prob_model"].notna()].copy()
+    work["rank"] = work["horse_key"].map(actual_rank).fillna(99).astype(int)
+
+    pred_eval = work[["horse_key", "Top3Prob_model"]].copy()
+    pred_eval["race_id"] = race_id
+    result_eval = work[["horse_key", "rank"]].copy()
+    result_eval["race_id"] = race_id
+    return pred_eval, result_eval
+
+
+def get_eval_window_races():
+    raw = (
+        os.environ.get("PRED_EVAL_WINDOW_RACES", "").strip()
+        or os.environ.get("PRED_OPT_WINDOW", "").strip()
+        or "50"
+    )
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 50
+    return max(1, value)
 
 
 def prompt_horse_name(label):
@@ -128,105 +175,6 @@ def prompt_actual_top3():
     name2 = prompt_horse_name("Enter 2nd place horse name: ")
     name3 = prompt_horse_name("Enter 3rd place horse name: ")
     return [name1, name2, name3]
-
-
-def safe_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def load_odds_map(odds_path):
-    if not odds_path or not Path(odds_path).exists():
-        return {}
-    df = pd.read_csv(odds_path, encoding="utf-8-sig")
-    if "name" not in df.columns or "odds" not in df.columns:
-        return {}
-    df["name_key"] = df["name"].apply(normalize_name)
-    odds_map = {}
-    for _, row in df.iterrows():
-        val = safe_float(row.get("odds"))
-        if val > 0:
-            odds_map[str(row.get("name_key"))] = val
-    return odds_map
-
-
-def ndcg_at3(pred_names, actual_order):
-    if not actual_order or len(actual_order) < 3:
-        return 0.0
-    rel_map = {
-        actual_order[0]: 3,
-        actual_order[1]: 2,
-        actual_order[2]: 1,
-    }
-    dcg = 0.0
-    for idx, name in enumerate(pred_names[:3]):
-        rel = rel_map.get(name, 0)
-        if rel <= 0:
-            continue
-        dcg += (2 ** rel - 1) / math.log2(idx + 2)
-    idcg = 0.0
-    for idx, rel in enumerate([3, 2, 1]):
-        idcg += (2 ** rel - 1) / math.log2(idx + 2)
-    return dcg / idcg if idcg > 0 else 0.0
-
-
-def ev_score_from_odds(pred_items, odds_map):
-    ev_values = []
-    for name, prob in pred_items:
-        odds = odds_map.get(normalize_name(name), 0)
-        if odds > 0:
-            ev_values.append(float(prob) * float(odds) - 1.0)
-    if not ev_values:
-        return 0.0
-    ev_mean = sum(ev_values) / len(ev_values)
-    return (math.tanh(ev_mean) + 1.0) / 2.0
-
-
-def clamp(value, lo, hi):
-    return max(lo, min(hi, value))
-
-
-def load_predictor_state():
-    try:
-        cfg = json.loads(PRED_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"rank_ema": 0.5, "ev_ema": 0.5, "risk_score": 0.5}
-    state = cfg.get("state", {})
-    return {
-        "rank_ema": clamp(float(state.get("rank_ema", 0.5)), 0.0, 1.0),
-        "ev_ema": clamp(float(state.get("ev_ema", 0.5)), 0.0, 1.0),
-        "risk_score": clamp(float(state.get("risk_score", 0.5)), 0.0, 1.0),
-    }
-
-
-def compute_confidence(pred_items, state):
-    rank_ema = state.get("rank_ema", 0.5)
-    ev_ema = state.get("ev_ema", 0.5)
-    risk_score = state.get("risk_score", 0.5)
-    validity = clamp(0.6 * rank_ema + 0.4 * ev_ema, 0.0, 1.0)
-    stability = clamp(risk_score, 0.0, 1.0)
-    consistency = 0.0
-    if pred_items:
-        probs = [safe_float(p) for _, p in pred_items]
-        if len(probs) >= 3:
-            gap = probs[0] - probs[2]
-        elif len(probs) >= 2:
-            gap = probs[0] - probs[1]
-        else:
-            gap = probs[0]
-        consistency = clamp(gap / 0.15, 0.0, 1.0)
-    confidence = math.sqrt(stability * validity) * consistency
-    return {
-        "confidence_score": round(clamp(confidence, 0.0, 1.0), 4),
-        "stability_score": round(stability, 4),
-        "validity_score": round(validity, 4),
-        "consistency_score": round(consistency, 4),
-        "rank_ema": round(rank_ema, 4),
-        "ev_ema": round(ev_ema, 4),
-        "risk_score": round(risk_score, 4),
-    }
 
 
 def main():
@@ -255,16 +203,12 @@ def main():
             print("Predictions file not found for this run.")
         sys.exit(1)
 
-    odds_path = run.get("odds_path") or str(DATA_DIR / f"odds_{run_id}.csv")
-    if not Path(odds_path).exists():
-        odds_path = str(ODDS_PATH)
-    odds_map = load_odds_map(odds_path)
-
     df = pd.read_csv(pred_file, encoding="utf-8-sig")
     score_key = pick_score_column(df.columns)
     if "HorseName" not in df.columns or not score_key:
-        print("Predictions file missing columns: HorseName / Top3Prob")
+        print("Predictions file missing columns: HorseName / score")
         sys.exit(1)
+    score_is_probability = infer_score_is_probability(df, score_key)
 
     pred_name_set = {
         normalize_name(n)
@@ -273,7 +217,6 @@ def main():
     }
     pred_top = df.sort_values(score_key, ascending=False).head(3)
     pred_names_raw = pred_top["HorseName"].tolist()
-    pred_items = list(zip(pred_top["HorseName"].tolist(), pred_top[score_key].tolist()))
     pred_names = [normalize_name(n) for n in pred_names_raw]
     pred_top5 = df.sort_values(score_key, ascending=False).head(5)
     pred_top5_names_raw = pred_top5["HorseName"].tolist()
@@ -301,12 +244,19 @@ def main():
     top1_in_top3 = 1 if pred_names and pred_names[0] in actual_names else 0
     top3_exact = 1 if set(pred_names) == set(actual_names) else 0
     score = hit_count + top1_hit
-    rank_score = ndcg_at3(pred_names, actual_names)
-    hit_rate = hit_count / 3.0
-    ev_score = ev_score_from_odds(pred_items, odds_map)
-    score_total = 0.4 * rank_score + 0.4 * ev_score + 0.2 * hit_rate
-    conf_state = load_predictor_state()
-    conf = compute_confidence(pred_items, conf_state)
+    eval_window_races = get_eval_window_races()
+    pred_eval_df, result_eval_df = build_eval_frames(
+        run_id=run_id,
+        pred_df=df,
+        horse_col="HorseName",
+        score_col=score_key,
+        actual_names_norm=actual_names,
+    )
+    hit_at_5 = compute_hit_at_k(pred_eval_df, result_eval_df, k=5)
+    top3_hits_at_5 = compute_top3_hits_at_k(pred_eval_df, result_eval_df, k=5)
+    mrr_top3 = compute_mrr_top3(pred_eval_df, result_eval_df, k=10)
+    brier = compute_brier_score(pred_eval_df, result_eval_df) if score_is_probability else None
+    sample_races = int(pred_eval_df["race_id"].nunique()) if not pred_eval_df.empty else 0
 
     row = {
         "run_id": run_id,
@@ -324,17 +274,23 @@ def main():
         "top1_in_top3": top1_in_top3,
         "top3_exact": top3_exact,
         "score": score,
-        "rank_score": round(rank_score, 4),
-        "ev_score": round(ev_score, 4),
-        "hit_rate": round(hit_rate, 4),
-        "score_total": round(score_total, 4),
-        "confidence_score": conf["confidence_score"],
-        "stability_score": conf["stability_score"],
-        "validity_score": conf["validity_score"],
-        "consistency_score": conf["consistency_score"],
-        "rank_ema": conf["rank_ema"],
-        "ev_ema": conf["ev_ema"],
-        "risk_score": conf["risk_score"],
+        "rank_score": "",
+        "ev_score": "",
+        "hit_rate": "",
+        "score_total": "",
+        "sample_races": sample_races,
+        "eval_window_races": eval_window_races,
+        "hit_at_5": round(hit_at_5, 4),
+        "top3_hits_at_5": round(top3_hits_at_5, 4),
+        "mrr_top3": round(mrr_top3, 4),
+        "brier": round(brier, 6) if (brier is not None and pd.notna(brier)) else "",
+        "confidence_score": "",
+        "stability_score": "",
+        "validity_score": "",
+        "consistency_score": "",
+        "rank_ema": "",
+        "ev_ema": "",
+        "risk_score": "",
     }
     replace_rows_for_run(PRED_RESULTS_PATH, list(row.keys()), run_id, row)
     print(f"Recorded predictor result for {run_id}")
