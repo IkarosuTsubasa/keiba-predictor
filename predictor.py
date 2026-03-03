@@ -86,12 +86,21 @@ DEFAULT_PARAMS = {
     "record_weight_match": 0.3,
     "recent_race_count": 5,
     "top_score_count": 3,
-    "top3_scale": 3.0
+    "top3_scale": 3.0,
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5,
 }
 
 
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
+
+
+def safe_param_float(params, key, default):
+    try:
+        return float(params.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def shrink_proba_around_half(p: np.ndarray, beta: float = 0.5) -> np.ndarray:
@@ -1449,24 +1458,30 @@ if all_nan_cols:
 
 if use_model:
     proba_lr = pipe.predict_proba(profiles[FEATURES])[:, 1]
+    profiles["Top3Prob_raw_lr"] = proba_lr
 
     if lgb_model is not None:
         raw_lgb = lgb_model.predict_proba(profiles[FEATURES])[:, 1]
+        profiles["Top3Prob_raw_lgb"] = raw_lgb
 
-        # ① 先把 LGBM 的概率围绕 0.5 压缩一下，避免 0.9/0.97 这种极端值主宰一切
-        lgb_beta = 0.5  # 可以先用 0.5，之后根据手感改到 0.3~0.7
+        # 命中率阶段：按配置控制 LGBM 概率压缩强度
+        lgb_beta = clamp(safe_param_float(PARAMS, "lgb_squash_beta", 0.5), 0.0, 1.0)
         proba_lgb = shrink_proba_around_half(raw_lgb, beta=lgb_beta)
 
-        # ② 再做 0.5 融合
-        alpha = 0.3
-        profiles["Top3Prob_lr"] = proba_lr
-        profiles["Top3Prob_lgbm"] = proba_lgb
+        # 命中率阶段：最终排序概率只看 Top3Prob_model
+        alpha = clamp(safe_param_float(PARAMS, "blend_alpha", 0.3), 0.0, 1.0)
         profiles["Top3Prob_model"] = alpha * proba_lgb + (1.0 - alpha) * proba_lr
     else:
-        profiles["Top3Prob_lr"] = proba_lr
         profiles["Top3Prob_model"] = proba_lr
 else:
-    profiles["Top3Prob_model"] = base_prob
+    fallback = np.full(len(profiles), base_prob, dtype=float)
+    profiles["Top3Prob_raw_lr"] = fallback
+    profiles["Top3Prob_model"] = fallback
+
+# backward-compatible aliases for existing scripts/UI
+profiles["Top3Prob_lr"] = profiles["Top3Prob_raw_lr"]
+if "Top3Prob_raw_lgb" in profiles.columns:
+    profiles["Top3Prob_lgbm"] = profiles["Top3Prob_raw_lgb"]
 
 pred_out = profiles.sort_values("Top3Prob_model", ascending=False)
 

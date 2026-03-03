@@ -15,6 +15,13 @@ from surface_scope import (
 
 import pandas as pd
 
+from predictor_metrics import (
+    compute_brier_score,
+    compute_hit_at_k,
+    compute_mrr_top3,
+    compute_top3_hits_at_k,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -113,6 +120,27 @@ def pick_score_column(columns):
         if key in columns:
             return key
     return ""
+
+
+def build_eval_frames(run_id, pred_df, horse_col, score_col, actual_names_norm):
+    race_id = str(run_id or "").strip() or "__single_race__"
+    actual_rank = {}
+    for idx, name in enumerate(actual_names_norm, start=1):
+        if name and name not in actual_rank:
+            actual_rank[name] = idx
+
+    work = pred_df[[horse_col, score_col]].copy()
+    work["horse_key"] = work[horse_col].apply(normalize_name)
+    work = work[work["horse_key"] != ""].copy()
+    work["Top3Prob_model"] = pd.to_numeric(work[score_col], errors="coerce")
+    work = work[work["Top3Prob_model"].notna()].copy()
+    work["rank"] = work["horse_key"].map(actual_rank).fillna(99).astype(int)
+
+    pred_eval = work[["horse_key", "Top3Prob_model"]].copy()
+    pred_eval["race_id"] = race_id
+    result_eval = work[["horse_key", "rank"]].copy()
+    result_eval["race_id"] = race_id
+    return pred_eval, result_eval
 
 
 def prompt_horse_name(label):
@@ -305,6 +333,18 @@ def main():
     hit_rate = hit_count / 3.0
     ev_score = ev_score_from_odds(pred_items, odds_map)
     score_total = 0.4 * rank_score + 0.4 * ev_score + 0.2 * hit_rate
+    pred_eval_df, result_eval_df = build_eval_frames(
+        run_id=run_id,
+        pred_df=df,
+        horse_col="HorseName",
+        score_col=score_key,
+        actual_names_norm=actual_names,
+    )
+    hit_at_5 = compute_hit_at_k(pred_eval_df, result_eval_df, k=5)
+    top3_hits_at_5 = compute_top3_hits_at_k(pred_eval_df, result_eval_df, k=5)
+    mrr_top3 = compute_mrr_top3(pred_eval_df, result_eval_df, k=10)
+    brier = compute_brier_score(pred_eval_df, result_eval_df)
+    sample_races = int(pred_eval_df["race_id"].nunique()) if not pred_eval_df.empty else 0
     conf_state = load_predictor_state()
     conf = compute_confidence(pred_items, conf_state)
 
@@ -328,6 +368,11 @@ def main():
         "ev_score": round(ev_score, 4),
         "hit_rate": round(hit_rate, 4),
         "score_total": round(score_total, 4),
+        "sample_races": sample_races,
+        "hit_at_5": round(hit_at_5, 4),
+        "top3_hits_at_5": round(top3_hits_at_5, 4),
+        "mrr_top3": round(mrr_top3, 4),
+        "brier": round(brier, 6),
         "confidence_score": conf["confidence_score"],
         "stability_score": conf["stability_score"],
         "validity_score": conf["validity_score"],

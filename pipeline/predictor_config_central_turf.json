@@ -24,7 +24,9 @@
     "record_weight_match": 0.2,
     "recent_race_count": 5,
     "top_score_count": 2,
-    "top3_scale": 2.4
+    "top3_scale": 2.4,
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5
   },
   "strategies": {
     "balanced": {
