@@ -113,10 +113,19 @@ def normalize_name(value):
 
 
 def pick_score_column(columns):
-    for key in ("Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
+    for key in ("rank_score", "Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
         if key in columns:
             return key
     return ""
+
+
+def infer_score_is_probability(df, score_key):
+    if "score_is_probability" in df.columns:
+        series = df["score_is_probability"].dropna()
+        if not series.empty:
+            text = str(series.iloc[0]).strip().lower()
+            return text in {"1", "true", "t", "yes", "y"}
+    return score_key in {"Top3Prob_model", "Top3Prob_est", "Top3Prob"}
 
 
 def build_eval_frames(run_id, pred_df, horse_col, score_col, actual_names_norm):
@@ -197,8 +206,9 @@ def main():
     df = pd.read_csv(pred_file, encoding="utf-8-sig")
     score_key = pick_score_column(df.columns)
     if "HorseName" not in df.columns or not score_key:
-        print("Predictions file missing columns: HorseName / Top3Prob")
+        print("Predictions file missing columns: HorseName / score")
         sys.exit(1)
+    score_is_probability = infer_score_is_probability(df, score_key)
 
     pred_name_set = {
         normalize_name(n)
@@ -245,7 +255,7 @@ def main():
     hit_at_5 = compute_hit_at_k(pred_eval_df, result_eval_df, k=5)
     top3_hits_at_5 = compute_top3_hits_at_k(pred_eval_df, result_eval_df, k=5)
     mrr_top3 = compute_mrr_top3(pred_eval_df, result_eval_df, k=10)
-    brier = compute_brier_score(pred_eval_df, result_eval_df)
+    brier = compute_brier_score(pred_eval_df, result_eval_df) if score_is_probability else None
     sample_races = int(pred_eval_df["race_id"].nunique()) if not pred_eval_df.empty else 0
 
     row = {
@@ -273,7 +283,7 @@ def main():
         "hit_at_5": round(hit_at_5, 4),
         "top3_hits_at_5": round(top3_hits_at_5, 4),
         "mrr_top3": round(mrr_top3, 4),
-        "brier": round(brier, 6),
+        "brier": round(brier, 6) if (brier is not None and pd.notna(brier)) else "",
         "confidence_score": "",
         "stability_score": "",
         "validity_score": "",

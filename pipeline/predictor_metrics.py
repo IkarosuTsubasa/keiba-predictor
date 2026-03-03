@@ -20,11 +20,17 @@ _PRED_HORSE_COLS = (
     "\u99ac\u540d",  # 馬名
 )
 _PRED_SCORE_COLS = (
+    "rank_score",
     "Top3Prob_model",
     "Top3Prob_est",
     "Top3Prob",
     "agg_score",
     "score",
+)
+_PRED_PROB_SCORE_COLS = (
+    "Top3Prob_model",
+    "Top3Prob_est",
+    "Top3Prob",
 )
 
 _RESULT_RACE_COLS = (
@@ -99,7 +105,7 @@ def _to_bool_series(series: pd.Series) -> pd.Series:
 
 def _prepare_pred(pred_df: pd.DataFrame) -> pd.DataFrame:
     if pred_df is None or pred_df.empty:
-        return pd.DataFrame(columns=["_race_id", "_horse_key", "_score"])
+        return pd.DataFrame(columns=["_race_id", "_horse_key", "_score", "_score_is_probability"])
 
     race_col = _pick_first(pred_df.columns, _PRED_RACE_COLS)
     horse_col = _pick_first(pred_df.columns, _PRED_HORSE_COLS)
@@ -115,6 +121,10 @@ def _prepare_pred(pred_df: pd.DataFrame) -> pd.DataFrame:
     out.loc[out["_race_id"] == "", "_race_id"] = _SINGLE_RACE_ID
     out["_horse_key"] = _normalize_horse_key(pred_df[horse_col])
     out["_score"] = pd.to_numeric(pred_df[score_col], errors="coerce")
+    if "score_is_probability" in pred_df.columns:
+        out["_score_is_probability"] = _to_bool_series(pred_df["score_is_probability"])
+    else:
+        out["_score_is_probability"] = bool(score_col in _PRED_PROB_SCORE_COLS)
     out = out[(out["_horse_key"] != "") & out["_score"].notna()].copy()
     out = out.sort_values(["_race_id", "_score"], ascending=[True, False])
     out = out.drop_duplicates(subset=["_race_id", "_horse_key"], keep="first")
@@ -257,6 +267,10 @@ def compute_brier_score(pred_df, result_df) -> float:
     if not races:
         return 0.0
     left = pred[pred["_race_id"].isin(races)].copy()
+    if left.empty:
+        return 0.0
+    if "_score_is_probability" in left.columns and not bool(left["_score_is_probability"].all()):
+        return float("nan")
     right = result[result["_race_id"].isin(races)][["_race_id", "_horse_key", "_is_top3"]].copy()
     merged = left.merge(right, on=["_race_id", "_horse_key"], how="left")
     if merged.empty:
@@ -264,5 +278,5 @@ def compute_brier_score(pred_df, result_df) -> float:
     y = merged["_is_top3"].fillna(False).astype(float)
     brier = ((merged["_score"] - y) ** 2).mean()
     if pd.isna(brier):
-        return 0.0
+        return float("nan")
     return float(brier)

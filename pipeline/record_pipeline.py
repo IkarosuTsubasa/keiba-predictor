@@ -525,7 +525,7 @@ def load_trifecta_odds_map(path):
 
 
 def pick_score_column(columns):
-    for key in ("Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
+    for key in ("rank_score", "Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
         if key in columns:
             return key
     return ""
