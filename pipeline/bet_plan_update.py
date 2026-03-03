@@ -1539,7 +1539,7 @@ def main():
         result = generate_bet_plan_v2(
             pred_df=pred_df,
             odds=odds_payload,
-            budget_yen=budget_yen,
+            bankroll_yen=budget_yen,
             scope_key=SCOPE_KEY,
             config=bet_engine_v2_cfg,
         )
