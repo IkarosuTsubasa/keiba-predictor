@@ -151,6 +151,12 @@ def build_grid(step):
     return sorted(set(values))
 
 
+def select_eval_window(rows, eval_window_races):
+    if eval_window_races <= 0:
+        return list(rows)
+    return list(rows[-eval_window_races:])
+
+
 def pick_first(columns, candidates):
     col_set = set(columns)
     for key in candidates:
@@ -383,21 +389,26 @@ def main():
         pause_exit()
         return
 
-    window = int(safe_float(os.environ.get("PRED_OPT_WINDOW", 50), 50))
-    window = max(1, window)
+    eval_window_races = int(
+        safe_float(
+            os.environ.get("PRED_EVAL_WINDOW_RACES", os.environ.get("PRED_OPT_WINDOW", 50)),
+            50,
+        )
+    )
+    eval_window_races = max(1, eval_window_races)
     min_samples = int(safe_float(os.environ.get("PRED_OPT_MIN_SAMPLES", 30), 30))
     min_samples = max(1, min_samples)
     min_improve = safe_float(os.environ.get("PRED_OPT_MIN_IMPROVE", 0.005), 0.005)
     alpha_step = safe_float(os.environ.get("PRED_OPT_BLEND_STEP", 0.05), 0.05)
     beta_step = safe_float(os.environ.get("PRED_OPT_LGB_SQUASH_STEP", 0.05), 0.05)
 
-    recent_rows = results[-window:]
+    recent_rows = select_eval_window(results, eval_window_races)
     run_map = build_run_map()
     dataset = build_eval_dataset(recent_rows, run_map)
     sample_races = len(dataset)
 
     print(
-        f"Evaluation window: last {window} runs "
+        f"Evaluation window: last {eval_window_races} runs "
         f"(usable samples={sample_races}, min_required={min_samples})"
     )
     if sample_races < min_samples:
@@ -461,7 +472,7 @@ def main():
         config["version"] = int(config.get("version", 1)) + 1
         state = dict(config.get("state", {}))
         state["predictor_opt_updated_at"] = datetime.now().isoformat(timespec="seconds")
-        state["predictor_opt_window"] = window
+        state["predictor_opt_window"] = eval_window_races
         state["predictor_opt_samples"] = sample_races
         config["state"] = state
         save_config(config)
@@ -494,7 +505,7 @@ def main():
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "action": action,
         "reason": reason,
-        "window": window,
+        "window": eval_window_races,
         "sample_races": sample_races,
         "min_samples": min_samples,
         "min_improve": round(min_improve, 6),

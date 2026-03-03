@@ -236,6 +236,7 @@ CSV_SPECS = {
         "hit_rate",
         "score_total",
         "sample_races",
+        "eval_window_races",
         "hit_at_5",
         "top3_hits_at_5",
         "mrr_top3",
