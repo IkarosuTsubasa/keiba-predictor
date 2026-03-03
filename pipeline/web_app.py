@@ -689,7 +689,7 @@ def _predict_col_desc(col):
         "consistency_score": "予測整合性スコア",
         "rank_ema": "順位実績のEMA指標",
         "ev_ema": "期待値のEMA指標",
-        "risk_score": "リスク評価スコア",
+        "risk_score": "安定度スコア（高いほど安定）",
     }
     if col in desc_map:
         return desc_map[col]
@@ -739,15 +739,15 @@ def _select_prediction_score_key(fieldnames):
 def _build_curated_predictions_csv(predictions_csv_text, top_n=None):
     text = str(predictions_csv_text or "").replace("\ufeff", "").strip()
     if not text:
-        return "", [], 0
+        return "", [], 0, {}
     try:
         reader = csv.DictReader(io.StringIO(text))
         rows = list(reader)
         fieldnames = list(reader.fieldnames or [])
     except Exception:
-        return "", [], 0
+        return "", [], 0, {}
     if not rows or not fieldnames:
-        return "", [], 0
+        return "", [], 0, {}
 
     score_key = _select_prediction_score_key(fieldnames)
     if score_key:
@@ -757,31 +757,34 @@ def _build_curated_predictions_csv(predictions_csv_text, top_n=None):
         rows = rows[:top_n]
 
     preferred_cols = [
-        "horse_no",
         "HorseName",
         "Top3Prob_model",
         "Top3Prob_lgbm",
         "Top3Prob_lr",
         "jscore_current",
-        "agg_score",
-        "confidence_score",
-        "risk_score",
-        "rank_ema",
-        "ev_ema",
-        "best_TimeIndexEff",
-        "avg_TimeIndexEff",
-        "dist_close",
     ]
     cols = [c for c in preferred_cols if c in fieldnames]
     if not cols:
-        cols = fieldnames[:10]
+        cols = fieldnames[:5]
+
+    race_metric_keys = ["confidence_score", "risk_score", "rank_ema", "ev_ema"]
+    race_metrics = {}
+    for key in race_metric_keys:
+        val = ""
+        for row in rows:
+            text = str(row.get(key, "")).strip()
+            if text:
+                val = text
+                break
+        if val:
+            race_metrics[key] = val
 
     sio = io.StringIO()
     writer = csv.DictWriter(sio, fieldnames=cols, lineterminator="\n")
     writer.writeheader()
     for row in rows:
         writer.writerow({c: row.get(c, "") for c in cols})
-    return sio.getvalue().strip(), cols, len(rows)
+    return sio.getvalue().strip(), cols, len(rows), race_metrics
 
 
 def build_mark_note_text(rows, predictions_filename="", predictions_csv_text=""):
@@ -807,17 +810,47 @@ def build_mark_note_text(rows, predictions_filename="", predictions_csv_text="")
         lines.append(f"- {mark} {horse_no}番 {horse_name}")
         lines.append(f"  予想順位: {pred_rank} / 買い目: {bet_types}")
 
-    csv_text, selected_cols, _ = _build_curated_predictions_csv(predictions_csv_text, top_n=None)
+    csv_text, selected_cols, _, race_metrics = _build_curated_predictions_csv(predictions_csv_text, top_n=None)
     if csv_text:
         if lines:
             lines.append("")
         col_guide = _build_predictions_column_guide(selected_cols)
-        if col_guide:
-            lines.append("↓↓↓予測データ詳細（CSV）↓↓↓")
+        conf_text = str(race_metrics.get("confidence_score", "")).strip()
+        risk_text = str(race_metrics.get("risk_score", "")).strip()
+        if conf_text and risk_text:
+            conf = _to_float_or_zero(conf_text)
+            risk = _to_float_or_zero(risk_text)
+            overall = 0.65 * conf + 0.35 * risk
+            if overall >= 0.90:
+                grade = "SSS"
+            elif overall >= 0.84:
+                grade = "SS"
+            elif overall >= 0.78:
+                grade = "S"
+            elif overall >= 0.72:
+                grade = "A"
+            elif overall >= 0.64:
+                grade = "B"
+            else:
+                grade = "C"
+            lines.append(f"予測データ総合評価：{grade}")
             lines.append("")
+        lines.append("↓↓↓予測データ詳細（CSV）↓↓↓")
+        lines.append("")
+        if col_guide:
             for item in col_guide:
                 lines.append(item)
                 lines.append("")
+        metric_labels = [
+            ("confidence_score", "予測信頼度スコア"),
+            ("risk_score", "安定度スコア"),
+            ("rank_ema", "順位実績のEMA指標"),
+            ("ev_ema", "期待値のEMA指標"),
+        ]
+        for key, label in metric_labels:
+            val = race_metrics.get(key, "-")
+            lines.append(f"{label}：{val}")
+            lines.append("")
         lines.append("```csv")
         lines.append(csv_text.replace("```", "'''"))
         lines.append("```")
@@ -999,7 +1032,18 @@ def view_run(
             error_text="Run ID / Race ID not found.",
             selected_run_id=run_id,
         )
-    resolved_run_id = run_row.get("run_id", run_id)
+    resolved_run_id = str(run_row.get("run_id", "")).strip()
+    if not resolved_run_id:
+        resolved_run_id = infer_run_id_from_row(run_row)
+        if resolved_run_id:
+            update_run_row_fields(scope_key, run_row, {"run_id": resolved_run_id})
+            run_row["run_id"] = resolved_run_id
+    if not resolved_run_id:
+        return render_page(
+            scope_key,
+            error_text="Run exists but run_id is missing; cannot resolve artifacts.",
+            selected_run_id=run_id,
+        )
     return render_page(
         scope_key,
         selected_run_id=resolved_run_id,

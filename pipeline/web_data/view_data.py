@@ -148,6 +148,18 @@ def _risk_signal_label(gate_status, has_bet_types, pred_rank, support_strength):
     return "\u901a\u5e38"
 
 
+def _fallback_bet_types(pred_rank):
+    try:
+        rank_val = int(pred_rank)
+    except (TypeError, ValueError):
+        return ""
+    if rank_val <= 2:
+        return "place,wide"
+    if rank_val <= 5:
+        return "place"
+    return ""
+
+
 def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
     pred_rows = load_csv_rows(_resolve_predictions_path(get_data_dir, base_dir, scope_key, run_id, run_row))
     if not pred_rows:
@@ -318,13 +330,14 @@ def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_flo
     marks = ["\u25CE", "\u25CB", "\u25B2", "\u25B3", "\u2606"]
     out_rows = []
     for idx, row in enumerate(selected):
+        bet_types = row["bet_types"] or _fallback_bet_types(row.get("pred_rank"))
         out_rows.append(
             {
                 "mark": marks[idx],
                 "horse_no": row["horse_no"],
                 "horse_name": row["horse_name"],
                 "pred_rank": row["pred_rank"],
-                "bet_types": row["bet_types"] or "-",
+                "bet_types": bet_types or "-",
             }
         )
     columns = [
