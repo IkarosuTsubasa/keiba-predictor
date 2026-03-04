@@ -50,6 +50,40 @@
     "max_single_horses": 8,
     "max_tickets_per_race": 0
   },
+  "calibration": {
+    "win_temp": 1.0,
+    "enabled": true
+  },
+  "bet_engine_v3": {
+    "enabled": true,
+    "p_mix_w": 0.6,
+    "rank_temperature": 1.0,
+    "p_mid_odds_threshold": 0.18,
+    "N_rank": 12,
+    "N_value": 12,
+    "target_risk_share": 0.25,
+    "kelly_scale": 0.25,
+    "max_ticket_share": 0.15,
+    "min_yen_unit": 100,
+    "min_ev": {
+      "win": 0.03,
+      "place": 0.01,
+      "wide": 0.01,
+      "quinella": 0.02
+    },
+    "min_p": {
+      "win": 0.03,
+      "place": 0.05,
+      "wide": 0.04,
+      "quinella": 0.04
+    },
+    "penalty": {
+      "win": 0.0,
+      "place": 0.02,
+      "wide": 0.02,
+      "quinella": 0.0
+    }
+  },
   "strategies": {
     "balanced": {
       "label": "balanced",
