@@ -207,6 +207,370 @@ def _classify_race_meta(selected_rows):
     return race_type, confidence, gap_1_2
 
 
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _build_prediction_map(pred_rows, to_float, odds_rows):
+    odds_name_to_no = _build_name_to_horse_no_map(odds_rows)
+    odds_name_to_win = {}
+    for row in odds_rows:
+        name = row.get("name") or row.get("HorseName") or row.get("horse_name")
+        norm = _normalize_name(name)
+        if not norm or norm in odds_name_to_win:
+            continue
+        odd = to_float(row.get("odds"))
+        if odd <= 0:
+            odd = to_float(row.get("win_odds"))
+        if odd > 0:
+            odds_name_to_win[norm] = float(odd)
+
+    score_key = pick_score_key(pred_rows)
+    if score_key:
+        pred_sorted = sorted(pred_rows, key=lambda r: to_float(r.get(score_key)), reverse=True)
+    else:
+        pred_sorted = list(pred_rows)
+
+    pred_map = {}
+    pred_order = []
+    for idx, row in enumerate(pred_sorted):
+        name = row.get("HorseName") or row.get("name") or row.get("horse_name")
+        norm = _normalize_name(name)
+        if not norm or norm in pred_map:
+            continue
+        score_val = to_float(row.get(score_key)) if score_key else float(max(len(pred_sorted) - idx, 1))
+        pred_map[norm] = {
+            "horse_name": str(name).strip(),
+            "pred_rank": idx + 1,
+            "pred_prob": score_val,
+            "horse_no": str(row.get("horse_no", "")).strip() or str(odds_name_to_no.get(norm, "")),
+            "rank_score": _safe_float(row.get("rank_score"), 0.0),
+            "win_odds": float(odds_name_to_win.get(norm, 0.0) or 0.0),
+        }
+        pred_order.append(norm)
+    return pred_map, pred_order, odds_name_to_no
+
+
+def _build_bet_map(plan_rows, to_float):
+    gate_status = ""
+    bet_map = {}
+    for row in plan_rows:
+        if not gate_status:
+            status_text = str(row.get("gate_status", "")).strip().lower()
+            if status_text:
+                gate_status = status_text
+        bet_type = str(row.get("bet_type", "")).strip().lower()
+        if bet_type in ("", "trifecta_rec", "pass"):
+            continue
+        amount = to_float(row.get("amount_yen"))
+        expected = to_float(row.get("expected_return_yen"))
+        hit_prob = to_float(row.get("hit_prob_est"))
+        ev_ratio = to_float(row.get("ev_ratio_est"))
+        edge = to_float(row.get("edge"))
+        if amount <= 0 and expected <= 0 and hit_prob <= 0 and ev_ratio <= 0 and edge <= 0:
+            continue
+        horse_names = _parse_plan_horse_names(row.get("horse_name", ""))
+        if not horse_names:
+            continue
+        share = 1.0 / float(len(horse_names))
+        horse_nos = _parse_plan_horse_nos(row.get("horse_no", ""))
+        for idx, horse_name in enumerate(horse_names):
+            norm = _normalize_name(horse_name)
+            item = bet_map.setdefault(
+                norm,
+                {
+                    "horse_name": horse_name,
+                    "horse_no": "",
+                    "bet_types": set(),
+                    "ticket_count": 0,
+                    "single_ticket_count": 0,
+                    "amount_max": 0.0,
+                    "expected_max": 0.0,
+                    "hit_prob_max": 0.0,
+                    "ev_ratio_max": 0.0,
+                    "edge_max": 0.0,
+                },
+            )
+            item["bet_types"].add(bet_type)
+            item["ticket_count"] += 1
+            if len(horse_names) == 1:
+                item["single_ticket_count"] += 1
+            item["amount_max"] = max(item["amount_max"], amount * share)
+            item["expected_max"] = max(item["expected_max"], expected * share)
+            item["hit_prob_max"] = max(item["hit_prob_max"], hit_prob)
+            item["ev_ratio_max"] = max(item["ev_ratio_max"], ev_ratio)
+            item["edge_max"] = max(item["edge_max"], edge)
+            if len(horse_nos) == len(horse_names):
+                if not item.get("horse_no"):
+                    item["horse_no"] = horse_nos[idx]
+            elif len(horse_names) == 1 and horse_nos and not item.get("horse_no"):
+                item["horse_no"] = horse_nos[0]
+    return bet_map, gate_status
+
+
+def _extract_risk_share(plan_rows, default=0.25):
+    for row in plan_rows:
+        for key in ("risk_share", "target_risk_share", "risk_share_used"):
+            val = _safe_float(row.get(key), -1.0)
+            if val >= 0:
+                return float(val)
+    return float(default)
+
+
+def _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
+    pred_rows = load_csv_rows(_resolve_predictions_path(get_data_dir, base_dir, scope_key, run_id, run_row))
+    if not pred_rows:
+        return {}
+    odds_rows = load_csv_rows(_resolve_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row))
+    plan_rows = load_csv_rows(_resolve_plan_path(get_data_dir, base_dir, scope_key, run_id, run_row))
+    pred_map, pred_order, odds_name_to_no = _build_prediction_map(pred_rows, to_float, odds_rows)
+    bet_map, gate_status = _build_bet_map(plan_rows, to_float)
+    return {
+        "pred_rows": pred_rows,
+        "odds_rows": odds_rows,
+        "plan_rows": plan_rows,
+        "pred_map": pred_map,
+        "pred_order": pred_order,
+        "odds_name_to_no": odds_name_to_no,
+        "bet_map": bet_map,
+        "gate_status": gate_status,
+        "risk_share": _extract_risk_share(plan_rows, default=0.25),
+    }
+
+
+def _recommended_bet_types(pred_rank, bet_types_text):
+    bt = str(bet_types_text or "").strip()
+    if bt:
+        return bt
+    fb = _fallback_bet_types(pred_rank)
+    return fb or "place"
+
+
+def _build_reason_tags(pred_rank, bet_types_text):
+    tags = []
+    try:
+        rank_val = int(pred_rank)
+    except (TypeError, ValueError):
+        rank_val = 999
+    if rank_val <= 2:
+        tags.append("総合上位")
+    bt_list = [x.strip().lower() for x in str(bet_types_text or "").split(",") if x.strip()]
+    if any(x in ("wide", "quinella") for x in bt_list):
+        tags.append("相手候補")
+    return tags
+
+
+def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
+    ctx = _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row)
+    if not ctx:
+        return [], []
+    pred_map = ctx["pred_map"]
+    pred_order = ctx["pred_order"]
+    bet_map = ctx["bet_map"]
+    gate_status = ctx["gate_status"]
+    risk_share = ctx["risk_share"]
+    candidate_keys = pred_order[:10]
+    if not candidate_keys:
+        return [], []
+
+    max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in candidate_keys), default=0.0)
+    pred_total = max(1, len(pred_map))
+    rank_scores = [float(pred_map.get(k, {}).get("rank_score", 0.0) or 0.0) for k in candidate_keys]
+    rank_min = min(rank_scores) if rank_scores else 0.0
+    rank_max = max(rank_scores) if rank_scores else 0.0
+    rank_span = max(0.0, rank_max - rank_min)
+    max_amount = max((float(bet_map.get(k, {}).get("amount_max", 0.0) or 0.0) for k in candidate_keys), default=0.0)
+
+    scored = []
+    for key in candidate_keys:
+        pred = pred_map.get(key, {})
+        bet = bet_map.get(key, {})
+        pred_rank = pred.get("pred_rank")
+        pred_prob = float(pred.get("pred_prob", 0.0) or 0.0)
+        pred_prob_norm = (pred_prob / max_pred_prob) if max_pred_prob > 0 else 0.0
+        rank_norm = 0.0
+        if pred_rank:
+            rank_norm = (pred_total - int(pred_rank) + 1) / float(pred_total)
+            rank_norm = max(0.0, rank_norm)
+        rank_score = float(pred.get("rank_score", 0.0) or 0.0)
+        if rank_span > 1e-12:
+            rank_score_norm = (rank_score - rank_min) / rank_span
+            ability_score = 0.70 * rank_score_norm + 0.30 * pred_prob_norm
+        else:
+            rank_score_norm = 0.0
+            ability_score = 0.75 * pred_prob_norm + 0.25 * rank_norm
+
+        bet_types = _format_bet_types(bet.get("bet_types", set()))
+        rec_bet_types = _recommended_bet_types(pred_rank, bet_types)
+        support_strength = _support_strength_label(float(bet.get("amount_max", 0.0) or 0.0), max_amount)
+        risk_signal = _risk_signal_label(gate_status, bool(bet_types), pred_rank, support_strength)
+        reason_tags = _build_reason_tags(pred_rank, bet_types)
+
+        scored.append(
+            {
+                "horse_key": key,
+                "horse_no": str(pred.get("horse_no", "")).strip(),
+                "horse_name": str(pred.get("horse_name", "")).strip() or key,
+                "pred_rank": pred_rank if pred_rank else "",
+                "top3_prob": f"{pred_prob:.4f}" if pred_rank else "",
+                "ability_score": float(ability_score),
+                "pred_prob_norm": float(pred_prob_norm),
+                "rank_norm": float(rank_norm),
+                "rank_score_norm": float(rank_score_norm),
+                "bet_types": bet_types or "-",
+                "recommended_bet_types": rec_bet_types,
+                "risk_signal": risk_signal,
+                "reason_tags": " / ".join(reason_tags),
+            }
+        )
+
+    scored = sorted(
+        scored,
+        key=lambda r: (-float(r.get("ability_score", 0.0) or 0.0), int(r.get("pred_rank") or 999), str(r.get("horse_name", ""))),
+    )
+    selected = scored[:5]
+    meta_rows = [{"combined_score": float(r.get("ability_score", 0.0) or 0.0), "pred_rank": r.get("pred_rank")} for r in selected]
+    race_type, confidence, gap_1_2 = _classify_race_meta(meta_rows)
+    marks = ["◎", "○", "▲", "△", "☆"]
+    out_rows = []
+    for idx, row in enumerate(selected):
+        out_rows.append(
+            {
+                "mark": marks[idx],
+                "horse_no": row.get("horse_no", ""),
+                "horse_name": row.get("horse_name", ""),
+                "pred_rank": row.get("pred_rank", ""),
+                "ability_score": round(float(row.get("ability_score", 0.0) or 0.0), 6),
+                "top3_prob": row.get("top3_prob", ""),
+                "bet_types": row.get("bet_types", "-"),
+                "recommended_bet_types": row.get("recommended_bet_types", "place"),
+                "risk_signal": row.get("risk_signal", "通常"),
+                "reason_tags": row.get("reason_tags", ""),
+                "race_type": race_type,
+                "confidence": confidence,
+                "gap_1_2": round(float(gap_1_2), 6),
+                "risk_share": round(float(risk_share), 6),
+            }
+        )
+    columns = ["mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "risk_signal"]
+    return out_rows, columns
+
+
+def load_value_picks_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
+    ctx = _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row)
+    if not ctx:
+        return [], []
+    pred_map = ctx["pred_map"]
+    pred_order = ctx["pred_order"]
+    bet_map = ctx["bet_map"]
+    if not pred_order:
+        return [], []
+
+    value_rows = []
+    single_candidates = []
+    for key, item in bet_map.items():
+        if int(item.get("single_ticket_count", 0) or 0) <= 0:
+            continue
+        pred = pred_map.get(key, {})
+        pred_rank = int(pred.get("pred_rank", 999) or 999)
+        odds_val = float(pred.get("win_odds", 0.0) or 0.0)
+        score = max(
+            float(item.get("edge_max", 0.0) or 0.0),
+            float(item.get("ev_ratio_max", 0.0) or 0.0),
+            0.0,
+        )
+        if score <= 0:
+            continue
+        bet_types = _format_bet_types(item.get("bet_types", set()))
+        reason_tags = ["期待値上位"]
+        if odds_val >= 8.0:
+            reason_tags.append("オッズ妙味")
+        if pred_rank > 5:
+            reason_tags.append("穴候補")
+        single_candidates.append(
+            {
+                "horse_key": key,
+                "horse_no": str(pred.get("horse_no", "")).strip() or str(item.get("horse_no", "")).strip(),
+                "horse_name": str(pred.get("horse_name", "")).strip() or str(item.get("horse_name", "")).strip() or key,
+                "pred_rank": pred_rank if pred_rank < 999 else "",
+                "value_score": float(score),
+                "recommended_bet_types": _recommended_bet_types(pred_rank if pred_rank < 999 else "", bet_types),
+                "reason_tags": " / ".join(reason_tags),
+                "odds_hint": odds_val,
+            }
+        )
+
+    if single_candidates:
+        ranked = sorted(single_candidates, key=lambda r: (-float(r["value_score"]), int(r["pred_rank"] or 999), str(r["horse_name"])))
+    else:
+        max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in pred_order), default=0.0)
+        fallback = []
+        for key in pred_order:
+            pred = pred_map.get(key, {})
+            odds_val = float(pred.get("win_odds", 0.0) or 0.0)
+            if odds_val <= 0:
+                continue
+            pred_rank = int(pred.get("pred_rank", 999) or 999)
+            p_norm = (float(pred.get("pred_prob", 0.0) or 0.0) / max_pred_prob) if max_pred_prob > 0 else 0.0
+            score = p_norm * odds_val - 1.0
+            if score <= 0:
+                continue
+            reason_tags = ["期待値上位"]
+            if odds_val >= 8.0:
+                reason_tags.append("オッズ妙味")
+            if pred_rank > 5:
+                reason_tags.append("穴候補")
+            fallback.append(
+                {
+                    "horse_key": key,
+                    "horse_no": str(pred.get("horse_no", "")).strip(),
+                    "horse_name": str(pred.get("horse_name", "")).strip() or key,
+                    "pred_rank": pred_rank if pred_rank < 999 else "",
+                    "value_score": float(score),
+                    "recommended_bet_types": _recommended_bet_types(pred_rank if pred_rank < 999 else "", "win"),
+                    "reason_tags": " / ".join(reason_tags),
+                    "odds_hint": odds_val,
+                }
+            )
+        ranked = sorted(fallback, key=lambda r: (-float(r["value_score"]), int(r["pred_rank"] or 999), str(r["horse_name"])))
+
+    if not ranked:
+        return [], ["value_mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types"]
+
+    selected = []
+    if ranked:
+        selected.append(ranked[0])
+    for row in ranked[1:]:
+        if len(selected) >= 2:
+            break
+        pred_rank = int(row.get("pred_rank") or 999)
+        odds_val = float(row.get("odds_hint", 0.0) or 0.0)
+        if pred_rank > 5 or odds_val >= 8.0:
+            selected.append(row)
+    if len(selected) == 1 and len(ranked) > 1 and float(ranked[1].get("value_score", 0.0) or 0.0) > 0:
+        selected.append(ranked[1])
+
+    marks = ["★", "☆", "△"]
+    for idx, row in enumerate(selected[:3]):
+        value_rows.append(
+            {
+                "value_mark": marks[idx],
+                "horse_no": row.get("horse_no", ""),
+                "horse_name": row.get("horse_name", ""),
+                "pred_rank": row.get("pred_rank", ""),
+                "value_score": round(float(row.get("value_score", 0.0) or 0.0), 6),
+                "reason_tags": row.get("reason_tags", ""),
+                "recommended_bet_types": row.get("recommended_bet_types", "win"),
+            }
+        )
+
+    columns = ["value_mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "reason_tags"]
+    return value_rows, columns
+
+
 def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
     pred_rows = load_csv_rows(_resolve_predictions_path(get_data_dir, base_dir, scope_key, run_id, run_row))
     if not pred_rows:
