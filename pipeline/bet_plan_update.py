@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from bet_engine_v2 import generate_bet_plan_v2
+from bet_engine_v3 import generate_bet_plan_v3
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -110,6 +111,24 @@ BET_ENGINE_V2_DEFAULTS = {
     "max_single_horses": 8,
     "max_tickets_per_race": 0,
 }
+
+BET_ENGINE_V3_DEFAULTS = {
+    "enabled": True,
+    "p_mix_w": 0.6,
+    "rank_temperature": 1.0,
+    "p_mid_odds_threshold": 0.18,
+    "N_rank": 12,
+    "N_value": 12,
+    "target_risk_share": 0.25,
+    "kelly_scale": 0.25,
+    "max_ticket_share": 0.15,
+    "min_yen_unit": 100,
+    "min_ev": {"win": 0.03, "place": 0.01, "wide": 0.01, "quinella": 0.02},
+    "min_p": {"win": 0.03, "place": 0.05, "wide": 0.04, "quinella": 0.04},
+    "penalty": {"win": 0.00, "place": 0.02, "wide": 0.02, "quinella": 0.00},
+}
+
+CALIBRATION_DEFAULTS = {"win_temp": 1.0, "enabled": True}
 
 
 def safe_print(text):
@@ -222,13 +241,13 @@ def load_predictor_config():
             if legacy.exists():
                 data = json.loads(legacy.read_text(encoding="utf-8"))
                 path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                return ensure_bet_engine_v2_config_defaults(path, data)
+                return ensure_predictor_bet_config_defaults(path, data)
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return ensure_bet_engine_v2_config_defaults(path, data)
+            return ensure_predictor_bet_config_defaults(path, data)
     except Exception:
-        return ensure_bet_engine_v2_config_defaults(path, {})
+        return ensure_predictor_bet_config_defaults(path, {})
 
 
 def get_bet_engine_v2_config(predictor_config):
@@ -236,6 +255,18 @@ def get_bet_engine_v2_config(predictor_config):
     node = predictor_config.get("bet_engine_v2", {}) if isinstance(predictor_config, dict) else {}
     if isinstance(node, dict):
         cfg.update(node)
+    return cfg
+
+
+def get_bet_engine_v3_config(predictor_config):
+    cfg = dict(BET_ENGINE_V3_DEFAULTS)
+    node = predictor_config.get("bet_engine_v3", {}) if isinstance(predictor_config, dict) else {}
+    if isinstance(node, dict):
+        cfg.update(node)
+    calibration = predictor_config.get("calibration", {}) if isinstance(predictor_config, dict) else {}
+    if isinstance(calibration, dict):
+        cfg["win_temp"] = float(calibration.get("win_temp", cfg.get("win_temp", 1.0)))
+        cfg["calibration_enabled"] = bool(calibration.get("enabled", True))
     return cfg
 
 
@@ -353,19 +384,41 @@ def build_bet_engine_v2_inputs(merged, fuku_odds_path, wide_odds_path, quinella_
     return pred_df, odds_payload
 
 
-def ensure_bet_engine_v2_config_defaults(cfg_path, predictor_config):
+def ensure_predictor_bet_config_defaults(cfg_path, predictor_config):
     data = predictor_config if isinstance(predictor_config, dict) else {}
-    node = data.get("bet_engine_v2")
     changed = False
-    if not isinstance(node, dict):
-        node = {}
+
+    node_v2 = data.get("bet_engine_v2")
+    if not isinstance(node_v2, dict):
+        node_v2 = {}
         changed = True
     for key, value in BET_ENGINE_V2_DEFAULTS.items():
-        if key not in node:
-            node[key] = value
+        if key not in node_v2:
+            node_v2[key] = value
             changed = True
+    data["bet_engine_v2"] = node_v2
+
+    node_v3 = data.get("bet_engine_v3")
+    if not isinstance(node_v3, dict):
+        node_v3 = {}
+        changed = True
+    for key, value in BET_ENGINE_V3_DEFAULTS.items():
+        if key not in node_v3:
+            node_v3[key] = value
+            changed = True
+    data["bet_engine_v3"] = node_v3
+
+    calibration = data.get("calibration")
+    if not isinstance(calibration, dict):
+        calibration = {}
+        changed = True
+    for key, value in CALIBRATION_DEFAULTS.items():
+        if key not in calibration:
+            calibration[key] = value
+            changed = True
+    data["calibration"] = calibration
+
     if changed:
-        data["bet_engine_v2"] = node
         try:
             cfg_path.write_text(
                 json.dumps(data, indent=2, ensure_ascii=False),
@@ -441,6 +494,77 @@ def build_rows_from_bet_plan_v2(result, budget_yen, horse_meta):
                 "edge": round(float(item.edge), 6),
                 "stake_yen": amount_yen,
                 "notes": str(item.notes or ""),
+            }
+        )
+    return out_rows, item_rows
+
+
+def build_rows_from_bet_items(items, budget_yen, horse_meta):
+    out_rows = []
+    item_rows = []
+    for item in items:
+        bet_type = str(item.get("bet_type", "")).strip()
+        horses = item.get("horses", ())
+        if isinstance(horses, str):
+            horses = tuple([x for x in str(horses).split("-") if x])
+        horse_keys = [str(h) for h in horses]
+        horse_no_labels = []
+        horse_names = []
+        for hk in horse_keys:
+            meta = horse_meta.get(hk, {})
+            horse_no_labels.append(str(meta.get("horse_no", hk)))
+            name = str(meta.get("horse_name", "")).strip()
+            if name:
+                horse_names.append(name)
+        horse_no = "-".join(horse_no_labels)
+        horse_name = " / ".join(horse_names)
+        amount_yen = int(item.get("stake_yen", 0) or 0)
+        if amount_yen <= 0:
+            continue
+        units = int(amount_yen // UNIT_YEN) if UNIT_YEN > 0 else 0
+        p_hit = float(item.get("p_hit", 0.0) or 0.0)
+        odds_used = float(item.get("odds_used", 0.0) or 0.0)
+        edge = float(item.get("edge", 0.0) or 0.0)
+        kelly_f = float(item.get("kelly_f", 0.0) or 0.0)
+        expected_return = int(round(amount_yen * p_hit * odds_used))
+        ev_ratio_est = edge + 1.0
+        why = str(item.get("why", "") or "")
+        notes = str(item.get("notes", "") or "")
+        merged_note = why if (why and not notes) else (notes if notes else "")
+        if why and notes:
+            merged_note = f"{why};{notes}"
+        row = {
+            "budget_yen": int(budget_yen),
+            "bet_type": bet_type,
+            "horse_no": horse_no,
+            "horse_name": horse_name,
+            "units": units,
+            "amount_yen": amount_yen,
+            "hit_prob_est": round(p_hit, 4),
+            "hit_prob_se": "",
+            "hit_prob_ci95_low": "",
+            "hit_prob_ci95_high": "",
+            "payout_mult": round(odds_used, 4),
+            "ev_ratio_est": round(ev_ratio_est, 4),
+            "expected_return_yen": expected_return,
+            "odds_used": round(odds_used, 6),
+            "p_hit": round(p_hit, 6),
+            "edge": round(edge, 6),
+            "kelly_f": round(kelly_f, 6),
+            "stake_yen": amount_yen,
+            "notes": merged_note,
+        }
+        out_rows.append(row)
+        item_rows.append(
+            {
+                "budget_yen": int(budget_yen),
+                "bet_type": bet_type,
+                "horses": horse_no,
+                "odds_used": round(odds_used, 6),
+                "p_hit": round(p_hit, 6),
+                "edge": round(edge, 6),
+                "stake_yen": amount_yen,
+                "notes": merged_note,
             }
         )
     return out_rows, item_rows
@@ -1429,6 +1553,8 @@ def main():
     config, strategy_used = apply_strategy_from_env(config)
     predictor_config = load_predictor_config()
     bet_engine_v2_cfg = get_bet_engine_v2_config(predictor_config)
+    bet_engine_v3_cfg = get_bet_engine_v3_config(predictor_config)
+    use_v3 = bool(bet_engine_v3_cfg.get("enabled", True))
     race_id = resolve_race_id()
     budget_list = resolve_budget_list()
 
@@ -1536,18 +1662,45 @@ def main():
     ]
 
     for budget_yen in budget_list:
-        result = generate_bet_plan_v2(
-            pred_df=pred_df,
-            odds=odds_payload,
-            bankroll_yen=budget_yen,
-            scope_key=SCOPE_KEY,
-            config=bet_engine_v2_cfg,
-        )
-        budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
-            result=result,
-            budget_yen=budget_yen,
-            horse_meta=horse_meta,
-        )
+        engine_used = "v2"
+        summary_info = {}
+        if use_v3:
+            try:
+                items_v3, _, summary_info = generate_bet_plan_v3(
+                    pred_df=pred_df,
+                    odds=odds_payload,
+                    bankroll_yen=budget_yen,
+                    scope_key=SCOPE_KEY,
+                    config=bet_engine_v3_cfg,
+                )
+                budget_rows, budget_item_rows = build_rows_from_bet_items(
+                    items=items_v3,
+                    budget_yen=budget_yen,
+                    horse_meta=horse_meta,
+                )
+                engine_used = "v3"
+            except Exception as exc:
+                print(f"[WARN] bet_engine_v3 failed for budget={budget_yen}, fallback to v2: {exc}")
+                items_v3 = []
+                budget_rows, budget_item_rows = [], []
+        else:
+            items_v3 = []
+            budget_rows, budget_item_rows = [], []
+
+        if engine_used != "v3":
+            result = generate_bet_plan_v2(
+                pred_df=pred_df,
+                odds=odds_payload,
+                bankroll_yen=budget_yen,
+                scope_key=SCOPE_KEY,
+                config=bet_engine_v2_cfg,
+            )
+            budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
+                result=result,
+                budget_yen=budget_yen,
+                horse_meta=horse_meta,
+            )
+
         out_rows.extend(budget_rows)
         for row in budget_item_rows:
             row["run_id"] = run_id
@@ -1555,9 +1708,17 @@ def main():
             row["race_id"] = race_id
             item_rows_all.append(row)
         total_stake, ticket_count, edge_sum, weighted_edge = calc_plan_summary(budget_item_rows)
+        expected_return = int(round(sum(float(r.get("p_hit", 0.0) or 0.0) * float(r.get("odds_used", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
+        expected_profit = int(round(sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
+        no_bet = bool(ticket_count == 0)
+        if engine_used == "v3" and isinstance(summary_info, dict):
+            expected_return = int(summary_info.get("expected_return_yen", expected_return) or expected_return)
+            expected_profit = int(summary_info.get("expected_profit_yen", expected_profit) or expected_profit)
+            no_bet = bool(summary_info.get("no_bet", no_bet))
         print(
-            f"[summary][{budget_yen}] total_stake={total_stake} "
-            f"ticket_count={ticket_count} estimated_total_edge_sum={weighted_edge:.2f} edge_sum={edge_sum:.4f}"
+            f"[summary][{budget_yen}][{engine_used}] stake={total_stake} expected_return={expected_return} "
+            f"expected_profit={expected_profit} ticket_count={ticket_count} no_bet={int(no_bet)} "
+            f"estimated_total_edge_sum={weighted_edge:.2f} edge_sum={edge_sum:.4f}"
         )
 
     out_df = pd.DataFrame(out_rows, columns=plan_columns)
@@ -1587,6 +1748,12 @@ def main():
     print(
         f"[summary][all] total_stake={total_stake_all} ticket_count={ticket_count_all} "
         f"estimated_total_edge_sum={weighted_edge_all:.2f} edge_sum={edge_sum_all:.4f}"
+    )
+    expected_return_all = int(round(sum(float(r.get("p_hit", 0.0) or 0.0) * float(r.get("odds_used", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in item_rows_all)))
+    expected_profit_all = int(round(sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in item_rows_all)))
+    print(
+        f"[summary][all_ext] stake={total_stake_all} expected_return={expected_return_all} "
+        f"expected_profit={expected_profit_all} ticket_count={ticket_count_all} no_bet={int(ticket_count_all==0)}"
     )
     print(f"Saved: {OUT_PATH}")
     print(f"Saved items: {items_path}")
