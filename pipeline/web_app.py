@@ -675,8 +675,8 @@ def _predict_col_desc(col):
         "best_TimeIndexEff": "タイム指数効率（最良）",
         "avg_TimeIndexEff": "タイム指数効率（平均）",
         "dist_close": "距離適性の近さ",
-        "Top3Prob_lr": "ロジスティック回帰の3着内確率",
-        "Top3Prob_lgbm": "LightGBMの3着内確率",
+        "Top3Prob_lr": "ロジスティック回帰モデル",
+        "Top3Prob_lgbm": "LightGBMモデル",
         "Top3Prob_model": "統合モデルの3着内確率",
         "Top3Prob_est": "推定3着内確率",
         "Top3Prob": "3着内確率",
@@ -787,6 +787,43 @@ def _build_curated_predictions_csv(predictions_csv_text, top_n=None):
     return sio.getvalue().strip(), cols, len(rows), race_metrics
 
 
+def build_ai_strategy_text(race_type, bet_types_counter, risk_share):
+    race = str(race_type or "").strip()
+    if race == "一本命":
+        race_text = "本命馬と対抗馬の能力差が大きく、比較的堅めのレース構造。"
+    elif race == "混戦":
+        race_text = "上位馬の能力差が小さく、展開次第で結果が変わる可能性。"
+    else:
+        race_text = "上位馬と中位馬の差が一定程度あり、標準的なレース構造。"
+
+    counter = dict(bet_types_counter or {})
+    place_n = int(counter.get("place", 0) or 0)
+    wide_n = int(counter.get("wide", 0) or 0)
+    win_n = int(counter.get("win", 0) or 0)
+    top_type = max(
+        [("place", place_n), ("wide", wide_n), ("win", win_n)],
+        key=lambda x: (x[1], {"place": 3, "wide": 2, "win": 1}.get(x[0], 0)),
+    )[0]
+    if top_type == "place" and place_n > 0:
+        bet_text = "今回は複勝を中心とした構成となりました。"
+    elif top_type == "wide" and wide_n > 0:
+        bet_text = "今回はワイドを軸にした分散型の構成となりました。"
+    elif top_type == "win" and win_n > 0:
+        bet_text = "今回は単勝を軸にした集中型の構成となりました。"
+    else:
+        bet_text = "今回は複数券種による分散構成となりました。"
+
+    rs = _to_float_or_zero(risk_share)
+    if rs < 0.2:
+        risk_text = "資金配分はリスクを抑えた保守的な設定です。"
+    elif rs <= 0.4:
+        risk_text = "資金配分は標準的なリスク設定です。"
+    else:
+        risk_text = "資金配分はやや積極的なリスク設定です。"
+
+    return f"■ AI戦略\n\n{race_text}\n\n期待値（EV）計算の結果、\n{bet_text}\n\n{risk_text}"
+
+
 def build_mark_note_text(rows, predictions_filename="", predictions_csv_text=""):
     bet_type_labels = {
         "win": "単勝",
@@ -796,61 +833,134 @@ def build_mark_note_text(rows, predictions_filename="", predictions_csv_text="")
         "-": "なし",
         "": "なし",
     }
-    lines = []
-    for row in rows or []:
-        mark = _escape_md_cell(row.get("mark", ""))
-        horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
-        horse_name = _escape_md_cell(row.get("horse_name", ""))
-        pred_rank = _escape_md_cell(row.get("pred_rank", "")) or "-"
-        bet_types_raw = _escape_md_cell(row.get("bet_types", "")) or "-"
-        bet_type_items = [t.strip().lower() for t in bet_types_raw.split(",") if t.strip()]
-        if not bet_type_items:
-            bet_type_items = ["-"]
-        bet_types = "・".join(bet_type_labels.get(item, item) for item in bet_type_items)
-        lines.append(f"- {mark} {horse_no}番 {horse_name}")
-        lines.append(f"  予想順位: {pred_rank} / 買い目: {bet_types}")
-
     csv_text, selected_cols, _, race_metrics = _build_curated_predictions_csv(predictions_csv_text, top_n=None)
+    conf_text = str(race_metrics.get("confidence_score", "")).strip()
+    risk_text = str(race_metrics.get("risk_score", "")).strip()
+    grade = "-"
+    if conf_text and risk_text:
+        conf = _to_float_or_zero(conf_text)
+        risk = _to_float_or_zero(risk_text)
+        overall = 0.65 * conf + 0.35 * risk
+        if overall >= 0.90:
+            grade = "SSS"
+        elif overall >= 0.84:
+            grade = "SS"
+        elif overall >= 0.78:
+            grade = "S"
+        elif overall >= 0.72:
+            grade = "A"
+        elif overall >= 0.64:
+            grade = "B"
+        else:
+            grade = "C"
+
+    lines = []
+    tendency_line = "買い目傾向：見送り（買い目なし）"
+    strategy_text = build_ai_strategy_text("通常", {}, 0.25)
+    if rows:
+        race_type = str(rows[0].get("race_type", "")).strip() or "通常"
+        confidence = str(rows[0].get("confidence", "")).strip() or "C"
+        gap_val = _to_float_or_zero(rows[0].get("gap_1_2", 0.0))
+        tendency_counter = {}
+        ev_max = max((_to_float_or_zero(r.get("bet_ev_norm", 0.0)) for r in rows), default=0.0)
+        mark_lines = []
+        for row in rows:
+            mark = _escape_md_cell(row.get("mark", ""))
+            horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
+            horse_name = _escape_md_cell(row.get("horse_name", ""))
+            pred_rank = _escape_md_cell(row.get("pred_rank", "")) or "-"
+            bet_types_raw = _escape_md_cell(row.get("bet_types", "")) or "-"
+            bet_type_items = [t.strip().lower() for t in bet_types_raw.split(",") if t.strip()]
+            if not bet_type_items:
+                bet_type_items = ["-"]
+            bet_types = "・".join(bet_type_labels.get(item, item) for item in bet_type_items)
+            for item in bet_type_items:
+                tendency_counter[item] = int(tendency_counter.get(item, 0)) + 1
+            tags = []
+            try:
+                rank_val = int(pred_rank)
+            except (TypeError, ValueError):
+                rank_val = 999
+            if rank_val <= 2:
+                tags.append("総合上位")
+            ev_norm = _to_float_or_zero(row.get("bet_ev_norm", 0.0))
+            if ev_max > 0 and abs(ev_norm - ev_max) <= 1e-9:
+                tags.append("期待値上位")
+            if any(t in ("wide", "quinella") for t in bet_type_items):
+                tags.append("相手候補")
+            reason_text = f"（{' / '.join(tags)}）" if tags else ""
+            risk_signal = _escape_md_cell(row.get("risk_signal", ""))
+            risk_label = ""
+            if risk_signal == "注意":
+                risk_label = "【注意】"
+            elif risk_signal == "見送り級":
+                risk_label = "【見送り級】"
+            mark_lines.append(f"- {mark} {horse_no}番 {horse_name}{risk_label}{reason_text}")
+            mark_lines.append(f"  予想順位: {pred_rank} / 買い目: {bet_types}")
+
+        valid_tendency = {k: v for k, v in tendency_counter.items() if k and k not in ("-", "なし")}
+        if valid_tendency:
+            top_items = sorted(valid_tendency.items(), key=lambda x: (-x[1], x[0]))[:2]
+            tendency_text = "・".join(bet_type_labels.get(k, k) for k, _ in top_items)
+            tendency_line = f"買い目傾向：{tendency_text}中心"
+        else:
+            tendency_line = "買い目傾向：見送り（買い目なし）"
+
+        risk_share = _to_float_or_zero(
+            rows[0].get("risk_share", rows[0].get("target_risk_share", rows[0].get("risk_share_used", 0.25)))
+        )
+        strategy_text = build_ai_strategy_text(race_type, tendency_counter, risk_share)
+
+        lines = [
+            "【レース評価】",
+            f"AI評価：{race_type}",
+            f"AI信頼度：{confidence}（gap={gap_val:.3f}）",
+            f"予測データ総合評価：{grade}",
+            "※AI信頼度=印5頭のgap",
+            "",
+            "【印】",
+        ]
+        lines.extend(mark_lines)
+        lines.extend(
+            [
+                "",
+                strategy_text,
+                "",
+                "【買い目傾向】",
+                tendency_line,
+                "",
+                "※AIは期待値(EV)ベースで券種を選択しています",
+            ]
+        )
+
     if csv_text:
         if lines:
             lines.append("")
-        col_guide = _build_predictions_column_guide(selected_cols)
-        conf_text = str(race_metrics.get("confidence_score", "")).strip()
-        risk_text = str(race_metrics.get("risk_score", "")).strip()
-        if conf_text and risk_text:
-            conf = _to_float_or_zero(conf_text)
-            risk = _to_float_or_zero(risk_text)
-            overall = 0.65 * conf + 0.35 * risk
-            if overall >= 0.90:
-                grade = "SSS"
-            elif overall >= 0.84:
-                grade = "SS"
-            elif overall >= 0.78:
-                grade = "S"
-            elif overall >= 0.72:
-                grade = "A"
-            elif overall >= 0.64:
-                grade = "B"
-            else:
-                grade = "C"
-            lines.append(f"予測データ総合評価：{grade}")
-            lines.append("")
-        lines.append("↓↓↓予測データ詳細（CSV）↓↓↓")
+        lines.append("※本記事はAIによる予測データを公開するものであり、")
+        lines.append("　投資判断は自己責任でお願いします。")
         lines.append("")
-        if col_guide:
-            for item in col_guide:
-                lines.append(item)
-                lines.append("")
+        lines.append("【予測データ】")
+        lines.append("")
+        lines.append("Top3Prob_model：統合モデルの3着内確率")
+        lines.append("")
+        lines.append("Top3Prob_lgbm：LightGBMモデル")
+        lines.append("")
+        lines.append("Top3Prob_lr：ロジスティック回帰モデル")
+        lines.append("")
+        if "jscore_current" in selected_cols:
+            lines.append("jscore_current：騎手評価スコア")
+            lines.append("")
         metric_labels = [
             ("confidence_score", "予測信頼度スコア"),
             ("risk_score", "安定度スコア"),
-            ("rank_ema", "順位実績のEMA指標"),
-            ("ev_ema", "期待値のEMA指標"),
+            ("rank_ema", "順位実績EMA"),
+            ("ev_ema", "期待値EMA"),
         ]
         for key, label in metric_labels:
             val = race_metrics.get(key, "-")
             lines.append(f"{label}：{val}")
             lines.append("")
+        lines.append("【CSVデータ】")
         lines.append("```csv")
         lines.append(csv_text.replace("```", "'''"))
         lines.append("```")
@@ -956,7 +1066,18 @@ def render_page(
         top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, run_row)
         top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
         mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, run_row)
-        mark_table_html = build_table_html(mark_rows, mark_cols, "Integrated Marks (◎○▲△☆)")
+        mark_title = "Integrated Marks (◎○▲△☆)"
+        if mark_rows:
+            race_type = str(mark_rows[0].get("race_type", "")).strip()
+            confidence = str(mark_rows[0].get("confidence", "")).strip()
+            badge_parts = []
+            if race_type:
+                badge_parts.append(race_type)
+            if confidence:
+                badge_parts.append(f"信頼度 {confidence}")
+            if badge_parts:
+                mark_title = f"{mark_title} {' / '.join(badge_parts)}"
+        mark_table_html = build_table_html(mark_rows, mark_cols, mark_title)
         pred_path = resolve_pred_path(scope_norm or scope_key, run_id, run_row)
         pred_csv_text = load_text_file(pred_path)
         mark_note_text = build_mark_note_text(mark_rows, pred_path.name if pred_path else "", pred_csv_text)
