@@ -62,9 +62,17 @@
     "N_rank": 12,
     "N_value": 12,
     "target_risk_share": 0.25,
-    "kelly_scale": 0.25,
+    "kelly_scale": 1.0,
+    "odds_power": 0.7,
     "max_ticket_share": 0.15,
     "min_yen_unit": 100,
+    "min_p_hit_per_ticket": 0.04,
+    "min_p_win_per_ticket": 0.03,
+    "rank_weight_floor": 0.55,
+    "rank_weight_ceil": 1.0,
+    "min_edge_per_ticket": 0.0,
+    "max_high_odds_tickets_per_race": 1,
+    "min_low_or_mid_presence": true,
     "min_ev": {
       "win": 0.03,
       "place": 0.01,
@@ -82,7 +90,10 @@
       "place": 0.02,
       "wide": 0.02,
       "quinella": 0.0
-    }
+    },
+    "fallback_max_odds_place": 15.0,
+    "high_exposure_cap_share": 0.15,
+    "low_mid_min_share": 0.6
   },
   "strategies": {
     "balanced": {

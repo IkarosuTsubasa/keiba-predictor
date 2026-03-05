@@ -1,5 +1,6 @@
 import csv
 import html
+import json
 import os
 import re
 import shutil
@@ -364,6 +365,16 @@ def load_text_file(path):
     return ""
 
 
+def load_json_file(path):
+    text = load_text_file(path)
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except Exception:
+        return {}
+
+
 def to_float(value):
     try:
         return float(value)
@@ -655,6 +666,15 @@ def load_mark_recommendation_table(scope_key, run_id, run_row=None):
     )
 
 
+def load_bet_engine_v3_cfg_summary(scope_key, run_id):
+    scope_norm = normalize_scope_key(scope_key)
+    if not scope_norm or not run_id:
+        return {}
+    data_dir = get_data_dir(BASE_DIR, scope_norm)
+    path = data_dir / f"bet_engine_v3_cfg_{run_id}.json"
+    return load_json_file(path)
+
+
 def load_ability_marks_table(scope_key, run_id, run_row=None):
     return view_data.load_ability_marks_table(
         get_data_dir,
@@ -784,22 +804,25 @@ def render_page(
         ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, run_row)
         value_rows, value_cols = load_value_picks_table(scope_norm or scope_key, run_id, run_row)
         if ability_rows:
-            mark_table_html = build_table_html(ability_rows, ability_cols, "AI能力印（◎○▲△☆）")
+            ability_rows_display = ability_rows
+            mark_table_html = build_table_html(ability_rows_display, ability_cols, "能力印（◎○▲△☆）")
             if value_rows:
                 mark_table_html += build_table_html(value_rows, value_cols, "EV狙い馬（★）")
         else:
             # Fallback to legacy integrated marks when ability rows are unavailable.
             mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, run_row)
             mark_table_html = build_table_html(mark_rows, mark_cols, "Integrated Marks (◎○▲△☆)")
-            ability_rows = mark_rows
+            ability_rows_display = mark_rows
             value_rows = []
         pred_path = resolve_pred_path(scope_norm or scope_key, run_id, run_row)
         pred_csv_text = load_text_file(pred_path)
+        bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
         mark_note_text = build_mark_note_text(
-            ability_rows,
+            ability_rows_display if ability_rows else ability_rows,
             value_rows,
             pred_path.name if pred_path else "",
             pred_csv_text,
+            bet_engine_v3_summary=bet_engine_v3_summary,
         )
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
@@ -1038,6 +1061,7 @@ def update_bet_plan(
     extra_env = {
         "SCOPE_KEY": scope_key,
         "RACE_ID": race_id,
+        "RUN_ID": run_id,
         "ODDS_PATH": str(odds_path),
         "PRED_PATH": str(pred_path),
         "BET_BUDGETS": "2000,5000,10000,50000",

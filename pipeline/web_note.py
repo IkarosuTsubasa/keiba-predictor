@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import io
 
 
@@ -68,6 +68,20 @@ def _to_float_or_zero(value):
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _to_text_or_dash(value):
+    text = str(value).strip()
+    return text if text else "-"
+
+
+def _extract_v3_param_summary(payload):
+    if not isinstance(payload, dict):
+        return {}
+    params = payload.get("params")
+    if isinstance(params, dict):
+        return dict(params)
+    return dict(payload)
 
 
 def _select_prediction_score_key(fieldnames):
@@ -186,7 +200,13 @@ def _bet_types_to_label(text, sep="・"):
     return sep.join(bet_type_labels.get(t, t) for t in tokens)
 
 
-def build_mark_note_text(ability_rows, value_rows=None, predictions_filename="", predictions_csv_text=""):
+def build_mark_note_text(
+    ability_rows,
+    value_rows=None,
+    predictions_filename="",
+    predictions_csv_text="",
+    bet_engine_v3_summary=None,
+):
     # Backward compatibility:
     # old: build_mark_note_text(rows, predictions_filename, predictions_csv_text)
     if isinstance(value_rows, str) and not predictions_csv_text:
@@ -314,6 +334,22 @@ def build_mark_note_text(ability_rows, value_rows=None, predictions_filename="",
             "※AIは期待値(EV)ベースで券種を選択しています",
         ]
     )
+
+    v3 = _extract_v3_param_summary(bet_engine_v3_summary)
+    if v3:
+        lines.extend(
+            [
+                "",
+                "【AIベット設定（v3）】",
+                f"- kelly_scale={_to_text_or_dash(v3.get('kelly_scale'))}",
+                f"- min_p_hit={_to_text_or_dash(v3.get('min_p_hit_per_ticket'))}",
+                f"- min_p_win={_to_text_or_dash(v3.get('min_p_win_per_ticket'))}",
+                f"- min_edge={_to_text_or_dash(v3.get('min_edge_per_ticket'))}",
+                f"- fallback_max_odds_place={_to_text_or_dash(v3.get('fallback_max_odds_place'))}",
+                f"- high_exposure_cap_share={_to_text_or_dash(v3.get('high_exposure_cap_share'))}",
+                f"- low_mid_min_share={_to_text_or_dash(v3.get('low_mid_min_share'))}",
+            ]
+        )
 
     if csv_text:
         lines.append("")

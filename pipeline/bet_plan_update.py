@@ -1,4 +1,5 @@
 import csv
+import argparse
 import heapq
 import itertools
 import json
@@ -120,15 +121,55 @@ BET_ENGINE_V3_DEFAULTS = {
     "N_rank": 12,
     "N_value": 12,
     "target_risk_share": 0.25,
-    "kelly_scale": 0.25,
+    "kelly_scale": 1.0,
+    "odds_power": 0.70,
     "max_ticket_share": 0.15,
     "min_yen_unit": 100,
+    "min_p_hit_per_ticket": 0.04,
+    "min_p_win_per_ticket": 0.03,
+    "rank_weight_floor": 0.55,
+    "rank_weight_ceil": 1.00,
+    "min_edge_per_ticket": 0.00,
+    "fallback_max_odds_place": 15.0,
+    "high_bucket_odds_threshold": 10.0,
+    "high_exposure_cap_share": 0.15,
+    "low_mid_min_share": 0.60,
+    "exposure_enforcement_mode": "trim",
+    "max_high_odds_tickets_per_race": 1,
+    "min_low_or_mid_presence": True,
     "min_ev": {"win": 0.03, "place": 0.01, "wide": 0.01, "quinella": 0.02},
     "min_p": {"win": 0.03, "place": 0.05, "wide": 0.04, "quinella": 0.04},
     "penalty": {"win": 0.00, "place": 0.02, "wide": 0.02, "quinella": 0.00},
 }
 
 CALIBRATION_DEFAULTS = {"win_temp": 1.0, "enabled": True}
+
+BET_ENGINE_V3_PROFILE_OVERRIDES = {
+    "publish": {
+        "kelly_scale": 1.0,
+        "min_p_hit_per_ticket": 0.04,
+        "min_p_win_per_ticket": 0.03,
+        "min_edge_per_ticket": 0.00,
+        "fallback_max_odds_place": 15.0,
+    },
+    "conservative": {
+        "kelly_scale": 1.0,
+        "min_p_hit_per_ticket": 0.04,
+        "min_p_win_per_ticket": 0.03,
+        "min_edge_per_ticket": 0.00,
+        "fallback_max_odds_place": 10.0,
+    },
+}
+
+BET_ENGINE_V3_AUDIT_KEYS = [
+    "kelly_scale",
+    "min_p_hit_per_ticket",
+    "min_p_win_per_ticket",
+    "min_edge_per_ticket",
+    "fallback_max_odds_place",
+    "high_exposure_cap_share",
+    "low_mid_min_share",
+]
 
 
 def safe_print(text):
@@ -268,6 +309,38 @@ def get_bet_engine_v3_config(predictor_config):
         cfg["win_temp"] = float(calibration.get("win_temp", cfg.get("win_temp", 1.0)))
         cfg["calibration_enabled"] = bool(calibration.get("enabled", True))
     return cfg
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Build bet plan with v2/v3 engines.")
+    parser.add_argument(
+        "--bet-profile",
+        choices=sorted(BET_ENGINE_V3_PROFILE_OVERRIDES.keys()),
+        default=os.environ.get("BET_PROFILE", "publish"),
+        help="bet_engine_v3 preset profile",
+    )
+    return parser.parse_args()
+
+
+def resolve_bet_profile(value):
+    profile = str(value or "").strip().lower()
+    if profile not in BET_ENGINE_V3_PROFILE_OVERRIDES:
+        profile = "publish"
+    return profile
+
+
+def apply_bet_profile_to_v3(cfg, profile):
+    out = dict(cfg) if isinstance(cfg, dict) else {}
+    overrides = BET_ENGINE_V3_PROFILE_OVERRIDES.get(resolve_bet_profile(profile), {})
+    out.update(overrides)
+    return out
+
+
+def build_bet_engine_v3_audit_summary(cfg):
+    out = {}
+    for key in BET_ENGINE_V3_AUDIT_KEYS:
+        out[key] = cfg.get(key)
+    return out
 
 
 def canonical_horse_key(value):
@@ -1549,11 +1622,13 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
 
 
 def main():
+    args = parse_args()
+    bet_profile = resolve_bet_profile(args.bet_profile)
     config = load_config()
     config, strategy_used = apply_strategy_from_env(config)
     predictor_config = load_predictor_config()
     bet_engine_v2_cfg = get_bet_engine_v2_config(predictor_config)
-    bet_engine_v3_cfg = get_bet_engine_v3_config(predictor_config)
+    bet_engine_v3_cfg = apply_bet_profile_to_v3(get_bet_engine_v3_config(predictor_config), bet_profile)
     use_v3 = bool(bet_engine_v3_cfg.get("enabled", True))
     race_id = resolve_race_id()
     budget_list = resolve_budget_list()
@@ -1622,6 +1697,23 @@ def main():
     scope_data_dir = get_data_dir(BASE_DIR, SCOPE_KEY)
     scope_data_dir.mkdir(parents=True, exist_ok=True)
     items_path = scope_data_dir / f"bet_plan_items_{run_id}.csv"
+    v3_cfg_path = scope_data_dir / f"bet_engine_v3_cfg_{run_id}.json"
+    if use_v3:
+        v3_summary = build_bet_engine_v3_audit_summary(bet_engine_v3_cfg)
+        try:
+            payload = {
+                "scope": SCOPE_KEY,
+                "run_id": run_id,
+                "bet_profile": bet_profile,
+                "params": v3_summary,
+            }
+            v3_cfg_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:
+            print(f"[WARN] failed to save bet_engine_v3 cfg summary: {exc}")
+        print(
+            "[bet_engine_v3] profile={profile} ".format(profile=bet_profile)
+            + " ".join([f"{k}={v3_summary.get(k)}" for k in BET_ENGINE_V3_AUDIT_KEYS])
+        )
 
     out_rows = []
     item_rows_all = []
@@ -1729,6 +1821,7 @@ def main():
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
+    print(f"Bet profile: {bet_profile}")
     print(f"Budgets: {', '.join(str(v) for v in budget_list)}")
     if out_df.empty:
         print("No tickets generated.")
@@ -1757,6 +1850,8 @@ def main():
     )
     print(f"Saved: {OUT_PATH}")
     print(f"Saved items: {items_path}")
+    if use_v3:
+        print(f"Saved bet_engine_v3 cfg: {v3_cfg_path}")
     append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
     pause_exit()
 
