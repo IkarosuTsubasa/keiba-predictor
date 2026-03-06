@@ -1056,10 +1056,8 @@ def run_pipeline(
     if not surface.strip():
         if scope_key == "central_turf":
             surface = "1"
-        elif scope_key == "central_dirt":
-            surface = "2"
         else:
-            surface = "1"
+            surface = "2"
     track_cond_norm = str(track_cond or "").strip().lower()
     track_cond_map = {
         "good": "good",

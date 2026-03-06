@@ -14,7 +14,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.metrics import roc_auc_score, log_loss
 from datetime import datetime
-from lightgbm import LGBMClassifier, LGBMRanker
+from lightgbm import LGBMClassifier, LGBMRanker, early_stopping
 
 
 def configure_utf8_io():
@@ -45,6 +45,20 @@ def normalize_frame_columns(df):
 
 kachiuma = normalize_frame_columns(kachiuma)
 shusso = normalize_frame_columns(shusso)
+
+# race_id ごとに全出走馬の履歴が格納されるため、同一馬・同一日の
+# レコードが複数 race_id にまたがって重複する。finish_pos / is_top3
+# は race_id 側の成績であり履歴レコード自体の属性ではないため、
+# 除外してから重複を排除する。
+_before = len(kachiuma)
+kachiuma = (
+    kachiuma
+    .drop(columns=["finish_pos", "is_top3"], errors="ignore")
+    .drop_duplicates(subset=["HorseName", "日付"])
+    .reset_index(drop=True)
+)
+if _before != len(kachiuma):
+    print(f"[INFO] kachiuma dedup: {_before} -> {len(kachiuma)} rows")
 
 SCOPE_ALIASES = {
     "central_turf": {"central_turf", "central_t", "ct", "1", "t", "turf", "grass", "shiba"},
@@ -99,7 +113,6 @@ DEFAULT_PARAMS = {
     "top3_scale": 3.0,
     "model_mode": "hybrid",
     "blend_alpha": 0.3,
-    "lgb_squash_beta": 0.5,
     "ranker_label_mode": "top5_gain",
     "ranker_blend_alpha": 0.6,
     "ranker_n_estimators": 300,
@@ -180,12 +193,68 @@ def build_ranker_relevance(rank_series, mode="top5_gain"):
     return rel
 
 
-def shrink_proba_around_half(p: np.ndarray, beta: float = 0.5) -> np.ndarray:
-    """
-    将概率围绕 0.5 线性压缩，保持排序不变但减少极端值影响。
-    beta 越小，压缩越狠；beta=1 表示不压缩。
-    """
-    return 0.5 + (p - 0.5) * beta
+
+def fit_platt_scaler(oof_probs, oof_labels):
+    """OOF 予測確率と実際のラベルから Platt scaling 用 sigmoid を学習する。"""
+    valid = np.isfinite(oof_probs) & np.isfinite(oof_labels)
+    p = np.asarray(oof_probs)[valid]
+    y = np.asarray(oof_labels)[valid]
+    if len(p) < 30 or len(np.unique(y)) < 2:
+        return None
+    eps = 1e-7
+    p_clipped = np.clip(p, eps, 1.0 - eps)
+    X = np.log(p_clipped / (1.0 - p_clipped)).reshape(-1, 1)
+    scaler = LogisticRegression(max_iter=2000, C=1e10, solver="lbfgs")
+    scaler.fit(X, y)
+    cal_probs = scaler.predict_proba(X)[:, 1]
+    print(
+        f"[INFO] Platt scaler fit: n={len(p)}, "
+        f"raw_mean={p.mean():.4f}, cal_mean={cal_probs.mean():.4f}, "
+        f"label_mean={y.mean():.4f}"
+    )
+    return scaler
+
+
+def apply_platt_scaler(scaler, probs):
+    """学習済み Platt scaler で確率を補正する。"""
+    if scaler is None:
+        return np.asarray(probs, dtype=float)
+    arr = np.asarray(probs, dtype=float)
+    eps = 1e-7
+    p_clipped = np.clip(arr, eps, 1.0 - eps)
+    X = np.log(p_clipped / (1.0 - p_clipped)).reshape(-1, 1)
+    return scaler.predict_proba(X)[:, 1]
+
+
+def find_optimal_blend_alpha(cal_lr, cal_lgb, labels, steps=21):
+    """校準済み LR/LGB の OOF 確率から最適ブレンド alpha を log_loss で選ぶ。"""
+    valid = np.isfinite(cal_lr) & np.isfinite(cal_lgb) & np.isfinite(labels)
+    lr = np.asarray(cal_lr)[valid]
+    lgb = np.asarray(cal_lgb)[valid]
+    y = np.asarray(labels)[valid]
+    if len(y) < 30 or len(np.unique(y)) < 2:
+        return 0.5
+    best_alpha = 0.5
+    best_ll = float("inf")
+    for i in range(steps):
+        a = i / (steps - 1)
+        blended = np.clip(a * lgb + (1.0 - a) * lr, 1e-7, 1.0 - 1e-7)
+        ll = log_loss(y, blended)
+        if ll < best_ll:
+            best_ll = ll
+            best_alpha = a
+    print(f"[INFO] Optimal blend alpha={best_alpha:.2f} (log_loss={best_ll:.4f})")
+    return best_alpha
+
+
+def race_level_normalize(probs, field_size, top_k=3):
+    """同一レースの確率合計が期待値 (top_k) になるよう正規化する。"""
+    arr = np.asarray(probs, dtype=float)
+    total = float(np.nansum(arr))
+    if total <= 0.0 or not np.isfinite(total):
+        return arr
+    expected = min(float(top_k), float(field_size))
+    return arr * (expected / total)
 
 
 def load_state_from_config(config):
@@ -213,7 +282,10 @@ def compute_confidence_from_pred(pred_df, state):
             gap = float(probs[0]) - float(probs[1])
         else:
             gap = float(probs[0])
-        consistency = clamp(gap / 0.15, 0.0, 1.0)
+        # 分母随出马头数变化: 头数越多 gap 越容易大，用 3/N 做期望基准
+        n_runners = max(len(probs), 1)
+        expected_gap = 3.0 / n_runners
+        consistency = clamp(gap / expected_gap, 0.0, 1.0)
     confidence = math.sqrt(stability * validity) * consistency
     return {
         "confidence_score": clamp(confidence, 0.0, 1.0),
@@ -771,7 +843,7 @@ def learn_tau_for_distance(train_df, race_distance, window, tau_min, tau_max):
         y = sub["y"].values
         clf.fit(X, y)
         b = float(clf.coef_[0][0])
-    except:
+    except Exception:
         b = -1/800.0
 
     tau = 1.0 / (-b) if b < 0 else 800.0
@@ -936,6 +1008,10 @@ def attach_cup_profile_features(df, cup_profiles, defaults, cup_key=None):
         ):
             d[col] = np.nan
 
+    # cup_samples の NaN を記録してから fillna する
+    # （gap NaN 保護で使うため、先に保存しておく）
+    _no_cup_data = d["cup_samples"].isna() | (d["cup_samples"] <= 0) if "cup_samples" in d.columns else pd.Series(False, index=d.index)
+
     for col, fallback in (defaults or {}).items():
         if col in d.columns:
             d[col] = d[col].fillna(fallback)
@@ -958,6 +1034,13 @@ def attach_cup_profile_features(df, cup_profiles, defaults, cup_key=None):
     d["cup_run_gain_gap"] = (run_gain - d["cup_run_gain_pct"]).abs()
     d["cup_uphill_gap"] = (up_mean - d["cup_uphill_mean"]).abs()
     d["cup_pace_gap"] = (pace_diff - d["cup_pace_diff"]).abs()
+
+    # cup_samples が元々 NaN or 0 → gap 特徴は信頼できないので NaN にする
+    no_cup = _no_cup_data
+    for col in ("cup_run_first_gap", "cup_run_last_gap", "cup_run_gain_gap",
+                "cup_uphill_gap", "cup_pace_gap"):
+        d.loc[no_cup, col] = np.nan
+
     return d
 
 
@@ -1012,6 +1095,26 @@ def build_cup_context(train_df: pd.DataFrame, max_dist: float = None) -> dict:
     if "FieldSize" in d.columns:
         ctx["fieldsize_med"] = float(d["FieldSize"].median())
     return ctx
+
+
+def _surface_exp_ratio(h):
+    """過去出走のうち同じ surface の割合 (prediction 用)。"""
+    if "Surface" not in h.columns or len(h) <= 1:
+        return float("nan")
+    past = h.iloc[:-1]  # exclude the target race row
+    if len(past) == 0:
+        return float("nan")
+    return float((past["Surface"] == RACE_SURFACE).mean())
+
+
+def _surface_exp_count(h):
+    """過去出走で同じ surface の出走回数 (prediction 用)。"""
+    if "Surface" not in h.columns or len(h) <= 1:
+        return float("nan")
+    past = h.iloc[:-1]
+    if len(past) == 0:
+        return float("nan")
+    return float((past["Surface"] == RACE_SURFACE).sum())
 
 
 def build_horse_profiles(shusso_df: pd.DataFrame, recent: int = 5) -> pd.DataFrame:
@@ -1112,6 +1215,8 @@ def build_horse_profiles(shusso_df: pd.DataFrame, recent: int = 5) -> pd.DataFra
             "up_min5": float(h_recent["Uphill"].min()) if "Uphill" in h_recent.columns and len(h_recent) else float("nan"),
             "trend_mean3": float(trend_series.mean()) if len(trend_series) else float("nan"),
             "history_count": int(max(len(h) - 1, 0)),
+            "surface_exp_ratio": _surface_exp_ratio(h),
+            "surface_exp_count": _surface_exp_count(h),
             "Age": age_val,
             "SexMale": sex_male,
             "SexFemale": sex_female,
@@ -1240,6 +1345,19 @@ def build_profile_training_samples(hist_df: pd.DataFrame, recent: int = 5) -> pd
     d["up_z_mean5"] = lag_roll("Uphill_z", recent, "mean")
     d["pace_diff_z_mean5"] = lag_roll("PaceDiff_z", recent, "mean")
     d["trend_mean3"] = lag_roll("TimeTrend", 3, "mean")   # ← 新增
+
+    # Surface experience: 同じ surface の過去出走数 / 全出走数
+    if "Surface" in d.columns:
+        d["_is_same_surface"] = (d["Surface"] == RACE_SURFACE).astype(float)
+        d["_surface_cum"] = g["_is_same_surface"].shift(1).groupby(d["HorseName"]).cumsum()
+        d["_total_cum"] = g.cumcount()  # 0-indexed count of prior rows
+        d["surface_exp_ratio"] = d["_surface_cum"] / d["_total_cum"].clip(lower=1)
+        d["surface_exp_count"] = d["_surface_cum"].fillna(0)
+        d.drop(columns=["_is_same_surface", "_surface_cum", "_total_cum"], inplace=True)
+    else:
+        d["surface_exp_ratio"] = np.nan
+        d["surface_exp_count"] = np.nan
+
     d["history_count"] = g.cumcount()
     d["jscore_last"] = d["JockeyScore"]
     d["jscore_mean5"] = (
@@ -1306,21 +1424,42 @@ def build_model_pipeline():
     return Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=2000, class_weight="balanced")),
+        ("clf", LogisticRegression(max_iter=2000)),
     ])
 
 
-def evaluate_grouped_holdout(train_df, features, group_col="race_id", n_splits: int = 3):
+def build_lgb_classifier():
+    return LGBMClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        num_leaves=20,
+        max_depth=-1,
+        min_child_samples=30,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.8,
+        importance_type="gain",
+        objective="binary",
+        random_state=42,
+        n_jobs=-1,
+    )
+
+
+def collect_oof_predictions(train_df, features, group_col="race_id", n_splits=5):
+    """CV で LR / LGB 両方の OOF 予測を収集し、評価指標も表示する。"""
+    empty = {"lr_probs": np.array([]), "lgb_probs": np.array([]), "labels": np.array([])}
     if group_col not in train_df.columns:
-        print(f"[INFO] Grouped eval skipped: missing {group_col}.")
-        return
+        print(f"[INFO] OOF collection skipped: missing {group_col}.")
+        return empty
     eval_df = train_df.dropna(subset=[group_col]).copy()
     if eval_df.empty or eval_df[group_col].nunique() < 2:
-        print(f"[INFO] Grouped eval skipped: not enough {group_col} groups.")
-        return
+        print(f"[INFO] OOF collection skipped: not enough {group_col} groups.")
+        return empty
 
+    all_lr, all_lgb, all_y = [], [], []
     metrics = []
     gss = GroupShuffleSplit(n_splits=n_splits, test_size=0.2, random_state=42)
+
     for split_id, (train_idx, test_idx) in enumerate(
         gss.split(eval_df, eval_df["y"], eval_df[group_col]),
         start=1,
@@ -1331,41 +1470,56 @@ def evaluate_grouped_holdout(train_df, features, group_col="race_id", n_splits: 
         pos = int((train_split["y"] == 1).sum())
         neg = int((train_split["y"] == 0).sum())
         if pos == 0 or neg == 0:
-            print(
-                f"[WARN] Grouped eval skipped split {split_id}: "
-                "only one class in train split."
-            )
+            print(f"[WARN] OOF split {split_id}: only one class in train split.")
             continue
 
-        pipe = build_model_pipeline()
         X_train, y_train = train_split[features], train_split["y"]
-
-        sample_weight = compute_sample_weight(train_split, RACE_TRACK_COND)
-
-        if sample_weight is not None:
-            pipe.fit(X_train, y_train, clf__sample_weight=sample_weight)
-        else:
-            pipe.fit(X_train, y_train)
-
         X_test, y_test = test_split[features], test_split["y"]
         if len(np.unique(y_test)) < 2:
-            print(
-                f"[INFO] Grouped eval skipped split {split_id}: "
-                "only one class in test split."
-            )
+            print(f"[INFO] OOF split {split_id}: only one class in test split.")
             continue
 
-        probs = pipe.predict_proba(X_test)[:, 1]
-        auc = roc_auc_score(y_test, probs)
-        ll = log_loss(y_test, probs)
+        _sw_fold = compute_sample_weight(train_split, RACE_TRACK_COND)
+        sw = _sw_fold.values if _sw_fold is not None else None
+
+        # LR
+        fold_pipe = build_model_pipeline()
+        if sw is not None:
+            fold_pipe.fit(X_train, y_train, clf__sample_weight=sw)
+        else:
+            fold_pipe.fit(X_train, y_train)
+        lr_probs = fold_pipe.predict_proba(X_test)[:, 1]
+
+        # LGB (with early stopping against the held-out fold)
+        fold_lgb = build_lgb_classifier()
+        _lgb_fold_kw = {
+            "eval_set": [(X_test, y_test)],
+            "eval_metric": "logloss",
+            "callbacks": [early_stopping(50, verbose=False)],
+        }
+        if sw is not None:
+            _lgb_fold_kw["sample_weight"] = sw
+        fold_lgb.fit(X_train, y_train, **_lgb_fold_kw)
+        lgb_probs = fold_lgb.predict_proba(X_test)[:, 1]
+
+        all_lr.append(lr_probs)
+        all_lgb.append(lgb_probs)
+        all_y.append(y_test.values)
+
+        # 評価指標
+        auc_lr = roc_auc_score(y_test, lr_probs)
+        auc_lgb = roc_auc_score(y_test, lgb_probs)
+        ll_lr = log_loss(y_test, lr_probs)
+        ll_lgb = log_loss(y_test, lgb_probs)
         print(
-            f"[INFO] Grouped eval split {split_id}/{n_splits}: "
-            f"auc={auc:.4f} logloss={ll:.4f} "
+            f"[INFO] OOF split {split_id}/{n_splits}: "
+            f"LR auc={auc_lr:.4f} ll={ll_lr:.4f} | "
+            f"LGB auc={auc_lgb:.4f} ll={ll_lgb:.4f} "
             f"(train={len(train_split)}, test={len(test_split)})"
         )
 
         test_eval = test_split.copy()
-        test_eval["_prob"] = probs
+        test_eval["_prob"] = lr_probs
         hits = 0
         total_slots = 0
         race_count = 0
@@ -1373,41 +1527,37 @@ def evaluate_grouped_holdout(train_df, features, group_col="race_id", n_splits: 
         for _, grp in test_eval.groupby(group_col):
             race_count += 1
             grp_sorted = grp.sort_values("_prob", ascending=False)
-            top3 = grp_sorted.head(3)
-            hits += int(top3["y"].sum())
-            total_slots += min(3, len(top3))
-
-            top1 = grp_sorted.head(1)
-            hit1 += int(top1["y"].sum())
+            top3_grp = grp_sorted.head(3)
+            hits += int(top3_grp["y"].sum())
+            total_slots += min(3, len(top3_grp))
+            hit1 += int(grp_sorted.head(1)["y"].sum())
 
         hit_at_3 = hits / total_slots if total_slots else float("nan")
-        avg_hits = hits / race_count if race_count else float("nan")
         hit_at_1 = hit1 / race_count if race_count else float("nan")
-
         print(
-            f"[INFO] Grouped eval split {split_id}/{n_splits} Hit@3: "
-            f"hit@3={hit_at_3:.4f} avg_hits={avg_hits:.2f} races={race_count}"
+            f"[INFO] OOF split {split_id}/{n_splits}: "
+            f"hit@3={hit_at_3:.4f} hit@1={hit_at_1:.4f} races={race_count}"
         )
-        print(
-            f"[INFO] Grouped eval split {split_id}/{n_splits} Hit@1: "
-            f"hit@1={hit_at_1:.4f} races={race_count}"
-        )
-
         print_reliability_bins(test_eval, prob_col="_prob", y_col="y", bins=8)
-
-        metrics.append((auc, ll, hit_at_3, hit_at_1))
+        metrics.append((auc_lr, ll_lr, hit_at_3, hit_at_1))
 
     if metrics:
         aucs, lls, hit3s, hit1s = zip(*metrics)
         print(
-            "[INFO] Grouped eval (avg): "
-            f"auc={np.mean(aucs):.4f} "
-            f"logloss={np.mean(lls):.4f} "
-            f"hit@3={np.mean(hit3s):.4f} "
-            f"hit@1={np.mean(hit1s):.4f}"
+            "[INFO] OOF (avg): "
+            f"auc={np.mean(aucs):.4f} logloss={np.mean(lls):.4f} "
+            f"hit@3={np.mean(hit3s):.4f} hit@1={np.mean(hit1s):.4f}"
         )
     else:
-        print("[WARN] Grouped eval skipped: no valid splits.")
+        print("[WARN] OOF collection: no valid splits.")
+
+    if all_lr:
+        return {
+            "lr_probs": np.concatenate(all_lr),
+            "lgb_probs": np.concatenate(all_lgb),
+            "labels": np.concatenate(all_y),
+        }
+    return empty
 
 
 # 7. Train Logistic Regression Model
@@ -1421,6 +1571,7 @@ NUMERIC_FEATURES = [
       "up_z_mean5", "pace_diff_z_mean5",
       "trend_mean3",
     "history_count",
+    "surface_exp_ratio", "surface_exp_count",
     "Age", "SexMale", "SexFemale", "SexGelding",
     "jscore_last", "jscore_mean5", "jscore_max5", "jscore_current",
     # PlaceScore ??????
@@ -1482,13 +1633,24 @@ if not np.isfinite(base_prob):
     base_prob = 0.0
 use_classifier_model = need_classifier and pos_count > 0 and neg_count > 0
 
+platt_lr = None
+platt_lgb = None
+learned_alpha = clamp(safe_param_float(PARAMS, "blend_alpha", 0.3), 0.0, 1.0)
+
 if need_classifier:
-    evaluate_grouped_holdout(train_df, FEATURES, group_col="race_id")
+    oof = collect_oof_predictions(train_df, FEATURES, group_col="race_id")
+    if oof["labels"].size > 0:
+        platt_lr = fit_platt_scaler(oof["lr_probs"], oof["labels"])
+        platt_lgb = fit_platt_scaler(oof["lgb_probs"], oof["labels"])
+        cal_lr = apply_platt_scaler(platt_lr, oof["lr_probs"])
+        cal_lgb = apply_platt_scaler(platt_lgb, oof["lgb_probs"])
+        learned_alpha = find_optimal_blend_alpha(cal_lr, cal_lgb, oof["labels"])
 else:
     print("[INFO] Grouped classifier eval skipped: model_mode does not use classifier.")
 
 
-sample_weight = compute_sample_weight(train_df, RACE_TRACK_COND)
+_sw = compute_sample_weight(train_df, RACE_TRACK_COND)
+sample_weight = _sw.values if _sw is not None else None
 
 pipe = None
 lgb_model = None
@@ -1503,27 +1665,34 @@ if use_classifier_model:
         pipe.fit(X, y)
 
     print("[INFO] Training LightGBM model for ensemble...")
-    lgb_model = LGBMClassifier(
-        n_estimators=500,          # 稳定，能学到更多非线性，但不会过拟合
-        learning_rate=0.03,        # 更细致学习，配合 500 棵树
-        num_leaves=20,             # 降低复杂度，防止噪音过拟合（赛马数据噪音很大）
-        max_depth=-1,              # 交给 num_leaves + min_child_samples 控制复杂度
-        min_child_samples=30,      # 每个叶子至少 30，适合你当前训练集规模
-        subsample=0.8,             # 行采样防 overfit
-        subsample_freq=1,          # 使用 subsample 时必须加，推荐=1
-        colsample_bytree=0.8,      # 列采样防 overfit
-        class_weight="balanced",   # ⚠ 关键！补偿 “前3名是少数类” 的不平衡问题
-        importance_type="gain",    # 之后做特征重要性更直观
-        objective="binary",        # 预测是否进 Top3
-        random_state=42,
-        n_jobs=-1                  # 跑满 CPU
-    )
+    lgb_model = build_lgb_classifier()
 
-    if sample_weight is not None:
-        # lgb_model.fit(X, y, sample_weight=sample_weight) 暂时避其锋芒感受效果
-        lgb_model.fit(X, y)
+    # Early stopping: hold out 15% by race group for validation
+    _lgb_es_split = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=42)
+    _lgb_has_rid = "race_id" in train_df.columns and train_df["race_id"].notna().mean() > 0.5
+    if _lgb_has_rid:
+        _lgb_tr_idx, _lgb_va_idx = next(
+            _lgb_es_split.split(train_df, train_df["y"], train_df["race_id"])
+        )
+        X_lgb_tr, y_lgb_tr = X.iloc[_lgb_tr_idx], y.iloc[_lgb_tr_idx]
+        X_lgb_va, y_lgb_va = X.iloc[_lgb_va_idx], y.iloc[_lgb_va_idx]
+        sw_lgb = sample_weight[_lgb_tr_idx] if sample_weight is not None else None
     else:
-        lgb_model.fit(X, y)
+        X_lgb_tr, y_lgb_tr = X, y
+        X_lgb_va, y_lgb_va = None, None
+        sw_lgb = sample_weight
+
+    _lgb_fit_kw = {}
+    if sw_lgb is not None:
+        _lgb_fit_kw["sample_weight"] = sw_lgb
+    if X_lgb_va is not None:
+        _lgb_fit_kw["eval_set"] = [(X_lgb_va, y_lgb_va)]
+        _lgb_fit_kw["eval_metric"] = "logloss"
+        _lgb_fit_kw["callbacks"] = [early_stopping(50, verbose=False)]
+
+    lgb_model.fit(X_lgb_tr, y_lgb_tr, **_lgb_fit_kw)
+    _best = getattr(lgb_model, "best_iteration_", lgb_model.n_estimators)
+    print(f"[INFO] LGB final model: best_iteration={_best}")
 elif need_classifier:
     print("[WARN] Only one label class; classifier fallback to constant probability.")
 
@@ -1602,6 +1771,7 @@ if need_ranker:
                             eval_set=[(rank_valid[FEATURES], rank_valid["y_rel"])],
                             eval_group=[group_valid],
                             eval_at=[1, 3, 5],
+                            callbacks=[early_stopping(50, verbose=False)],
                         )
                         print(
                             "[INFO] Ranker trained: "
@@ -1632,19 +1802,29 @@ if use_classifier_model and pipe is not None:
     proba_lr = pipe.predict_proba(profiles[FEATURES])[:, 1]
     profiles["Top3Prob_raw_lr"] = proba_lr
 
+    # Platt calibration on LR
+    cal_lr = apply_platt_scaler(platt_lr, proba_lr)
+    profiles["Top3Prob_cal_lr"] = cal_lr
+
     if lgb_model is not None:
         raw_lgb = lgb_model.predict_proba(profiles[FEATURES])[:, 1]
         profiles["Top3Prob_raw_lgb"] = raw_lgb
 
-        # 命中率阶段：按配置控制 LGBM 概率压缩强度
-        lgb_beta = clamp(safe_param_float(PARAMS, "lgb_squash_beta", 0.5), 0.0, 1.0)
-        proba_lgb = shrink_proba_around_half(raw_lgb, beta=lgb_beta)
+        # Platt calibration on LGB
+        cal_lgb = apply_platt_scaler(platt_lgb, raw_lgb)
+        profiles["Top3Prob_cal_lgb"] = cal_lgb
 
-        # 命中率阶段：最终排序概率只看 Top3Prob_model
-        alpha = clamp(safe_param_float(PARAMS, "blend_alpha", 0.3), 0.0, 1.0)
-        profiles["Top3Prob_model"] = alpha * proba_lgb + (1.0 - alpha) * proba_lr
+        # Blend with learned alpha (from OOF log_loss optimization)
+        blended = learned_alpha * cal_lgb + (1.0 - learned_alpha) * cal_lr
+        profiles["Top3Prob_model"] = blended
     else:
-        profiles["Top3Prob_model"] = proba_lr
+        profiles["Top3Prob_model"] = cal_lr
+
+    # Race-level normalization: sum of probs should ≈ top_k (3)
+    field_size = len(profiles)
+    profiles["Top3Prob_model"] = race_level_normalize(
+        profiles["Top3Prob_model"].values, field_size, top_k=3
+    )
 else:
     fallback = np.full(len(profiles), base_prob, dtype=float)
     profiles["Top3Prob_raw_lr"] = fallback
