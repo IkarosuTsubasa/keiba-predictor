@@ -1,8 +1,8 @@
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import pandas as pd
 import os
@@ -25,6 +25,9 @@ BLOCK_PATTERNS = (
     "err_too_many_requests",
 )
 SLEEP_RANGE_SECONDS = (0.6, 1.6)
+PAGE_LOAD_STRATEGY = os.environ.get("PIPELINE_PAGE_LOAD_STRATEGY", "eager").strip().lower() or "eager"
+PAGE_LOAD_TIMEOUT_SECONDS = 15.0
+PAGE_WAIT_TIMEOUT_SECONDS = 10.0
 
 
 def configure_utf8_io():
@@ -66,6 +69,53 @@ def assert_not_blocked(driver, url):
 
 def sleep_jitter():
     time.sleep(random.uniform(*SLEEP_RANGE_SECONDS))
+
+
+def get_env_float(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except ValueError:
+        return float(default)
+    if value <= 0:
+        return float(default)
+    return value
+
+
+def stop_loading(driver):
+    try:
+        driver.execute_script("window.stop();")
+    except Exception:
+        pass
+
+
+def get_page_source_fast(driver, url, wait_css=None, timeout=None, require_numeric=False):
+    timeout = timeout if timeout is not None else get_env_float("PIPELINE_PAGE_WAIT_TIMEOUT", PAGE_WAIT_TIMEOUT_SECONDS)
+    try:
+        driver.get(url)
+    except TimeoutException:
+        print(f"[WARN] Page load timeout; continue with partial DOM: {url}")
+        stop_loading(driver)
+    if wait_css:
+        try:
+            if require_numeric:
+                def has_numeric_text(_driver):
+                    elems = _driver.find_elements(By.CSS_SELECTOR, wait_css)
+                    for el in elems:
+                        if re.search(r"\d", el.text or ""):
+                            return True
+                    return False
+                WebDriverWait(driver, timeout).until(has_numeric_text)
+            else:
+                WebDriverWait(driver, timeout).until(
+                    lambda d: bool(d.find_elements(By.CSS_SELECTOR, wait_css))
+                )
+            stop_loading(driver)
+        except Exception:
+            print(f"[WARN] Timeout waiting for selector: {wait_css}")
+    return driver.page_source
 
 
 def parse_sex_age(text):
@@ -300,6 +350,8 @@ url = input("History search URL: ")
 
 # ===== 启动 Selenium =====
 options = Options()
+if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
+    options.page_load_strategy = PAGE_LOAD_STRATEGY
 debugger_address = os.environ.get("CHROME_DEBUGGER_ADDRESS", "").strip()
 shared_driver = bool(debugger_address)
 if shared_driver:
@@ -309,13 +361,17 @@ else:
         options.add_argument("--headless")
     options.add_argument("--lang=ja-JP")
 driver = webdriver.Chrome(options=options)
-wait = WebDriverWait(driver, 10)
+try:
+    page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
+    driver.set_page_load_timeout(page_load_timeout)
+except Exception:
+    pass
 
 # ===== 注入 cookie（需先访问主域）=====
 if should_inject_cookies():
     cookies = load_cookies_from_json_file("cookie.txt")
     if cookies:
-        driver.get("https://db.netkeiba.com")
+        get_page_source_fast(driver, "https://db.netkeiba.com")
         assert_not_blocked(driver, "https://db.netkeiba.com")
         for cookie in cookies:
             driver.add_cookie(cookie)
@@ -326,10 +382,9 @@ else:
     print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
 
 # ===== 打开目标列表页 =====
-driver.get(url)
+page = get_page_source_fast(driver, url, wait_css='a[href^="/race/"]')
 assert_not_blocked(driver, url)
-sleep_jitter()
-soup = BeautifulSoup(driver.page_source, 'html.parser')
+soup = BeautifulSoup(page, 'html.parser')
 
 # ===== 解析前20场比赛 =====
 race_links = []
@@ -382,10 +437,13 @@ for race_idx, (race_name, race_url, race_date) in enumerate(race_links, start=1)
     print(f"\n>>> Processing race {race_idx}/{len(race_links)}: {race_name} ({race_date_str})")
     race_id_match = re.search(r"/race/(\d{12})/", race_url)
     race_id = race_id_match.group(1) if race_id_match else ""
-    driver.get(race_url)
+    race_page = get_page_source_fast(
+        driver,
+        race_url,
+        wait_css="table.race_table_01",
+    )
     assert_not_blocked(driver, race_url)
-    sleep_jitter()
-    soup_race = BeautifulSoup(driver.page_source, 'html.parser')
+    soup_race = BeautifulSoup(race_page, 'html.parser')
 
     # 找到比赛表格并取前3匹马
     race_table = soup_race.find("table", class_="race_table_01 nk_tb_common")
@@ -435,10 +493,13 @@ for race_idx, (race_name, race_url, race_date) in enumerate(race_links, start=1)
     # 抓每匹马的战绩表
     for h_idx, (horse_name, horse_url, finish_pos, is_top3, sex, age, sex_age) in enumerate(horse_links, start=1):
         print(f"  - Horse {h_idx}: {horse_name}")
-        driver.get(horse_url)
+        horse_page = get_page_source_fast(
+            driver,
+            horse_url,
+            wait_css=".db_h_race_results",
+        )
         assert_not_blocked(driver, horse_url)
-        sleep_jitter()
-        soup_horse = BeautifulSoup(driver.page_source, 'html.parser')
+        soup_horse = BeautifulSoup(horse_page, 'html.parser')
         birthdate = extract_birthdate(soup_horse)
 
         # 查找新版战绩表（以列名“レース名”为标志）

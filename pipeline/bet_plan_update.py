@@ -15,6 +15,8 @@ import pandas as pd
 
 from bet_engine_v2 import generate_bet_plan_v2
 from bet_engine_v3 import generate_bet_plan_v3
+from bet_engine_v4 import generate_bet_plan_v4
+from bet_engine_v5 import generate_bet_plan_v5
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -142,6 +144,34 @@ BET_ENGINE_V3_DEFAULTS = {
     "penalty": {"win": 0.00, "place": 0.02, "wide": 0.02, "quinella": 0.00},
 }
 
+BET_ENGINE_V4_DEFAULTS = {
+    "enabled": True,
+    "race_budget_share": 0.02,
+    "max_tickets_per_race": 3,
+    "high_odds_threshold": 10.0,
+    "max_high_odds_per_race": 1,
+    "ensure_diversity": True,
+    "min_yen_unit": 100,
+}
+
+BET_ENGINE_V5_DEFAULTS = {
+    "enabled": True,
+    "target_risk_share": 0.02,
+    "min_race_budget": 400,
+    "min_yen_unit": 100,
+    "base_lambda_market": 0.20,
+    "lambda_min": 0.05,
+    "lambda_max": 0.45,
+    "odds_power": 0.72,
+    "ev_margin": 0.01,
+    "min_ev_per_ticket": -0.02,
+    "kelly_scale": 0.45,
+    "f_cap_by_type": {"win": 0.25, "place": 0.25, "pair": 0.20},
+    "min_p_by_type": {"win": 0.02, "place": 0.05, "wide": 0.03, "quinella": 0.03},
+    "max_tickets_per_race": 6,
+    "ensure_diversity": True,
+}
+
 CALIBRATION_DEFAULTS = {"win_temp": 1.0, "enabled": True}
 
 BET_ENGINE_V3_PROFILE_OVERRIDES = {
@@ -158,6 +188,84 @@ BET_ENGINE_V3_PROFILE_OVERRIDES = {
         "min_p_win_per_ticket": 0.03,
         "min_edge_per_ticket": 0.00,
         "fallback_max_odds_place": 10.0,
+    },
+}
+
+BET_ENGINE_V5_PROFILE_OVERRIDES = {
+    "default": {},
+    "conservative": {
+        "target_risk_share": 0.06,
+        "min_race_budget": 0,
+        "min_ev_per_ticket": 0.00,
+        "ev_margin": 0.02,
+        "min_p_by_type": {"win": 0.03, "place": 0.06, "wide": 0.04, "quinella": 0.04},
+        "kelly_scale": 0.20,
+        "f_cap_by_type": {"win": 0.10, "place": 0.14, "pair": 0.12},
+        "base_lambda_market": 0.18,
+        "lambda_min": 0.05,
+        "lambda_max": 0.35,
+        "odds_power": 0.75,
+    },
+    "conservative2": {
+        "target_risk_share": 0.08,
+        "min_race_budget": 200,
+        "min_ev_per_ticket": -0.02,
+        "ev_margin": 0.01,
+        "min_p_by_type": {"win": 0.03, "place": 0.06, "wide": 0.04, "quinella": 0.04},
+        "kelly_scale": 0.18,
+        "f_cap_by_type": {"win": 0.10, "place": 0.14, "pair": 0.12},
+        "base_lambda_market": 0.18,
+        "lambda_min": 0.05,
+        "lambda_max": 0.40,
+        "odds_power": 0.75,
+    },
+    "conservative3": {
+        "target_risk_share": 0.06,
+        "min_race_budget": 0,
+        "min_ev_per_ticket": 0.01,
+        "ev_margin": 0.02,
+        "base_lambda_market": 0.30,
+        "lambda_min": 0.20,
+        "lambda_max": 0.60,
+        "odds_power": 0.80,
+        "kelly_scale": 0.12,
+        "min_p_by_type": {"win": 0.03, "place": 0.06, "wide": 0.04, "quinella": 0.04},
+    },
+    "conservative4": {
+        "target_risk_share": 0.06,
+        "min_race_budget": 0,
+        "min_ev_per_ticket": 0.01,
+        "ev_margin": 0.02,
+        "base_lambda_market": 0.30,
+        "lambda_min": 0.20,
+        "lambda_max": 0.60,
+        "odds_power": 0.80,
+        "kelly_scale": 0.12,
+        "min_p_by_type": {"win": 0.03, "place": 0.06, "wide": 0.04, "quinella": 0.04},
+        "value_gate_enabled": True,
+        "value_min_by_type": {"win": 0.06, "place": 0.08, "pair": 0.04},
+        "value_gate_gap_boost_k": 2.0,
+        "gap_for_boost": 0.06,
+    },
+    "conservative5": {
+        "target_risk_share": 0.06,
+        "min_race_budget": 0,
+        "min_ev_per_ticket": 0.01,
+        "ev_margin": 0.02,
+        "base_lambda_market": 0.30,
+        "lambda_min": 0.20,
+        "lambda_max": 0.60,
+        "odds_power": 0.80,
+        "kelly_scale": 0.12,
+        "min_p_by_type": {"win": 0.03, "place": 0.06, "wide": 0.04, "quinella": 0.04},
+        "value_gate_enabled": True,
+        "value_gate_enabled_by_type": {"win": True, "place": False, "pair": False},
+        "takeout_mult_by_type": {"win": 1.10, "place": 1.15, "pair": 1.20},
+        "value_ratio_min_by_type": {"win": 0.20, "place": 0.25, "pair": 0.15},
+        "value_gate_gap_boost_k": 2.0,
+        "gap_for_boost": 0.06,
+        "value_entry_gate_enabled": True,
+        "min_best_value_ratio_to_bet": 0.15,
     },
 }
 
@@ -311,13 +419,41 @@ def get_bet_engine_v3_config(predictor_config):
     return cfg
 
 
+def get_bet_engine_v4_config(predictor_config):
+    cfg = dict(BET_ENGINE_V4_DEFAULTS)
+    node = predictor_config.get("bet_engine_v4", {}) if isinstance(predictor_config, dict) else {}
+    if isinstance(node, dict):
+        cfg.update(node)
+    return cfg
+
+
+def get_bet_engine_v5_config(predictor_config):
+    cfg = dict(BET_ENGINE_V5_DEFAULTS)
+    node = predictor_config.get("bet_engine_v5", {}) if isinstance(predictor_config, dict) else {}
+    if isinstance(node, dict):
+        cfg.update(node)
+    return cfg
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Build bet plan with v2/v3 engines.")
+    parser = argparse.ArgumentParser(description="Build bet plan with v2/v3/v4/v5 engines.")
+    parser.add_argument(
+        "--engine-version",
+        choices=["v2", "v3", "v4", "v5"],
+        default=os.environ.get("ENGINE_VERSION", "v4"),
+        help="bet engine version",
+    )
     parser.add_argument(
         "--bet-profile",
         choices=sorted(BET_ENGINE_V3_PROFILE_OVERRIDES.keys()),
         default=os.environ.get("BET_PROFILE", "publish"),
-        help="bet_engine_v3 preset profile",
+        help="bet_engine_v3 preset profile (used only when engine-version=v3)",
+    )
+    parser.add_argument(
+        "--v5-profile",
+        choices=sorted(BET_ENGINE_V5_PROFILE_OVERRIDES.keys()),
+        default=os.environ.get("V5_PROFILE", "default"),
+        help="bet_engine_v5 preset profile (used only when engine-version=v5)",
     )
     return parser.parse_args()
 
@@ -329,10 +465,37 @@ def resolve_bet_profile(value):
     return profile
 
 
+def resolve_v5_profile(value):
+    profile = str(value or "").strip().lower()
+    if profile not in BET_ENGINE_V5_PROFILE_OVERRIDES:
+        profile = "default"
+    return profile
+
+
+def resolve_engine_version(value):
+    v = str(value or "").strip().lower()
+    if v not in ("v2", "v3", "v4", "v5"):
+        v = "v4"
+    return v
+
+
 def apply_bet_profile_to_v3(cfg, profile):
     out = dict(cfg) if isinstance(cfg, dict) else {}
     overrides = BET_ENGINE_V3_PROFILE_OVERRIDES.get(resolve_bet_profile(profile), {})
     out.update(overrides)
+    return out
+
+
+def apply_bet_profile_to_v5(cfg, profile):
+    out = dict(cfg) if isinstance(cfg, dict) else {}
+    overrides = BET_ENGINE_V5_PROFILE_OVERRIDES.get(resolve_v5_profile(profile), {})
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            node = dict(out[key])
+            node.update(value)
+            out[key] = node
+        else:
+            out[key] = value
     return out
 
 
@@ -480,6 +643,26 @@ def ensure_predictor_bet_config_defaults(cfg_path, predictor_config):
             node_v3[key] = value
             changed = True
     data["bet_engine_v3"] = node_v3
+
+    node_v4 = data.get("bet_engine_v4")
+    if not isinstance(node_v4, dict):
+        node_v4 = {}
+        changed = True
+    for key, value in BET_ENGINE_V4_DEFAULTS.items():
+        if key not in node_v4:
+            node_v4[key] = value
+            changed = True
+    data["bet_engine_v4"] = node_v4
+
+    node_v5 = data.get("bet_engine_v5")
+    if not isinstance(node_v5, dict):
+        node_v5 = {}
+        changed = True
+    for key, value in BET_ENGINE_V5_DEFAULTS.items():
+        if key not in node_v5:
+            node_v5[key] = value
+            changed = True
+    data["bet_engine_v5"] = node_v5
 
     calibration = data.get("calibration")
     if not isinstance(calibration, dict):
@@ -641,6 +824,41 @@ def build_rows_from_bet_items(items, budget_yen, horse_meta):
             }
         )
     return out_rows, item_rows
+
+
+def normalize_portfolio_items(items):
+    out = []
+    for item in (items or []):
+        if not isinstance(item, dict):
+            continue
+        bet_type = str(item.get("bet_type", "") or item.get("ticket_type", "")).strip().lower()
+        horses = item.get("horses", item.get("horse_ids", ()))
+        if isinstance(horses, str):
+            horses = tuple([x for x in str(horses).split("-") if x])
+        horses = tuple([str(x) for x in (horses or ()) if str(x).strip() != ""])
+        if not bet_type or not horses:
+            continue
+        stake_yen = int(float(item.get("stake_yen", item.get("stake", 0)) or 0))
+        odds_used = float(item.get("odds_used", item.get("odds", 0.0)) or 0.0)
+        p_hit = float(item.get("p_hit", item.get("p_final", 0.0)) or 0.0)
+        edge = float(item.get("edge", item.get("EV_adj", item.get("EV", 0.0))) or 0.0)
+        kelly_f = float(item.get("kelly_f", 0.0) or 0.0)
+        why = str(item.get("why", "") or "")
+        notes = str(item.get("notes", "") or "")
+        out.append(
+            {
+                "bet_type": bet_type,
+                "horses": horses,
+                "stake_yen": stake_yen,
+                "odds_used": odds_used,
+                "p_hit": p_hit,
+                "edge": edge,
+                "kelly_f": kelly_f,
+                "why": why,
+                "notes": notes,
+            }
+        )
+    return out
 
 
 def calc_plan_summary(item_rows):
@@ -1623,13 +1841,16 @@ def build_trifecta_recommendation(horses_list, prob_maps, eligible_indices, conf
 
 def main():
     args = parse_args()
+    engine_version = resolve_engine_version(args.engine_version)
     bet_profile = resolve_bet_profile(args.bet_profile)
+    v5_profile = resolve_v5_profile(getattr(args, "v5_profile", "default"))
     config = load_config()
     config, strategy_used = apply_strategy_from_env(config)
     predictor_config = load_predictor_config()
     bet_engine_v2_cfg = get_bet_engine_v2_config(predictor_config)
     bet_engine_v3_cfg = apply_bet_profile_to_v3(get_bet_engine_v3_config(predictor_config), bet_profile)
-    use_v3 = bool(bet_engine_v3_cfg.get("enabled", True))
+    bet_engine_v4_cfg = get_bet_engine_v4_config(predictor_config)
+    bet_engine_v5_cfg = apply_bet_profile_to_v5(get_bet_engine_v5_config(predictor_config), v5_profile)
     race_id = resolve_race_id()
     budget_list = resolve_budget_list()
 
@@ -1697,23 +1918,36 @@ def main():
     scope_data_dir = get_data_dir(BASE_DIR, SCOPE_KEY)
     scope_data_dir.mkdir(parents=True, exist_ok=True)
     items_path = scope_data_dir / f"bet_plan_items_{run_id}.csv"
-    v3_cfg_path = scope_data_dir / f"bet_engine_v3_cfg_{run_id}.json"
-    if use_v3:
+    cfg_dump_path = scope_data_dir / f"bet_engine_{engine_version}_cfg_{run_id}.json"
+    if engine_version == "v3":
         v3_summary = build_bet_engine_v3_audit_summary(bet_engine_v3_cfg)
         try:
             payload = {
                 "scope": SCOPE_KEY,
                 "run_id": run_id,
+                "engine_version": engine_version,
                 "bet_profile": bet_profile,
                 "params": v3_summary,
             }
-            v3_cfg_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            cfg_dump_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception as exc:
             print(f"[WARN] failed to save bet_engine_v3 cfg summary: {exc}")
         print(
             "[bet_engine_v3] profile={profile} ".format(profile=bet_profile)
             + " ".join([f"{k}={v3_summary.get(k)}" for k in BET_ENGINE_V3_AUDIT_KEYS])
         )
+    elif engine_version in ("v4", "v5"):
+        try:
+            payload = {
+                "scope": SCOPE_KEY,
+                "run_id": run_id,
+                "engine_version": engine_version,
+                "v5_profile": (v5_profile if engine_version == "v5" else ""),
+                "params": (bet_engine_v4_cfg if engine_version == "v4" else bet_engine_v5_cfg),
+            }
+            cfg_dump_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:
+            print(f"[WARN] failed to save bet_engine_{engine_version} cfg summary: {exc}")
 
     out_rows = []
     item_rows_all = []
@@ -1753,12 +1987,15 @@ def main():
         "notes",
     ]
 
+    v5_diag_printed = False
     for budget_yen in budget_list:
-        engine_used = "v2"
+        engine_used = engine_version
         summary_info = {}
-        if use_v3:
-            try:
-                items_v3, _, summary_info = generate_bet_plan_v3(
+        budget_rows, budget_item_rows = [], []
+
+        try:
+            if engine_version == "v3":
+                items_raw, _, summary_info = generate_bet_plan_v3(
                     pred_df=pred_df,
                     odds=odds_payload,
                     bankroll_yen=budget_yen,
@@ -1766,20 +2003,60 @@ def main():
                     config=bet_engine_v3_cfg,
                 )
                 budget_rows, budget_item_rows = build_rows_from_bet_items(
-                    items=items_v3,
+                    items=items_raw,
                     budget_yen=budget_yen,
                     horse_meta=horse_meta,
                 )
-                engine_used = "v3"
-            except Exception as exc:
-                print(f"[WARN] bet_engine_v3 failed for budget={budget_yen}, fallback to v2: {exc}")
-                items_v3 = []
-                budget_rows, budget_item_rows = [], []
-        else:
-            items_v3 = []
-            budget_rows, budget_item_rows = [], []
-
-        if engine_used != "v3":
+            elif engine_version == "v4":
+                items_raw, _, summary_info = generate_bet_plan_v4(
+                    pred_df=pred_df,
+                    odds=odds_payload,
+                    bankroll_yen=budget_yen,
+                    scope_key=SCOPE_KEY,
+                    config=bet_engine_v4_cfg,
+                )
+                budget_rows, budget_item_rows = build_rows_from_bet_items(
+                    items=normalize_portfolio_items(items_raw),
+                    budget_yen=budget_yen,
+                    horse_meta=horse_meta,
+                )
+            elif engine_version == "v5":
+                items_raw, _, summary_info = generate_bet_plan_v5(
+                    pred_df=pred_df,
+                    odds=odds_payload,
+                    bankroll_yen=budget_yen,
+                    scope_key=SCOPE_KEY,
+                    config=bet_engine_v5_cfg,
+                )
+                budget_rows, budget_item_rows = build_rows_from_bet_items(
+                    items=normalize_portfolio_items(items_raw),
+                    budget_yen=budget_yen,
+                    horse_meta=horse_meta,
+                )
+                if (not v5_diag_printed) and isinstance(summary_info, dict):
+                    race_diags = summary_info.get("diagnostics", [])
+                    if race_diags:
+                        print(f"[v5][diag][first_race] {race_diags[0]}")
+                        v5_diag_printed = True
+                    strategy_text = str(summary_info.get("strategy_text", "") or "").strip()
+                    if strategy_text:
+                        print(f"[v5][strategy]\n{strategy_text}")
+            else:
+                result = generate_bet_plan_v2(
+                    pred_df=pred_df,
+                    odds=odds_payload,
+                    bankroll_yen=budget_yen,
+                    scope_key=SCOPE_KEY,
+                    config=bet_engine_v2_cfg,
+                )
+                budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
+                    result=result,
+                    budget_yen=budget_yen,
+                    horse_meta=horse_meta,
+                )
+        except Exception as exc:
+            print(f"[WARN] bet_engine_{engine_version} failed for budget={budget_yen}, fallback to v2: {exc}")
+            engine_used = "v2_fallback"
             result = generate_bet_plan_v2(
                 pred_df=pred_df,
                 odds=odds_payload,
@@ -1803,9 +2080,11 @@ def main():
         expected_return = int(round(sum(float(r.get("p_hit", 0.0) or 0.0) * float(r.get("odds_used", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
         expected_profit = int(round(sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
         no_bet = bool(ticket_count == 0)
-        if engine_used == "v3" and isinstance(summary_info, dict):
-            expected_return = int(summary_info.get("expected_return_yen", expected_return) or expected_return)
-            expected_profit = int(summary_info.get("expected_profit_yen", expected_profit) or expected_profit)
+        if isinstance(summary_info, dict):
+            if "expected_return_yen" in summary_info:
+                expected_return = int(summary_info.get("expected_return_yen", expected_return) or expected_return)
+            if "expected_profit_yen" in summary_info:
+                expected_profit = int(summary_info.get("expected_profit_yen", expected_profit) or expected_profit)
             no_bet = bool(summary_info.get("no_bet", no_bet))
         print(
             f"[summary][{budget_yen}][{engine_used}] stake={total_stake} expected_return={expected_return} "
@@ -1821,7 +2100,9 @@ def main():
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
-    print(f"Bet profile: {bet_profile}")
+    print(f"Engine version: {engine_version}")
+    if engine_version == "v3":
+        print(f"Bet profile: {bet_profile}")
     print(f"Budgets: {', '.join(str(v) for v in budget_list)}")
     if out_df.empty:
         print("No tickets generated.")
@@ -1850,8 +2131,8 @@ def main():
     )
     print(f"Saved: {OUT_PATH}")
     print(f"Saved items: {items_path}")
-    if use_v3:
-        print(f"Saved bet_engine_v3 cfg: {v3_cfg_path}")
+    if engine_version in ("v3", "v4", "v5"):
+        print(f"Saved bet_engine_{engine_version} cfg: {cfg_dump_path}")
     append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
     pause_exit()
 

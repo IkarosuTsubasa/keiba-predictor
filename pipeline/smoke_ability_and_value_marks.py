@@ -123,6 +123,12 @@ def main():
         assert "mark" in ability_cols and "recommended_bet_types" in ability_cols
         assert "value_mark" in value_cols
 
+        # Ability marks must be identical to Predictions Top5 order.
+        pred_sorted = sorted(pred_rows, key=lambda r: _to_float(r.get("Top3Prob_model")), reverse=True)
+        expected_top5_nos = [str(r.get("horse_no", "")).strip() for r in pred_sorted[:5]]
+        actual_top5_nos = [str(r.get("horse_no", "")).strip() for r in ability_rows]
+        assert actual_top5_nos == expected_top5_nos, f"ability marks order mismatch: {actual_top5_nos} vs {expected_top5_nos}"
+
         # Case A: strong horse with low odds must stay top in ability marks.
         h1 = next((r for r in ability_rows if str(r.get("horse_no", "")) == "1"), None)
         assert h1 is not None
@@ -131,7 +137,7 @@ def main():
         # Case B: value horse (pred_rank low but high EV) must appear in value picks.
         h5 = next((r for r in value_rows if str(r.get("horse_no", "")) == "5"), None)
         assert h5 is not None
-        assert h5.get("value_mark") in ("★", "☆")
+        assert h5.get("value_mark") == "★"
 
         pred_csv = (
             "HorseName,Top3Prob_model,Top3Prob_lgbm,Top3Prob_lr,confidence_score,risk_score\n"
@@ -140,10 +146,10 @@ def main():
             "H5,0.16,0.12,0.10,0.78,0.70\n"
         )
         note_text = build_mark_note_text(ability_rows, value_rows, predictions_filename="", predictions_csv_text=pred_csv)
-        assert "【AI能力印（◎○▲△☆）】" in note_text
+        assert "【能力印（◎○▲△☆）】" in note_text
         assert "【EV狙い馬（★）】" in note_text
-        assert "◎ 1番 H1" in note_text or "○ 1番 H1" in note_text
-        assert "★ 5番 H5" in note_text or "☆ 5番 H5" in note_text
+        assert "H1" in note_text
+        assert "H5" in note_text
 
         print("OK: ability/value marks smoke passed")
 

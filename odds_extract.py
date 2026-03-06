@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
@@ -16,6 +17,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 
 SLEEP_RANGE_SECONDS = (1.0, 3.5)
+PAGE_LOAD_STRATEGY = os.environ.get("PIPELINE_PAGE_LOAD_STRATEGY", "eager").strip().lower() or "eager"
+PAGE_LOAD_TIMEOUT_SECONDS = 15
 BLOCK_PATTERNS = (
     "403 forbidden",
     "error 403",
@@ -42,6 +45,26 @@ configure_utf8_io()
 
 def sleep_jitter():
     time.sleep(random.uniform(*SLEEP_RANGE_SECONDS))
+
+
+def get_env_float(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except ValueError:
+        return float(default)
+    if value <= 0:
+        return float(default)
+    return value
+
+
+def stop_loading(driver):
+    try:
+        driver.execute_script("window.stop();")
+    except Exception:
+        pass
 
 
 def load_cookies_from_json_file(path="cookie.txt"):
@@ -99,7 +122,11 @@ def assert_not_blocked(page_source, title, url):
 def get_page_source(url, driver, wait_css=None, timeout=10):
     if not driver:
         raise RuntimeError("Selenium driver is required for odds extraction.")
-    driver.get(url)
+    try:
+        driver.get(url)
+    except TimeoutException:
+        print(f"[WARN] Page load timeout; continue with partial DOM: {url}")
+        stop_loading(driver)
     if wait_css:
         try:
             def has_numeric_text(_driver):
@@ -110,6 +137,7 @@ def get_page_source(url, driver, wait_css=None, timeout=10):
                 return False
 
             WebDriverWait(driver, timeout).until(has_numeric_text)
+            stop_loading(driver)
         except Exception:
             print(f"[WARN] Timeout waiting for odds values: {wait_css}")
     page_source = driver.page_source
@@ -566,6 +594,8 @@ def main():
         return
 
     options = Options()
+    if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
+        options.page_load_strategy = PAGE_LOAD_STRATEGY
     debugger_address = os.environ.get("CHROME_DEBUGGER_ADDRESS", "").strip()
     shared_driver = bool(debugger_address)
     if shared_driver:
@@ -586,6 +616,11 @@ def main():
     except Exception as exc:
         print(f"[ERROR] Selenium unavailable: {exc}")
         return
+    try:
+        page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
+        driver.set_page_load_timeout(page_load_timeout)
+    except Exception:
+        pass
     try:
         if should_inject_cookies():
             cookies = load_cookies_from_json_file("cookie.txt")

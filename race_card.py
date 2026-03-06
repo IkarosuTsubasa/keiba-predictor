@@ -1,10 +1,9 @@
 import os
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
@@ -40,6 +39,9 @@ BLOCK_PATTERNS = (
     "err_too_many_requests",
 )
 SLEEP_RANGE_SECONDS = (0.6, 1.6)
+PAGE_LOAD_STRATEGY = os.environ.get("PIPELINE_PAGE_LOAD_STRATEGY", "eager").strip().lower() or "eager"
+PAGE_LOAD_TIMEOUT_SECONDS = 15.0
+PAGE_WAIT_TIMEOUT_SECONDS = 10.0
 # ===== 从 cookie.txt 加载 JSON 格式的 cookie =====
 def load_cookies_from_json_file(path="cookie.txt"):
     try:
@@ -73,6 +75,26 @@ def sleep_jitter():
     time.sleep(random.uniform(*SLEEP_RANGE_SECONDS))
 
 
+def get_env_float(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except ValueError:
+        return float(default)
+    if value <= 0:
+        return float(default)
+    return value
+
+
+def stop_loading(driver):
+    try:
+        driver.execute_script("window.stop();")
+    except Exception:
+        pass
+
+
 def wait_for_horse_rows(driver, timeout=12):
     selectors = [
         "table.RaceTable01.ShutubaTable tbody tr.HorseList",
@@ -85,9 +107,37 @@ def wait_for_horse_rows(driver, timeout=12):
     while time.time() < end_time:
         for selector in selectors:
             if driver.find_elements(By.CSS_SELECTOR, selector):
+                stop_loading(driver)
                 return selector
         time.sleep(0.25)
     return ""
+
+
+def get_page_source_fast(driver, url, wait_css=None, timeout=None, require_numeric=False):
+    timeout = timeout if timeout is not None else get_env_float("PIPELINE_PAGE_WAIT_TIMEOUT", PAGE_WAIT_TIMEOUT_SECONDS)
+    try:
+        driver.get(url)
+    except TimeoutException:
+        print(f"[WARN] Page load timeout; continue with partial DOM: {url}")
+        stop_loading(driver)
+    if wait_css:
+        try:
+            if require_numeric:
+                def has_numeric_text(_driver):
+                    elems = _driver.find_elements(By.CSS_SELECTOR, wait_css)
+                    for el in elems:
+                        if re.search(r"\d", el.text or ""):
+                            return True
+                    return False
+                WebDriverWait(driver, timeout).until(has_numeric_text)
+            else:
+                WebDriverWait(driver, timeout).until(
+                    lambda d: bool(d.find_elements(By.CSS_SELECTOR, wait_css))
+                )
+            stop_loading(driver)
+        except Exception:
+            print(f"[WARN] Timeout waiting for selector: {wait_css}")
+    return driver.page_source
 
 
 def should_inject_cookies():
@@ -119,6 +169,8 @@ debug_enabled = os.environ.get("RACE_CARD_DEBUG", "").strip().lower() in ("1", "
 
 # ===== 启动 Selenium 浏览器 =====
 chrome_options = Options()
+if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
+    chrome_options.page_load_strategy = PAGE_LOAD_STRATEGY
 debugger_address = os.environ.get("CHROME_DEBUGGER_ADDRESS", "").strip()
 shared_driver = bool(debugger_address)
 if shared_driver:
@@ -129,12 +181,17 @@ else:
         chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--lang=ja-JP")
 driver = webdriver.Chrome(options=chrome_options)
+try:
+    page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
+    driver.set_page_load_timeout(page_load_timeout)
+except Exception:
+    pass
 
 # ===== 注入 cookie（先访问一次主域名）=====
 if should_inject_cookies():
     cookies = load_cookies_from_json_file("cookie.txt")
     if cookies:
-        driver.get("https://db.netkeiba.com")
+        get_page_source_fast(driver, "https://db.netkeiba.com")
         assert_not_blocked(driver, "https://db.netkeiba.com")
         for cookie in cookies:
             driver.add_cookie(cookie)
@@ -145,8 +202,11 @@ else:
     print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
 
 # ===== 打开出走马页面 =====
-driver.get(url)
-wait_selector = wait_for_horse_rows(driver)
+get_page_source_fast(driver, url)
+wait_selector = wait_for_horse_rows(
+    driver,
+    timeout=get_env_float("PIPELINE_PAGE_WAIT_TIMEOUT", PAGE_WAIT_TIMEOUT_SECONDS),
+)
 if debug_enabled:
     if wait_selector:
         print(f"DEBUG: horse rows detected via {wait_selector}")
@@ -448,17 +508,17 @@ def extract_kanji(text):
 for horse_number, horse_data in horses_info.items():
     print(f"\nFetching data for {horse_data['name']}...")
 
-    driver.get(horse_data["url"])
+    page = get_page_source_fast(
+        driver,
+        horse_data["url"],
+        wait_css=".db_h_race_results",
+    )
     assert_not_blocked(driver, horse_data["url"])
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "db_h_race_results"))
-        )
-    except:
+    if not driver.find_elements(By.CLASS_NAME, "db_h_race_results"):
         print(f"WARN: {horse_data['name']} results table not found")
         continue
 
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    soup = BeautifulSoup(page, 'html.parser')
     birthdate = extract_birthdate(soup)
     table = soup.find('table', {'class': 'db_h_race_results nk_tb_common'})
     if table is None:

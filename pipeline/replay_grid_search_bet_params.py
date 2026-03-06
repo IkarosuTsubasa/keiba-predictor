@@ -11,6 +11,8 @@ import pandas as pd
 
 from bet_engine_v2 import generate_bet_plan_v2
 from bet_engine_v3 import generate_bet_plan_v3
+from bet_engine_v4 import generate_bet_plan_v4
+from bet_engine_v5 import generate_bet_plan_v5
 from record_pipeline import (
     estimate_payout_multiplier,
     eval_ticket,
@@ -27,6 +29,7 @@ from surface_scope import get_data_dir, get_predictor_config_path, normalize_sco
 BASE_DIR = Path(__file__).resolve().parent
 RUN_ID_RE = re.compile(r"(\d{8}_\d{6})")
 BET_TYPES = ("win", "place", "wide", "quinella")
+ENGINE_CHOICES = ("v2", "v3", "v4", "v5")
 
 
 def _safe_float(value, default=0.0):
@@ -254,6 +257,32 @@ def _ticket_profit(
     return int(amount_yen), int(payout)
 
 
+def _odds_bucket(odds_used: float) -> str:
+    odd = _safe_float(odds_used, 0.0)
+    if odd < 3.0:
+        return "low"
+    if odd < 10.0:
+        return "mid"
+    return "high"
+
+
+def _collect_bucket_counts(items: List[Dict]) -> Dict[str, int]:
+    counts = {"bucket_low": 0, "bucket_mid": 0, "bucket_high": 0}
+    for item in items:
+        bet_type = str(item.get("bet_type", "")).strip().lower()
+        if bet_type not in BET_TYPES:
+            continue
+        stake = _safe_int(item.get("stake_yen", item.get("amount_yen", 0)), 0)
+        if stake <= 0:
+            continue
+        odds_used = _safe_float(item.get("odds_used", 0.0), 0.0)
+        if odds_used <= 0:
+            continue
+        bucket = _odds_bucket(odds_used)
+        counts[f"bucket_{bucket}"] += 1
+    return counts
+
+
 def _evaluate_items(
     items: List[Dict],
     no_to_name: Dict[int, str],
@@ -301,6 +330,80 @@ def _evaluate_items(
         payout_sum += pay
         tickets += 1
     return int(stake_sum), int(payout_sum), int(tickets)
+
+
+def _normalize_engine_items(engine: str, raw_items) -> List[Dict]:
+    eng = str(engine or "").strip().lower()
+    out: List[Dict] = []
+    if eng == "v2":
+        for item in raw_items.items:
+            out.append(
+                {
+                    "bet_type": item.bet_type,
+                    "horses": item.horses,
+                    "stake_yen": item.stake_yen,
+                    "odds_used": item.odds_used,
+                }
+            )
+        return out
+
+    for item in (raw_items or []):
+        if not isinstance(item, dict):
+            continue
+        bet_type = str(item.get("bet_type", "") or item.get("ticket_type", "")).strip().lower()
+        horses = item.get("horses", item.get("horse_ids", ()))
+        if isinstance(horses, str):
+            horses = tuple([x for x in str(horses).split("-") if x])
+        horses = tuple([str(x) for x in (horses or ()) if str(x).strip() != ""])
+        out.append(
+            {
+                "bet_type": bet_type,
+                "horses": horses,
+                "stake_yen": _safe_int(item.get("stake_yen", item.get("stake", 0)), 0),
+                "odds_used": _safe_float(item.get("odds_used", item.get("odds", 0.0)), 0.0),
+            }
+        )
+    return out
+
+
+def _generate_items_by_engine(engine: str, pred_df: pd.DataFrame, odds_payload: Dict, bankroll: int, scope_key: str, cfg: Dict):
+    eng = str(engine or "").strip().lower()
+    if eng == "v3":
+        items, _, _ = generate_bet_plan_v3(
+            pred_df=pred_df,
+            odds=odds_payload,
+            bankroll_yen=bankroll,
+            scope_key=scope_key,
+            config=cfg,
+        )
+        return _normalize_engine_items(eng, items)
+    if eng == "v4":
+        items, _, _ = generate_bet_plan_v4(
+            pred_df=pred_df,
+            odds=odds_payload,
+            bankroll_yen=bankroll,
+            scope_key=scope_key,
+            config=cfg,
+        )
+        return _normalize_engine_items(eng, items)
+    if eng == "v5":
+        items, _, _ = generate_bet_plan_v5(
+            pred_df=pred_df,
+            odds=odds_payload,
+            bankroll_yen=bankroll,
+            scope_key=scope_key,
+            config=cfg,
+        )
+        return _normalize_engine_items(eng, items)
+
+    result = generate_bet_plan_v2(
+        pred_df=pred_df,
+        odds=odds_payload,
+        bankroll_yen=bankroll,
+        scope_key=scope_key,
+        config=cfg,
+    )
+    return _normalize_engine_items("v2", result)
 
 
 def _build_run_rows(scope_key: str) -> List[Dict]:
@@ -379,6 +482,9 @@ def _calc_metrics(rows: List[Dict], bankroll: int) -> Dict:
             "max_drawdown": 0,
             "no_bet_rate": float("nan"),
             "avg_tickets": float("nan"),
+            "bucket_low_ratio": float("nan"),
+            "bucket_mid_ratio": float("nan"),
+            "bucket_high_ratio": float("nan"),
         }
     stake_total = int(sum(int(r["stake"]) for r in rows))
     profit_total = int(sum(int(r["profit"]) for r in rows))
@@ -391,6 +497,18 @@ def _calc_metrics(rows: List[Dict], bankroll: int) -> Dict:
     max_dd = int(dd.min()) if len(dd) else 0
     no_bet_rate = float(np.mean([1.0 if int(r["stake"]) <= 0 else 0.0 for r in rows]))
     avg_tickets = float(np.mean([int(r["tickets"]) for r in rows]))
+    low_cnt = int(sum(int(r.get("bucket_low", 0)) for r in rows))
+    mid_cnt = int(sum(int(r.get("bucket_mid", 0)) for r in rows))
+    high_cnt = int(sum(int(r.get("bucket_high", 0)) for r in rows))
+    bucket_total = int(low_cnt + mid_cnt + high_cnt)
+    if bucket_total > 0:
+        low_ratio = float(low_cnt) / float(bucket_total)
+        mid_ratio = float(mid_cnt) / float(bucket_total)
+        high_ratio = float(high_cnt) / float(bucket_total)
+    else:
+        low_ratio = float("nan")
+        mid_ratio = float("nan")
+        high_ratio = float("nan")
     return {
         "runs": int(len(rows)),
         "stake_total": stake_total,
@@ -400,6 +518,9 @@ def _calc_metrics(rows: List[Dict], bankroll: int) -> Dict:
         "max_drawdown": max_dd,
         "no_bet_rate": no_bet_rate,
         "avg_tickets": avg_tickets,
+        "bucket_low_ratio": low_ratio,
+        "bucket_mid_ratio": mid_ratio,
+        "bucket_high_ratio": high_ratio,
     }
 
 
@@ -423,6 +544,12 @@ def _apply_combo_to_v3(base_cfg: Dict, combo: Dict) -> Dict:
     cfg["min_ev"]["place"] = float(combo["min_ev_place"])
     cfg["min_ev"]["wide"] = float(combo["min_ev_wide"])
     cfg["min_ev"]["quinella"] = float(combo["min_ev_quinella"])
+    if "min_p_hit_per_ticket" in combo:
+        cfg["min_p_hit_per_ticket"] = float(combo["min_p_hit_per_ticket"])
+    if "min_p_win_per_ticket" in combo:
+        cfg["min_p_win_per_ticket"] = float(combo["min_p_win_per_ticket"])
+    if "min_edge_per_ticket" in combo:
+        cfg["min_edge_per_ticket"] = float(combo["min_edge_per_ticket"])
     return cfg
 
 
@@ -438,6 +565,9 @@ def _iter_grid(args) -> Iterable[Dict]:
         "min_ev_place": _parse_grid(args.min_ev_place_grid, "0.005,0.01"),
         "min_ev_wide": _parse_grid(args.min_ev_wide_grid, "0.005,0.01"),
         "min_ev_quinella": _parse_grid(args.min_ev_quinella_grid, "0.01,0.02"),
+        "min_p_hit_per_ticket": _parse_grid(args.min_p_hit_ticket_grid, "0.12"),
+        "min_p_win_per_ticket": _parse_grid(args.min_p_win_ticket_grid, "0.06"),
+        "min_edge_per_ticket": _parse_grid(args.min_edge_ticket_grid, "0.03"),
     }
     keys = list(grids.keys())
     vals = [grids[k] for k in keys]
@@ -506,7 +636,18 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                 fuku_odds_map,
                 quinella_odds_map,
             )
-            rows_v3.append({"run_id": run["run_id"], "stake": s3, "profit": p3 - s3, "tickets": t3})
+            b3 = _collect_bucket_counts(v3_items)
+            rows_v3.append(
+                {
+                    "run_id": run["run_id"],
+                    "stake": s3,
+                    "profit": p3 - s3,
+                    "tickets": t3,
+                    "bucket_low": b3["bucket_low"],
+                    "bucket_mid": b3["bucket_mid"],
+                    "bucket_high": b3["bucket_high"],
+                }
+            )
 
             if args.ab_mode == "fair":
                 v2_result = generate_bet_plan_v2(
@@ -523,6 +664,7 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                             "bet_type": item.bet_type,
                             "horses": item.horses,
                             "stake_yen": item.stake_yen,
+                            "odds_used": item.odds_used,
                         }
                     )
                 s2, p2, t2 = _evaluate_items(
@@ -534,7 +676,18 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                     fuku_odds_map,
                     quinella_odds_map,
                 )
-                rows_v2.append({"run_id": run["run_id"], "stake": s2, "profit": p2 - s2, "tickets": t2})
+                b2 = _collect_bucket_counts(v2_items)
+                rows_v2.append(
+                    {
+                        "run_id": run["run_id"],
+                        "stake": s2,
+                        "profit": p2 - s2,
+                        "tickets": t2,
+                        "bucket_low": b2["bucket_low"],
+                        "bucket_mid": b2["bucket_mid"],
+                        "bucket_high": b2["bucket_high"],
+                    }
+                )
             else:
                 old_base = int(run["old_base_amount"])
                 old_profit = int(run["old_profit"])
@@ -542,7 +695,17 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                     scale = float(bankroll) / float(old_base) if old_base > 0 else 1.0
                     old_profit = int(round(old_profit * scale))
                     old_base = bankroll
-                rows_v2.append({"run_id": run["run_id"], "stake": old_base, "profit": old_profit, "tickets": 0})
+                rows_v2.append(
+                    {
+                        "run_id": run["run_id"],
+                        "stake": old_base,
+                        "profit": old_profit,
+                        "tickets": 0,
+                        "bucket_low": 0,
+                        "bucket_mid": 0,
+                        "bucket_high": 0,
+                    }
+                )
 
         if not rows_v3:
             continue
@@ -560,11 +723,17 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                 "v3_max_drawdown": m_v3["max_drawdown"],
                 "v3_no_bet_rate": m_v3["no_bet_rate"],
                 "v3_avg_tickets": m_v3["avg_tickets"],
+                "v3_bucket_low_ratio": m_v3["bucket_low_ratio"],
+                "v3_bucket_mid_ratio": m_v3["bucket_mid_ratio"],
+                "v3_bucket_high_ratio": m_v3["bucket_high_ratio"],
                 "v2_roi_cash_as_1": m_v2["roi_cash_as_1"],
                 "v2_roi_stake": m_v2["roi_stake"],
                 "v2_max_drawdown": m_v2["max_drawdown"],
                 "v2_no_bet_rate": m_v2["no_bet_rate"],
                 "v2_avg_tickets": m_v2["avg_tickets"],
+                "v2_bucket_low_ratio": m_v2["bucket_low_ratio"],
+                "v2_bucket_mid_ratio": m_v2["bucket_mid_ratio"],
+                "v2_bucket_high_ratio": m_v2["bucket_high_ratio"],
                 "delta_roi_cash_as_1": delta_cash,
                 "delta_roi_stake": delta_stake,
                 "runs": m_v3["runs"],
@@ -581,6 +750,9 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                     "stake": row["stake"],
                     "profit": row["profit"],
                     "tickets": row["tickets"],
+                    "bucket_low": row.get("bucket_low", 0),
+                    "bucket_mid": row.get("bucket_mid", 0),
+                    "bucket_high": row.get("bucket_high", 0),
                 }
             )
         for row in rows_v2:
@@ -593,10 +765,131 @@ def run_grid_for_scope(scope_key: str, args) -> Tuple[pd.DataFrame, pd.DataFrame
                     "stake": row["stake"],
                     "profit": row["profit"],
                     "tickets": row["tickets"],
+                    "bucket_low": row.get("bucket_low", 0),
+                    "bucket_mid": row.get("bucket_mid", 0),
+                    "bucket_high": row.get("bucket_high", 0),
                 }
             )
 
     return pd.DataFrame(summary_rows), pd.DataFrame(detail_rows)
+
+
+def run_engine_compare_for_scope(scope_key: str, args, engine_a: str, engine_b: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    runs = _build_run_rows(scope_key)
+    if not runs:
+        return pd.DataFrame(), pd.DataFrame()
+    cfg = _load_predictor_config(scope_key)
+    cfg_a = dict(cfg.get(f"bet_engine_{engine_a}", {})) if isinstance(cfg.get(f"bet_engine_{engine_a}", {}), dict) else {}
+    cfg_b = dict(cfg.get(f"bet_engine_{engine_b}", {})) if isinstance(cfg.get(f"bet_engine_{engine_b}", {}), dict) else {}
+    bankroll = int(args.bankroll)
+
+    rows_a = []
+    rows_b = []
+    detail_rows = []
+    for run in runs:
+        try:
+            pred_df, odds_payload = _build_inputs(
+                pred_path=run["pred_path"],
+                odds_path=run["odds_path"],
+                fuku_path=run["fuku_path"],
+                wide_path=run["wide_path"],
+                quinella_path=run["quinella_path"],
+            )
+        except Exception:
+            continue
+
+        actual_top3 = run["actual_top3"]
+        no_to_name = _build_no_to_name_map(run["odds_path"])
+        odds_map = load_odds_map(str(run["odds_path"]))
+        wide_odds_map = load_wide_odds_map(str(run["wide_path"]))
+        fuku_odds_map = load_fuku_odds_map(str(run["fuku_path"]))
+        quinella_odds_map = load_quinella_odds_map(str(run["quinella_path"]))
+
+        items_a = _generate_items_by_engine(engine_a, pred_df, odds_payload, bankroll, scope_key, cfg_a)
+        s_a, p_a, t_a = _evaluate_items(
+            items_a,
+            no_to_name,
+            actual_top3,
+            odds_map,
+            wide_odds_map,
+            fuku_odds_map,
+            quinella_odds_map,
+        )
+        b_a = _collect_bucket_counts(items_a)
+        rows_a.append(
+            {
+                "run_id": run["run_id"],
+                "stake": s_a,
+                "profit": p_a - s_a,
+                "tickets": t_a,
+                "bucket_low": b_a["bucket_low"],
+                "bucket_mid": b_a["bucket_mid"],
+                "bucket_high": b_a["bucket_high"],
+            }
+        )
+
+        items_b = _generate_items_by_engine(engine_b, pred_df, odds_payload, bankroll, scope_key, cfg_b)
+        s_b, p_b, t_b = _evaluate_items(
+            items_b,
+            no_to_name,
+            actual_top3,
+            odds_map,
+            wide_odds_map,
+            fuku_odds_map,
+            quinella_odds_map,
+        )
+        b_b = _collect_bucket_counts(items_b)
+        rows_b.append(
+            {
+                "run_id": run["run_id"],
+                "stake": s_b,
+                "profit": p_b - s_b,
+                "tickets": t_b,
+                "bucket_low": b_b["bucket_low"],
+                "bucket_mid": b_b["bucket_mid"],
+                "bucket_high": b_b["bucket_high"],
+            }
+        )
+
+    if not rows_a or not rows_b:
+        return pd.DataFrame(), pd.DataFrame()
+
+    m_a = _calc_metrics(rows_a, bankroll=bankroll)
+    m_b = _calc_metrics(rows_b, bankroll=bankroll)
+    summary = pd.DataFrame(
+        [
+            {
+                "scope": scope_key,
+                "engine_a": engine_a,
+                "engine_b": engine_b,
+                "runs": m_a["runs"],
+                "a_roi_stake": m_a["roi_stake"],
+                "a_roi_cash_as_1": m_a["roi_cash_as_1"],
+                "a_no_bet_rate": m_a["no_bet_rate"],
+                "a_avg_tickets": m_a["avg_tickets"],
+                "a_bucket_low_ratio": m_a["bucket_low_ratio"],
+                "a_bucket_mid_ratio": m_a["bucket_mid_ratio"],
+                "a_bucket_high_ratio": m_a["bucket_high_ratio"],
+                "b_roi_stake": m_b["roi_stake"],
+                "b_roi_cash_as_1": m_b["roi_cash_as_1"],
+                "b_no_bet_rate": m_b["no_bet_rate"],
+                "b_avg_tickets": m_b["avg_tickets"],
+                "b_bucket_low_ratio": m_b["bucket_low_ratio"],
+                "b_bucket_mid_ratio": m_b["bucket_mid_ratio"],
+                "b_bucket_high_ratio": m_b["bucket_high_ratio"],
+                "delta_roi_stake_b_minus_a": float(m_b["roi_stake"]) - float(m_a["roi_stake"]),
+                "delta_roi_cash_as_1_b_minus_a": float(m_b["roi_cash_as_1"]) - float(m_a["roi_cash_as_1"]),
+                "delta_bet_runs_b_minus_a": int(sum(1 for r in rows_b if int(r["stake"]) > 0))
+                - int(sum(1 for r in rows_a if int(r["stake"]) > 0)),
+            }
+        ]
+    )
+
+    for row in rows_a:
+        detail_rows.append({"scope": scope_key, "engine": engine_a, **row})
+    for row in rows_b:
+        detail_rows.append({"scope": scope_key, "engine": engine_b, **row})
+    return summary, pd.DataFrame(detail_rows)
 
 
 def _render_patch(scope_key: str, combo: Dict) -> str:
@@ -616,6 +909,9 @@ def _render_patch(scope_key: str, combo: Dict) -> str:
     be3["min_ev"]["place"] = float(combo["min_ev_place"])
     be3["min_ev"]["wide"] = float(combo["min_ev_wide"])
     be3["min_ev"]["quinella"] = float(combo["min_ev_quinella"])
+    be3["min_p_hit_per_ticket"] = float(combo["min_p_hit_per_ticket"])
+    be3["min_p_win_per_ticket"] = float(combo["min_p_win_per_ticket"])
+    be3["min_edge_per_ticket"] = float(combo["min_edge_per_ticket"])
     cfg["bet_engine_v3"] = be3
     new_txt = json.dumps(cfg, ensure_ascii=False, indent=2) + "\n"
 
@@ -648,6 +944,11 @@ def main():
     parser.add_argument("--min-ev-place-grid", default="0.005,0.01")
     parser.add_argument("--min-ev-wide-grid", default="0.005,0.01")
     parser.add_argument("--min-ev-quinella-grid", default="0.01,0.02")
+    parser.add_argument("--min-p-hit-ticket-grid", default="0.12")
+    parser.add_argument("--min-p-win-ticket-grid", default="0.06")
+    parser.add_argument("--min-edge-ticket-grid", default="0.03")
+    parser.add_argument("--engine-a", choices=ENGINE_CHOICES, default="", help="engine compare mode: engine A")
+    parser.add_argument("--engine-b", choices=ENGINE_CHOICES, default="", help="engine compare mode: engine B")
     args = parser.parse_args()
 
     scopes = []
@@ -659,6 +960,36 @@ def main():
         scopes = ["central_dirt"]
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    compare_mode = bool(str(args.engine_a).strip()) and bool(str(args.engine_b).strip())
+    out_dir = BASE_DIR / "data"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if compare_mode:
+        engine_a = str(args.engine_a).strip().lower()
+        engine_b = str(args.engine_b).strip().lower()
+        all_summary = []
+        all_detail = []
+        for scope in scopes:
+            summary_df, detail_df = run_engine_compare_for_scope(scope, args, engine_a=engine_a, engine_b=engine_b)
+            if not summary_df.empty:
+                all_summary.append(summary_df)
+            if not detail_df.empty:
+                all_detail.append(detail_df)
+
+        summary_out = pd.concat(all_summary, ignore_index=True) if all_summary else pd.DataFrame()
+        detail_out = pd.concat(all_detail, ignore_index=True) if all_detail else pd.DataFrame()
+        summary_path = out_dir / f"replay_engine_compare_summary_{engine_a}_vs_{engine_b}_{ts}.csv"
+        detail_path = out_dir / f"replay_engine_compare_detail_{engine_a}_vs_{engine_b}_{ts}.csv"
+        summary_out.to_csv(summary_path, index=False, encoding="utf-8-sig")
+        detail_out.to_csv(detail_path, index=False, encoding="utf-8-sig")
+        if summary_out.empty:
+            print("No comparable runs.")
+        else:
+            print(summary_out.to_string(index=False))
+        print(f"\nsaved summary: {summary_path}")
+        print(f"saved detail : {detail_path}")
+        return
+
     all_summary = []
     all_detail = []
     for scope in scopes:
@@ -673,8 +1004,6 @@ def main():
         if not detail_df.empty:
             all_detail.append(detail_df)
 
-    out_dir = BASE_DIR / "data"
-    out_dir.mkdir(parents=True, exist_ok=True)
     summary_path = out_dir / f"replay_grid_search_bet_params_summary_{ts}.csv"
     detail_path = out_dir / f"replay_grid_search_bet_params_detail_{ts}.csv"
     patch_path = out_dir / f"replay_grid_search_bet_params_patch_{ts}.diff"
@@ -703,6 +1032,9 @@ def main():
                         "v3_max_drawdown",
                         "v3_no_bet_rate",
                         "v3_avg_tickets",
+                        "v3_bucket_low_ratio",
+                        "v3_bucket_mid_ratio",
+                        "v3_bucket_high_ratio",
                     ]
                 ].to_string(index=False)
             )
@@ -717,4 +1049,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

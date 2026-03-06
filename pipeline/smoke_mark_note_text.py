@@ -55,38 +55,37 @@ def main():
         predictions_csv_text=pred_csv,
     )
 
-    assert "【AI競馬予想】AI能力印（◎○▲△☆）＋EV狙い馬（★）" in text
-    assert "【AIレース評価】" in text
-    assert "【AI能力印（◎○▲△☆）】" in text
+    assert "【レース評価】" in text
+    assert "【能力印（◎○▲△☆）】" in text
     assert "【EV狙い馬（★）】" in text
-    assert "AI評価：混戦" in text
-    assert "AI信頼度：B（gap=0.081）" in text
+    assert "評価：混戦" in text
+    assert "信頼度：B（gap=0.081）" in text
     assert "予測データ総合評価：" in text
-    assert "※AI信頼度=印5頭のgap" in text
+    assert "※信頼度=印5頭のgap" in text
     assert "◎ 1番 テストホースA【注意】" in text
     assert "○ 2番 テストホースB【見送り級】" in text
     assert "★ 5番 テストホースD（期待値上位 / オッズ妙味）" in text
     assert "推奨：単勝・ワイド" in text
-    assert "【AI戦略】" in text
+    assert "【戦略】" in text
     assert "【買い目傾向】" in text
-    assert "※AIは期待値(EV)ベースで券種を選択しています" in text
-    assert "【予測データ説明】" in text
+    assert "※期待値(EV)ベースで券種を選択しています" in text
+    assert "【予測データ】" in text
     assert "Top3Prob_model：統合モデルの3着内確率" in text
     assert "Top3Prob_lgbm：LightGBMモデル" in text
     assert "Top3Prob_lr：ロジスティック回帰モデル" in text
     assert "【CSVデータ】" in text
     assert "※本記事はAIによる予測データを公開するものであり、" in text
 
-    idx_eval = text.find("【AIレース評価】")
-    idx_ability = text.find("【AI能力印（◎○▲△☆）】")
+    idx_eval = text.find("【レース評価】")
+    idx_ability = text.find("【能力印（◎○▲△☆）】")
     idx_value = text.find("【EV狙い馬（★）】")
-    idx_strategy = text.find("【AI戦略】")
+    idx_strategy = text.find("【戦略】")
     idx_tendency = text.find("【買い目傾向】")
-    idx_desc = text.find("【予測データ説明】")
+    idx_desc = text.find("【予測データ】")
     idx_csv = text.find("【CSVデータ】")
     idx_disclaimer = text.find("※本記事はAIによる予測データを公開するものであり、")
     assert -1 not in (idx_eval, idx_ability, idx_value, idx_strategy, idx_tendency, idx_desc, idx_csv, idx_disclaimer)
-    assert idx_eval < idx_ability < idx_value < idx_strategy < idx_tendency < idx_desc < idx_csv < idx_disclaimer
+    assert idx_eval < idx_ability < idx_value < idx_strategy < idx_tendency < idx_disclaimer < idx_desc < idx_csv
 
     print("OK: mark note readability smoke passed")
 

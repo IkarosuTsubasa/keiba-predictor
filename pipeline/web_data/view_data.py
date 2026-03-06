@@ -372,16 +372,13 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
     bet_map = ctx["bet_map"]
     gate_status = ctx["gate_status"]
     risk_share = ctx["risk_share"]
-    candidate_keys = pred_order[:10]
+    # Ability marks must follow prediction ranking directly.
+    candidate_keys = pred_order[:5]
     if not candidate_keys:
         return [], []
 
-    max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in candidate_keys), default=0.0)
+    max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in pred_order), default=0.0)
     pred_total = max(1, len(pred_map))
-    rank_scores = [float(pred_map.get(k, {}).get("rank_score", 0.0) or 0.0) for k in candidate_keys]
-    rank_min = min(rank_scores) if rank_scores else 0.0
-    rank_max = max(rank_scores) if rank_scores else 0.0
-    rank_span = max(0.0, rank_max - rank_min)
     max_amount = max((float(bet_map.get(k, {}).get("amount_max", 0.0) or 0.0) for k in candidate_keys), default=0.0)
 
     scored = []
@@ -395,13 +392,9 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
         if pred_rank:
             rank_norm = (pred_total - int(pred_rank) + 1) / float(pred_total)
             rank_norm = max(0.0, rank_norm)
-        rank_score = float(pred.get("rank_score", 0.0) or 0.0)
-        if rank_span > 1e-12:
-            rank_score_norm = (rank_score - rank_min) / rank_span
-            ability_score = 0.70 * rank_score_norm + 0.30 * pred_prob_norm
-        else:
-            rank_score_norm = 0.0
-            ability_score = 0.75 * pred_prob_norm + 0.25 * rank_norm
+        # Keep score fields for compatibility, but ordering is strictly pred_rank.
+        rank_score_norm = rank_norm
+        ability_score = pred_prob_norm if pred_prob_norm > 0 else rank_norm
 
         bet_types = _format_bet_types(bet.get("bet_types", set()))
         rec_bet_types = _recommended_bet_types(pred_rank, bet_types)
@@ -427,10 +420,7 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
             }
         )
 
-    scored = sorted(
-        scored,
-        key=lambda r: (-float(r.get("ability_score", 0.0) or 0.0), int(r.get("pred_rank") or 999), str(r.get("horse_name", ""))),
-    )
+    scored = sorted(scored, key=lambda r: int(r.get("pred_rank") or 999))
     selected = scored[:5]
     meta_rows = [{"combined_score": float(r.get("ability_score", 0.0) or 0.0), "pred_rank": r.get("pred_rank")} for r in selected]
     race_type, confidence, gap_1_2 = _classify_race_meta(meta_rows)
@@ -553,11 +543,10 @@ def load_value_picks_table(get_data_dir, base_dir, load_csv_rows, to_float, scop
     if len(selected) == 1 and len(ranked) > 1 and float(ranked[1].get("value_score", 0.0) or 0.0) > 0:
         selected.append(ranked[1])
 
-    marks = ["★", "☆", "△"]
-    for idx, row in enumerate(selected[:3]):
+    for row in selected[:3]:
         value_rows.append(
             {
-                "value_mark": marks[idx],
+                "value_mark": "★",
                 "horse_no": row.get("horse_no", ""),
                 "horse_name": row.get("horse_name", ""),
                 "pred_rank": row.get("pred_rank", ""),
