@@ -6,6 +6,40 @@ def _escape_md_cell(value):
     return str(value or "").strip().replace("|", "\\|")
 
 
+def _extract_shared_policy_output(gemini_policy_payload):
+    if not isinstance(gemini_policy_payload, dict):
+        return {}
+    budgets = list(gemini_policy_payload.get("budgets", []) or [])
+    for item in budgets:
+        if not isinstance(item, dict):
+            continue
+        output = dict(item.get("output", {}) or {})
+        if output:
+            return output
+    return {}
+
+
+def _format_policy_buy_text(output):
+    if not isinstance(output, dict) or not output:
+        return ""
+    key_horses = [str(x).strip() for x in list(output.get("key_horses", []) or []) if str(x).strip()]
+    secondary_horses = [str(x).strip() for x in list(output.get("secondary_horses", []) or []) if str(x).strip()]
+    longshot_horses = [str(x).strip() for x in list(output.get("longshot_horses", []) or []) if str(x).strip()]
+    lines = []
+    if key_horses or secondary_horses:
+        left = ",".join(key_horses)
+        right = ",".join(secondary_horses)
+        if left and right:
+            lines.append(f"{left}-{right}")
+        elif left:
+            lines.append(left)
+        elif right:
+            lines.append(right)
+    if longshot_horses:
+        lines.append(f"★ {','.join(longshot_horses)}")
+    return "\n".join(lines).strip()
+
+
 def _predict_col_desc(col):
     desc_map = {
         "HorseName": "馬名",
@@ -206,6 +240,7 @@ def build_mark_note_text(
     predictions_filename="",
     predictions_csv_text="",
     bet_engine_v3_summary=None,
+    gemini_policy_payload=None,
 ):
     # Backward compatibility:
     # old: build_mark_note_text(rows, predictions_filename, predictions_csv_text)
@@ -237,21 +272,48 @@ def build_mark_note_text(
         else:
             grade = "C"
 
-    lines = ["【AI競馬予想】AI能力印（◎○▲△☆）＋EV狙い馬（★）", ""]
+    lines = ["【AI競馬予想】AI能力印（◎○▲△☆）＋買い目戦略", ""]
     tendency_line = "見送り（買い目なし）"
     strategy_text = build_ai_strategy_text("通常", {}, 0.25).replace("■ AI戦略\n\n", "")
     race_type = "通常"
     confidence = "C"
     gap_val = 0.0
+    policy_strategy_text_ja = ""
+    policy_tendency_ja = ""
+    policy_construction_style = ""
+    policy_buy_text = ""
+    shared_policy_output = _extract_shared_policy_output(gemini_policy_payload)
+    construction_note_map = {
+        "single_axis": "軸馬を中心に組み立てます。",
+        "pair_spread": "相手は組み合わせ中心で最小限に広げます。",
+        "value_hunt": "本線を保ちながら妙味のある一撃だけを補助で狙います。",
+        "conservative_single": "点数は絞って守備的に入ります。",
+    }
     if rows:
         race_type = str(rows[0].get("race_type", "")).strip() or "通常"
         confidence = str(rows[0].get("confidence", "")).strip() or "C"
         gap_val = _to_float_or_zero(rows[0].get("gap_1_2", 0.0))
+        policy_strategy_text_ja = str(rows[0].get("strategy_text_ja", "")).strip()
+        policy_tendency_ja = str(rows[0].get("bet_tendency_ja", "")).strip()
+        policy_construction_style = str(rows[0].get("policy_construction_style", "")).strip()
+        if shared_policy_output:
+            policy_strategy_text_ja = str(shared_policy_output.get("strategy_text_ja", "") or "").strip() or policy_strategy_text_ja
+            policy_tendency_ja = str(shared_policy_output.get("bet_tendency_ja", "") or "").strip() or policy_tendency_ja
+            policy_construction_style = (
+                str(shared_policy_output.get("strategy_mode", "") or shared_policy_output.get("construction_style", "") or "").strip()
+                or policy_construction_style
+            )
+            policy_buy_text = _format_policy_buy_text(shared_policy_output)
         tendency_counter = {}
         risk_share = _to_float_or_zero(
             rows[0].get("risk_share", rows[0].get("target_risk_share", rows[0].get("risk_share_used", 0.25)))
         )
         strategy_text = build_ai_strategy_text(race_type, tendency_counter, risk_share).replace("■ AI戦略\n\n", "")
+        if policy_strategy_text_ja:
+            strategy_text = policy_strategy_text_ja
+            construction_text = construction_note_map.get(policy_construction_style, "")
+            if construction_text and construction_text not in strategy_text:
+                strategy_text = f"{strategy_text}\n{construction_text}"
     else:
         tendency_counter = {}
 
@@ -263,43 +325,19 @@ def build_mark_note_text(
             f"予測データ総合評価：{grade}",
             "※AI信頼度=印5頭のgap",
             "",
-            "【AI能力印（◎○▲△☆）】",
+            "【能力印（◎○▲△☆）】",
         ]
     )
 
     if rows:
-        ev_max = max((_to_float_or_zero(r.get("bet_ev_norm", r.get("value_score", 0.0))) for r in rows), default=0.0)
         for row in rows:
             mark = _escape_md_cell(row.get("mark", ""))
             horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
             horse_name = _escape_md_cell(row.get("horse_name", ""))
-            pred_rank = _escape_md_cell(row.get("pred_rank", "")) or "-"
             bet_types_raw = _escape_md_cell(row.get("recommended_bet_types", row.get("bet_types", ""))) or "-"
             for item in _normalize_bet_type_tokens(bet_types_raw):
                 tendency_counter[item] = int(tendency_counter.get(item, 0)) + 1
-            bet_types = _bet_types_to_label(bet_types_raw, sep="・")
-            tags = [x.strip() for x in str(row.get("reason_tags", "")).split("/") if x.strip()]
-            try:
-                rank_val = int(pred_rank)
-            except (TypeError, ValueError):
-                rank_val = 999
-            if rank_val <= 2 and "総合上位" not in tags:
-                tags.append("総合上位")
-            ev_norm = _to_float_or_zero(row.get("bet_ev_norm", row.get("value_score", 0.0)))
-            if ev_max > 0 and abs(ev_norm - ev_max) <= 1e-9 and "期待値上位" not in tags:
-                tags.append("期待値上位")
-            if any(t in ("wide", "quinella") for t in _normalize_bet_type_tokens(bet_types_raw)):
-                if "相手候補" not in tags:
-                    tags.append("相手候補")
-            reason_text = f"（{' / '.join(tags)}）" if tags else ""
-            risk_signal = _escape_md_cell(row.get("risk_signal", ""))
-            risk_label = ""
-            if risk_signal == "注意":
-                risk_label = "【注意】"
-            elif risk_signal == "見送り級":
-                risk_label = "【見送り級】"
-            lines.append(f"{mark} {horse_no}番 {horse_name}{risk_label}{reason_text}")
-            lines.append(f"  予想順位: {pred_rank} / 推奨券種: {bet_types}")
+            lines.append(f"{mark} {horse_no}番 {horse_name}")
     else:
         lines.append("該当なし")
 
@@ -307,53 +345,27 @@ def build_mark_note_text(
     if valid_tendency:
         top_items = sorted(valid_tendency.items(), key=lambda x: (-x[1], x[0]))[:2]
         tendency_line = "・".join(_bet_types_to_label(k, sep="") for k, _ in top_items) + "中心"
+    if policy_tendency_ja:
+        tendency_line = policy_tendency_ja
 
-    lines.extend(["", "【EV狙い馬（★）】"])
-    if value_rows:
-        for row in value_rows:
-            vmark = _escape_md_cell(row.get("value_mark", "★")) or "★"
-            horse_no = _escape_md_cell(row.get("horse_no", "")) or "-"
-            horse_name = _escape_md_cell(row.get("horse_name", ""))
-            reasons = " / ".join([x.strip() for x in str(row.get("reason_tags", "")).split("/") if x.strip()])
-            reason_text = f"（{reasons}）" if reasons else ""
-            rec = _bet_types_to_label(row.get("recommended_bet_types", "win"), sep="・")
-            lines.append(f"{vmark} {horse_no}番 {horse_name}{reason_text}")
-            lines.append(f"  推奨：{rec}")
-    else:
-        lines.append("該当なし")
-
-    lines.extend(
-        [
-            "",
-            "【AI戦略】",
-            strategy_text,
-            "",
-            "【買い目傾向】",
-            tendency_line,
-            "",
-            "※AIは期待値(EV)ベースで券種を選択しています",
-        ]
-    )
-
-    v3 = _extract_v3_param_summary(bet_engine_v3_summary)
-    if v3:
+    if policy_buy_text:
         lines.extend(
             [
                 "",
-                "【AIベット設定（v3）】",
-                f"- kelly_scale={_to_text_or_dash(v3.get('kelly_scale'))}",
-                f"- min_p_hit={_to_text_or_dash(v3.get('min_p_hit_per_ticket'))}",
-                f"- min_p_win={_to_text_or_dash(v3.get('min_p_win_per_ticket'))}",
-                f"- min_edge={_to_text_or_dash(v3.get('min_edge_per_ticket'))}",
-                f"- fallback_max_odds_place={_to_text_or_dash(v3.get('fallback_max_odds_place'))}",
-                f"- high_exposure_cap_share={_to_text_or_dash(v3.get('high_exposure_cap_share'))}",
-                f"- low_mid_min_share={_to_text_or_dash(v3.get('low_mid_min_share'))}",
+                "【買い目】",
+                policy_buy_text,
+                "",
+                "【買い目戦略】",
+                strategy_text,
+                "",
+                "【買い目傾向】",
+                tendency_line,
             ]
         )
 
     if csv_text:
         lines.append("")
-        lines.append("【予測データ説明】")
+        lines.append("【予測データ】")
         lines.append("")
         lines.append("Top3Prob_model：統合モデルの3着内確率")
         lines.append("")

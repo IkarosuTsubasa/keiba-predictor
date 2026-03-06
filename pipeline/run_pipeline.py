@@ -687,6 +687,7 @@ def main():
 
     plan_path = BASE_DIR / "bet_plan_update.csv"
     plan_log_path = ""
+    gemini_policy_path = ""
     tickets = 0
     amount_yen = 0
     if plan_path.exists():
@@ -721,6 +722,9 @@ def main():
                 tickets = int(len(metric_df))
                 if "amount_yen" in metric_df.columns:
                     amount_yen = int(pd.to_numeric(metric_df["amount_yen"], errors="coerce").fillna(0).sum())
+    gemini_policy_file = race_dir / f"gemini_policy_{run_id}{race_suffix}.json"
+    if gemini_policy_file.exists():
+        gemini_policy_path = str(gemini_policy_file)
 
     row = {
         "run_id": run_id,
@@ -746,6 +750,7 @@ def main():
         "quinella_odds_path": quinella_odds_path,
         "trifecta_odds_path": trifecta_odds_path,
         "plan_path": plan_log_path or str(plan_path),
+        "gemini_policy_path": gemini_policy_path,
         "tickets": tickets,
         "amount_yen": amount_yen,
     }

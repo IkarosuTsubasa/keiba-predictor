@@ -36,6 +36,16 @@ PIPELINE_START = datetime.now()
 kachiuma = pd.read_csv("kachiuma.csv")
 shusso = pd.read_csv("shutuba.csv")
 
+
+def normalize_frame_columns(df):
+    df = df.copy()
+    df.columns = [re.sub(r"\s+", "", str(col or "")).strip() for col in df.columns]
+    return df
+
+
+kachiuma = normalize_frame_columns(kachiuma)
+shusso = normalize_frame_columns(shusso)
+
 SCOPE_ALIASES = {
     "central_turf": {"central_turf", "central_t", "ct", "1", "t", "turf", "grass", "shiba"},
     "central_dirt": {"central_dirt", "central_d", "cd", "2", "d", "dirt", "sand"},

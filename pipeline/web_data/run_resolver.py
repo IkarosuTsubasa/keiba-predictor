@@ -118,12 +118,12 @@ def resolve_wide_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row):
     return None
 
 
-def resolve_run_asset_path(get_data_dir, base_dir, scope_key, run_id, run_row, field_name, prefix):
+def resolve_run_asset_path(get_data_dir, base_dir, scope_key, run_id, run_row, field_name, prefix, ext=".csv"):
     path = str(run_row.get(field_name, "")).strip() if run_row else ""
     if path:
         return Path(path)
     race_id = str(run_row.get("race_id", "") or "") if run_row else ""
     if race_id:
         race_dir = get_data_dir(base_dir, scope_key) / race_id
-        return race_dir / f"{prefix}_{run_id}_{race_id}.csv"
+        return race_dir / f"{prefix}_{run_id}_{race_id}{ext}"
     return None

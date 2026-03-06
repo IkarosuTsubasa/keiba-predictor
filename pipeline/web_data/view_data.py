@@ -320,6 +320,22 @@ def _extract_risk_share(plan_rows, default=0.25):
     return float(default)
 
 
+def _extract_policy_text(plan_rows):
+    strategy_text_ja = ""
+    bet_tendency_ja = ""
+    policy_construction_style = ""
+    for row in plan_rows:
+        if not strategy_text_ja:
+            strategy_text_ja = str(row.get("strategy_text_ja", "")).strip()
+        if not bet_tendency_ja:
+            bet_tendency_ja = str(row.get("bet_tendency_ja", "")).strip()
+        if not policy_construction_style:
+            policy_construction_style = str(row.get("policy_construction_style", "")).strip()
+        if strategy_text_ja and bet_tendency_ja and policy_construction_style:
+            break
+    return strategy_text_ja, bet_tendency_ja, policy_construction_style
+
+
 def _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
     pred_rows = load_csv_rows(_resolve_predictions_path(get_data_dir, base_dir, scope_key, run_id, run_row))
     if not pred_rows:
@@ -328,6 +344,7 @@ def _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope
     plan_rows = load_csv_rows(_resolve_plan_path(get_data_dir, base_dir, scope_key, run_id, run_row))
     pred_map, pred_order, odds_name_to_no = _build_prediction_map(pred_rows, to_float, odds_rows)
     bet_map, gate_status = _build_bet_map(plan_rows, to_float)
+    strategy_text_ja, bet_tendency_ja, policy_construction_style = _extract_policy_text(plan_rows)
     return {
         "pred_rows": pred_rows,
         "odds_rows": odds_rows,
@@ -338,6 +355,9 @@ def _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope
         "bet_map": bet_map,
         "gate_status": gate_status,
         "risk_share": _extract_risk_share(plan_rows, default=0.25),
+        "strategy_text_ja": strategy_text_ja,
+        "bet_tendency_ja": bet_tendency_ja,
+        "policy_construction_style": policy_construction_style,
     }
 
 
@@ -372,6 +392,8 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
     bet_map = ctx["bet_map"]
     gate_status = ctx["gate_status"]
     risk_share = ctx["risk_share"]
+    strategy_text_ja = str(ctx.get("strategy_text_ja", "") or "")
+    bet_tendency_ja = str(ctx.get("bet_tendency_ja", "") or "")
     # Ability marks must follow prediction ranking directly.
     candidate_keys = pred_order[:5]
     if not candidate_keys:
@@ -443,6 +465,8 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
                 "confidence": confidence,
                 "gap_1_2": round(float(gap_1_2), 6),
                 "risk_share": round(float(risk_share), 6),
+                "strategy_text_ja": strategy_text_ja,
+                "bet_tendency_ja": bet_tendency_ja,
             }
         )
     columns = ["mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "risk_signal"]

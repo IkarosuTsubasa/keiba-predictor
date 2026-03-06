@@ -265,9 +265,10 @@ def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=No
     cmd = [sys.executable, str(script_path)]
     if args:
         cmd.extend(args)
-    env = None
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     if extra_env:
-        env = os.environ.copy()
         env.update(extra_env)
     result = subprocess.run(
         cmd,
@@ -283,6 +284,19 @@ def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=No
     if result.stderr:
         output = f"{output}\n[stderr]\n{result.stderr}"
     return result.returncode, output.strip()
+
+
+def build_policy_env(cache_enable=False, budget_reuse=False):
+    cache_value = "true" if bool(cache_enable) else "false"
+    budget_reuse_value = "true" if bool(budget_reuse) else "false"
+    return {
+        "POLICY_ENGINE": str(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
+        "GEMINI_MODEL": str(
+            os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview"
+        ),
+        "POLICY_CACHE_ENABLE": cache_value,
+        "POLICY_BUDGET_REUSE": budget_reuse_value,
+    }
 
 
 def extract_section(output_text, start_label, end_label=None):
@@ -536,7 +550,7 @@ def resolve_wide_odds_path(scope_key, run_id, run_row):
     return run_resolver.resolve_wide_odds_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
-def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix):
+def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix, ext=".csv"):
     return run_resolver.resolve_run_asset_path(
         get_data_dir,
         BASE_DIR,
@@ -545,6 +559,7 @@ def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix):
         run_row,
         field_name,
         prefix,
+        ext,
     )
 
 
@@ -675,6 +690,87 @@ def load_bet_engine_v3_cfg_summary(scope_key, run_id):
     return load_json_file(path)
 
 
+def load_gemini_policy_payload(scope_key, run_id, run_row=None):
+    path = resolve_run_asset_path(
+        scope_key,
+        run_id,
+        run_row,
+        "gemini_policy_path",
+        "gemini_policy",
+        ext=".json",
+    )
+    return load_json_file(path)
+
+
+def build_gemini_policy_html(payload):
+    if not isinstance(payload, dict) or not payload:
+        return ""
+    budgets = list(payload.get("budgets", []) or [])
+    lines = []
+    model = str(payload.get("gemini_model", "") or "")
+    policy_engine = str(payload.get("policy_engine", "") or "")
+    if model:
+        lines.append(f"model: {model}")
+    if policy_engine:
+        lines.append(f"policy_engine: {policy_engine}")
+    for item in budgets:
+        if not isinstance(item, dict):
+            continue
+        is_shared = bool(item.get("shared_policy", False))
+        budget = int(to_float(item.get("budget_yen")))
+        output = dict(item.get("output", {}) or {})
+        meta = dict(item.get("meta", {}) or {})
+        if lines:
+            lines.append("")
+        header = "[shared]" if is_shared else f"[{budget}]"
+        lines.append(
+            f"{header} decision={output.get('bet_decision', '')} participation={output.get('participation_level', '')} "
+            f"buy_style={output.get('buy_style', '')} strategy_mode={output.get('strategy_mode', '')}"
+        )
+        lines.append(f"enabled_bet_types={json.dumps(output.get('enabled_bet_types', []), ensure_ascii=False)}")
+        lines.append(f"key_horses={json.dumps(output.get('key_horses', []), ensure_ascii=False)}")
+        lines.append(f"secondary_horses={json.dumps(output.get('secondary_horses', []), ensure_ascii=False)}")
+        lines.append(f"longshot_horses={json.dumps(output.get('longshot_horses', []), ensure_ascii=False)}")
+        lines.append(f"max_ticket_count={int(to_float(output.get('max_ticket_count')))} risk_tilt={output.get('risk_tilt', '')}")
+        lines.append(f"pick_ids={json.dumps(output.get('pick_ids', []), ensure_ascii=False)}")
+        strategy_text = str(output.get("strategy_text_ja", "") or "").strip()
+        if strategy_text:
+            lines.append("strategy_text_ja:")
+            lines.append(strategy_text)
+        tendency = str(output.get("bet_tendency_ja", "") or "").strip()
+        if tendency:
+            lines.append(f"bet_tendency_ja: {tendency}")
+        reason_codes = list(output.get("reason_codes", []) or [])
+        if reason_codes:
+            lines.append("reason_codes: " + ", ".join(str(x) for x in reason_codes))
+        warnings = list(output.get("warnings", []) or [])
+        if warnings:
+            lines.append("warnings: " + ", ".join(str(x) for x in warnings))
+        lines.append(
+            "meta: cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} "
+            "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
+            "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}".format(
+                cache_hit=int(bool(meta.get("cache_hit", False))),
+                llm_latency_ms=int(meta.get("llm_latency_ms", 0) or 0),
+                fallback_reason=str(meta.get("fallback_reason", "") or ""),
+                requested_budget_yen=int(meta.get("requested_budget_yen", 0) or 0),
+                requested_race_budget_yen=int(meta.get("requested_race_budget_yen", 0) or 0),
+                reused=int(bool(meta.get("reused", False))),
+                source_budget_yen=int(meta.get("source_budget_yen", 0) or 0),
+                policy_version=str(meta.get("policy_version", "") or ""),
+            )
+        )
+    text = "\n".join(lines).strip()
+    if not text:
+        return ""
+    return (
+        '<section class="panel">'
+        '<h2>Gemini Policy</h2>'
+        f"<pre>{html.escape(text)}</pre>"
+        "</section>"
+    )
+
+
 def load_ability_marks_table(scope_key, run_id, run_row=None):
     return view_data.load_ability_marks_table(
         get_data_dir,
@@ -723,6 +819,7 @@ def page_template(
     mark_table_html="",
     mark_note_text="",
     bet_plan_table_html="",
+    gemini_policy_html="",
     summary_table_html="",
     run_summary_block="",
     stats_block="",
@@ -740,6 +837,7 @@ def page_template(
         mark_table_html=mark_table_html,
         mark_note_text=mark_note_text,
         bet_plan_table_html=bet_plan_table_html,
+        gemini_policy_html=gemini_policy_html,
         summary_table_html=summary_table_html,
         run_summary_block=run_summary_block,
         stats_block=stats_block,
@@ -796,6 +894,7 @@ def render_page(
     mark_table_html = ""
     mark_note_text = ""
     bet_plan_table_html = ""
+    gemini_policy_html = ""
     summary_table_html = ""
     bet_rows = []
     if run_id:
@@ -817,12 +916,15 @@ def render_page(
         pred_path = resolve_pred_path(scope_norm or scope_key, run_id, run_row)
         pred_csv_text = load_text_file(pred_path)
         bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
+        gemini_policy_payload = load_gemini_policy_payload(scope_norm or scope_key, run_id, run_row)
+        gemini_policy_html = build_gemini_policy_html(gemini_policy_payload)
         mark_note_text = build_mark_note_text(
             ability_rows_display if ability_rows else ability_rows,
             value_rows,
             pred_path.name if pred_path else "",
             pred_csv_text,
             bet_engine_v3_summary=bet_engine_v3_summary,
+            gemini_policy_payload=gemini_policy_payload,
         )
         summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
         if summary_rows:
@@ -860,6 +962,7 @@ def render_page(
         mark_table_html=mark_table_html,
         mark_note_text=mark_note_text,
         bet_plan_table_html=bet_plan_table_html,
+        gemini_policy_html=gemini_policy_html,
         summary_table_html=summary_table_html,
         run_summary_block=run_summary_block,
         stats_block=stats_block,
@@ -974,6 +1077,7 @@ def run_pipeline(
         track_cond,
     ]
     extra_env = {"SCOPE_KEY": scope_key}
+    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False))
     code, output = run_script(
         RUN_PIPELINE,
         inputs=inputs,
@@ -1066,6 +1170,7 @@ def update_bet_plan(
         "PRED_PATH": str(pred_path),
         "BET_BUDGETS": "2000,5000,10000,50000",
     }
+    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False))
     if wide_path:
         extra_env["WIDE_ODDS_PATH"] = str(wide_path)
     if fuku_path:
@@ -1079,6 +1184,14 @@ def update_bet_plan(
         extra_blanks=1,
         extra_env=extra_env,
     )
+    gemini_policy_path = resolve_run_asset_path(
+        scope_key,
+        run_id,
+        run_row,
+        "gemini_policy_path",
+        "gemini_policy",
+        ext=".json",
+    )
 
     plan_src = BASE_DIR / "bet_plan_update.csv"
     if code == 0 and plan_src.exists():
@@ -1087,6 +1200,9 @@ def update_bet_plan(
         shutil.copy2(plan_src, plan_dest)
         if not update_run_plan_path(scope_key, run_id, plan_dest):
             warnings.append("runs.csv not updated; plan_path may be stale.")
+        if gemini_policy_path and gemini_policy_path.exists():
+            update_run_row_fields(scope_key, run_row, {"gemini_policy_path": str(gemini_policy_path)})
+            run_row["gemini_policy_path"] = str(gemini_policy_path)
     else:
         if not plan_src.exists():
             warnings.append("bet_plan_update.csv not found after update.")

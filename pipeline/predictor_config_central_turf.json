@@ -102,7 +102,9 @@
     },
     "fallback_max_odds_place": 15.0,
     "high_exposure_cap_share": 0.15,
-    "low_mid_min_share": 0.6
+    "low_mid_min_share": 0.6,
+    "high_bucket_odds_threshold": 10.0,
+    "exposure_enforcement_mode": "trim"
   },
   "strategies": {
     "balanced": {
@@ -143,5 +145,40 @@
     "ev_ema": 0.9257,
     "risk_score": 0.8723,
     "updated_at": "2026-01-05T15:53:32"
+  },
+  "bet_engine_v4": {
+    "enabled": true,
+    "race_budget_share": 0.02,
+    "max_tickets_per_race": 3,
+    "high_odds_threshold": 10.0,
+    "max_high_odds_per_race": 1,
+    "ensure_diversity": true,
+    "min_yen_unit": 100
+  },
+  "bet_engine_v5": {
+    "enabled": true,
+    "target_risk_share": 0.02,
+    "min_race_budget": 400,
+    "min_yen_unit": 100,
+    "base_lambda_market": 0.2,
+    "lambda_min": 0.05,
+    "lambda_max": 0.45,
+    "odds_power": 0.72,
+    "ev_margin": 0.01,
+    "min_ev_per_ticket": -0.02,
+    "kelly_scale": 0.45,
+    "f_cap_by_type": {
+      "win": 0.25,
+      "place": 0.25,
+      "pair": 0.2
+    },
+    "min_p_by_type": {
+      "win": 0.02,
+      "place": 0.05,
+      "wide": 0.03,
+      "quinella": 0.03
+    },
+    "max_tickets_per_race": 6,
+    "ensure_diversity": true
   }
 }

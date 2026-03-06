@@ -17,6 +17,12 @@ from bet_engine_v2 import generate_bet_plan_v2
 from bet_engine_v3 import generate_bet_plan_v3
 from bet_engine_v4 import generate_bet_plan_v4
 from bet_engine_v5 import generate_bet_plan_v5
+try:
+    from llm.gemini_policy import RacePolicyInput, call_gemini_policy, get_last_call_meta
+except Exception:
+    RacePolicyInput = None
+    call_gemini_policy = None
+    get_last_call_meta = None
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -455,6 +461,27 @@ def parse_args():
         default=os.environ.get("V5_PROFILE", "default"),
         help="bet_engine_v5 preset profile (used only when engine-version=v5)",
     )
+    parser.add_argument(
+        "--policy-engine",
+        choices=["none", "gemini"],
+        default=os.environ.get("POLICY_ENGINE", "none"),
+        help="policy engine selector",
+    )
+    parser.add_argument(
+        "--gemini-model",
+        default=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
+        help="Gemini model name for policy layer",
+    )
+    parser.add_argument(
+        "--policy-cache-enable",
+        default=os.environ.get("POLICY_CACHE_ENABLE", "true"),
+        help="enable/disable policy cache (true/false)",
+    )
+    parser.add_argument(
+        "--policy-budget-reuse",
+        default=os.environ.get("POLICY_BUDGET_REUSE", "false"),
+        help="reuse gemini policy across budget tiers (true/false)",
+    )
     return parser.parse_args()
 
 
@@ -477,6 +504,15 @@ def resolve_engine_version(value):
     if v not in ("v2", "v3", "v4", "v5"):
         v = "v4"
     return v
+
+
+def parse_bool_text(value, default=True):
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return bool(default)
 
 
 def apply_bet_profile_to_v3(cfg, profile):
@@ -736,8 +772,15 @@ def build_rows_from_bet_plan_v2(result, budget_yen, horse_meta):
             "p_hit": round(float(item.p_hit), 6),
             "edge": round(float(item.edge), 6),
             "kelly_f": round(float(item.kelly_f), 6),
+            "score": round(float(item.edge), 6),
             "stake_yen": amount_yen,
             "notes": str(item.notes or ""),
+            "strategy_text_ja": "",
+            "bet_tendency_ja": "",
+            "policy_engine": "",
+            "policy_buy_style": "",
+            "policy_bet_decision": "",
+            "policy_construction_style": "",
         }
         out_rows.append(row)
         item_rows.append(
@@ -750,6 +793,13 @@ def build_rows_from_bet_plan_v2(result, budget_yen, horse_meta):
                 "edge": round(float(item.edge), 6),
                 "stake_yen": amount_yen,
                 "notes": str(item.notes or ""),
+                "score": round(float(item.edge), 6),
+                "strategy_text_ja": "",
+                "bet_tendency_ja": "",
+                "policy_engine": "",
+                "policy_buy_style": "",
+                "policy_bet_decision": "",
+                "policy_construction_style": "",
             }
         )
     return out_rows, item_rows
@@ -782,10 +832,17 @@ def build_rows_from_bet_items(items, budget_yen, horse_meta):
         odds_used = float(item.get("odds_used", 0.0) or 0.0)
         edge = float(item.get("edge", 0.0) or 0.0)
         kelly_f = float(item.get("kelly_f", 0.0) or 0.0)
+        score = float(item.get("score", edge) or edge)
         expected_return = int(round(amount_yen * p_hit * odds_used))
         ev_ratio_est = edge + 1.0
         why = str(item.get("why", "") or "")
         notes = str(item.get("notes", "") or "")
+        strategy_text_ja = str(item.get("strategy_text_ja", "") or "")
+        bet_tendency_ja = str(item.get("bet_tendency_ja", "") or "")
+        policy_engine = str(item.get("policy_engine", "") or "")
+        policy_buy_style = str(item.get("policy_buy_style", "") or "")
+        policy_bet_decision = str(item.get("policy_bet_decision", "") or "")
+        policy_construction_style = str(item.get("policy_construction_style", "") or "")
         merged_note = why if (why and not notes) else (notes if notes else "")
         if why and notes:
             merged_note = f"{why};{notes}"
@@ -807,8 +864,15 @@ def build_rows_from_bet_items(items, budget_yen, horse_meta):
             "p_hit": round(p_hit, 6),
             "edge": round(edge, 6),
             "kelly_f": round(kelly_f, 6),
+            "score": round(score, 6),
             "stake_yen": amount_yen,
             "notes": merged_note,
+            "strategy_text_ja": strategy_text_ja,
+            "bet_tendency_ja": bet_tendency_ja,
+            "policy_engine": policy_engine,
+            "policy_buy_style": policy_buy_style,
+            "policy_bet_decision": policy_bet_decision,
+            "policy_construction_style": policy_construction_style,
         }
         out_rows.append(row)
         item_rows.append(
@@ -821,6 +885,13 @@ def build_rows_from_bet_items(items, budget_yen, horse_meta):
                 "edge": round(edge, 6),
                 "stake_yen": amount_yen,
                 "notes": merged_note,
+                "score": round(score, 6),
+                "strategy_text_ja": strategy_text_ja,
+                "bet_tendency_ja": bet_tendency_ja,
+                "policy_engine": policy_engine,
+                "policy_buy_style": policy_buy_style,
+                "policy_bet_decision": policy_bet_decision,
+                "policy_construction_style": policy_construction_style,
             }
         )
     return out_rows, item_rows
@@ -843,6 +914,7 @@ def normalize_portfolio_items(items):
         p_hit = float(item.get("p_hit", item.get("p_final", 0.0)) or 0.0)
         edge = float(item.get("edge", item.get("EV_adj", item.get("EV", 0.0))) or 0.0)
         kelly_f = float(item.get("kelly_f", 0.0) or 0.0)
+        score = float(item.get("score", edge) or edge)
         why = str(item.get("why", "") or "")
         notes = str(item.get("notes", "") or "")
         out.append(
@@ -854,8 +926,15 @@ def normalize_portfolio_items(items):
                 "p_hit": p_hit,
                 "edge": edge,
                 "kelly_f": kelly_f,
+                "score": score,
                 "why": why,
                 "notes": notes,
+                "strategy_text_ja": str(item.get("strategy_text_ja", "") or ""),
+                "bet_tendency_ja": str(item.get("bet_tendency_ja", "") or ""),
+                "policy_engine": str(item.get("policy_engine", "") or ""),
+                "policy_buy_style": str(item.get("policy_buy_style", "") or ""),
+                "policy_bet_decision": str(item.get("policy_bet_decision", "") or ""),
+                "policy_construction_style": str(item.get("policy_construction_style", "") or ""),
             }
         )
     return out
@@ -869,6 +948,954 @@ def calc_plan_summary(item_rows):
         sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in item_rows)
     )
     return total_stake, ticket_count, edge_sum, weighted_edge
+
+
+def clamp01(value):
+    v = safe_float(value)
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        return 1.0
+    return float(v)
+
+
+def normalize_policy_weights(raw):
+    d = dict(raw or {})
+    win = max(0.0, safe_float(d.get("win", 0.0)))
+    place = max(0.0, safe_float(d.get("place", 0.0)))
+    pair = max(0.0, safe_float(d.get("pair", 0.0)))
+    total = win + place + pair
+    if total <= 1e-12:
+        return {"win": 0.20, "place": 0.50, "pair": 0.30}
+    return {"win": win / total, "place": place / total, "pair": pair / total}
+
+
+def policy_group_for_type(bet_type):
+    t = str(bet_type or "").strip().lower()
+    if t == "win":
+        return "win"
+    if t == "place":
+        return "place"
+    return "pair"
+
+
+def stable_ticket_legs(bet_type, horses):
+    t = str(bet_type or "").strip().lower()
+    legs = [str(x).strip() for x in (horses or ()) if str(x).strip()]
+    if t in ("wide", "quinella") and len(legs) >= 2:
+        a, b = canonical_pair(legs[0], legs[1])
+        return [str(a), str(b)]
+    if legs:
+        return [str(canonical_horse_key(legs[0]))]
+    return []
+
+
+def build_policy_ticket_id(bet_type, horses):
+    t = str(bet_type or "").strip().lower()
+    legs = stable_ticket_legs(t, horses)
+    return f"{t}:{'-'.join(legs)}"
+
+
+def build_items_from_v2_result(result):
+    out = []
+    if result is None:
+        return out
+    for item in list(getattr(result, "items", []) or []):
+        horses = tuple(str(x) for x in (getattr(item, "horses", ()) or ()))
+        p_hit = float(getattr(item, "p_hit", 0.0) or 0.0)
+        edge = float(getattr(item, "edge", 0.0) or 0.0)
+        score = edge * math.sqrt(max(p_hit, 0.0))
+        out.append(
+            {
+                "bet_type": str(getattr(item, "bet_type", "")).strip().lower(),
+                "horses": horses,
+                "stake_yen": int(getattr(item, "stake_yen", 0) or 0),
+                "odds_used": float(getattr(item, "odds_used", 0.0) or 0.0),
+                "p_hit": p_hit,
+                "edge": edge,
+                "kelly_f": float(getattr(item, "kelly_f", 0.0) or 0.0),
+                "score": float(score),
+                "why": "",
+                "notes": str(getattr(item, "notes", "") or ""),
+            }
+        )
+    return out
+
+
+def policy_candidate_sort_key(item):
+    return (
+        -float(item.get("score", item.get("edge", 0.0)) or 0.0),
+        -float(item.get("edge", 0.0) or 0.0),
+        -float(item.get("p_hit", 0.0) or 0.0),
+        float(item.get("odds_used", 0.0) or 0.0),
+        str(item.get("bet_type", "") or ""),
+        "-".join([str(x) for x in (item.get("horses", ()) or ())]),
+    )
+
+
+def _softmax_probs(values, temperature=1.0):
+    nums = [float(v or 0.0) for v in list(values or [])]
+    if not nums:
+        return []
+    scale = max(1e-6, float(temperature or 1.0))
+    shifted = [v / scale for v in nums]
+    mx = max(shifted)
+    exps = [math.exp(v - mx) for v in shifted]
+    total = float(sum(exps))
+    if total <= 1e-12:
+        return [1.0 / float(len(nums)) for _ in nums]
+    return [float(v / total) for v in exps]
+
+
+def policy_odds_scalar(value):
+    if isinstance(value, (list, tuple)):
+        nums = [safe_float(x) for x in list(value or []) if safe_float(x) > 0]
+        if nums:
+            return float(sum(nums) / float(len(nums)))
+        return 0.0
+    return safe_float(value)
+
+
+def build_policy_candidates_from_items(items, per_type_caps=None):
+    caps = per_type_caps or {"win": 5, "place": 5, "wide": 10, "quinella": 10}
+    bucketed = {"win": [], "place": [], "wide": [], "quinella": []}
+    item_by_id = {}
+    for item in list(items or []):
+        bet_type = str(item.get("bet_type", "")).strip().lower()
+        horses = tuple(str(x) for x in (item.get("horses", ()) or ()))
+        if bet_type not in bucketed or not horses:
+            continue
+        cid = build_policy_ticket_id(bet_type, horses)
+        legs = stable_ticket_legs(bet_type, horses)
+        score = float(item.get("score", item.get("edge", 0.0)) or 0.0)
+        candidate = {
+            "id": cid,
+            "bet_type": bet_type,
+            "legs": legs,
+            "odds_used": float(item.get("odds_used", 0.0) or 0.0),
+            "p_hit": float(item.get("p_hit", 0.0) or 0.0),
+            "ev": float(item.get("edge", 0.0) or 0.0),
+            "score": score,
+        }
+        prev = item_by_id.get(cid)
+        if prev is None or policy_candidate_sort_key(item) < policy_candidate_sort_key(prev):
+            norm = dict(item)
+            norm["bet_type"] = bet_type
+            norm["horses"] = horses
+            norm["score"] = score
+            item_by_id[cid] = norm
+            if prev is None:
+                bucketed[bet_type].append(candidate)
+            else:
+                for idx, old in enumerate(bucketed[bet_type]):
+                    if str(old.get("id", "")) == cid:
+                        bucketed[bet_type][idx] = candidate
+                        break
+    candidates = []
+    for bet_type in ("win", "place", "wide", "quinella"):
+        rows = sorted(bucketed[bet_type], key=lambda x: policy_candidate_sort_key(item_by_id.get(str(x.get("id", "")), {})))
+        cap = int(caps.get(bet_type, len(rows)) or len(rows))
+        candidates.extend(rows[:cap])
+    candidates.sort(key=lambda x: (-float(x.get("score", 0.0) or 0.0), str(x.get("id", ""))))
+    return candidates, item_by_id
+
+
+def build_policy_candidate_pool(merged, odds_payload, per_type_caps=None):
+    if merged is None or merged.empty:
+        return [], {}
+    d = merged.copy()
+    d["horse_key"] = d.get("horse_no").apply(canonical_horse_key)
+    d = d[d["horse_key"].fillna("").astype(str).str.strip() != ""].copy()
+    if d.empty:
+        return [], {}
+    if "Top3Prob_model" not in d.columns:
+        d["Top3Prob_model"] = pd.to_numeric(d.get("Top3Prob_used"), errors="coerce").fillna(0.0)
+    d["Top3Prob_model"] = pd.to_numeric(d["Top3Prob_model"], errors="coerce").fillna(0.0)
+    if "rank_score" not in d.columns:
+        d["rank_score"] = d["Top3Prob_model"]
+    d["rank_score"] = pd.to_numeric(d["rank_score"], errors="coerce").fillna(d["Top3Prob_model"])
+    d = d.sort_values(["Top3Prob_model", "rank_score"], ascending=False).reset_index(drop=True)
+
+    rank_vals = d["rank_score"].astype(float).tolist()
+    rank_mean = sum(rank_vals) / float(len(rank_vals)) if rank_vals else 0.0
+    rank_var = sum((x - rank_mean) ** 2 for x in rank_vals) / float(len(rank_vals)) if rank_vals else 0.0
+    rank_std = math.sqrt(rank_var) if rank_var > 1e-12 else 0.0
+    z_scores = [((x - rank_mean) / rank_std) if rank_std > 1e-12 else 0.0 for x in rank_vals]
+    p_rank = _softmax_probs([0.8 * z for z in z_scores], temperature=1.0)
+
+    top3_raw = [clamp01(x) for x in d["Top3Prob_model"].astype(float).tolist()]
+    top3_sum = float(sum(top3_raw))
+    if top3_sum <= 1e-12:
+        p_top3 = [1.0 / float(len(top3_raw)) for _ in top3_raw]
+    else:
+        p_top3 = [float(x / top3_sum) for x in top3_raw]
+    p_win_mix = [(0.55 * pr) + (0.45 * pt) for pr, pt in zip(p_rank, p_top3)]
+    win_mix_sum = float(sum(p_win_mix))
+    if win_mix_sum <= 1e-12:
+        p_win = [1.0 / float(len(p_win_mix)) for _ in p_win_mix]
+    else:
+        p_win = [float(x / win_mix_sum) for x in p_win_mix]
+    p_place = [clamp01((0.68 * top3) + (0.32 * min(1.0, pw * 2.2))) for top3, pw in zip(top3_raw, p_win)]
+
+    horse_rows = []
+    for row, pw, pp in zip(d.to_dict("records"), p_win, p_place):
+        horse_key = str(row.get("horse_key", "")).strip()
+        if not horse_key:
+            continue
+        horse_rows.append(
+            {
+                "horse_key": horse_key,
+                "p_win": float(pw),
+                "p_place": float(pp),
+            }
+        )
+    if not horse_rows:
+        return [], {}
+
+    item_pool = []
+    for row in horse_rows:
+        horse_key = row["horse_key"]
+        win_odds = policy_odds_scalar((odds_payload.get("win", {}) or {}).get(horse_key, 0.0))
+        if win_odds > 1.0:
+            p_hit = float(row["p_win"])
+            edge = float((p_hit * win_odds) - 1.0)
+            item_pool.append(
+                {
+                    "bet_type": "win",
+                    "horses": (horse_key,),
+                    "stake_yen": 0,
+                    "odds_used": win_odds,
+                    "p_hit": p_hit,
+                    "edge": edge,
+                    "kelly_f": 0.0,
+                    "score": float(edge * math.sqrt(max(1e-6, p_hit))),
+                    "why": "",
+                    "notes": "policy_pool=expanded",
+                }
+            )
+        place_odds = policy_odds_scalar((odds_payload.get("place", {}) or {}).get(horse_key, 0.0))
+        if place_odds > 1.0:
+            p_hit = float(row["p_place"])
+            edge = float((p_hit * place_odds) - 1.0)
+            item_pool.append(
+                {
+                    "bet_type": "place",
+                    "horses": (horse_key,),
+                    "stake_yen": 0,
+                    "odds_used": place_odds,
+                    "p_hit": p_hit,
+                    "edge": edge,
+                    "kelly_f": 0.0,
+                    "score": float(edge * math.sqrt(max(1e-6, p_hit))),
+                    "why": "",
+                    "notes": "policy_pool=expanded",
+                }
+            )
+
+    for i, left in enumerate(horse_rows):
+        for right in horse_rows[i + 1 :]:
+            a, b = canonical_pair(left["horse_key"], right["horse_key"])
+            p_wide = clamp01(float(left["p_place"]) * float(right["p_place"]) * 0.78)
+            wide_odds = policy_odds_scalar((odds_payload.get("wide", {}) or {}).get((a, b), 0.0))
+            if wide_odds > 1.0:
+                edge = float((p_wide * wide_odds) - 1.0)
+                item_pool.append(
+                    {
+                        "bet_type": "wide",
+                        "horses": (a, b),
+                        "stake_yen": 0,
+                        "odds_used": wide_odds,
+                        "p_hit": p_wide,
+                        "edge": edge,
+                        "kelly_f": 0.0,
+                        "score": float(edge * math.sqrt(max(1e-6, p_wide))),
+                        "why": "",
+                        "notes": "policy_pool=expanded",
+                    }
+                )
+            p_quinella = clamp01(float(left["p_win"]) * float(right["p_win"]) * 1.45)
+            quinella_odds = policy_odds_scalar((odds_payload.get("quinella", {}) or {}).get((a, b), 0.0))
+            if quinella_odds > 1.0:
+                edge = float((p_quinella * quinella_odds) - 1.0)
+                item_pool.append(
+                    {
+                        "bet_type": "quinella",
+                        "horses": (a, b),
+                        "stake_yen": 0,
+                        "odds_used": quinella_odds,
+                        "p_hit": p_quinella,
+                        "edge": edge,
+                        "kelly_f": 0.0,
+                        "score": float(edge * math.sqrt(max(1e-6, p_quinella))),
+                        "why": "",
+                        "notes": "policy_pool=expanded",
+                    }
+                )
+
+    return build_policy_candidates_from_items(item_pool, per_type_caps=per_type_caps)
+
+
+def build_marks_top5_payload(merged):
+    if merged is None or merged.empty:
+        return []
+    d = merged.copy()
+    if "Top3Prob_model" not in d.columns:
+        d["Top3Prob_model"] = pd.to_numeric(d.get("Top3Prob_used"), errors="coerce").fillna(0.0)
+    d["Top3Prob_model"] = pd.to_numeric(d["Top3Prob_model"], errors="coerce").fillna(0.0)
+    if "rank_score" not in d.columns:
+        d["rank_score"] = d["Top3Prob_model"]
+    d["rank_score"] = pd.to_numeric(d["rank_score"], errors="coerce").fillna(0.0)
+    rank_min = float(d["rank_score"].min()) if len(d) > 0 else 0.0
+    rank_max = float(d["rank_score"].max()) if len(d) > 0 else 0.0
+    denom = rank_max - rank_min
+    if denom <= 1e-12:
+        d["rank_score_norm"] = 0.5
+    else:
+        d["rank_score_norm"] = (d["rank_score"] - rank_min) / denom
+    d = d.sort_values("Top3Prob_model", ascending=False).reset_index(drop=True)
+    rows = []
+    for i, row in d.head(5).iterrows():
+        horse_no = parse_horse_no(row.get("horse_no", ""))
+        rows.append(
+            {
+                "horse_no": str(horse_no) if horse_no is not None else str(row.get("horse_no", "")).strip(),
+                "horse_name": str(row.get("HorseName", "")).strip(),
+                "pred_rank": int(i + 1),
+                "top3_prob_model": float(row.get("Top3Prob_model", 0.0) or 0.0),
+                "rank_score_norm": float(row.get("rank_score_norm", 0.0) or 0.0),
+            }
+        )
+    return rows
+
+
+def build_predictions_payload(merged, odds_payload, limit=8):
+    if merged is None or merged.empty:
+        return []
+    d = merged.copy()
+    d["horse_key"] = d.get("horse_no").apply(canonical_horse_key)
+    if "Top3Prob_model" not in d.columns:
+        d["Top3Prob_model"] = pd.to_numeric(d.get("Top3Prob_used"), errors="coerce").fillna(0.0)
+    d["Top3Prob_model"] = pd.to_numeric(d["Top3Prob_model"], errors="coerce").fillna(0.0)
+    if "rank_score" not in d.columns:
+        d["rank_score"] = d["Top3Prob_model"]
+    d["rank_score"] = pd.to_numeric(d["rank_score"], errors="coerce").fillna(d["Top3Prob_model"])
+    rank_min = float(d["rank_score"].min()) if len(d) > 0 else 0.0
+    rank_max = float(d["rank_score"].max()) if len(d) > 0 else 0.0
+    denom = rank_max - rank_min
+    if denom <= 1e-12:
+        d["rank_score_norm"] = 0.5
+    else:
+        d["rank_score_norm"] = (d["rank_score"] - rank_min) / denom
+    d = d.sort_values(["Top3Prob_model", "rank_score"], ascending=False).reset_index(drop=True)
+    rows = []
+    for i, row in d.head(int(max(1, limit))).iterrows():
+        horse_key = canonical_horse_key(row.get("horse_no", ""))
+        horse_no = parse_horse_no(row.get("horse_no", ""))
+        rows.append(
+            {
+                "horse_no": str(horse_no) if horse_no is not None else str(row.get("horse_no", "")).strip(),
+                "horse_name": str(row.get("HorseName", "")).strip(),
+                "pred_rank": int(i + 1),
+                "top3_prob_model": float(row.get("Top3Prob_model", 0.0) or 0.0),
+                "rank_score_norm": float(row.get("rank_score_norm", 0.0) or 0.0),
+                "win_odds": policy_odds_scalar((odds_payload.get("win", {}) or {}).get(horse_key, 0.0)),
+                "place_odds": policy_odds_scalar((odds_payload.get("place", {}) or {}).get(horse_key, 0.0)),
+            }
+        )
+    return rows
+
+
+def _sanitize_policy_json_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        text = str(value).strip()
+        return text
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_policy_json_value(x) for x in list(value)]
+    if isinstance(value, dict):
+        out = {}
+        for key, item in dict(value).items():
+            out[str(key)] = _sanitize_policy_json_value(item)
+        return out
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    return str(value)
+
+
+def _prediction_col_desc(col):
+    desc_map = {
+        "race_id": "レースID",
+        "horse_no": "馬番",
+        "HorseName": "馬名",
+        "odds_num": "単勝オッズ",
+        "Age": "年齢",
+        "SexMale": "性別フラグ（牡）",
+        "SexFemale": "性別フラグ（牝）",
+        "SexGelding": "性別フラグ（騸）",
+        "TargetDistance": "対象距離（m）",
+        "fieldsize_med": "想定頭数の中央値",
+        "best_TimeIndexEff": "タイム指数効率（最良）",
+        "avg_TimeIndexEff": "タイム指数効率（平均）",
+        "dist_close": "距離適性の近さ",
+        "Top3Prob_lr": "ロジスティック回帰モデルの3着内確率",
+        "Top3Prob_lgbm": "LightGBMモデルの3着内確率",
+        "Top3Prob_model": "統合モデルの3着内確率",
+        "Top3Prob_est": "推定3着内確率",
+        "Top3Prob": "3着内確率",
+        "Top3Prob_used": "下注判断に使う3着内確率",
+        "jscore_current": "騎手評価スコア（当該レース時点）",
+        "agg_score": "総合評価スコア",
+        "score": "評価スコア",
+        "rank_score": "順位付け用スコア",
+        "rank_score_norm": "順位付けスコアの正規化値",
+        "confidence_score": "予測信頼度スコア",
+        "stability_score": "予測安定性スコア",
+        "validity_score": "予測妥当性スコア",
+        "consistency_score": "予測整合性スコア",
+        "rank_ema": "順位実績のEMA指標",
+        "ev_ema": "期待値のEMA指標",
+        "risk_score": "リスク/不確実性スコア",
+        "horse_key": "内部用の馬キー",
+        "pred_rank": "予測順位（1が最上位）",
+        "win_odds": "単勝オッズの代表値",
+        "place_odds": "複勝オッズの代表値",
+    }
+    if col in desc_map:
+        return desc_map[col]
+    if str(col).startswith("ti_"):
+        return "タイム指数系特徴量"
+    if str(col).startswith("jscore_"):
+        return "騎手/補正スコア系特徴量"
+    if str(col).startswith("ps_"):
+        return "走法・ポジション系特徴量"
+    if str(col).startswith("run_"):
+        return "直近走パフォーマンス特徴量"
+    if str(col).startswith("cup_"):
+        return "同条件（クラス/距離/馬場）傾向特徴量"
+    if str(col).startswith("top3_ti_"):
+        return "上位3着タイム指数の分位特徴量"
+    return "モデル特徴量（内部定義）"
+
+
+def build_prediction_field_guide(merged):
+    if merged is None or merged.empty:
+        cols = []
+    else:
+        cols = [str(col).strip() for col in list(merged.columns) if str(col).strip()]
+    extras = ["pred_rank", "win_odds", "place_odds"]
+    ordered = []
+    seen = set()
+    for col in cols + extras:
+        name = str(col).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return {name: _prediction_col_desc(name) for name in ordered}
+
+
+def build_predictions_full_payload(merged, odds_payload):
+    if merged is None or merged.empty:
+        return []
+    d = merged.copy()
+    d["horse_key"] = d.get("horse_no").apply(canonical_horse_key)
+    if "Top3Prob_model" not in d.columns:
+        d["Top3Prob_model"] = pd.to_numeric(d.get("Top3Prob_used"), errors="coerce").fillna(0.0)
+    d["Top3Prob_model"] = pd.to_numeric(d["Top3Prob_model"], errors="coerce").fillna(0.0)
+    if "rank_score" not in d.columns:
+        d["rank_score"] = d["Top3Prob_model"]
+    d["rank_score"] = pd.to_numeric(d["rank_score"], errors="coerce").fillna(d["Top3Prob_model"])
+    d = d.sort_values(["Top3Prob_model", "rank_score"], ascending=False).reset_index(drop=True)
+    rows = []
+    base_records = d.to_dict("records")
+    for idx, row in enumerate(base_records):
+        horse_key = canonical_horse_key(row.get("horse_no", ""))
+        enriched = {}
+        for key, value in row.items():
+            enriched[str(key)] = _sanitize_policy_json_value(value)
+        horse_no = parse_horse_no(row.get("horse_no", ""))
+        enriched["horse_no"] = str(horse_no) if horse_no is not None else str(row.get("horse_no", "")).strip()
+        enriched["horse_key"] = str(horse_key)
+        enriched["pred_rank"] = int(idx + 1)
+        enriched["win_odds"] = policy_odds_scalar((odds_payload.get("win", {}) or {}).get(horse_key, 0.0))
+        enriched["place_odds"] = policy_odds_scalar((odds_payload.get("place", {}) or {}).get(horse_key, 0.0))
+        rows.append(enriched)
+    return rows
+
+
+def _build_single_odds_entry(horse_no, value):
+    odds_scalar = policy_odds_scalar(value)
+    entry = {
+        "horse_no": str(horse_no),
+        "odds": float(odds_scalar),
+    }
+    if isinstance(value, (list, tuple)):
+        nums = [safe_float(x) for x in list(value) if safe_float(x) > 0]
+        if nums:
+            entry["odds_low"] = float(min(nums))
+            entry["odds_high"] = float(max(nums))
+    return entry
+
+
+def _build_pair_odds_entry(pair_key, value):
+    left, right = pair_key
+    odds_scalar = policy_odds_scalar(value)
+    entry = {
+        "pair": f"{left}-{right}",
+        "horse_no_a": str(left),
+        "horse_no_b": str(right),
+        "odds": float(odds_scalar),
+    }
+    if isinstance(value, (list, tuple)):
+        nums = [safe_float(x) for x in list(value) if safe_float(x) > 0]
+        if nums:
+            entry["odds_low"] = float(min(nums))
+            entry["odds_high"] = float(max(nums))
+    return entry
+
+
+def build_full_odds_payload(odds_payload):
+    odds_payload = dict(odds_payload or {})
+    out = {"win": [], "place": [], "wide": [], "quinella": []}
+    for horse_no, value in sorted((odds_payload.get("win", {}) or {}).items(), key=lambda x: str(x[0])):
+        out["win"].append(_build_single_odds_entry(horse_no, value))
+    for horse_no, value in sorted((odds_payload.get("place", {}) or {}).items(), key=lambda x: str(x[0])):
+        out["place"].append(_build_single_odds_entry(horse_no, value))
+    for pair_key, value in sorted((odds_payload.get("wide", {}) or {}).items(), key=lambda x: (str(x[0][0]), str(x[0][1]))):
+        out["wide"].append(_build_pair_odds_entry(pair_key, value))
+    for pair_key, value in sorted((odds_payload.get("quinella", {}) or {}).items(), key=lambda x: (str(x[0][0]), str(x[0][1]))):
+        out["quinella"].append(_build_pair_odds_entry(pair_key, value))
+    return out
+
+
+def build_pair_odds_top_payload(candidates, limit_per_type=5):
+    bucketed = {"wide": [], "quinella": []}
+    for candidate in list(candidates or []):
+        bet_type = str(candidate.get("bet_type", "") or "").strip().lower()
+        if bet_type not in bucketed:
+            continue
+        legs = [str(x) for x in list(candidate.get("legs", []) or []) if str(x).strip()]
+        if len(legs) < 2:
+            continue
+        bucketed[bet_type].append(
+            {
+                "bet_type": bet_type,
+                "pair": f"{legs[0]}-{legs[1]}",
+                "odds": float(candidate.get("odds_used", 0.0) or 0.0),
+                "score": float(candidate.get("score", 0.0) or 0.0),
+            }
+        )
+    rows = []
+    for bet_type in ("wide", "quinella"):
+        ordered = sorted(
+            bucketed[bet_type],
+            key=lambda x: (-float(x.get("score", 0.0) or 0.0), float(x.get("odds", 0.0) or 0.0), str(x.get("pair", ""))),
+        )
+        for item in ordered[: int(max(1, limit_per_type))]:
+            rows.append(
+                {
+                    "bet_type": bet_type,
+                    "pair": str(item.get("pair", "")),
+                    "odds": float(item.get("odds", 0.0) or 0.0),
+                }
+            )
+    return rows
+
+
+def extract_ai_payload(merged, summary_info):
+    top_vals = []
+    if merged is not None and not merged.empty:
+        vals = pd.to_numeric(merged.get("Top3Prob_model"), errors="coerce").fillna(0.0).astype(float).tolist()
+        top_vals = sorted(vals, reverse=True)
+    gap = (top_vals[0] - top_vals[1]) if len(top_vals) >= 2 else 0.0
+    confidence_score = 0.5 + max(0.0, min(0.4, gap * 3.0))
+    stability_score = confidence_score
+    risk_score = 0.5
+    if merged is not None and not merged.empty:
+        if "confidence_score" in merged.columns:
+            confidence_score = clamp01(float(pd.to_numeric(merged["confidence_score"], errors="coerce").fillna(confidence_score).iloc[0]))
+        if "risk_score" in merged.columns:
+            risk_score = clamp01(float(pd.to_numeric(merged["risk_score"], errors="coerce").fillna(risk_score).iloc[0]))
+        if "rank_ema" in merged.columns:
+            stability_score = clamp01(float(pd.to_numeric(merged["rank_ema"], errors="coerce").fillna(stability_score).iloc[0]))
+    if isinstance(summary_info, dict):
+        race_diags = summary_info.get("diagnostics", []) or summary_info.get("race_diagnostics", [])
+        if isinstance(race_diags, list) and race_diags:
+            first = race_diags[0]
+            try:
+                gap = float(first.get("gap"))
+            except (TypeError, ValueError):
+                gap = float(gap)
+            confidence_score = clamp01(first.get("confidence_score", confidence_score))
+            stability_score = clamp01(first.get("stability_score", stability_score))
+    return {
+        "gap": float(gap),
+        "confidence_score": float(confidence_score),
+        "stability_score": float(stability_score),
+        "risk_score": float(risk_score),
+    }
+
+
+def resolve_policy_constraints(engine_version, budget_yen, summary_info, candidates_count, v2_cfg, v3_cfg, v4_cfg, v5_cfg):
+    high_odds_threshold = 10.0
+    max_tickets_per_race = 6
+    if engine_version == "v2":
+        max_tickets_per_race = int(v2_cfg.get("max_tickets_per_race", 0) or 0)
+        high_odds_threshold = safe_float(v2_cfg.get("high_odds_threshold", 10.0))
+    elif engine_version == "v3":
+        max_tickets_per_race = int(v3_cfg.get("max_tickets_per_race", 6) or 6)
+        high_odds_threshold = safe_float(v3_cfg.get("high_bucket_odds_threshold", 10.0))
+    elif engine_version == "v4":
+        max_tickets_per_race = int(v4_cfg.get("max_tickets_per_race", 3) or 3)
+        high_odds_threshold = safe_float(v4_cfg.get("high_odds_threshold", 10.0))
+    elif engine_version == "v5":
+        max_tickets_per_race = int(v5_cfg.get("max_tickets_per_race", 6) or 6)
+        high_odds_threshold = safe_float(v5_cfg.get("high_odds_threshold", 10.0))
+    if max_tickets_per_race <= 0:
+        max_tickets_per_race = int(max(1, candidates_count))
+    return {
+        "bankroll_yen": 0,
+        "race_budget_yen": 0,
+        "max_tickets_per_race": int(max_tickets_per_race),
+        "high_odds_threshold": float(high_odds_threshold if high_odds_threshold > 0 else 10.0),
+        "allowed_types": ["win", "place", "wide", "quinella"],
+    }
+
+
+def build_policy_input_payload(race_id, scope_key, merged, summary_info, candidates, constraints, odds_payload):
+    ai_payload = extract_ai_payload(merged, summary_info)
+    marks_top5 = build_marks_top5_payload(merged)
+    predictions = build_predictions_payload(merged, odds_payload)
+    predictions_full = build_predictions_full_payload(merged, odds_payload)
+    pair_odds_top = build_pair_odds_top_payload(candidates)
+    odds_full = build_full_odds_payload(odds_payload)
+    prediction_field_guide = build_prediction_field_guide(merged)
+    payload = {
+        "race_id": str(race_id or "__single_race__"),
+        "scope_key": str(scope_key or ""),
+        "field_size": int(len(merged) if merged is not None else 0),
+        "ai": ai_payload,
+        "marks_top5": marks_top5,
+        "predictions": predictions,
+        "predictions_full": predictions_full,
+        "pair_odds_top": pair_odds_top,
+        "odds_full": odds_full,
+        "prediction_field_guide": prediction_field_guide,
+        "candidates": list(candidates or []),
+        "constraints": dict(constraints or {}),
+    }
+    return payload
+
+
+def blueprint_group_weights(policy_output, selected_items):
+    buy_style = str(policy_output.get("buy_style", "") or "").strip().lower()
+    strategy_mode = str(policy_output.get("strategy_mode", "") or "").strip().lower()
+    participation_level = str(policy_output.get("participation_level", "") or "").strip().lower()
+    construction_style = str(policy_output.get("construction_style", "") or "").strip().lower()
+    if not construction_style:
+        if strategy_mode in ("pair_focus", "spread"):
+            construction_style = "pair_spread"
+        elif strategy_mode in ("place_only", "conservative_single", "small_probe"):
+            construction_style = "conservative_single"
+        else:
+            construction_style = "single_axis"
+    risk_tilt = str(policy_output.get("risk_tilt", "") or "").strip().lower()
+    enabled_types = {str(x).strip().lower() for x in list(policy_output.get("enabled_bet_types", []) or []) if str(x).strip()}
+    present_groups = {policy_group_for_type(item.get("bet_type", "")) for item in list(selected_items or [])}
+    if buy_style == "win_focus":
+        weights = {"win": 0.42, "place": 0.28, "pair": 0.30}
+    elif buy_style == "pair_focus":
+        weights = {"win": 0.06, "place": 0.30, "pair": 0.64}
+    elif buy_style == "place_only":
+        weights = {"win": 0.0, "place": 1.0, "pair": 0.0}
+    elif buy_style == "conservative":
+        weights = {"win": 0.03, "place": 0.82, "pair": 0.15}
+    elif buy_style == "place_focus":
+        weights = {"win": 0.06, "place": 0.72, "pair": 0.22}
+    else:
+        weights = {"win": 0.20, "place": 0.46, "pair": 0.34}
+    if construction_style == "pair_spread":
+        weights["pair"] += 0.18
+        weights["place"] -= 0.08
+        weights["win"] -= 0.10
+    elif construction_style == "conservative_single":
+        weights["place"] += 0.18
+        weights["win"] -= 0.08
+        weights["pair"] -= 0.10
+    elif construction_style == "value_hunt":
+        weights["pair"] += 0.06
+        weights["place"] += 0.04
+        weights["win"] -= 0.10
+    if risk_tilt == "low":
+        weights["place"] += 0.08
+        weights["win"] -= 0.04
+        weights["pair"] -= 0.04
+    elif risk_tilt == "high":
+        weights["pair"] += 0.08
+        weights["win"] += 0.04
+        weights["place"] -= 0.12
+    if participation_level == "small_bet":
+        weights["place"] += 0.10
+        weights["win"] -= 0.04
+        weights["pair"] -= 0.06
+    for group_name in ("win", "place", "pair"):
+        if group_name not in present_groups:
+            weights[group_name] = 0.0
+    if enabled_types:
+        if "win" not in enabled_types:
+            weights["win"] = 0.0
+        if "place" not in enabled_types:
+            weights["place"] = 0.0
+        if ("wide" not in enabled_types) and ("quinella" not in enabled_types):
+            weights["pair"] = 0.0
+    return normalize_policy_weights(weights)
+
+
+def build_tickets_from_policy_blueprint(policy, candidates, bankroll, cfg):
+    if not isinstance(policy, dict):
+        return []
+    if str(policy.get("bet_decision", "") or "").strip().lower() == "no_bet":
+        return []
+    if str(policy.get("buy_style", "") or "").strip().lower() == "no_bet":
+        return []
+    constraints = dict((cfg or {}).get("constraints", {}) or {})
+    ticket_item_by_id = dict((cfg or {}).get("ticket_item_by_id", {}) or {})
+    selected_candidates = list(candidates or [])
+    if not selected_candidates or not ticket_item_by_id:
+        return []
+
+    enabled_types = {
+        str(x).strip().lower() for x in list(policy.get("enabled_bet_types", []) or []) if str(x).strip()
+    }
+    focus_points = list(policy.get("focus_points", []) or [])
+    key_horses = {str(x).strip() for x in list(policy.get("key_horses", []) or []) if str(x).strip()}
+    secondary_horses = {str(x).strip() for x in list(policy.get("secondary_horses", []) or []) if str(x).strip()}
+    longshot_horses = {str(x).strip() for x in list(policy.get("longshot_horses", []) or []) if str(x).strip()}
+    if not key_horses:
+        for point in focus_points:
+            if str(point.get("type", "")).strip().lower() == "horse":
+                value = str(point.get("value", "")).strip()
+                if value:
+                    key_horses.add(value)
+                    break
+    if not enabled_types:
+        for point in focus_points:
+            if str(point.get("type", "")).strip().lower() == "bet_type":
+                value = str(point.get("value", "")).strip().lower()
+                if value:
+                    enabled_types.add(value)
+    preferred_ids = {str(x).strip() for x in list(policy.get("pick_ids", []) or []) if str(x).strip()}
+    max_tickets = int(policy.get("max_ticket_count", 0) or 0)
+    hard_cap = int(constraints.get("max_tickets_per_race", 0) or 0)
+    if hard_cap > 0:
+        max_tickets = min(max_tickets if max_tickets > 0 else hard_cap, hard_cap)
+    if max_tickets <= 0:
+        max_tickets = max(1, min(len(selected_candidates), 2))
+    strategy_mode = str(policy.get("strategy_mode", "") or "").strip().lower()
+    participation_level = str(policy.get("participation_level", "") or "").strip().lower()
+    construction_style = str(policy.get("construction_style", "") or "").strip().lower()
+    if not construction_style:
+        if strategy_mode in ("pair_focus", "spread"):
+            construction_style = "pair_spread"
+        elif strategy_mode in ("place_only", "conservative_single", "small_probe"):
+            construction_style = "conservative_single"
+        else:
+            construction_style = "single_axis"
+    risk_tilt = str(policy.get("risk_tilt", "") or "").strip().lower()
+    high_odds_threshold = float(constraints.get("high_odds_threshold", 10.0) or 10.0)
+
+    def style_score(candidate):
+        bet_type = str(candidate.get("bet_type", "") or "").strip().lower()
+        legs = [str(x) for x in list(candidate.get("legs", []) or []) if str(x).strip()]
+        base = float(candidate.get("score", candidate.get("ev", 0.0)) or 0.0)
+        score = base
+        if preferred_ids and str(candidate.get("id", "")) in preferred_ids:
+            score += 5.0
+        if enabled_types and bet_type not in enabled_types:
+            score -= 1000.0
+        key_hits = len(key_horses.intersection(legs))
+        secondary_hits = len(secondary_horses.intersection(legs))
+        longshot_hits = len(longshot_horses.intersection(legs))
+        score += 1.8 * float(key_hits)
+        score += 0.8 * float(secondary_hits)
+        if construction_style == "single_axis":
+            if bet_type == "place" and key_hits:
+                score += 2.4
+            elif bet_type == "win" and key_hits:
+                score += 2.1
+            elif bet_type in ("wide", "quinella") and key_hits:
+                score += 1.8 + (0.6 * float(secondary_hits))
+            elif bet_type in ("wide", "quinella"):
+                score -= 1.2
+        elif construction_style == "pair_spread":
+            if bet_type in ("wide", "quinella"):
+                score += 2.3 + (0.5 * float(key_hits + secondary_hits))
+            else:
+                score -= 0.8
+        elif construction_style == "value_hunt":
+            if longshot_hits:
+                score += 2.0
+            if float(candidate.get("ev", 0.0) or 0.0) > 0.0:
+                score += 0.9
+            if bet_type == "place" and key_hits:
+                score += 1.3
+        elif construction_style == "conservative_single":
+            if bet_type == "place":
+                score += 2.4 + (0.4 * float(key_hits))
+            elif bet_type == "win" and key_hits:
+                score += 0.7
+            elif bet_type in ("wide", "quinella") and key_hits and secondary_hits:
+                score += 0.6
+            else:
+                score -= 1.4
+        if risk_tilt == "low":
+            if bet_type == "place":
+                score += 0.5
+            if float(candidate.get("odds_used", 0.0) or 0.0) >= high_odds_threshold:
+                score -= 0.7
+        elif risk_tilt == "high":
+            if bet_type in ("wide", "quinella"):
+                score += 0.4
+        if participation_level == "small_bet" and bet_type in ("wide", "quinella"):
+            score -= 0.4
+        return score
+
+    ordered = sorted(
+        selected_candidates,
+        key=lambda x: (
+            -style_score(x),
+            -float(x.get("p_hit", 0.0) or 0.0),
+            -float(x.get("ev", 0.0) or 0.0),
+            str(x.get("id", "")),
+        ),
+    )
+    picked = []
+    high_count = 0
+    longshot_count = 0
+    seen_ids = set()
+    for candidate in ordered:
+        cid = str(candidate.get("id", "") or "").strip()
+        if (not cid) or (cid in seen_ids):
+            continue
+        item = dict(ticket_item_by_id.get(cid, {}) or {})
+        if not item:
+            continue
+        odds_used = float(item.get("odds_used", 0.0) or 0.0)
+        item_horses = {str(x) for x in list(item.get("horses", ()) or ()) if str(x).strip()}
+        is_high = odds_used >= high_odds_threshold
+        is_longshot = bool(item_horses.intersection(longshot_horses)) or is_high
+        if is_high and high_count >= 1:
+            continue
+        if is_longshot and longshot_horses and longshot_count >= 1:
+            continue
+        seen_ids.add(cid)
+        picked.append(item)
+        if is_high:
+            high_count += 1
+        if is_longshot and longshot_horses:
+            longshot_count += 1
+        if len(picked) >= max_tickets:
+            break
+    if not picked:
+        return []
+
+    units_total = int(max(0, int(bankroll) // int(UNIT_YEN)))
+    if units_total <= 0:
+        return []
+    weights = blueprint_group_weights(policy, picked)
+    group_items = {"win": [], "place": [], "pair": []}
+    for item in picked:
+        group_items[policy_group_for_type(item.get("bet_type", ""))].append(item)
+    units_by_group = split_units(units_total, [weights["win"], weights["place"], weights["pair"]])
+    alloc_map = {"win": int(units_by_group[0]), "place": int(units_by_group[1]), "pair": int(units_by_group[2])}
+    out = []
+    for group_name in ("win", "place", "pair"):
+        rows = list(group_items[group_name] or [])
+        if not rows:
+            continue
+        units_g = int(alloc_map.get(group_name, 0) or 0)
+        if units_g <= 0:
+            continue
+        row_weights = []
+        for row in rows:
+            score = float(row.get("score", row.get("edge", 0.0)) or 0.0)
+            if score <= 0:
+                score = max(1e-6, float(row.get("p_hit", 0.0) or 0.0))
+            row_weights.append(max(1e-6, score))
+        alloc = split_units(units_g, row_weights)
+        for row, units in zip(rows, alloc):
+            if int(units) <= 0:
+                continue
+            rec = dict(row)
+            rec["stake_yen"] = int(units) * int(UNIT_YEN)
+            out.append(rec)
+    return out
+
+
+def attach_policy_text(items, policy_output):
+    if not items:
+        return []
+    strategy_text_ja = str(policy_output.get("strategy_text_ja", "") or "")
+    bet_tendency_ja = str(policy_output.get("bet_tendency_ja", "") or "")
+    buy_style = str(policy_output.get("buy_style", "") or "")
+    bet_decision = str(policy_output.get("bet_decision", "") or "")
+    construction_style = str(policy_output.get("strategy_mode", "") or policy_output.get("construction_style", "") or "")
+    reason_codes = ",".join([str(x) for x in list(policy_output.get("reason_codes", []) or []) if str(x).strip()])
+    out = []
+    for item in items:
+        rec = dict(item)
+        notes = str(rec.get("notes", "") or "")
+        policy_note = f"policy={buy_style}"
+        if bet_decision:
+            policy_note = f"{policy_note};decision={bet_decision}"
+        if construction_style:
+            policy_note = f"{policy_note};construction={construction_style}"
+        if reason_codes:
+            policy_note = f"{policy_note};reasons={reason_codes}"
+        rec["notes"] = f"{notes};{policy_note}" if notes else policy_note
+        rec["strategy_text_ja"] = strategy_text_ja
+        rec["bet_tendency_ja"] = bet_tendency_ja
+        rec["policy_engine"] = "gemini"
+        rec["policy_buy_style"] = buy_style
+        rec["policy_bet_decision"] = bet_decision
+        rec["policy_construction_style"] = construction_style
+        out.append(rec)
+    return out
+
+
+def build_gemini_policy_artifact_path(scope_data_dir, race_id, run_id):
+    race_text = str(race_id or "").strip()
+    run_text = str(run_id or "").strip()
+    if race_text:
+        race_dir = scope_data_dir / race_text
+        race_dir.mkdir(parents=True, exist_ok=True)
+        return race_dir / f"gemini_policy_{run_text}_{race_text}.json"
+    return scope_data_dir / f"gemini_policy_{run_text}.json"
+
+
+def save_gemini_policy_artifact(path, payload):
+    if not path or not payload:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+    except Exception as exc:
+        print(f"[WARN] failed to save gemini_policy artifact: {exc}")
+        return False
+
 
 def apply_strategy_from_env(config):
     strategies = config.get("strategies", {})
@@ -1844,6 +2871,14 @@ def main():
     engine_version = resolve_engine_version(args.engine_version)
     bet_profile = resolve_bet_profile(args.bet_profile)
     v5_profile = resolve_v5_profile(getattr(args, "v5_profile", "default"))
+    policy_engine = str(getattr(args, "policy_engine", "none") or "none").strip().lower()
+    if policy_engine not in ("none", "gemini"):
+        policy_engine = "none"
+    gemini_model = str(
+        getattr(args, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview"
+    ).strip()
+    policy_cache_enable = parse_bool_text(getattr(args, "policy_cache_enable", "true"), default=True)
+    policy_budget_reuse = parse_bool_text(getattr(args, "policy_budget_reuse", "false"), default=False)
     config = load_config()
     config, strategy_used = apply_strategy_from_env(config)
     predictor_config = load_predictor_config()
@@ -1952,6 +2987,12 @@ def main():
     out_rows = []
     item_rows_all = []
     all_no_bet_rows = []
+    gemini_policy_records = []
+    gemini_policy_path = None
+    shared_policy_output_payload = None
+    shared_policy_meta = {}
+    shared_policy_source_budget = None
+    policy_is_budget_agnostic = bool(policy_engine == "gemini")
     plan_columns = [
         "budget_yen",
         "bet_type",
@@ -1970,8 +3011,15 @@ def main():
         "p_hit",
         "edge",
         "kelly_f",
+        "score",
         "stake_yen",
         "notes",
+        "strategy_text_ja",
+        "bet_tendency_ja",
+        "policy_engine",
+        "policy_buy_style",
+        "policy_bet_decision",
+        "policy_construction_style",
     ]
     item_columns = [
         "run_id",
@@ -1983,8 +3031,15 @@ def main():
         "odds_used",
         "p_hit",
         "edge",
+        "score",
         "stake_yen",
         "notes",
+        "strategy_text_ja",
+        "bet_tendency_ja",
+        "policy_engine",
+        "policy_buy_style",
+        "policy_bet_decision",
+        "policy_construction_style",
     ]
 
     v5_diag_printed = False
@@ -1992,6 +3047,9 @@ def main():
         engine_used = engine_version
         summary_info = {}
         budget_rows, budget_item_rows = [], []
+        normalized_items = []
+        policy_applied = False
+        policy_output_payload = None
 
         try:
             if engine_version == "v3":
@@ -2002,11 +3060,7 @@ def main():
                     scope_key=SCOPE_KEY,
                     config=bet_engine_v3_cfg,
                 )
-                budget_rows, budget_item_rows = build_rows_from_bet_items(
-                    items=items_raw,
-                    budget_yen=budget_yen,
-                    horse_meta=horse_meta,
-                )
+                normalized_items = normalize_portfolio_items(items_raw)
             elif engine_version == "v4":
                 items_raw, _, summary_info = generate_bet_plan_v4(
                     pred_df=pred_df,
@@ -2015,11 +3069,7 @@ def main():
                     scope_key=SCOPE_KEY,
                     config=bet_engine_v4_cfg,
                 )
-                budget_rows, budget_item_rows = build_rows_from_bet_items(
-                    items=normalize_portfolio_items(items_raw),
-                    budget_yen=budget_yen,
-                    horse_meta=horse_meta,
-                )
+                normalized_items = normalize_portfolio_items(items_raw)
             elif engine_version == "v5":
                 items_raw, _, summary_info = generate_bet_plan_v5(
                     pred_df=pred_df,
@@ -2028,11 +3078,7 @@ def main():
                     scope_key=SCOPE_KEY,
                     config=bet_engine_v5_cfg,
                 )
-                budget_rows, budget_item_rows = build_rows_from_bet_items(
-                    items=normalize_portfolio_items(items_raw),
-                    budget_yen=budget_yen,
-                    horse_meta=horse_meta,
-                )
+                normalized_items = normalize_portfolio_items(items_raw)
                 if (not v5_diag_printed) and isinstance(summary_info, dict):
                     race_diags = summary_info.get("diagnostics", [])
                     if race_diags:
@@ -2049,11 +3095,7 @@ def main():
                     scope_key=SCOPE_KEY,
                     config=bet_engine_v2_cfg,
                 )
-                budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
-                    result=result,
-                    budget_yen=budget_yen,
-                    horse_meta=horse_meta,
-                )
+                normalized_items = build_items_from_v2_result(result)
         except Exception as exc:
             print(f"[WARN] bet_engine_{engine_version} failed for budget={budget_yen}, fallback to v2: {exc}")
             engine_used = "v2_fallback"
@@ -2064,11 +3106,135 @@ def main():
                 scope_key=SCOPE_KEY,
                 config=bet_engine_v2_cfg,
             )
-            budget_rows, budget_item_rows = build_rows_from_bet_plan_v2(
-                result=result,
-                budget_yen=budget_yen,
-                horse_meta=horse_meta,
-            )
+            normalized_items = build_items_from_v2_result(result)
+
+        if policy_engine == "gemini":
+            if (RacePolicyInput is None) or (call_gemini_policy is None):
+                print("[WARN] policy_engine=gemini but module unavailable; keep original plan.")
+            else:
+                policy_candidates, ticket_item_by_id = build_policy_candidate_pool(
+                    merged=merged,
+                    odds_payload=odds_payload,
+                    per_type_caps={"win": 5, "place": 5, "wide": 10, "quinella": 10},
+                )
+                if not policy_candidates:
+                    policy_candidates, ticket_item_by_id = build_policy_candidates_from_items(normalized_items)
+                constraints = resolve_policy_constraints(
+                    engine_version=engine_version,
+                    budget_yen=budget_yen,
+                    summary_info=summary_info,
+                    candidates_count=len(policy_candidates),
+                    v2_cfg=bet_engine_v2_cfg,
+                    v3_cfg=bet_engine_v3_cfg,
+                    v4_cfg=bet_engine_v4_cfg,
+                    v5_cfg=bet_engine_v5_cfg,
+                )
+                policy_payload = build_policy_input_payload(
+                    race_id=race_id,
+                    scope_key=SCOPE_KEY,
+                    merged=merged,
+                    summary_info=summary_info,
+                    candidates=policy_candidates,
+                    constraints=constraints,
+                    odds_payload=odds_payload,
+                )
+                try:
+                    reused_shared_policy = False
+                    use_shared_policy = bool(policy_is_budget_agnostic or policy_budget_reuse)
+                    if (not use_shared_policy) or (shared_policy_output_payload is None):
+                        policy_input_obj = RacePolicyInput(**policy_payload)
+                        policy_output_obj = call_gemini_policy(
+                            input=policy_input_obj,
+                            model=gemini_model,
+                            timeout_s=20,
+                            cache_enable=policy_cache_enable,
+                        )
+                        if hasattr(policy_output_obj, "model_dump"):
+                            policy_output_payload = policy_output_obj.model_dump()
+                        else:
+                            policy_output_payload = policy_output_obj.dict()
+                        policy_meta = get_last_call_meta() if callable(get_last_call_meta) else {}
+                        if use_shared_policy:
+                            shared_policy_output_payload = dict(policy_output_payload)
+                            shared_policy_meta = dict(policy_meta)
+                            shared_policy_source_budget = 0
+                    else:
+                        policy_output_payload = dict(shared_policy_output_payload)
+                        policy_meta = dict(shared_policy_meta)
+                        reused_shared_policy = True
+                    rebalanced = build_tickets_from_policy_blueprint(
+                        policy=policy_output_payload,
+                        candidates=policy_candidates,
+                        bankroll=budget_yen,
+                        cfg={
+                            "constraints": constraints,
+                            "ticket_item_by_id": ticket_item_by_id,
+                        },
+                    )
+                    rebalanced = attach_policy_text(rebalanced, policy_output_payload)
+                    normalized_items = rebalanced
+                    policy_applied = True
+                    engine_used = f"{engine_used}+gemini"
+                    if reused_shared_policy:
+                        policy_meta = {
+                            **dict(shared_policy_meta),
+                            "requested_budget_yen": 0,
+                            "requested_race_budget_yen": 0,
+                            "reused": True,
+                            "source_budget_yen": 0,
+                        }
+                    else:
+                        policy_meta = {
+                            **dict(policy_meta),
+                            "requested_budget_yen": 0,
+                            "requested_race_budget_yen": 0,
+                            "reused": False,
+                            "source_budget_yen": 0,
+                        }
+                    strategy_text_ja = str(policy_output_payload.get("strategy_text_ja", "") or "").strip()
+                    bet_tendency_ja = str(policy_output_payload.get("bet_tendency_ja", "") or "").strip()
+                    reason_codes = [str(x) for x in list(policy_output_payload.get("reason_codes", []) or []) if str(x).strip()]
+                    warnings_list = [str(x) for x in list(policy_output_payload.get("warnings", []) or []) if str(x).strip()]
+                    if reused_shared_policy:
+                        pass
+                    else:
+                        print(
+                            "[policy][gemini] scope=race decision={decision} buy_style={buy_style} max_ticket_count={picked} "
+                            "enabled={enabled} construction={construction} cache_hit={cache_hit} fallback_reason={fallback_reason}".format(
+                                decision=str(policy_output_payload.get("bet_decision", "")),
+                                buy_style=str(policy_output_payload.get("buy_style", "")),
+                                picked=int(policy_output_payload.get("max_ticket_count", 0) or 0),
+                                enabled=str(policy_output_payload.get("enabled_bet_types", [])),
+                                construction=str(policy_output_payload.get("construction_style", "")),
+                                cache_hit=int(bool(policy_meta.get("cache_hit", False))),
+                                fallback_reason=str(policy_meta.get("fallback_reason", "") or ""),
+                            )
+                        )
+                        if strategy_text_ja:
+                            print(f"[gemini][strategy]\n{strategy_text_ja}")
+                        if bet_tendency_ja:
+                            print(f"[gemini][tendency] {bet_tendency_ja}")
+                        if reason_codes:
+                            print(f"[gemini][reasons] {', '.join(reason_codes)}")
+                        if warnings_list:
+                            print(f"[gemini][warnings] {', '.join(warnings_list)}")
+                    if not reused_shared_policy:
+                        gemini_policy_records.append(
+                            {
+                                "budget_yen": 0,
+                                "shared_policy": True,
+                                "output": dict(policy_output_payload),
+                                "meta": dict(policy_meta),
+                            }
+                        )
+                except Exception as exc:
+                    print(f"[WARN] gemini policy failed for budget={budget_yen}, keep original plan: {exc}")
+
+        budget_rows, budget_item_rows = build_rows_from_bet_items(
+            items=normalized_items,
+            budget_yen=budget_yen,
+            horse_meta=horse_meta,
+        )
 
         out_rows.extend(budget_rows)
         for row in budget_item_rows:
@@ -2080,7 +3246,7 @@ def main():
         expected_return = int(round(sum(float(r.get("p_hit", 0.0) or 0.0) * float(r.get("odds_used", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
         expected_profit = int(round(sum(float(r.get("edge", 0.0) or 0.0) * int(r.get("stake_yen", 0) or 0) for r in budget_item_rows)))
         no_bet = bool(ticket_count == 0)
-        if isinstance(summary_info, dict):
+        if isinstance(summary_info, dict) and (not policy_applied):
             if "expected_return_yen" in summary_info:
                 expected_return = int(summary_info.get("expected_return_yen", expected_return) or expected_return)
             if "expected_profit_yen" in summary_info:
@@ -2096,11 +3262,30 @@ def main():
     out_df.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
     items_df = pd.DataFrame(item_rows_all, columns=item_columns)
     items_df.to_csv(items_path, index=False, encoding="utf-8-sig")
+    if policy_engine == "gemini" and gemini_policy_records:
+        gemini_policy_path = build_gemini_policy_artifact_path(scope_data_dir, race_id, run_id)
+        artifact_payload = {
+            "scope": SCOPE_KEY,
+            "race_id": str(race_id or ""),
+            "run_id": str(run_id or ""),
+            "policy_engine": "gemini",
+            "gemini_model": gemini_model,
+            "policy_budget_reuse": bool(policy_budget_reuse),
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "budgets": gemini_policy_records,
+        }
+        if save_gemini_policy_artifact(gemini_policy_path, artifact_payload):
+            print(f"Saved Gemini policy: {gemini_policy_path}")
     total_stake_all, ticket_count_all, edge_sum_all, weighted_edge_all = calc_plan_summary(item_rows_all)
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
     print(f"Engine version: {engine_version}")
+    print(f"Policy engine: {policy_engine}")
+    if policy_engine == "gemini":
+        print(f"Gemini model: {gemini_model}")
+        print(f"Policy cache: {int(bool(policy_cache_enable))}")
+        print(f"Policy budget reuse: {int(bool(policy_budget_reuse))}")
     if engine_version == "v3":
         print(f"Bet profile: {bet_profile}")
     print(f"Budgets: {', '.join(str(v) for v in budget_list)}")

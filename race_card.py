@@ -95,6 +95,50 @@ def stop_loading(driver):
         pass
 
 
+def expand_cell_texts(cells):
+    values = []
+    for cell in cells:
+        text = cell.get_text(" ", strip=True)
+        colspan_raw = cell.get("colspan", 1)
+        try:
+            colspan = max(1, int(colspan_raw))
+        except (TypeError, ValueError):
+            colspan = 1
+        values.extend([text] * colspan)
+    return values
+
+
+def normalize_header_text(text):
+    return re.sub(r"\s+", "", str(text or "")).strip()
+
+
+def table_to_dataframe(table):
+    header = []
+    rows = []
+    for tr in table.find_all("tr"):
+        ths = tr.find_all("th")
+        tds = tr.find_all("td")
+        if ths and not header:
+            header = [normalize_header_text(x) for x in expand_cell_texts(ths)]
+            continue
+        if not tds:
+            continue
+        row = expand_cell_texts(tds)
+        if header:
+            if len(row) < len(header):
+                row.extend([""] * (len(header) - len(row)))
+            elif len(row) > len(header):
+                row = row[: len(header)]
+        rows.append(row)
+    if not header and rows:
+        width = max(len(row) for row in rows)
+        header = [f"col_{idx}" for idx in range(width)]
+        rows = [row + [""] * (width - len(row)) for row in rows]
+    if not header:
+        return pd.DataFrame()
+    return pd.DataFrame(rows, columns=header)
+
+
 def wait_for_horse_rows(driver, timeout=12):
     selectors = [
         "table.RaceTable01.ShutubaTable tbody tr.HorseList",
@@ -526,7 +570,9 @@ for horse_number, horse_data in horses_info.items():
         continue
 
     try:
-        df = pd.read_html(str(table), header=0)[0]
+        df = table_to_dataframe(table)
+        if df.empty:
+            raise ValueError("parsed table is empty")
     except Exception as e:
         print(f"ERROR: {horse_data['name']} table parse failed: {e}")
         continue

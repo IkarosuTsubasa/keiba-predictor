@@ -13,6 +13,7 @@ def page_template(
     mark_table_html="",
     mark_note_text="",
     bet_plan_table_html="",
+    gemini_policy_html="",
     summary_table_html="",
     run_summary_block="",
     stats_block="",
@@ -76,6 +77,8 @@ def page_template(
             <pre>{html.escape(bet_plan_text)}</pre>
         </section>
         """
+    if gemini_policy_html:
+        bet_plan_block = f"{bet_plan_block}{gemini_policy_html}"
 
     summary_block = ""
     if bet_plan_block and summary_table_html:
