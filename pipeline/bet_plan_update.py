@@ -24,6 +24,7 @@ except Exception:
     RacePolicyInput = None
     call_gemini_policy = None
     get_last_call_meta = None
+from predictor_catalog import list_predictors
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,6 +64,42 @@ QUINELLA_ODDS_PATH = ROOT_DIR / "quinella_odds.csv"
 PRED_PATH = ROOT_DIR / "predictions.csv"
 OUT_PATH = BASE_DIR / "bet_plan_update.csv"
 NO_BET_LOG_PATH = BASE_DIR / f"no_bet_log_{SCOPE_KEY}.csv"
+PREDICTOR_PATH_ENV_MAP = {
+    "main": "PRED_PATH",
+    "v2_opus": "PRED_PATH_V2_OPUS",
+    "v3_premium": "PRED_PATH_V3_PREMIUM",
+    "v4_gemini": "PRED_PATH_V4_GEMINI",
+}
+PREDICTOR_PROFILE_HINTS = {
+    "main": {
+        "strengths_ja": [
+            "主系統。校準済み確率と順位系シグナルのバランスが良い。",
+            "全体の基準軸として使いやすく、安定度を見やすい。",
+        ],
+        "style_ja": "総合バランス型",
+    },
+    "v2_opus": {
+        "strengths_ja": [
+            "ML寄りの上位判定と能力比較が得意な設計。",
+            "時間指数や近走文脈を使う前提で、上位候補の濃淡を見やすい。",
+        ],
+        "style_ja": "上位抽出型",
+    },
+    "v3_premium": {
+        "strengths_ja": [
+            "市場オッズとの整合や説明しやすさを重視した視点。",
+            "保守的な買い方や値頃感の判断材料として使いやすい。",
+        ],
+        "style_ja": "市場融合型",
+    },
+    "v4_gemini": {
+        "strengths_ja": [
+            "分類でのTop3確率とLambdaRankの順位付けを混合したハイブリッド設計。",
+            "コース・距離・馬場・馬場指数寄りの適性を明示的に見るため、条件適合の評価に強い。",
+        ],
+        "style_ja": "文脈適性ハイブリッド型",
+    },
+}
 
 UNIT_YEN = 100
 SIM_RUNS = 3000
@@ -323,6 +360,9 @@ def resolve_run_paths(race_id):
     run = rows[-1]
     return {
         "predictions_path": run.get("predictions_path", ""),
+        "predictions_v2_opus_path": run.get("predictions_v2_opus_path", ""),
+        "predictions_v3_premium_path": run.get("predictions_v3_premium_path", ""),
+        "predictions_v4_gemini_path": run.get("predictions_v4_gemini_path", ""),
         "odds_path": run.get("odds_path", ""),
         "wide_odds_path": run.get("wide_odds_path", ""),
         "fuku_odds_path": run.get("fuku_odds_path", ""),
@@ -1481,6 +1521,208 @@ def build_full_odds_payload(odds_payload):
     return out
 
 
+def resolve_policy_predictor_paths(primary_pred_path, race_id="", run_paths=None):
+    run_paths = dict(run_paths or {})
+    resolved = {}
+    for spec in list_predictors():
+        env_name = PREDICTOR_PATH_ENV_MAP.get(spec["id"], "")
+        raw = str(os.environ.get(env_name, "") or "").strip()
+        if (not raw) and spec.get("run_field"):
+            raw = str(run_paths.get(spec["run_field"], "") or "").strip()
+        if (not raw) and spec["id"] == "main":
+            raw = str(primary_pred_path or "")
+        if not raw:
+            raw = str(ROOT_DIR / spec["latest_filename"])
+        path = Path(raw)
+        if path.exists():
+            resolved[spec["id"]] = path
+    return resolved
+
+
+def _prepare_policy_predictor_frame(merged, odds_payload):
+    if merged is None or merged.empty:
+        return pd.DataFrame()
+    d = merged.copy()
+    if "HorseName" not in d.columns:
+        if "name" in d.columns:
+            d["HorseName"] = d["name"]
+        else:
+            d["HorseName"] = ""
+    if "horse_no" not in d.columns:
+        d["horse_no"] = ""
+    d["horse_no"] = d["horse_no"].apply(
+        lambda value: str(parse_horse_no(value)) if parse_horse_no(value) is not None else str(value or "").strip()
+    )
+    d["horse_key"] = d["horse_no"].apply(canonical_horse_key)
+    prob_col = pick_prob_column(d.columns)
+    d["Top3Prob_model"] = get_prob_series(d, prob_col)
+    if "rank_score" not in d.columns:
+        d["rank_score"] = d["Top3Prob_model"]
+    d["rank_score"] = pd.to_numeric(d["rank_score"], errors="coerce").fillna(d["Top3Prob_model"])
+    rank_min = float(d["rank_score"].min()) if len(d) > 0 else 0.0
+    rank_max = float(d["rank_score"].max()) if len(d) > 0 else 0.0
+    denom = rank_max - rank_min
+    if denom <= 1e-12:
+        d["rank_score_norm"] = 0.5
+    else:
+        d["rank_score_norm"] = (d["rank_score"] - rank_min) / denom
+    d = d.sort_values(["Top3Prob_model", "rank_score"], ascending=False).reset_index(drop=True)
+    d["pred_rank"] = [int(i + 1) for i in range(len(d))]
+    d["horse_name"] = d.get("HorseName", "").apply(lambda x: str(x or "").strip())
+    d["win_odds"] = d["horse_key"].apply(lambda key: policy_odds_scalar((odds_payload.get("win", {}) or {}).get(key, 0.0)))
+    d["place_odds"] = d["horse_key"].apply(lambda key: policy_odds_scalar((odds_payload.get("place", {}) or {}).get(key, 0.0)))
+    return d
+
+
+def load_policy_predictor_frames(odds, predictor_paths, odds_payload):
+    frames = {}
+    odds = odds.copy()
+    for predictor_id, path in dict(predictor_paths or {}).items():
+        try:
+            preds = pd.read_csv(path, encoding="utf-8-sig")
+        except Exception as exc:
+            print(f"[WARN] failed to read {predictor_id} predictions: {path} ({exc})")
+            continue
+        try:
+            _, _, merged = merge_predictions_with_odds(odds, preds)
+        except Exception as exc:
+            print(f"[WARN] failed to merge {predictor_id} predictions with odds: {exc}")
+            continue
+        frames[predictor_id] = _prepare_policy_predictor_frame(merged, odds_payload)
+    return frames
+
+
+def build_multi_predictor_policy_payload(predictor_frames):
+    predictor_frames = dict(predictor_frames or {})
+    profiles = []
+    summaries = []
+    consensus_bucket = {}
+    top1_horses = []
+    available_ids = []
+
+    for spec in list_predictors():
+        predictor_id = spec["id"]
+        frame = predictor_frames.get(predictor_id)
+        available = frame is not None and not frame.empty
+        profile_hint = PREDICTOR_PROFILE_HINTS.get(predictor_id, {})
+        profiles.append(
+            {
+                "predictor_id": predictor_id,
+                "predictor_label": spec["label"],
+                "available": bool(available),
+                "style_ja": str(profile_hint.get("style_ja", "") or ""),
+                "strengths_ja": list(profile_hint.get("strengths_ja", []) or []),
+            }
+        )
+        if not available:
+            continue
+        available_ids.append(predictor_id)
+        top_rows = []
+        for _, row in frame.head(8).iterrows():
+            horse_no = str(row.get("horse_no", "") or "").strip()
+            horse_name = str(row.get("horse_name", "") or "").strip()
+            top_rows.append(
+                {
+                    "horse_no": horse_no,
+                    "horse_name": horse_name,
+                    "pred_rank": int(row.get("pred_rank", 0) or 0),
+                    "top3_prob_model": float(row.get("Top3Prob_model", 0.0) or 0.0),
+                    "rank_score_norm": float(row.get("rank_score_norm", 0.0) or 0.0),
+                    "win_odds": float(row.get("win_odds", 0.0) or 0.0),
+                    "place_odds": float(row.get("place_odds", 0.0) or 0.0),
+                }
+            )
+        top_choice = top_rows[0] if top_rows else {}
+        if top_choice.get("horse_no"):
+            top1_horses.append(str(top_choice.get("horse_no")))
+        summaries.append(
+            {
+                "predictor_id": predictor_id,
+                "predictor_label": spec["label"],
+                "style_ja": str(profile_hint.get("style_ja", "") or ""),
+                "field_size": int(len(frame)),
+                "top_choice_horse_no": str(top_choice.get("horse_no", "") or ""),
+                "top_choice_horse_name": str(top_choice.get("horse_name", "") or ""),
+                "top_choice_top3_prob_model": float(top_choice.get("top3_prob_model", 0.0) or 0.0),
+                "top_horses": top_rows,
+            }
+        )
+        for _, row in frame.iterrows():
+            horse_no = str(row.get("horse_no", "") or "").strip()
+            if not horse_no:
+                continue
+            bucket = consensus_bucket.setdefault(
+                horse_no,
+                {
+                    "horse_no": horse_no,
+                    "horse_name": str(row.get("horse_name", "") or "").strip(),
+                    "top1_votes": 0,
+                    "top3_votes": 0,
+                    "predictor_count": 0,
+                    "pred_rank_sum": 0.0,
+                    "top3_prob_sum": 0.0,
+                    "rank_score_norm_sum": 0.0,
+                    "win_odds": float(row.get("win_odds", 0.0) or 0.0),
+                    "place_odds": float(row.get("place_odds", 0.0) or 0.0),
+                    "predictors_support": [],
+                },
+            )
+            pred_rank = int(row.get("pred_rank", 0) or 0)
+            bucket["predictor_count"] += 1
+            bucket["pred_rank_sum"] += float(pred_rank)
+            bucket["top3_prob_sum"] += float(row.get("Top3Prob_model", 0.0) or 0.0)
+            bucket["rank_score_norm_sum"] += float(row.get("rank_score_norm", 0.0) or 0.0)
+            bucket["predictors_support"].append(spec["label"])
+            if pred_rank == 1:
+                bucket["top1_votes"] += 1
+            if 1 <= pred_rank <= 3:
+                bucket["top3_votes"] += 1
+
+    consensus = []
+    for horse_no, item in consensus_bucket.items():
+        count = int(item.get("predictor_count", 0) or 0)
+        if count <= 0:
+            continue
+        consensus.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": str(item.get("horse_name", "") or ""),
+                "top1_votes": int(item.get("top1_votes", 0) or 0),
+                "top3_votes": int(item.get("top3_votes", 0) or 0),
+                "predictor_count": count,
+                "avg_pred_rank": round(float(item.get("pred_rank_sum", 0.0) or 0.0) / count, 4),
+                "avg_top3_prob_model": round(float(item.get("top3_prob_sum", 0.0) or 0.0) / count, 6),
+                "avg_rank_score_norm": round(float(item.get("rank_score_norm_sum", 0.0) or 0.0) / count, 6),
+                "win_odds": float(item.get("win_odds", 0.0) or 0.0),
+                "place_odds": float(item.get("place_odds", 0.0) or 0.0),
+                "predictors_support": list(item.get("predictors_support", []) or []),
+            }
+        )
+    consensus = sorted(
+        consensus,
+        key=lambda x: (
+            -int(x.get("top1_votes", 0) or 0),
+            -int(x.get("top3_votes", 0) or 0),
+            float(x.get("avg_pred_rank", 999.0) or 999.0),
+            -float(x.get("avg_top3_prob_model", 0.0) or 0.0),
+            str(x.get("horse_no", "")),
+        ),
+    )
+    unique_top1 = sorted({horse_no for horse_no in top1_horses if str(horse_no).strip()}, key=lambda x: int(x) if str(x).isdigit() else str(x))
+    return {
+        "profiles": profiles,
+        "summaries": summaries,
+        "consensus": consensus[:12],
+        "meta": {
+            "available_predictor_ids": available_ids,
+            "available_predictor_count": int(len(available_ids)),
+            "unique_top1_horses": unique_top1,
+            "unique_top1_count": int(len(unique_top1)),
+            "consensus_top_horse_no": str(consensus[0].get("horse_no", "") or "") if consensus else "",
+        },
+    }
+
+
 def build_pair_odds_top_payload(candidates, limit_per_type=5):
     bucketed = {"wide": [], "quinella": []}
     for candidate in list(candidates or []):
@@ -1575,7 +1817,7 @@ def resolve_policy_constraints(engine_version, budget_yen, summary_info, candida
     }
 
 
-def build_policy_input_payload(race_id, scope_key, merged, summary_info, candidates, constraints, odds_payload):
+def build_policy_input_payload(race_id, scope_key, merged, summary_info, candidates, constraints, odds_payload, multi_predictor=None):
     ai_payload = extract_ai_payload(merged, summary_info)
     marks_top5 = build_marks_top5_payload(merged)
     predictions = build_predictions_payload(merged, odds_payload)
@@ -1594,6 +1836,7 @@ def build_policy_input_payload(race_id, scope_key, merged, summary_info, candida
         "pair_odds_top": pair_odds_top,
         "odds_full": odds_full,
         "prediction_field_guide": prediction_field_guide,
+        "multi_predictor": dict(multi_predictor or {}),
         "candidates": list(candidates or []),
         "constraints": dict(constraints or {}),
     }
@@ -1984,9 +2227,9 @@ def normalize_name(value):
     return "".join(str(value or "").split())
 
 
-def load_inputs(odds_path, pred_path):
-    odds = pd.read_csv(odds_path, encoding="utf-8-sig")
-    preds = pd.read_csv(pred_path, encoding="utf-8-sig")
+def merge_predictions_with_odds(odds, preds):
+    odds = odds.copy()
+    preds = preds.copy()
     odds["name_key"] = odds["name"].apply(normalize_name)
     preds["name_key"] = preds["HorseName"].apply(normalize_name)
     dup_mask = odds["name_key"].duplicated(keep=False)
@@ -1999,6 +2242,12 @@ def load_inputs(odds_path, pred_path):
     if len(merged) != len(preds):
         print(f"[WARN] merge expanded rows: preds={len(preds)} merged={len(merged)} (duplicate name_key in odds?)")
     return odds, preds, merged
+
+
+def load_inputs(odds_path, pred_path):
+    odds = pd.read_csv(odds_path, encoding="utf-8-sig")
+    preds = pd.read_csv(pred_path, encoding="utf-8-sig")
+    return merge_predictions_with_odds(odds, preds)
 
 
 def safe_float(value):
@@ -2895,6 +3144,8 @@ def main():
     wide_odds_path = Path(os.environ.get("WIDE_ODDS_PATH") or WIDE_ODDS_PATH)
     fuku_odds_path = Path(os.environ.get("FUKU_ODDS_PATH") or FUKU_ODDS_PATH)
     quinella_odds_path = Path(os.environ.get("QUINELLA_ODDS_PATH") or QUINELLA_ODDS_PATH)
+    run_paths = {}
+    predictor_paths = resolve_policy_predictor_paths(pred_path, race_id=race_id, run_paths=run_paths)
 
     odds, preds, merged = load_inputs(odds_path, pred_path)
     if merged["horse_no"].isna().all() and race_id:
@@ -2916,6 +3167,7 @@ def main():
             if alt_quinella.exists():
                 quinella_odds_path = alt_quinella
             odds, preds, merged = load_inputs(odds_path, pred_path)
+    predictor_paths = resolve_policy_predictor_paths(pred_path, race_id=race_id, run_paths=run_paths)
     if merged["horse_no"].isna().all():
         print("[ERROR] odds/predictions mismatch: horse_no missing for all rows.")
         print(f"odds: {odds_path}")
@@ -2948,6 +3200,8 @@ def main():
         wide_odds_path=wide_odds_path,
         quinella_odds_path=quinella_odds_path,
     )
+    predictor_frames = load_policy_predictor_frames(odds, predictor_paths, odds_payload)
+    multi_predictor_payload = build_multi_predictor_policy_payload(predictor_frames)
     horse_meta = build_horse_meta_map(merged)
 
     run_id = str(os.environ.get("RUN_ID", "")).strip() or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3165,6 +3419,7 @@ def main():
                     candidates=policy_candidates,
                     constraints=constraints,
                     odds_payload=odds_payload,
+                    multi_predictor=multi_predictor_payload,
                 )
                 try:
                     reused_shared_policy = False

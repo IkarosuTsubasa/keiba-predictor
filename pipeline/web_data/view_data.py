@@ -1,4 +1,4 @@
-import re
+﻿import re
 from pathlib import Path
 
 
@@ -376,10 +376,10 @@ def _build_reason_tags(pred_rank, bet_types_text):
     except (TypeError, ValueError):
         rank_val = 999
     if rank_val <= 2:
-        tags.append("総合上位")
+        tags.append("综合上位")
     bt_list = [x.strip().lower() for x in str(bet_types_text or "").split(",") if x.strip()]
     if any(x in ("wide", "quinella") for x in bt_list):
-        tags.append("相手候補")
+        tags.append("连系适性")
     return tags
 
 
@@ -459,7 +459,7 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
                 "top3_prob": row.get("top3_prob", ""),
                 "bet_types": row.get("bet_types", "-"),
                 "recommended_bet_types": row.get("recommended_bet_types", "place"),
-                "risk_signal": row.get("risk_signal", "通常"),
+                "risk_signal": row.get("risk_signal", "标准"),
                 "reason_tags": row.get("reason_tags", ""),
                 "race_type": race_type,
                 "confidence": confidence,
@@ -471,117 +471,6 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
         )
     columns = ["mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "risk_signal"]
     return out_rows, columns
-
-
-def load_value_picks_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):
-    ctx = _prepare_mark_context(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row)
-    if not ctx:
-        return [], []
-    pred_map = ctx["pred_map"]
-    pred_order = ctx["pred_order"]
-    bet_map = ctx["bet_map"]
-    if not pred_order:
-        return [], []
-
-    value_rows = []
-    single_candidates = []
-    for key, item in bet_map.items():
-        if int(item.get("single_ticket_count", 0) or 0) <= 0:
-            continue
-        pred = pred_map.get(key, {})
-        pred_rank = int(pred.get("pred_rank", 999) or 999)
-        odds_val = float(pred.get("win_odds", 0.0) or 0.0)
-        score = max(
-            float(item.get("edge_max", 0.0) or 0.0),
-            float(item.get("ev_ratio_max", 0.0) or 0.0),
-            0.0,
-        )
-        if score <= 0:
-            continue
-        bet_types = _format_bet_types(item.get("bet_types", set()))
-        reason_tags = ["期待値上位"]
-        if odds_val >= 8.0:
-            reason_tags.append("オッズ妙味")
-        if pred_rank > 5:
-            reason_tags.append("穴候補")
-        single_candidates.append(
-            {
-                "horse_key": key,
-                "horse_no": str(pred.get("horse_no", "")).strip() or str(item.get("horse_no", "")).strip(),
-                "horse_name": str(pred.get("horse_name", "")).strip() or str(item.get("horse_name", "")).strip() or key,
-                "pred_rank": pred_rank if pred_rank < 999 else "",
-                "value_score": float(score),
-                "recommended_bet_types": _recommended_bet_types(pred_rank if pred_rank < 999 else "", bet_types),
-                "reason_tags": " / ".join(reason_tags),
-                "odds_hint": odds_val,
-            }
-        )
-
-    if single_candidates:
-        ranked = sorted(single_candidates, key=lambda r: (-float(r["value_score"]), int(r["pred_rank"] or 999), str(r["horse_name"])))
-    else:
-        max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in pred_order), default=0.0)
-        fallback = []
-        for key in pred_order:
-            pred = pred_map.get(key, {})
-            odds_val = float(pred.get("win_odds", 0.0) or 0.0)
-            if odds_val <= 0:
-                continue
-            pred_rank = int(pred.get("pred_rank", 999) or 999)
-            p_norm = (float(pred.get("pred_prob", 0.0) or 0.0) / max_pred_prob) if max_pred_prob > 0 else 0.0
-            score = p_norm * odds_val - 1.0
-            if score <= 0:
-                continue
-            reason_tags = ["期待値上位"]
-            if odds_val >= 8.0:
-                reason_tags.append("オッズ妙味")
-            if pred_rank > 5:
-                reason_tags.append("穴候補")
-            fallback.append(
-                {
-                    "horse_key": key,
-                    "horse_no": str(pred.get("horse_no", "")).strip(),
-                    "horse_name": str(pred.get("horse_name", "")).strip() or key,
-                    "pred_rank": pred_rank if pred_rank < 999 else "",
-                    "value_score": float(score),
-                    "recommended_bet_types": _recommended_bet_types(pred_rank if pred_rank < 999 else "", "win"),
-                    "reason_tags": " / ".join(reason_tags),
-                    "odds_hint": odds_val,
-                }
-            )
-        ranked = sorted(fallback, key=lambda r: (-float(r["value_score"]), int(r["pred_rank"] or 999), str(r["horse_name"])))
-
-    if not ranked:
-        return [], ["value_mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types"]
-
-    selected = []
-    if ranked:
-        selected.append(ranked[0])
-    for row in ranked[1:]:
-        if len(selected) >= 2:
-            break
-        pred_rank = int(row.get("pred_rank") or 999)
-        odds_val = float(row.get("odds_hint", 0.0) or 0.0)
-        if pred_rank > 5 or odds_val >= 8.0:
-            selected.append(row)
-    if len(selected) == 1 and len(ranked) > 1 and float(ranked[1].get("value_score", 0.0) or 0.0) > 0:
-        selected.append(ranked[1])
-
-    for row in selected[:3]:
-        value_rows.append(
-            {
-                "value_mark": "★",
-                "horse_no": row.get("horse_no", ""),
-                "horse_name": row.get("horse_name", ""),
-                "pred_rank": row.get("pred_rank", ""),
-                "value_score": round(float(row.get("value_score", 0.0) or 0.0), 6),
-                "reason_tags": row.get("reason_tags", ""),
-                "recommended_bet_types": row.get("recommended_bet_types", "win"),
-            }
-        )
-
-    columns = ["value_mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "reason_tags"]
-    return value_rows, columns
 
 
 def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_float, scope_key, run_id, run_row=None):

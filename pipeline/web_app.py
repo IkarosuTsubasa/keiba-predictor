@@ -803,18 +803,6 @@ def load_ability_marks_table(scope_key, run_id, run_row=None):
     )
 
 
-def load_value_picks_table(scope_key, run_id, run_row=None):
-    return view_data.load_value_picks_table(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        to_float,
-        scope_key,
-        run_id,
-        run_row,
-    )
-
-
 def detect_gate_status(rows):
     return ui_detect_gate_status(rows)
 
@@ -918,40 +906,6 @@ def render_page(
     summary_table_html = ""
     bet_rows = []
     if run_id:
-        top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, run_row)
-        top5_table_html = build_table_html(top_rows, top_cols, "Top5 Predictions")
-        ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, run_row)
-        value_rows, value_cols = load_value_picks_table(scope_norm or scope_key, run_id, run_row)
-        if ability_rows:
-            ability_rows_display = ability_rows
-            mark_table_html = build_table_html(ability_rows_display, ability_cols, "能力印（◎○▲△☆）")
-            if value_rows:
-                mark_table_html += build_table_html(value_rows, value_cols, "EV狙い馬（★）")
-        else:
-            # Fallback to legacy integrated marks when ability rows are unavailable.
-            mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, run_row)
-            mark_table_html = build_table_html(mark_rows, mark_cols, "Integrated Marks (◎○▲△☆)")
-            ability_rows_display = mark_rows
-            value_rows = []
-        pred_path = resolve_pred_path(scope_norm or scope_key, run_id, run_row)
-        pred_csv_text = load_text_file(pred_path)
-        bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
-        gemini_policy_payload = load_gemini_policy_payload(scope_norm or scope_key, run_id, run_row)
-        gemini_policy_html = build_gemini_policy_html(gemini_policy_payload)
-        mark_note_text = build_mark_note_text(
-            ability_rows_display if ability_rows else ability_rows,
-            value_rows,
-            pred_path.name if pred_path else "",
-            pred_csv_text,
-            bet_engine_v3_summary=bet_engine_v3_summary,
-            gemini_policy_payload=gemini_policy_payload,
-        )
-        summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, run_row)
-        if summary_rows:
-            summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")
-        bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
-        bet_plan_table_html = build_bet_plan_table_html(bet_rows, bet_cols, "Bet Plan")
-    if run_id:
         predictor_top_sections = []
         predictor_mark_sections = []
         predictor_summary_sections = []
@@ -970,20 +924,14 @@ def render_page(
                     build_table_html(top_rows, top_cols, f"Top5 Predictions - {spec['label']}")
                 )
             ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, predictor_run_row)
-            value_rows, value_cols = load_value_picks_table(scope_norm or scope_key, run_id, predictor_run_row)
             ability_rows_display = ability_rows
             if ability_rows:
                 predictor_mark_sections.append(
                     build_table_html(ability_rows, ability_cols, f"Ability Marks - {spec['label']}")
                 )
-                if value_rows:
-                    predictor_mark_sections.append(
-                        build_table_html(value_rows, value_cols, f"Value Picks - {spec['label']}")
-                    )
             else:
                 mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, predictor_run_row)
                 ability_rows_display = mark_rows
-                value_rows = []
                 if mark_rows:
                     predictor_mark_sections.append(
                         build_table_html(mark_rows, mark_cols, f"Integrated Marks - {spec['label']}")
@@ -991,7 +939,6 @@ def render_page(
             pred_csv_text = load_text_file(pred_path)
             note_text = build_mark_note_text(
                 ability_rows_display if ability_rows_display else [],
-                value_rows,
                 pred_path.name if pred_path else "",
                 pred_csv_text,
                 bet_engine_v3_summary=bet_engine_v3_summary,
@@ -1012,6 +959,8 @@ def render_page(
             mark_note_text = "\n\n".join(predictor_note_texts)
         if predictor_summary_sections:
             summary_table_html = "".join(predictor_summary_sections)
+        bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
+        bet_plan_table_html = build_bet_plan_table_html(bet_rows, bet_cols, "Bet Plan")
     gate_status, gate_reason = detect_gate_status(bet_rows)
     gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
     gate_notice_text = build_gate_notice_text(gate_status, gate_reason)
@@ -1217,6 +1166,7 @@ def update_bet_plan(
     fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
     quinella_path = resolve_run_asset_path(scope_key, run_id, run_row, "quinella_odds_path", "quinella_odds")
     trifecta_path = resolve_run_asset_path(scope_key, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
+    predictor_paths = resolve_predictor_paths(scope_key, run_id, run_row)
     prev_odds_snapshot = load_odds_snapshot(odds_path)
     warnings = []
     updated, msg, odds_warnings = refresh_odds_for_run(
@@ -1256,6 +1206,20 @@ def update_bet_plan(
         extra_env["FUKU_ODDS_PATH"] = str(fuku_path)
     if quinella_path:
         extra_env["QUINELLA_ODDS_PATH"] = str(quinella_path)
+    for spec, predictor_path in predictor_paths:
+        if predictor_path is None:
+            continue
+        predictor_path = Path(predictor_path)
+        if not predictor_path.exists():
+            continue
+        if spec["id"] == "main":
+            extra_env["PRED_PATH"] = str(predictor_path)
+        elif spec["id"] == "v2_opus":
+            extra_env["PRED_PATH_V2_OPUS"] = str(predictor_path)
+        elif spec["id"] == "v3_premium":
+            extra_env["PRED_PATH_V3_PREMIUM"] = str(predictor_path)
+        elif spec["id"] == "v4_gemini":
+            extra_env["PRED_PATH_V4_GEMINI"] = str(predictor_path)
 
     code, output = run_script(
         BET_PLAN_UPDATE,

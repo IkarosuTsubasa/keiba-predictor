@@ -236,20 +236,12 @@ def _bet_types_to_label(text, sep="・"):
 
 def build_mark_note_text(
     ability_rows,
-    value_rows=None,
     predictions_filename="",
     predictions_csv_text="",
     bet_engine_v3_summary=None,
     gemini_policy_payload=None,
 ):
-    # Backward compatibility:
-    # old: build_mark_note_text(rows, predictions_filename, predictions_csv_text)
-    if isinstance(value_rows, str) and not predictions_csv_text:
-        predictions_csv_text = str(predictions_filename or "")
-        predictions_filename = str(value_rows or "")
-        value_rows = []
     rows = list(ability_rows or [])
-    value_rows = list(value_rows or [])
 
     csv_text, selected_cols, _, race_metrics = _build_curated_predictions_csv(predictions_csv_text, top_n=None)
     conf_text = str(race_metrics.get("confidence_score", "")).strip()

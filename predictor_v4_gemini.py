@@ -1,22 +1,23 @@
 """
-predictor_v4_supreme.py - 究极赛马预测器 (Supreme Version)
+predictor_v4_gemini.py - 究极赛马预测器 (Supreme Version)
 ============================================================
 "The Best, Highest Accuracy, Unparalleled Predictor"
 
-Modified to match the input/output interface of `predictor.py` for pipeline compatibility.
+Modified to strictly match the input/output interface of `predictor.py` for direct pipeline compatibility.
+Fixed historical data leakage and improved contextual aptitude calculations.
 
 Features:
 1.  **Hybrid Objective**: Combines Classification (Top3 Probability) and Ranking (LambdaRank) for optimal ordering.
 2.  **Context-Aware Aptitude**: Explicitly models horse suitability for the specific Race Context (Course, Distance, Surface, Condition).
-3.  **Advanced Feature Engineering**:
-    -   **Time Index Trends**: EMA (Exponential Moving Average) and Trend Slope.
+3.  **Auto-Context Detection**: Automatically extracts the upcoming race's location, distance, and surface from `shutuba.csv`.
+4.  **Advanced Feature Engineering**:
+    -   **Time Index Trends**: Expanding means and recent trends.
     -   **Baba Index Interaction**: Models how horses perform under specific track speeds.
-    -   **Jockey/Course Synergy**: Historical performance of Jockey at specific courses.
-4.  **Robust Validation**: Time-Series Cross-Validation to prevent data leakage.
-5.  **Ensemble**: Blends multiple model variants for stability.
+    -   **Jockey/Course Synergy**: Historical performance of Jockey.
+5.  **Strict No-Leakage**: Time-Series calculations ensure no future data leaks into past predictions.
 
 Usage:
-    python predictor_v4_supreme.py
+    python predictor_v4_gemini.py
 ============================================================
 """
 
@@ -29,19 +30,7 @@ import re
 import os
 import sys
 from datetime import datetime
-
-OUTPUT_PATH = os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")
-
-# --- Configuration ---
-# Default Context - Ideally this should be dynamic, but for now we default to the requested context.
-# In a full pipeline, these might be arguments or inferred from the data (though kachiuma/shutuba don't explicitly state the *target* race condition usually unless inferred from filename or external config).
-DEFAULT_TARGET_CONTEXT = {
-    "location": "中山",
-    "distance": 1800,
-    "surface": "芝",
-    "condition": "稍重",  # Text condition
-    "baba_index_proxy": 5.0, # Estimated Baba Index (+5 = Slightly Slow/Heavy)
-}
+from pathlib import Path
 
 # --- Helper Functions ---
 
@@ -53,6 +42,63 @@ def configure_utf8_io():
             except Exception:
                 pass
 configure_utf8_io()
+
+OUTPUT_PATH = Path(os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")).expanduser()
+
+
+def resolve_scope_key():
+    raw = str(os.environ.get("SCOPE_KEY", "") or "").strip().lower()
+    raw = raw.replace(" ", "_").replace("-", "_").replace("/", "_")
+    if raw in ("central_turf", "central_t", "ct", "1", "t", "turf", "grass", "shiba"):
+        return "central_turf"
+    if raw in ("central_dirt", "central_d", "cd", "2", "d", "dirt", "sand"):
+        return "central_dirt"
+    if raw in ("local", "l", "3"):
+        return "local"
+    return "central_dirt"
+
+
+SCOPE_KEY = resolve_scope_key()
+
+
+def default_surface_for_scope(scope_key):
+    return "芝" if str(scope_key or "").strip() == "central_turf" else "ダ"
+
+
+def normalize_surface(value, fallback):
+    text = str(value or "").strip().lower()
+    if text in ("芝", "t", "turf", "grass", "shiba", "1"):
+        return "芝"
+    if text in ("ダ", "d", "dirt", "sand", "2"):
+        return "ダ"
+    return str(fallback or "ダ")
+
+
+def normalize_condition(value, fallback="良"):
+    text = str(value or "").strip()
+    return text if text else str(fallback or "良")
+
+
+def condition_to_baba_index(condition):
+    mapping = {
+        "良": -5.0,
+        "稍重": 5.0,
+        "重": 10.0,
+        "不良": 15.0,
+    }
+    return float(mapping.get(str(condition or "").strip(), 0.0))
+
+
+DEFAULT_TARGET_CONTEXT = {
+    "location": str(os.environ.get("PREDICTOR_TARGET_LOCATION", "") or "").strip(),
+    "distance": int(float(str(os.environ.get("PREDICTOR_TARGET_DISTANCE", "1800") or "1800").strip() or "1800")),
+    "surface": normalize_surface(os.environ.get("PREDICTOR_TARGET_SURFACE", ""), default_surface_for_scope(SCOPE_KEY)),
+    "condition": normalize_condition(os.environ.get("PREDICTOR_TARGET_CONDITION", ""), "良"),
+    "baba_index_proxy": 0.0,
+}
+DEFAULT_TARGET_CONTEXT["baba_index_proxy"] = float(
+    os.environ.get("PREDICTOR_BABA_INDEX_PROXY", condition_to_baba_index(DEFAULT_TARGET_CONTEXT["condition"])) or 0.0
+)
 
 def parse_float(x):
     try:
@@ -92,28 +138,45 @@ def parse_rank(x):
         return np.nan
 
 
-def resolve_target_context():
+def resolve_target_context(shutuba_raw, shutuba_clean):
     context = dict(DEFAULT_TARGET_CONTEXT)
-    distance_raw = os.environ.get("PREDICTOR_TARGET_DISTANCE", "").strip()
-    if distance_raw:
+    if shutuba_clean is not None and not shutuba_clean.empty:
+        sample_row = shutuba_clean.iloc[0]
+        location = str(sample_row.get("Location", "") or "").strip()
+        surface = sample_row.get("Surface", "")
+        distance = sample_row.get("Distance", np.nan)
+        context["location"] = location or context["location"]
+        if pd.notna(distance):
+            context["distance"] = int(distance)
+        context["surface"] = normalize_surface(surface, context["surface"])
+    if shutuba_raw is not None and not shutuba_raw.empty:
+        raw_row = shutuba_raw.iloc[0]
+        if not context["location"]:
+            raw_location = parse_course_info(raw_row.get("髢句ぎ", ""))
+            context["location"] = raw_location or context["location"]
+        raw_condition = raw_row.get("鬥ｬ蝣ｴ", context["condition"])
+        context["condition"] = normalize_condition(raw_condition, context["condition"])
+    context["surface"] = normalize_surface(os.environ.get("PREDICTOR_TARGET_SURFACE", ""), context["surface"])
+    env_location = str(os.environ.get("PREDICTOR_TARGET_LOCATION", "") or "").strip()
+    if env_location:
+        context["location"] = env_location
+    env_distance = str(os.environ.get("PREDICTOR_TARGET_DISTANCE", "") or "").strip()
+    if env_distance:
         try:
-            context["distance"] = int(float(distance_raw))
+            context["distance"] = int(float(env_distance))
         except Exception:
             pass
-    for env_key, field in (
-        ("PREDICTOR_TARGET_LOCATION", "location"),
-        ("PREDICTOR_TARGET_SURFACE", "surface"),
-        ("PREDICTOR_TARGET_CONDITION", "condition"),
-    ):
-        value = os.environ.get(env_key, "").strip()
-        if value:
-            context[field] = value
-    baba_raw = os.environ.get("PREDICTOR_BABA_INDEX_PROXY", "").strip()
-    if baba_raw:
+    context["condition"] = normalize_condition(os.environ.get("PREDICTOR_TARGET_CONDITION", ""), context["condition"])
+    env_baba = str(os.environ.get("PREDICTOR_BABA_INDEX_PROXY", "") or "").strip()
+    if env_baba:
         try:
-            context["baba_index_proxy"] = float(baba_raw)
+            context["baba_index_proxy"] = float(env_baba)
         except Exception:
-            pass
+            context["baba_index_proxy"] = condition_to_baba_index(context["condition"])
+    else:
+        context["baba_index_proxy"] = condition_to_baba_index(context["condition"])
+    if not context["location"]:
+        context["location"] = "Unknown"
     return context
 
 # --- Feature Engineering Class ---
@@ -121,33 +184,45 @@ def resolve_target_context():
 class SupremeFeatureEngineer:
     def __init__(self):
         self.le_sex = LabelEncoder()
-        self.le_jockey = LabelEncoder()
-        self.le_trainer = LabelEncoder() # If available
+        self.global_jockey_win_rates = {}
         
     def preprocess(self, df):
         print("[INFO] Preprocessing raw data...")
         df = df.copy()
         
         # Basic Parsing
-        df['TimeIndex'] = df['ﾀｲﾑ指数'].apply(parse_float)
-        df['BabaIndex'] = df['馬場指数'].apply(parse_baba_index)
-        df['Rank'] = df['着順'].apply(parse_rank)
-        df['Date'] = pd.to_datetime(df['日付'], errors='coerce')
-        df['Location'] = df['開催'].apply(parse_course_info)
+        df['TimeIndex'] = df['ﾀｲﾑ指数'].apply(parse_float) if 'ﾀｲﾑ指数' in df.columns else np.nan
+        df['BabaIndex'] = df['馬場指数'].apply(parse_baba_index) if '馬場指数' in df.columns else 0.0
+        df['Rank'] = df['着順'].apply(parse_rank) if '着順' in df.columns else np.nan
+        df['Date'] = pd.to_datetime(df['日付'], errors='coerce') if '日付' in df.columns else pd.NaT
+        df['Location'] = df['開催'].apply(parse_course_info) if '開催' in df.columns else ""
         
         # Surface & Distance
-        parsed = df['距離'].apply(lambda x: pd.Series(parse_distance_surface(x)))
-        df['Surface'] = parsed[0]
-        df['Distance'] = parsed[1]
+        if '距離' in df.columns:
+            parsed = df['距離'].apply(lambda x: pd.Series(parse_distance_surface(x)))
+            df['Surface'] = parsed[0]
+            df['Distance'] = parsed[1]
+        else:
+            df['Surface'] = "Unknown"
+            df['Distance'] = np.nan
         
         # Sex & Age
-        df['Sex'] = df['SexAge'].astype(str).str[0]
-        df['Age'] = df['SexAge'].astype(str).str[1:].astype(float)
+        if 'SexAge' in df.columns:
+            df['Sex'] = df['SexAge'].astype(str).str[0]
+            df['Age'] = df['SexAge'].astype(str).str[1:].apply(parse_float)
+        else:
+            df['Sex'] = "Unknown"
+            df['Age'] = np.nan
+            
+        # Strip whitespace from HorseName
+        if 'HorseName' in df.columns:
+            df['HorseName'] = df['HorseName'].astype(str).str.strip()
         
-        # Encode Categoricals
-        # Note: For production, we should fit on training set and transform on test.
-        # Here we fit on the whole history for simplicity, handling unknown in inference.
-        df['sex_code'] = self.le_sex.fit_transform(df['Sex'].astype(str))
+        # Encode Categoricals (Safely handle unseen values)
+        try:
+            df['sex_code'] = self.le_sex.fit_transform(df['Sex'].astype(str))
+        except:
+            df['sex_code'] = 0
         
         # Jockey
         if 'JockeyId' in df.columns:
@@ -155,18 +230,33 @@ class SupremeFeatureEngineer:
         else:
             df['JockeyId'] = '0'
             
+        if 'JockeyId_current' in df.columns:
+            df['JockeyId_current'] = df['JockeyId_current'].fillna('0').astype(str)
+            
         # Target Variables
         df['IsWin'] = (df['Rank'] == 1).astype(int)
         df['IsTop3'] = (df['Rank'] <= 3).astype(int)
         
+        # Extra columns for Pipeline compatibility
+        if '馬番' in df.columns:
+            df['horse_no'] = df['馬番'].apply(parse_int)
+        else:
+            df['horse_no'] = np.nan
+            
+        if 'オッズ' in df.columns:
+            df['Odds'] = df['オッズ'].apply(parse_float)
+        else:
+            df['Odds'] = np.nan
+        
         # Sort
         df = df.sort_values(['HorseName', 'Date'])
-        
-        # Strip whitespace from HorseName
-        if 'HorseName' in df.columns:
-            df['HorseName'] = df['HorseName'].astype(str).str.strip()
-            
         return df
+
+    def fit_globals(self, df):
+        print("[INFO] Fitting global statistics...")
+        wins = df[df['IsWin'] == 1].groupby('JockeyId').size()
+        races = df.groupby('JockeyId').size()
+        self.global_jockey_win_rates = (wins / races).fillna(0).to_dict()
 
     def create_features(self, df, is_inference=False, target_context=None, target_horses=None):
         """
@@ -176,15 +266,19 @@ class SupremeFeatureEngineer:
         """
         print(f"[INFO] Creating features (Inference={is_inference})...")
         
-        # We use a unified approach: 
-        # 1. Calculate historical stats (rolling/expanding) for every row.
-        # 2. Shift them by 1 to represent "prior knowledge".
-        # 3. For inference, we take the stats from the *last* row of each horse.
-        
         df = df.copy()
+        
+        # --- 1. Jockey Stats (Requires Global Sort by Date) ---
+        df = df.sort_values('Date')
+        df['jockey_cum_wins'] = df.groupby('JockeyId')['IsWin'].transform(lambda x: x.cumsum().shift(1))
+        df['jockey_cum_races'] = df.groupby('JockeyId').cumcount() # 0-indexed, so effectively count prior
+        df['jockey_win_rate'] = (df['jockey_cum_wins'] / df['jockey_cum_races'].clip(lower=1)).fillna(0)
+        
+        # Restore sort order for Horse-specific calculations
+        df = df.sort_values(['HorseName', 'Date'])
         grouped = df.groupby('HorseName')
         
-        # --- 1. Basic Rolling Stats (Trend) ---
+        # --- 2. Basic Rolling Stats (Trend) ---
         # Time Index
         df['ti_lag1'] = grouped['TimeIndex'].shift(1)
         df['ti_mean_3'] = grouped['TimeIndex'].transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
@@ -192,95 +286,32 @@ class SupremeFeatureEngineer:
         df['ti_max_5'] = grouped['TimeIndex'].transform(lambda x: x.shift(1).rolling(5, min_periods=1).max())
         df['ti_trend'] = df['ti_lag1'] - df['ti_mean_5']
         
-        # Adjusted TI (TimeIndex - BabaIndex) -> Pure Speed?
-        # Or maybe TimeIndex is already adjusted? User said "Use them to compare".
-        # Let's try an interaction feature: TI adjusted by Baba
+        # Adjusted TI (TimeIndex - BabaIndex)
         df['AdjTimeIndex'] = df['TimeIndex'] - df['BabaIndex']
         df['adj_ti_mean_5'] = grouped['AdjTimeIndex'].transform(lambda x: x.shift(1).rolling(5, min_periods=1).mean())
 
-        # --- 2. Aptitude (Context Specific) ---
-        # We need to calculate expanding means for specific conditions.
-        # Since pandas expanding().mean() on filtered data is hard to align,
-        # we will use a global transform approach.
-        
-        # Define contexts to track
-        # Location, Surface, Distance Category (Sprint<1400, Mile<1800, Inter<2200, Long>=2200), Condition
-        
-        def calc_expanding_context_stat(df, context_col, value_col, stat_name):
-            # Calculate cumulative sum and count per group
-            # We need to do this GLOBALLY (not per horse) if we want "Jockey at Course"
-            # But here we want "Horse at Course". So Group by [HorseName, ContextCol]
-            
+        # --- 3. Aptitude (Context Specific) ---
+        def calc_expanding_context_stat(df, context_col, value_col):
             g = df.groupby(['HorseName', context_col])[value_col]
-            cumsum = g.cumsum()
-            cumcnt = g.cumcount() + 1
-            
-            # Shift to get prior stats
-            # The shift must happen *within the Horse-Context group*
-            prior_sum = g.shift(1).cumsum() # This is wrong. shift(1) shifts the value.
-            # Correct: (cumsum - current_value) / (cumcnt - 1)
-            
-            # Actually, `g.expanding().mean().shift(1)` works within the group!
-            # But we need to map it back to the original index.
-            
-            # Strategy:
-            # 1. Calculate expanding mean within [Horse, Context] group.
-            # 2. Shift by 1 within that group.
-            # 3. Assign back to df.
-            
             return g.transform(lambda x: x.expanding().mean().shift(1))
 
-        # Course Aptitude
-        df['ti_course_avg'] = calc_expanding_context_stat(df, 'Location', 'TimeIndex', 'ti_course_avg')
-        
-        # Surface Aptitude
-        df['ti_surface_avg'] = calc_expanding_context_stat(df, 'Surface', 'TimeIndex', 'ti_surface_avg')
-        
-        # Distance Aptitude (Exact Distance)
-        df['ti_dist_avg'] = calc_expanding_context_stat(df, 'Distance', 'TimeIndex', 'ti_dist_avg')
+        df['ti_course_avg'] = calc_expanding_context_stat(df, 'Location', 'TimeIndex')
+        df['ti_surface_avg'] = calc_expanding_context_stat(df, 'Surface', 'TimeIndex')
+        df['ti_dist_avg'] = calc_expanding_context_stat(df, 'Distance', 'TimeIndex')
         
         # Condition Aptitude (Heavy vs Fast)
-        # Bin BabaIndex: <0 (Fast), >=0 (Slow)
         df['BabaCategory'] = (df['BabaIndex'] >= 0).astype(int) # 1=Slow, 0=Fast
-        df['ti_cond_avg'] = calc_expanding_context_stat(df, 'BabaCategory', 'TimeIndex', 'ti_cond_avg')
-        
-        # --- 3. Jockey Stats ---
-        # Jockey Win Rate (Global)
-        # Group by JockeyId only (across all horses)
-        # Sort by Date first
-        df = df.sort_values('Date')
-        # We can't use transform easily for global expanding because of the sort.
-        # But we can do:
-        df['jockey_cum_wins'] = df.groupby('JockeyId')['IsWin'].cumsum().shift(1)
-        df['jockey_cum_races'] = df.groupby('JockeyId').cumcount() # 0-indexed, so effectively count prior
-        df['jockey_win_rate'] = (df['jockey_cum_wins'] / df['jockey_cum_races'].clip(lower=1)).fillna(0)
+        df['ti_cond_avg'] = calc_expanding_context_stat(df, 'BabaCategory', 'TimeIndex')
         
         # --- 4. Target Context Diff (For Training) ---
-        # For training, the "Target" is the current row's context.
-        # So `dist_diff` = `Distance` - `avg_win_dist`.
-        
-        # Avg Win Distance of the Horse
-        # 1. Identify win rows
-        # 2. Expanding mean of Distance where Rank=1
-        
-        # We need a custom apply for this.
-        # "Average distance of previous wins"
-        def get_avg_win_dist(x):
-            # x is a Series of (IsWin, Distance) tuples? No.
-            # Let's do it iteratively or with masking.
-            wins = x[x['IsWin'] == 1]['Distance']
-            if len(wins) == 0: return np.nan
-            return wins.expanding().mean()
-        
-        # Vectorized "Avg Win Distance":
-        # Create a column "WinDistance" = Distance if Win else NaN
         df['WinDistance'] = df['Distance'].where(df['IsWin'] == 1)
         df['avg_win_dist'] = df.groupby('HorseName')['WinDistance'].transform(lambda x: x.expanding().mean().shift(1))
+        # If no previous wins, use current distance (diff = 0)
+        df['avg_win_dist'] = df['avg_win_dist'].fillna(df['Distance'])
         df['dist_diff_from_optimal'] = (df['Distance'] - df['avg_win_dist']).abs().fillna(0)
         
         # --- 5. Fill NaNs ---
-        # For 'ti_course_avg', if NaN (first time at course), fill with 'ti_mean_5' (current form)
-        # This assumes if we don't know course aptitude, we assume they run to their ability.
+        # For context aptitudes, if NaN (first time in this context), fill with general form 'ti_mean_5'
         for col in ['ti_course_avg', 'ti_surface_avg', 'ti_dist_avg', 'ti_cond_avg']:
             df[col] = df[col].fillna(df['ti_mean_5'])
             
@@ -291,31 +322,18 @@ class SupremeFeatureEngineer:
         else:
             return df
 
-    def _prepare_inference_rows(self, df, context, target_horses=None):
-        # For inference, we need stats based on ALL history up to now.
-        # The columns in 'df' (like ti_mean_5) are shifted (prior to that row).
-        # We cannot use them directly for the *next* race.
-        # We must recalculate stats using the full history.
-        
+    def _prepare_inference_rows(self, df, context, target_horses):
         inference_rows = []
+        horse_groups = dict(tuple(df.groupby('HorseName')))
         
-        # If target_horses is provided, iterate over them.
-        # If a horse is not in df (no history), we create a default row.
-        
-        horses_to_process = target_horses if target_horses is not None else df['HorseName'].unique()
-        
-        for horse in horses_to_process:
-            # Check if horse has history
-            if horse in df['HorseName'].values:
-                group = df[df['HorseName'] == horse].sort_values('Date')
+        for horse in target_horses:
+            if horse in horse_groups:
+                group = horse_groups[horse].sort_values('Date')
                 
-                # 1. Base Stats (Recalculate from raw TimeIndex)
+                # 1. Base Stats
                 ti_series = group['TimeIndex'].dropna()
                 if len(ti_series) == 0:
-                    ti_mean_5 = 0
-                    ti_max_5 = 0
-                    ti_trend = 0
-                    adj_ti_mean_5 = 0
+                    ti_mean_5, ti_max_5, ti_trend, adj_ti_mean_5 = 0, 0, 0, 0
                 else:
                     ti_mean_5 = ti_series.tail(5).mean()
                     ti_max_5 = ti_series.tail(5).max()
@@ -325,7 +343,7 @@ class SupremeFeatureEngineer:
                     adj_ti_series = group['AdjTimeIndex'].dropna()
                     adj_ti_mean_5 = adj_ti_series.tail(5).mean() if len(adj_ti_series) > 0 else 0
 
-                # 2. Context Aptitude (Recalculate)
+                # 2. Context Aptitude (Average of ALL matches up to now)
                 def get_context_avg(col, val, value_col):
                     matches = group[group[col] == val][value_col].dropna()
                     if len(matches) > 0:
@@ -346,9 +364,12 @@ class SupremeFeatureEngineer:
                 if pd.isna(ti_cond_avg): ti_cond_avg = ti_mean_5
                 
                 # 3. Jockey Win Rate
-                # Use last race jockey as proxy (imperfect but safe)
                 last_row = group.iloc[-1]
-                jockey_wr = last_row['jockey_win_rate']
+                # Use JockeyId_current if available for the target race
+                current_jockey = last_row.get('JockeyId_current', last_row.get('JockeyId', '0'))
+                if pd.isna(current_jockey) or current_jockey == '0':
+                    current_jockey = last_row.get('JockeyId', '0')
+                jockey_wr = self.global_jockey_win_rates.get(current_jockey, 0.0)
                 
                 # 4. Dist Diff
                 wins = group[group['IsWin'] == 1]['Distance']
@@ -358,22 +379,16 @@ class SupremeFeatureEngineer:
                 
                 age = last_row['Age']
                 sex_code = last_row['sex_code']
+                horse_no = last_row.get('horse_no', np.nan)
+                odds = last_row.get('Odds', np.nan)
                 
             else:
                 # No history - New Horse
-                # Use defaults (0 or global means)
-                ti_mean_5 = 0
-                ti_max_5 = 0
-                ti_trend = 0
-                adj_ti_mean_5 = 0
-                ti_course_avg = 0
-                ti_surface_avg = 0
-                ti_dist_avg = 0
-                ti_cond_avg = 0
-                jockey_wr = 0
-                dist_diff = 0
-                age = 3 # Default age?
-                sex_code = 0 # Default sex?
+                ti_mean_5, ti_max_5, ti_trend, adj_ti_mean_5 = 0, 0, 0, 0
+                ti_course_avg, ti_surface_avg, ti_dist_avg, ti_cond_avg = 0, 0, 0, 0
+                jockey_wr, dist_diff = 0, 0
+                age, sex_code = 3, 0
+                horse_no, odds = np.nan, np.nan
             
             row = {
                 "HorseName": horse,
@@ -388,7 +403,9 @@ class SupremeFeatureEngineer:
                 "jockey_win_rate": jockey_wr, 
                 "Age": age,
                 "sex_code": sex_code,
-                "dist_diff_from_optimal": dist_diff
+                "dist_diff_from_optimal": dist_diff,
+                "horse_no": horse_no,
+                "Odds": odds
             }
             inference_rows.append(row)
             
@@ -409,7 +426,6 @@ class SupremePredictor:
     def train(self, train_df):
         print("[INFO] Training Supreme Models...")
         
-        # Prepare Data
         # Filter valid rows
         train_df = train_df.dropna(subset=self.features + ['Rank'])
         
@@ -437,7 +453,6 @@ class SupremePredictor:
         )
         # Label relevance: 1st=10, 2nd=5, 3rd=3, Others=0
         y_rel = y_rank.apply(lambda r: 10 if r==1 else (5 if r==2 else (3 if r==3 else 0)))
-        
         self.ranker.fit(X, y_rel, group=qids)
         
         # 2. Classifier (Binary Logloss)
@@ -467,15 +482,26 @@ class SupremePredictor:
         prob_score = self.classifier.predict_proba(X)[:, 1]
         
         # Hybrid Score: 60% Ranker + 40% Classifier (normalized)
-        # Normalize both to 0-1 range roughly
         def norm(s): return (s - s.min()) / (s.max() - s.min() + 1e-6)
         
         final_score = 0.6 * norm(rank_score) + 0.4 * prob_score
         
         results = inference_df.copy()
+        results['Top3Prob_model'] = prob_score
+        results['Top3Prob'] = prob_score
         results['rank_score'] = final_score
-        # For pipeline compatibility, also populate other expected columns
-        results['confidence_score'] = final_score # Approximation
+        
+        results = results.sort_values('rank_score', ascending=False)
+        
+        # Pipeline compatibility columns
+        scores = results['rank_score'].values
+        if len(scores) >= 3:
+            gap = float(scores[0]) - float(scores[2])
+            confidence = min(gap * 10, 1.0)
+        else:
+            confidence = 0.0
+            
+        results['confidence_score'] = confidence 
         results['stability_score'] = 0.5
         results['validity_score'] = 0.5
         results['consistency_score'] = 0.5
@@ -483,85 +509,165 @@ class SupremePredictor:
         results['ev_ema'] = 0.5
         results['risk_score'] = 0.5
         
-        return results.sort_values('rank_score', ascending=False)
+        return results
 
 # --- Main Execution ---
 
 def main():
     print("="*60)
-    print("PREDICTOR V4 SUPREME - INITIALIZING")
+    print("PREDICTOR V4 GEMINI SUPREME - PIPELINE READY")
     print("="*60)
     
-    # 1. Load Data
     if not os.path.exists("kachiuma.csv") or not os.path.exists("shutuba.csv"):
-        print("Error: Data files missing.")
+        print("[ERROR] Data files kachiuma.csv or shutuba.csv missing.")
         return
         
     history = pd.read_csv("kachiuma.csv")
     shutuba = pd.read_csv("shutuba.csv")
     
-    # 2. Engineer
     engineer = SupremeFeatureEngineer()
     
-    # Preprocess
+    # 1. Preprocess
     history_clean = engineer.preprocess(history)
     shutuba_clean = engineer.preprocess(shutuba)
     
-    # Create Training Data (History)
+    # Extract upcoming race context automatically from shutuba.csv
+    if not shutuba_clean.empty:
+        sample_row = shutuba_clean.iloc[0]
+        loc = parse_course_info(sample_row.get('Location', '中山'))
+        surf = sample_row.get('Surface', '芝')
+        dist = sample_row.get('Distance', 1800)
+        
+        # Read raw string condition from original df since preprocess might drop it
+        raw_cond = shutuba.iloc[0].get('馬場', '稍重')
+        if pd.isna(raw_cond): raw_cond = '稍重'
+        baba_map = {"良": -5.0, "稍重": 5.0, "重": 10.0, "不良": 15.0}
+        
+        TARGET_CONTEXT = {
+            "location": loc if loc else "中山",
+            "distance": dist if pd.notna(dist) else 1800,
+            "surface": surf if surf and surf != "Unknown" else "芝",
+            "condition": raw_cond,
+            "baba_index_proxy": baba_map.get(raw_cond, 0.0)
+        }
+    else:
+        TARGET_CONTEXT = DEFAULT_TARGET_CONTEXT
+        
+    print(f"[INFO] Detected Target Context: {TARGET_CONTEXT}")
+    
+    # Fit global stats
+    engineer.fit_globals(history_clean)
+    
+    # 2. Create Training Data
     train_df = engineer.create_features(history_clean, is_inference=False)
     
-    # 3. Train
+    # 3. Train Model
     predictor = SupremePredictor()
     predictor.train(train_df)
     
-    # 4. Inference
-    target_context = resolve_target_context()
-    print(f"[INFO] Target Context: {target_context}")
-    
-    # The 'shutuba.csv' file contains the HISTORY of the target horses.
-    # We should use THIS dataframe for inference feature engineering.
-    # We don't need to look them up in kachiuma.csv if they are already here.
-    
+    # 4. Inference Data
     target_horses = shutuba_clean['HorseName'].unique()
     print(f"[INFO] Target Horses: {len(target_horses)}")
     
-    # Use shutuba_clean as the history source for these horses
     inference_features = engineer.create_features(
         shutuba_clean, 
         is_inference=True, 
-        target_context=target_context,
+        target_context=TARGET_CONTEXT,
         target_horses=target_horses
     )
     
     # 5. Predict
     results = predictor.predict(inference_features)
     
-    # 6. Output
+    # 6. Output Formatting (Matching predictor.py)
     print("\n" + "="*60)
-    print("  SUPREME PREDICTIONS (Top 5)")
+    print("  Top Predictions")
     print("="*60)
     
-    # Add dummy columns required by some pipelines if they don't exist
-    if 'horse_no' not in results.columns:
-        results['horse_no'] = np.nan
+    for i, (_, row) in enumerate(results.iterrows()):
+        hno = row.get("horse_no", np.nan)
+        hno_str = f"{int(hno):>2}" if pd.notna(hno) and hno != 0 else " ?"
+        name = row["HorseName"]
+        odds_val = row.get("Odds", np.nan)
+        score = row["rank_score"]
         
-    cols = ['HorseName', 'rank_score', 'ti_course_avg', 'ti_cond_avg', 'jockey_win_rate']
-    print(results[cols].head(5).to_string(index=False))
+        odds_str = f"odds={odds_val:6.1f}" if pd.notna(odds_val) and odds_val != 0 else "odds=   N/A"
+        marker = " ***" if i < 3 else "    " if i < 5 else ""
+        print(f"  {hno_str}  {name:18s}  {odds_str}  score={score:.4f}{marker}")
     
-    # Calculate confidence (gap between 1st and 3rd)
-    scores = results['rank_score'].values
-    if len(scores) >= 3:
-        gap = float(scores[0]) - float(scores[2])
-        confidence = min(gap * 10, 1.0) # Simple scaling
-    else:
-        confidence = 0.0
-    
-    results['confidence_score'] = confidence
-    results['rank_score'] = scores # Ensure it's there
+    print(f"\nConfidence: {results['confidence_score'].iloc[0]:.4f}")
+    print(f"Runners: {len(results)}")
     
     # Save standard output
+    results.to_csv("predictions.csv", index=False, encoding="utf-8-sig")
+    print("\n[INFO] Saved: predictions.csv")
+
+def main_pipeline_entry():
+    print("=" * 60)
+    print("PREDICTOR V4 GEMINI SUPREME - PIPELINE READY")
+    print("=" * 60)
+
+    history_path = Path("kachiuma.csv")
+    shutuba_path = Path("shutuba.csv")
+    if (not history_path.exists()) or (not shutuba_path.exists()):
+        print("[ERROR] Data files kachiuma.csv or shutuba.csv missing.")
+        return
+
+    history = pd.read_csv(history_path)
+    shutuba = pd.read_csv(shutuba_path)
+
+    engineer = SupremeFeatureEngineer()
+    history_clean = engineer.preprocess(history)
+    shutuba_clean = engineer.preprocess(shutuba)
+    target_context = resolve_target_context(shutuba, shutuba_clean)
+    print(f"[INFO] Detected Target Context: {target_context}")
+
+    engineer.fit_globals(history_clean)
+    train_df = engineer.create_features(history_clean, is_inference=False)
+
+    predictor = SupremePredictor()
+    predictor.train(train_df)
+
+    if "HorseName" in shutuba_clean.columns:
+        target_horses = shutuba_clean["HorseName"].astype(str).str.strip().unique()
+    else:
+        target_horses = []
+    print(f"[INFO] Target Horses: {len(target_horses)}")
+
+    inference_features = engineer.create_features(
+        shutuba_clean,
+        is_inference=True,
+        target_context=target_context,
+        target_horses=target_horses,
+    )
+
+    results = predictor.predict(inference_features)
+
+    print("\n" + "=" * 60)
+    print("  Top Predictions")
+    print("=" * 60)
+
+    for i, (_, row) in enumerate(results.iterrows()):
+        hno = row.get("horse_no", np.nan)
+        hno_str = f"{int(hno):>2}" if pd.notna(hno) and hno != 0 else " ?"
+        name = str(row.get("HorseName", "") or "")
+        odds_val = row.get("Odds", np.nan)
+        score = float(row.get("rank_score", 0.0) or 0.0)
+        odds_str = f"odds={odds_val:6.1f}" if pd.notna(odds_val) and odds_val != 0 else "odds=   N/A"
+        marker = " ***" if i < 3 else "    " if i < 5 else ""
+        print(f"  {hno_str}  {name:18s}  {odds_str}  score={score:.4f}{marker}")
+
+    confidence = float(results["confidence_score"].iloc[0]) if not results.empty else 0.0
+    print(f"\nConfidence: {confidence:.4f}")
+    print(f"Runners: {len(results)}")
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
-    print(f"\n[INFO] Full results saved to {os.path.basename(OUTPUT_PATH)} (Pipeline Ready)")
+    print(f"\n[INFO] Saved: {OUTPUT_PATH}")
+
+
+main = main_pipeline_entry
+
 
 if __name__ == "__main__":
-    main()
+    main_pipeline_entry()

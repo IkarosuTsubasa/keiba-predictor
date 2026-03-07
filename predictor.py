@@ -792,7 +792,13 @@ shusso_e = add_time_trend(shusso_e)
 # ====================================================
 # 4. 比赛条件（支持手动输入）
 # ====================================================
-def prompt_race_condition(default_surface="芝", default_distance=1600, default_track="良"):
+def get_default_race_surface():
+    return "芝" if SCOPE_KEY == "central_turf" else "ダ"
+
+
+def prompt_race_condition(default_surface=None, default_distance=1600, default_track="良"):
+    if default_surface is None:
+        default_surface = get_default_race_surface()
     default_label = "turf" if default_surface == "芝" else "dirt"
     surf_raw = input(f"Race surface (turf/dirt) [default {default_label}]: ").strip().lower()
     if not surf_raw:

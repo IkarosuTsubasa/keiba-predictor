@@ -270,10 +270,10 @@ def race_level_normalize(probs: Sequence[float], top_k: int = 3) -> List[float]:
 def resolve_race_condition(args: argparse.Namespace) -> RaceCondition:
     scope = resolve_scope_key()
     default_surface = args.race_surface
-    if scope == "central_dirt":
-        default_surface = "ダ"
-    elif scope == "central_turf":
+    if scope == "central_turf":
         default_surface = "芝"
+    else:
+        default_surface = "ダ"
 
     surface = default_surface
     distance = int(args.race_distance)

@@ -48,6 +48,10 @@ NO_WAIT = str(os.environ.get("PREDICTOR_NO_WAIT", "")).strip().lower() in {
     "on",
 }
 
+
+def _env_truthy(name):
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
 # ============================================================
 # 1. Scope Resolution
 # ============================================================
@@ -285,8 +289,9 @@ def compute_jockey_scores(df):
     default_rate = 0.3
 
     cum_count = d.loc[valid].groupby("_jid").cumcount()
-    cum_top3 = d.loc[valid].groupby("_jid")["IsTop3"].cumsum().shift(1).fillna(0)
-    d.loc[valid, "JockeyScore"] = (cum_top3 + prior * default_rate) / (cum_count.clip(lower=1) + prior)
+    cum_top3 = d.loc[valid].groupby("_jid")["IsTop3"].cumsum()
+    cum_top3 = cum_top3.groupby(d.loc[valid, "_jid"]).shift(1).fillna(0)
+    d.loc[valid, "JockeyScore"] = (cum_top3 + prior * default_rate) / (cum_count + prior)
     d["JockeyScore"] = d["JockeyScore"].fillna(default_rate)
 
     d = d.drop(columns=["_jid"])
@@ -309,26 +314,58 @@ def build_jockey_score_map(hist_df):
 # 6. Race Condition Input
 # ============================================================
 def prompt_race_condition():
-    try:
-        surf_raw = input("Surface (turf/dirt) [turf]: ").strip().lower()
-    except EOFError:
-        surf_raw = ""
-    surface = "ダ" if surf_raw in ("d", "dirt", "ダ", "sand") else "芝"
+    env_surface = str(os.environ.get("PREDICTOR_TARGET_SURFACE", "")).strip().lower()
+    if env_surface in ("d", "dirt", "sand", "ダ", "2"):
+        default_surface = "ダ"
+    elif env_surface in ("t", "turf", "grass", "shiba", "芝", "1"):
+        default_surface = "芝"
+    elif SCOPE == "central_turf":
+        default_surface = "芝"
+    else:
+        default_surface = "ダ"
+
+    default_distance = 1800
+    env_distance = str(os.environ.get("PREDICTOR_TARGET_DISTANCE", "")).strip()
+    if env_distance:
+        try:
+            default_distance = int(float(env_distance))
+        except Exception:
+            default_distance = 1800
+
+    default_track_text = str(os.environ.get("PREDICTOR_TARGET_CONDITION", "")).strip() or "良"
+    no_prompt = _env_truthy("PREDICTOR_NO_PROMPT")
+
+    surf_raw = ""
+    dist_raw = ""
+    track_raw = ""
+    if not no_prompt:
+        try:
+            default_label = "dirt" if default_surface == "ダ" else "turf"
+            surf_raw = input(f"Surface (turf/dirt) [{default_label}]: ").strip().lower()
+        except EOFError:
+            surf_raw = ""
+        try:
+            dist_raw = input(f"Distance (meters) [{default_distance}]: ").strip()
+        except EOFError:
+            dist_raw = ""
+        try:
+            track_raw = input(f"Track (良/稍重/重/不良) [{default_track_text}]: ").strip()
+        except EOFError:
+            track_raw = ""
+
+    if surf_raw in ("d", "dirt", "ダ", "sand"):
+        surface = "ダ"
+    elif surf_raw in ("t", "turf", "grass", "shiba", "芝"):
+        surface = "芝"
+    else:
+        surface = default_surface
 
     try:
-        dist_raw = input("Distance (meters) [1800]: ").strip()
-    except EOFError:
-        dist_raw = ""
-    try:
-        distance = int(dist_raw)
+        distance = int(dist_raw) if dist_raw else default_distance
     except Exception:
-        distance = 1800
+        distance = default_distance
 
-    try:
-        track_raw = input("Track (良/稍重/重/不良) [良]: ").strip()
-    except EOFError:
-        track_raw = ""
-    track_cond = parse_track_condition(track_raw or "良")
+    track_cond = parse_track_condition(track_raw or default_track_text)
     if not np.isfinite(track_cond):
         track_cond = 0.0
 
@@ -508,7 +545,7 @@ def build_training_data(hist_df, target_surface, target_distance):
 # 8. Build Prediction Profiles
 # ============================================================
 def build_prediction_profiles(shusso_df, cur_odds_df, target_surface, target_distance,
-                              jockey_map):
+                              jockey_map, race_date=None):
     d = shusso_df.sort_values(["HorseName", "Date"]).copy()
 
     profiles = []
@@ -532,7 +569,7 @@ def build_prediction_profiles(shusso_df, cur_odds_df, target_surface, target_dis
         _ti_m3 = out["f_ti_mean3"]
         out["f_ti_trend"] = (
             _ti_last - _ti_m3
-            if np.isfinite(_ti_last or np.nan) and np.isfinite(_ti_m3 or np.nan)
+            if pd.notna(_ti_last) and np.isfinite(_ti_last) and pd.notna(_ti_m3) and np.isfinite(_ti_m3)
             else np.nan
         )
 
@@ -545,7 +582,7 @@ def build_prediction_profiles(shusso_df, cur_odds_df, target_surface, target_dis
         _tia_m5 = out["f_ti_adj_mean5"]
         out["f_ti_adj_trend"] = (
             _tia_last - _tia_m5
-            if np.isfinite(_tia_last or np.nan) and np.isfinite(_tia_m5 or np.nan)
+            if pd.notna(_tia_last) and np.isfinite(_tia_last) and pd.notna(_tia_m5) and np.isfinite(_tia_m5)
             else np.nan
         )
 
@@ -579,8 +616,9 @@ def build_prediction_profiles(shusso_df, cur_odds_df, target_surface, target_dis
         out["f_run_gain5"] = float(rg.mean()) if len(rg) else np.nan
 
         # --- Rest Days ---
+        _race_dt = race_date if race_date is not None else datetime.now()
         if n >= 1 and pd.notna(h["Date"].iloc[-1]):
-            out["f_rest_days"] = (datetime.now() - h["Date"].iloc[-1]).days
+            out["f_rest_days"] = (_race_dt - h["Date"].iloc[-1]).days
         else:
             out["f_rest_days"] = np.nan
 
@@ -849,15 +887,24 @@ def train_and_evaluate(train_df, features):
             continue
 
         # Ensemble: train both variants and average
+        # Split a validation set from training data for early stopping (avoid using test fold)
+        val_split = int(len(X_tr) * 0.85)
+        X_tr_inner, y_tr_inner = X_tr.iloc[:val_split], y_tr.iloc[:val_split]
+        X_va_inner, y_va_inner = X_tr.iloc[val_split:], y_tr.iloc[val_split:]
+        has_inner_valid = len(y_va_inner.unique()) >= 2 and len(X_va_inner) >= 20
+
         fold_probs_list = []
         for variant in ("A", "B"):
             fm = build_lgb(variant=variant)
-            fm.fit(
-                X_tr, y_tr,
-                eval_set=[(X_te, y_te)],
-                eval_metric="logloss",
-                callbacks=[early_stopping(100, verbose=False)],
-            )
+            if has_inner_valid:
+                fm.fit(
+                    X_tr_inner, y_tr_inner,
+                    eval_set=[(X_va_inner, y_va_inner)],
+                    eval_metric="logloss",
+                    callbacks=[early_stopping(100, verbose=False)],
+                )
+            else:
+                fm.fit(X_tr, y_tr)
             fold_probs_list.append(fm.predict_proba(X_te)[:, 1])
         probs = np.mean(fold_probs_list, axis=0)
         oof_probs[test_start:test_end] = probs
@@ -907,6 +954,7 @@ def train_and_evaluate(train_df, features):
             )
 
     # ---- Final Ensemble on All Data ----
+    # Step 1: Use last 15% as validation to find best iteration count
     print("[INFO] Training final ensemble (2x LGB) on all data...")
     split_idx = int(n * 0.85)
     X_tr_f, y_tr_f = X.iloc[:split_idx], y.iloc[:split_idx]
@@ -915,17 +963,24 @@ def train_and_evaluate(train_df, features):
 
     final_models = []
     for variant in ("A", "B"):
-        m = build_lgb(variant=variant)
         if has_valid:
-            m.fit(
+            # First pass: find best iteration via early stopping on validation split
+            m_probe = build_lgb(variant=variant)
+            m_probe.fit(
                 X_tr_f, y_tr_f,
                 eval_set=[(X_va_f, y_va_f)],
                 eval_metric="logloss",
                 callbacks=[early_stopping(100, verbose=False)],
             )
-        else:
+            best = getattr(m_probe, "best_iteration_", m_probe.n_estimators)
+            # Second pass: retrain on ALL data with the best iteration count
+            m = build_lgb(variant=variant)
+            m.set_params(n_estimators=best)
             m.fit(X, y)
-        best = getattr(m, "best_iteration_", m.n_estimators)
+        else:
+            m = build_lgb(variant=variant)
+            m.fit(X, y)
+            best = m.n_estimators
         print(f"[INFO] Model {variant}: best_iteration={best}")
         final_models.append(m)
 
@@ -982,8 +1037,10 @@ model, platt, base_prob = train_and_evaluate(train_df, FEATURES)
 
 # Build prediction profiles
 print("[INFO] Building prediction profiles...")
+_race_date = shusso_e["Date"].dropna().max() if "Date" in shusso_e.columns else None
 pred_profiles = build_prediction_profiles(
     shusso_e, odds_df, RACE_SURFACE, RACE_DISTANCE, jockey_map,
+    race_date=_race_date,
 )
 
 # Ensure all features exist
@@ -1055,7 +1112,7 @@ print("  Top Predictions")
 print("=" * 60)
 for i, (_, row) in enumerate(pred_profiles.iterrows()):
     hno = row.get("horse_no", "?")
-    hno_str = f"{int(hno):>2}" if np.isfinite(hno or np.nan) else " ?"
+    hno_str = f"{int(hno):>2}" if pd.notna(hno) and np.isfinite(hno) else " ?"
     name = row["HorseName"]
     odds_val = row.get("f_odds", np.nan)
     pop = row.get("f_popularity", np.nan)
@@ -1063,10 +1120,10 @@ for i, (_, row) in enumerate(pred_profiles.iterrows()):
     ti = row.get("f_ti_last", np.nan)
     t3r = row.get("f_top3_rate5", np.nan)
 
-    odds_str = f"odds={odds_val:6.1f}" if np.isfinite(odds_val or np.nan) else "odds=   N/A"
-    pop_str = f"pop={int(pop):2}" if np.isfinite(pop or np.nan) else "pop=NA"
-    ti_str = f"TI={ti:5.1f}" if np.isfinite(ti or np.nan) else "TI=  N/A"
-    t3r_str = f"T3R={t3r:.0%}" if np.isfinite(t3r or np.nan) else "T3R= N/A"
+    odds_str = f"odds={odds_val:6.1f}" if pd.notna(odds_val) and np.isfinite(odds_val) else "odds=   N/A"
+    pop_str = f"pop={int(pop):2}" if pd.notna(pop) and np.isfinite(pop) else "pop=NA"
+    ti_str = f"TI={ti:5.1f}" if pd.notna(ti) and np.isfinite(ti) else "TI=  N/A"
+    t3r_str = f"T3R={t3r:.0%}" if pd.notna(t3r) and np.isfinite(t3r) else "T3R= N/A"
 
     marker = " ***" if i < 3 else "    " if i < 5 else ""
     print(f"  {hno_str}  {name:18s}  {odds_str}  {pop_str}  {ti_str}  {t3r_str}  score={score:.4f}{marker}")

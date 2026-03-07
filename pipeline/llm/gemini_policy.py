@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v5"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v5"
+POLICY_CACHE_VERSION = "gemini_policy_v6"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v6"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -95,6 +95,7 @@ class RacePolicyInput(BaseModel):
     pair_odds_top: List[PairOddsSnapshot] = Field(default_factory=list)
     odds_full: Dict[str, Any] = Field(default_factory=dict)
     prediction_field_guide: Dict[str, str] = Field(default_factory=dict)
+    multi_predictor: Dict[str, Any] = Field(default_factory=dict)
     candidates: List[PolicyCandidate] = Field(default_factory=list)
     constraints: PolicyConstraints
 
@@ -203,6 +204,7 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "pair_odds_top": [_model_dump(x) for x in list(input_obj.pair_odds_top or [])],
         "odds_full": dict(input_obj.odds_full or {}),
         "prediction_field_guide": dict(input_obj.prediction_field_guide or {}),
+        "multi_predictor": dict(input_obj.multi_predictor or {}),
         "constraints": {
             "max_tickets_per_race": int(input_obj.constraints.max_tickets_per_race or 0),
             "high_odds_threshold": float(input_obj.constraints.high_odds_threshold or 0.0),
@@ -566,12 +568,27 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     full_data_text = (
         "【入力データの読み方】\n"
         "- predictions は要約版、predictions_full は全馬・全列の予測テーブルです。\n"
+        "- multi_predictor には v1-v4 全 predictor の要約・設計上の特徴・共識表が入っています。\n"
+        "- multi_predictor.profiles は各 predictor の設計上の強みです。絶対評価ではなく、視点の違いとして扱ってください。\n"
+        "- multi_predictor.summaries は predictor ごとの上位馬一覧です。\n"
+        "- multi_predictor.consensus は馬番単位で揃えた共識表です。top1_votes / top3_votes / avg_pred_rank を優先的に見てください。\n"
         "- odds_full には win/place/wide/quinella の全量オッズが入っています。\n"
         "- prediction_field_guide には predictions_full の各列が何を意味するかの説明があります。\n"
-        "- 要約だけで判断せず、predictions_full・odds_full・prediction_field_guide も必ず参照して考えてください。\n"
-        "- candidates や要約情報は補助材料です。最終判断では predictions_full と odds_full を優先して参照してください。\n"
+        "- 要約だけで判断せず、multi_predictor・predictions_full・odds_full・prediction_field_guide を必ず参照して考えてください。\n"
+        "- candidates や要約情報は補助材料です。最終判断では multi_predictor・predictions_full・odds_full を優先して参照してください。\n"
         "- 特に軸馬・相手・券種構成を決める際は、全馬の予測順位、確率、スコア、オッズのバランスを見てください。\n"
         "- 入力に含まれる horse_no / pair / candidates の範囲から逸脱してはいけません。\n\n"
+    )
+    multi_predictor_text = (
+        "【4 predictor の使い方】\n"
+        "- v1 は総合バランス型の主軸視点です。まず基準線として参照してください。\n"
+        "- v2 は上位抽出・能力比較寄りの視点です。強い上位候補の濃淡確認に向いています。\n"
+        "- v3 は市場融合・説明性寄りの視点です。値頃感や保守的な買い方の妥当性確認に向いています。\n"
+        "- v4 は文脈適性ハイブリッド型です。Top3確率の分類と順位付けを混合し、コース・距離・馬場条件への適合を強く見ています。\n"
+        "- 4 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズが過度に安く妙味がないなら買い方は保守化してください。\n"
+        "- 4 路の見解差が大きい場合は、単勝偏重を避け、複勝・ワイド中心、または small_bet / conservative を優先してください。\n"
+        "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、candidates の EV を合わせて判断してください。\n"
+        "- 最終判断は『4 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
     )
     return (
         "あなたは「競馬AIの購入戦略責任者」です。\n\n"
@@ -669,6 +686,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- NO_BET\n\n"
         f"{ticket_cap_text}"
         f"{full_data_text}"
+        f"{multi_predictor_text}"
         "--------------------------------\n"
         "【入力JSON】\n"
         "--------------------------------\n"

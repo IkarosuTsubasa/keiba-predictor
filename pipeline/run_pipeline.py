@@ -727,6 +727,18 @@ def main():
         sleep_between_scrapes()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     bet_plan_env = {"RACE_ID": race_id, "RUN_ID": run_id}
+    for spec in predictor_specs:
+        pred_latest_path = latest_prediction_paths.get(spec["id"])
+        if not pred_latest_path:
+            continue
+        env_name = {
+            "main": "PRED_PATH",
+            "v2_opus": "PRED_PATH_V2_OPUS",
+            "v3_premium": "PRED_PATH_V3_PREMIUM",
+            "v4_gemini": "PRED_PATH_V4_GEMINI",
+        }.get(spec["id"])
+        if env_name:
+            bet_plan_env[env_name] = str(pred_latest_path)
     if strategy_name:
         bet_plan_env["BET_STRATEGY"] = strategy_name
     bet_plan_env["BET_BUDGETS"] = ",".join(str(v) for v in DEFAULT_BUDGETS)
