@@ -40,6 +40,13 @@ def configure_utf8_io():
 
 configure_utf8_io()
 START_TIME = datetime.now()
+OUTPUT_PATH = Path(os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")).expanduser()
+NO_WAIT = str(os.environ.get("PREDICTOR_NO_WAIT", "")).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # ============================================================
 # 1. Scope Resolution
@@ -1068,9 +1075,13 @@ print(f"\nConfidence: {confidence:.4f}")
 print(f"Runners: {len(pred_profiles)}")
 
 # Save
-pred_profiles.to_csv("predictions.csv", index=False, encoding="utf-8-sig")
-print("\nSaved: predictions.csv")
+pred_profiles.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
+print(f"\nSaved: {OUTPUT_PATH.name}")
 
 elapsed = datetime.now() - START_TIME
 print(f"[INFO] Elapsed: {elapsed}")
-input("\nPress Enter to exit...")
+if not NO_WAIT:
+    try:
+        input("\nPress Enter to exit...")
+    except EOFError:
+        pass

@@ -22,6 +22,7 @@ from surface_scope import (
     get_scope_key,
     migrate_legacy_data,
 )
+from predictor_catalog import latest_prediction_path, list_predictors, snapshot_prediction_path
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -298,7 +299,41 @@ def validate_odds_outputs(start_ts, required_paths):
     return True, ""
 
 
-def run_script(script_path, inputs, label, cwd, extra_env=None, extra_lines=0):
+def normalize_track_condition_label(value):
+    raw = str(value or "").strip()
+    raw_lower = raw.lower()
+    mapping = {
+        "good": "良",
+        "firm": "良",
+        "slightly_heavy": "稍重",
+        "slightly heavy": "稍重",
+        "heavy": "重",
+        "bad": "不良",
+    }
+    return mapping.get(raw_lower, raw or "良")
+
+
+def surface_cli_token(surface_value):
+    return "dirt" if surface_value == map_surface("2") else "turf"
+
+
+def validate_prediction_output(start_ts, pred_path, odds_path):
+    if not pred_path.exists():
+        return False, f"{pred_path.name} not generated."
+    try:
+        if pred_path.stat().st_mtime < start_ts - 1:
+            return False, f"{pred_path.name} not updated."
+    except OSError:
+        return False, f"{pred_path.name} stat unavailable."
+    if not csv_has_rows(pred_path):
+        return False, f"{pred_path.name} has no rows."
+    ok, msg = validate_odds_predictions(odds_path, pred_path)
+    if not ok:
+        return False, msg
+    return True, ""
+
+
+def run_script(script_path, inputs, label, cwd, extra_env=None, extra_lines=0, script_args=None):
     payload_inputs = list(inputs) + ([""] * max(0, int(extra_lines)))
     payload = "\n".join(payload_inputs) + "\n"
     print(f"\n=== {label} ===")
@@ -308,7 +343,7 @@ def run_script(script_path, inputs, label, cwd, extra_env=None, extra_lines=0):
     if extra_env:
         env.update(extra_env)
     subprocess.run(
-        [sys.executable, str(script_path)],
+        [sys.executable, str(script_path)] + [str(arg) for arg in (script_args or [])],
         input=payload,
         text=True,
         encoding="utf-8",
@@ -588,6 +623,7 @@ def main():
         print(f"Selected predictor strategy: {predictor_strategy} ({predictor_reason})")
 
     os.environ["SCOPE_KEY"] = scope_key
+    predictor_specs = list_predictors()
     race_card_env = None
     run_script(
         ROOT_DIR / "race_card.py",
@@ -598,15 +634,6 @@ def main():
     )
     sleep_between_scrapes()
     run_script(ROOT_DIR / "new_history.py", [history_url], "new_history", ROOT_DIR)
-    sleep_between_scrapes()
-    run_script(
-        ROOT_DIR / "predictor.py",
-        [surface, distance, track_cond],
-        "predictor",
-        ROOT_DIR,
-        {"PREDICTOR_STRATEGY": predictor_strategy} if predictor_strategy else None,
-        extra_lines=1,
-    )
     sleep_between_scrapes()
     odds_extract_start = time.time()
     run_script(ROOT_DIR / "odds_extract.py", [race_url], "odds_extract", ROOT_DIR)
@@ -621,13 +648,83 @@ def main():
         print(f"[WARN] odds_extract incomplete: {msg}")
         print("Abort before bet plan to avoid incorrect predictions.")
         sys.exit(1)
-    pred_src = ROOT_DIR / "predictions.csv"
     odds_src = ROOT_DIR / "odds.csv"
-    ok, msg = validate_odds_predictions(odds_src, pred_src)
-    if not ok:
-        print(f"[ERROR] {msg}")
-        print("Abort before recording run to avoid polluting data.")
-        sys.exit(1)
+    track_cond_label = normalize_track_condition_label(track_cond)
+    surface_token = surface_cli_token(surface)
+    latest_prediction_paths = {}
+    for spec in predictor_specs:
+        pred_latest_path = latest_prediction_path(ROOT_DIR, spec["id"])
+        latest_prediction_paths[spec["id"]] = pred_latest_path
+        predictor_start = time.time()
+        if spec["id"] == "main":
+            env = {"SCOPE_KEY": scope_key}
+            if predictor_strategy:
+                env["PREDICTOR_STRATEGY"] = predictor_strategy
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [surface, distance, track_cond],
+                spec["label"],
+                ROOT_DIR,
+                env,
+                extra_lines=1,
+            )
+        elif spec["id"] == "v2_opus":
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [surface_token, distance, track_cond_label],
+                spec["label"],
+                ROOT_DIR,
+                {
+                    "SCOPE_KEY": scope_key,
+                    "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_NO_WAIT": "1",
+                },
+                extra_lines=1,
+            )
+        elif spec["id"] == "v3_premium":
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [],
+                spec["label"],
+                ROOT_DIR,
+                {"SCOPE_KEY": scope_key},
+                script_args=[
+                    "--base-dir",
+                    str(ROOT_DIR),
+                    "--output",
+                    spec["latest_filename"],
+                    "--race-surface",
+                    surface,
+                    "--race-distance",
+                    distance or "1800",
+                    "--race-going",
+                    track_cond_label,
+                    "--no-prompt",
+                    "--no-wait",
+                ],
+            )
+        elif spec["id"] == "v4_gemini":
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [],
+                spec["label"],
+                ROOT_DIR,
+                {
+                    "SCOPE_KEY": scope_key,
+                    "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_TARGET_SURFACE": surface,
+                    "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                    "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                },
+            )
+        else:
+            continue
+        ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
+        if not ok:
+            print(f"[ERROR] {spec['label']}: {msg}")
+            print("Abort before recording run to avoid polluting data.")
+            sys.exit(1)
+        sleep_between_scrapes()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     bet_plan_env = {"RACE_ID": race_id, "RUN_ID": run_id}
     if strategy_name:
@@ -645,11 +742,17 @@ def main():
     race_suffix = f"_{race_id}"
     race_dir = DATA_DIR / race_id
     race_dir.mkdir(parents=True, exist_ok=True)
-    predictions_path = ""
-    if pred_src.exists():
-        pred_dest = race_dir / f"predictions_{run_id}{race_suffix}.csv"
+    prediction_snapshot_paths = {}
+    for spec in predictor_specs:
+        pred_src = latest_prediction_paths.get(spec["id"])
+        if not pred_src or not pred_src.exists():
+            prediction_snapshot_paths[spec["id"]] = ""
+            continue
+        pred_dest = snapshot_prediction_path(DATA_DIR, race_id, run_id, spec["id"])
+        pred_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(pred_src, pred_dest)
-        predictions_path = str(pred_dest)
+        prediction_snapshot_paths[spec["id"]] = str(pred_dest)
+    predictions_path = prediction_snapshot_paths.get("main", "")
 
     odds_path = ""
     if odds_src.exists():
@@ -744,6 +847,9 @@ def main():
         "predictor_reason": predictor_reason,
         "config_version": load_config_version(config),
         "predictions_path": predictions_path,
+        "predictions_v2_opus_path": prediction_snapshot_paths.get("v2_opus", ""),
+        "predictions_v3_premium_path": prediction_snapshot_paths.get("v3_premium", ""),
+        "predictions_v4_gemini_path": prediction_snapshot_paths.get("v4_gemini", ""),
         "odds_path": odds_path,
         "wide_odds_path": wide_odds_path,
         "fuku_odds_path": fuku_odds_path,

@@ -30,6 +30,8 @@ import os
 import sys
 from datetime import datetime
 
+OUTPUT_PATH = os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")
+
 # --- Configuration ---
 # Default Context - Ideally this should be dynamic, but for now we default to the requested context.
 # In a full pipeline, these might be arguments or inferred from the data (though kachiuma/shutuba don't explicitly state the *target* race condition usually unless inferred from filename or external config).
@@ -88,6 +90,31 @@ def parse_rank(x):
         return int(x)
     except:
         return np.nan
+
+
+def resolve_target_context():
+    context = dict(DEFAULT_TARGET_CONTEXT)
+    distance_raw = os.environ.get("PREDICTOR_TARGET_DISTANCE", "").strip()
+    if distance_raw:
+        try:
+            context["distance"] = int(float(distance_raw))
+        except Exception:
+            pass
+    for env_key, field in (
+        ("PREDICTOR_TARGET_LOCATION", "location"),
+        ("PREDICTOR_TARGET_SURFACE", "surface"),
+        ("PREDICTOR_TARGET_CONDITION", "condition"),
+    ):
+        value = os.environ.get(env_key, "").strip()
+        if value:
+            context[field] = value
+    baba_raw = os.environ.get("PREDICTOR_BABA_INDEX_PROXY", "").strip()
+    if baba_raw:
+        try:
+            context["baba_index_proxy"] = float(baba_raw)
+        except Exception:
+            pass
+    return context
 
 # --- Feature Engineering Class ---
 
@@ -488,7 +515,8 @@ def main():
     predictor.train(train_df)
     
     # 4. Inference
-    print(f"[INFO] Target Context: {DEFAULT_TARGET_CONTEXT}")
+    target_context = resolve_target_context()
+    print(f"[INFO] Target Context: {target_context}")
     
     # The 'shutuba.csv' file contains the HISTORY of the target horses.
     # We should use THIS dataframe for inference feature engineering.
@@ -501,7 +529,7 @@ def main():
     inference_features = engineer.create_features(
         shutuba_clean, 
         is_inference=True, 
-        target_context=DEFAULT_TARGET_CONTEXT,
+        target_context=target_context,
         target_horses=target_horses
     )
     
@@ -532,8 +560,8 @@ def main():
     results['rank_score'] = scores # Ensure it's there
     
     # Save standard output
-    results.to_csv("predictions.csv", index=False, encoding="utf-8-sig")
-    print("\n[INFO] Full results saved to predictions.csv (Pipeline Ready)")
+    results.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
+    print(f"\n[INFO] Full results saved to {os.path.basename(OUTPUT_PATH)} (Pipeline Ready)")
 
 if __name__ == "__main__":
     main()

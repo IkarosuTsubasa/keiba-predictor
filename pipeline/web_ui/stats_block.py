@@ -79,7 +79,21 @@ def build_stats_block(
             )
         )
     if predictor_rows:
-        parts.append(build_metric_table(predictor_rows, "Predictor Hit Rate"))
+        parts.append(
+            build_table_html(
+                predictor_rows,
+                [
+                    "predictor",
+                    "samples",
+                    "top3_hit_rate",
+                    "top5_to_top3_hit_rate",
+                    "top1_hit_rate",
+                    "top1_in_top3_rate",
+                    "top3_exact_rate",
+                ],
+                "Predictor Hit Rate",
+            )
+        )
     return "\n".join(parts)
 
 
@@ -129,7 +143,20 @@ def build_run_summary_block(
 
     predictor_rows = load_run_predictor_summary(scope_norm, summary_id)
     if predictor_rows:
-        parts.append(build_metric_table(predictor_rows, "Run Predictor Hit Rate"))
+        parts.append(
+            build_table_html(
+                predictor_rows,
+                [
+                    "predictor",
+                    "run_top3_hit_rate",
+                    "run_top5_to_top3_hit_rate",
+                    "run_top1_hit",
+                    "top1_in_top3",
+                    "top3_exact",
+                ],
+                "Run Predictor Hit Rate",
+            )
+        )
 
     bet_type_rows = load_run_bet_type_summary(scope_norm, summary_id)
     if bet_type_rows:

@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
+from predictor_catalog import list_predictors, resolve_run_prediction_path
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
@@ -563,6 +564,25 @@ def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix, ext="
     )
 
 
+def resolve_predictor_paths(scope_key, run_id, run_row):
+    data_dir = get_data_dir(BASE_DIR, scope_key)
+    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
+    last_run_id = str(run_row.get("run_id", "") or "") if run_row else ""
+    out = []
+    for spec in list_predictors():
+        path = resolve_run_prediction_path(
+            run_row,
+            data_dir,
+            ROOT_DIR,
+            run_id=run_id,
+            race_id=race_id,
+            predictor_id=spec["id"],
+            last_run_id=last_run_id,
+        )
+        out.append((spec, Path(path) if path else None))
+    return out
+
+
 def load_race_results(scope_key):
     return summary_service.load_race_results(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
 
@@ -931,6 +951,67 @@ def render_page(
             summary_table_html = build_table_html(summary_rows, ["metric", "value"], "Model Status")
         bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
         bet_plan_table_html = build_bet_plan_table_html(bet_rows, bet_cols, "Bet Plan")
+    if run_id:
+        predictor_top_sections = []
+        predictor_mark_sections = []
+        predictor_summary_sections = []
+        predictor_note_texts = []
+        bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
+        gemini_policy_payload = load_gemini_policy_payload(scope_norm or scope_key, run_id, run_row)
+        gemini_policy_html = build_gemini_policy_html(gemini_policy_payload)
+        for spec, pred_path in resolve_predictor_paths(scope_norm or scope_key, run_id, run_row):
+            if not pred_path or not pred_path.exists():
+                continue
+            predictor_run_row = dict(run_row or {})
+            predictor_run_row["predictions_path"] = str(pred_path)
+            top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, predictor_run_row)
+            if top_rows:
+                predictor_top_sections.append(
+                    build_table_html(top_rows, top_cols, f"Top5 Predictions - {spec['label']}")
+                )
+            ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, predictor_run_row)
+            value_rows, value_cols = load_value_picks_table(scope_norm or scope_key, run_id, predictor_run_row)
+            ability_rows_display = ability_rows
+            if ability_rows:
+                predictor_mark_sections.append(
+                    build_table_html(ability_rows, ability_cols, f"Ability Marks - {spec['label']}")
+                )
+                if value_rows:
+                    predictor_mark_sections.append(
+                        build_table_html(value_rows, value_cols, f"Value Picks - {spec['label']}")
+                    )
+            else:
+                mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, predictor_run_row)
+                ability_rows_display = mark_rows
+                value_rows = []
+                if mark_rows:
+                    predictor_mark_sections.append(
+                        build_table_html(mark_rows, mark_cols, f"Integrated Marks - {spec['label']}")
+                    )
+            pred_csv_text = load_text_file(pred_path)
+            note_text = build_mark_note_text(
+                ability_rows_display if ability_rows_display else [],
+                value_rows,
+                pred_path.name if pred_path else "",
+                pred_csv_text,
+                bet_engine_v3_summary=bet_engine_v3_summary,
+                gemini_policy_payload=gemini_policy_payload,
+            ).strip()
+            if note_text:
+                predictor_note_texts.append(f"[{spec['label']}]\n{note_text}")
+            summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, predictor_run_row)
+            if summary_rows:
+                predictor_summary_sections.append(
+                    build_table_html(summary_rows, ["metric", "value"], f"Model Status - {spec['label']}")
+                )
+        if predictor_top_sections:
+            top5_table_html = "".join(predictor_top_sections)
+        if predictor_mark_sections:
+            mark_table_html = "".join(predictor_mark_sections)
+        if predictor_note_texts:
+            mark_note_text = "\n\n".join(predictor_note_texts)
+        if predictor_summary_sections:
+            summary_table_html = "".join(predictor_summary_sections)
     gate_status, gate_reason = detect_gate_status(bet_rows)
     gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
     gate_notice_text = build_gate_notice_text(gate_status, gate_reason)

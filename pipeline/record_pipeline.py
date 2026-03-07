@@ -22,6 +22,7 @@ from surface_scope import (
     get_scope_key,
     migrate_legacy_data,
 )
+from predictor_catalog import list_predictors, resolve_run_prediction_path
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -927,53 +928,8 @@ def main():
     if predictor_strategy:
         print(f"Predictor strategy: {predictor_strategy}")
 
-    pred_names_raw = []
-    pred_names = []
-    pred_items = []
-    pred_top5_names = []
-    pred_name_set = None
-    pred_file = None
-    pred_path = str(pred_path_run) if pred_path_run else ""
-    pred_file = Path(pred_path) if pred_path else None
-    if pred_file and pred_file.exists():
-        df = pd.read_csv(pred_file, encoding="utf-8-sig")
-        score_key = pick_score_column(df.columns)
-        if "HorseName" in df.columns and score_key:
-            pred_name_set = {
-                normalize_name(n)
-                for n in df["HorseName"].dropna().astype(str)
-                if normalize_name(n)
-            }
-            pred_top = df.sort_values(score_key, ascending=False).head(3)
-            pred_names_raw = pred_top["HorseName"].tolist()
-            pred_items = list(zip(pred_top["HorseName"].tolist(), pred_top[score_key].tolist()))
-            pred_names = [normalize_name(n) for n in pred_names_raw]
-            pred_top5 = df.sort_values(score_key, ascending=False).head(5)
-            pred_top5_names_raw = pred_top5["HorseName"].tolist()
-            pred_top5_names = [normalize_name(n) for n in pred_top5_names_raw]
-            print("\nPredicted Top3:")
-            for i, name in enumerate(pred_names_raw, 1):
-                print(f"{i}. {name}")
-        else:
-            print("Predictions file missing columns: HorseName / Top3Prob")
-    else:
-        if pred_path_run:
-            print(f"Predictions file not found: {pred_path_run}")
-        else:
-            print("Predictions file not found for this run.")
-        print("Skip predictor record.")
-
     actual_names_raw = prompt_actual_top3()
     actual_names = [normalize_name(n) for n in actual_names_raw]
-    if pred_name_set:
-        missing = [
-            raw
-            for raw, norm in zip(actual_names_raw, actual_names)
-            if norm and norm not in pred_name_set
-        ]
-        if missing:
-            print(f"[ERROR] Actual Top3 names not found in predictions: {', '.join(missing)}")
-            sys.exit(1)
     race_row = {
         "run_id": run_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -983,7 +939,60 @@ def main():
     }
     replace_rows_for_run(RACE_RESULTS_PATH, list(race_row.keys()), run_id, race_row)
 
-    if pred_names_raw and pred_file and pred_file.exists():
+    predictor_rows = []
+    main_pred_file = None
+    for spec in list_predictors():
+        spec_pred_path = resolve_run_prediction_path(
+            run,
+            DATA_DIR,
+            ROOT_DIR,
+            run_id=run_id,
+            race_id=race_id,
+            predictor_id=spec["id"],
+            last_run_id=last_run,
+        )
+        pred_path = str(spec_pred_path) if spec_pred_path else ""
+        pred_file = Path(pred_path) if pred_path else None
+        if not pred_file or not pred_file.exists():
+            if spec_pred_path:
+                print(f"[WARN] {spec['label']} predictions not found: {spec_pred_path}")
+            else:
+                print(f"[WARN] {spec['label']} predictions not found for this run.")
+            continue
+        if spec["id"] == "main":
+            main_pred_file = pred_file
+            pred_path_run = pred_file
+        df = pd.read_csv(pred_file, encoding="utf-8-sig")
+        score_key = pick_score_column(df.columns)
+        if "HorseName" not in df.columns or not score_key:
+            print(f"[WARN] {spec['label']} missing columns: HorseName / score")
+            continue
+
+        pred_name_set = {
+            normalize_name(n)
+            for n in df["HorseName"].dropna().astype(str)
+            if normalize_name(n)
+        }
+        missing = [
+            raw
+            for raw, norm in zip(actual_names_raw, actual_names)
+            if norm and norm not in pred_name_set
+        ]
+        if missing:
+            print(f"[ERROR] {spec['label']} missing actual horses in predictions: {', '.join(missing)}")
+            sys.exit(1)
+
+        pred_top = df.sort_values(score_key, ascending=False).head(3)
+        pred_names_raw = pred_top["HorseName"].tolist()
+        pred_items = list(zip(pred_top["HorseName"].tolist(), pred_top[score_key].tolist()))
+        pred_names = [normalize_name(n) for n in pred_names_raw]
+        pred_top5 = df.sort_values(score_key, ascending=False).head(5)
+        pred_top5_names_raw = pred_top5["HorseName"].tolist()
+        pred_top5_names = [normalize_name(n) for n in pred_top5_names_raw]
+        print(f"\n{spec['label']} Top3:")
+        for i, name in enumerate(pred_names_raw, 1):
+            print(f"{i}. {name}")
+
         hit_count = len(set(pred_names) & set(actual_names))
         top5_hit_count = len(set(pred_top5_names) & set(actual_names)) if pred_top5_names else 0
         top1_hit = 1 if pred_names and actual_names and pred_names[0] == actual_names[0] else 0
@@ -997,36 +1006,49 @@ def main():
         conf_state = load_predictor_state()
         conf = compute_confidence(pred_items, conf_state)
 
-        pred_row = {
-            "run_id": run_id,
-            "strategy": predictor_strategy,
-            "predictions_path": str(pred_file),
-            "pred_top1": pred_names_raw[0] if len(pred_names_raw) > 0 else "",
-            "pred_top2": pred_names_raw[1] if len(pred_names_raw) > 1 else "",
-            "pred_top3": pred_names_raw[2] if len(pred_names_raw) > 2 else "",
-            "actual_top1": actual_names_raw[0],
-            "actual_top2": actual_names_raw[1],
-            "actual_top3": actual_names_raw[2],
-            "top3_hit_count": hit_count,
-            "top5_hit_count": top5_hit_count,
-            "top1_hit": top1_hit,
-            "top1_in_top3": top1_in_top3,
-            "top3_exact": top3_exact,
-            "score": score,
-            "rank_score": round(rank_score, 4),
-            "ev_score": round(ev_score, 4),
-            "hit_rate": round(hit_rate, 4),
-            "score_total": round(score_total, 4),
-            "confidence_score": conf["confidence_score"],
-            "stability_score": conf["stability_score"],
-            "validity_score": conf["validity_score"],
-            "consistency_score": conf["consistency_score"],
-            "rank_ema": conf["rank_ema"],
-            "ev_ema": conf["ev_ema"],
-            "risk_score": conf["risk_score"],
-        }
-        replace_rows_for_run(PRED_RESULTS_PATH, list(pred_row.keys()), run_id, pred_row)
-        print(f"Recorded predictor result for {run_id}")
+        predictor_rows.append(
+            {
+                "run_id": run_id,
+                "predictor_id": spec["id"],
+                "predictor_label": spec["label"],
+                "strategy": predictor_strategy if spec["id"] == "main" else spec["id"],
+                "predictions_path": str(pred_file),
+                "pred_top1": pred_names_raw[0] if len(pred_names_raw) > 0 else "",
+                "pred_top2": pred_names_raw[1] if len(pred_names_raw) > 1 else "",
+                "pred_top3": pred_names_raw[2] if len(pred_names_raw) > 2 else "",
+                "actual_top1": actual_names_raw[0],
+                "actual_top2": actual_names_raw[1],
+                "actual_top3": actual_names_raw[2],
+                "top3_hit_count": hit_count,
+                "top5_hit_count": top5_hit_count,
+                "top1_hit": top1_hit,
+                "top1_in_top3": top1_in_top3,
+                "top3_exact": top3_exact,
+                "score": score,
+                "rank_score": round(rank_score, 4),
+                "ev_score": round(ev_score, 4),
+                "hit_rate": round(hit_rate, 4),
+                "score_total": round(score_total, 4),
+                "sample_races": "",
+                "eval_window_races": "",
+                "hit_at_5": "",
+                "top3_hits_at_5": "",
+                "mrr_top3": "",
+                "brier": "",
+                "confidence_score": conf["confidence_score"],
+                "stability_score": conf["stability_score"],
+                "validity_score": conf["validity_score"],
+                "consistency_score": conf["consistency_score"],
+                "rank_ema": conf["rank_ema"],
+                "ev_ema": conf["ev_ema"],
+                "risk_score": conf["risk_score"],
+            }
+        )
+    if predictor_rows:
+        replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
+        print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
+    else:
+        print("Skip predictor record.")
 
     wide_box_info = None
     if pred_path_run and pred_path_run.exists() and odds_path_run.exists() and wide_odds_path_run.exists():

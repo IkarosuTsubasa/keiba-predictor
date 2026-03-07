@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from itertools import combinations
 from pathlib import Path
 
+from predictor_catalog import canonical_predictor_id, predictor_label
+
 
 def extract_date_prefix(value):
     text = str(value or "")
@@ -659,34 +661,37 @@ def load_predictor_summary(get_data_dir, base_dir, load_csv_rows, compute_top5_h
     rows = load_csv_rows(path)
     if not rows:
         return []
-    total = len(rows)
-    top1_hit = sum(int(float(r.get("top1_hit", 0) or 0)) for r in rows)
-    top1_in_top3 = sum(int(float(r.get("top1_in_top3", 0) or 0)) for r in rows)
-    top3_exact = sum(int(float(r.get("top3_exact", 0) or 0)) for r in rows)
-    top3_hit = sum(int(float(r.get("top3_hit_count", 0) or 0)) for r in rows)
-    top5_hit = 0
-    top5_total = 0
+    grouped = {}
     for row in rows:
-        hit_count = compute_top5_hit_count_func(scope_key, row)
-        if hit_count is None:
-            continue
-        top5_hit += hit_count
-        top5_total += 1
-    top1_rate = round(top1_hit / total, 4) if total else ""
-    top1_in_top3_rate = round(top1_in_top3 / total, 4) if total else ""
-    top3_exact_rate = round(top3_exact / total, 4) if total else ""
-    top3_hit_rate = round(top3_hit / (3 * total), 4) if total else ""
-    top5_hit_rate = round(top5_hit / (3 * top5_total), 4) if top5_total else ""
-    summary = [
-        {"metric": "samples", "value": total},
-        {"metric": "top3_hit_rate", "value": top3_hit_rate},
-        {"metric": "top1_hit_rate", "value": top1_rate},
-        {"metric": "top1_in_top3_rate", "value": top1_in_top3_rate},
-        {"metric": "top3_exact_rate", "value": top3_exact_rate},
-    ]
-    if top5_hit_rate != "":
-        summary.insert(2, {"metric": "top5_to_top3_hit_rate", "value": top5_hit_rate})
-    return summary
+        predictor_id = canonical_predictor_id(row.get("predictor_id"))
+        grouped.setdefault(predictor_id, []).append(row)
+    summary = []
+    for predictor_id, items in grouped.items():
+        total = len(items)
+        top1_hit = sum(int(float(r.get("top1_hit", 0) or 0)) for r in items)
+        top1_in_top3 = sum(int(float(r.get("top1_in_top3", 0) or 0)) for r in items)
+        top3_exact = sum(int(float(r.get("top3_exact", 0) or 0)) for r in items)
+        top3_hit = sum(int(float(r.get("top3_hit_count", 0) or 0)) for r in items)
+        top5_hit = 0
+        top5_total = 0
+        for row in items:
+            hit_count = compute_top5_hit_count_func(scope_key, row)
+            if hit_count is None:
+                continue
+            top5_hit += hit_count
+            top5_total += 1
+        summary.append(
+            {
+                "predictor": predictor_label(predictor_id),
+                "samples": total,
+                "top3_hit_rate": round(top3_hit / (3 * total), 4) if total else "",
+                "top5_to_top3_hit_rate": round(top5_hit / (3 * top5_total), 4) if top5_total else "",
+                "top1_hit_rate": round(top1_hit / total, 4) if total else "",
+                "top1_in_top3_rate": round(top1_in_top3 / total, 4) if total else "",
+                "top3_exact_rate": round(top3_exact / total, 4) if total else "",
+            }
+        )
+    return sorted(summary, key=lambda r: str(r.get("predictor", "")))
 
 
 def load_run_result_summary(get_data_dir, base_dir, load_csv_rows, scope_key, run_id):
@@ -771,18 +776,21 @@ def load_run_predictor_summary(
 ):
     path = get_data_dir(base_dir, scope_key) / "predictor_results.csv"
     rows = load_csv_rows(path)
-    row = next((r for r in rows if r.get("run_id") == run_id), None)
-    if not row:
+    rows = [r for r in rows if r.get("run_id") == run_id]
+    if not rows:
         return []
-    top3_hit = to_float(row.get("top3_hit_count")) / 3.0 if row.get("top3_hit_count") is not None else ""
-    top5_hit_count = compute_top5_hit_count_func(scope_key, row)
-    top5_hit = round(top5_hit_count / 3.0, 4) if top5_hit_count is not None else ""
-    summary = [
-        {"metric": "run_top3_hit_rate", "value": round(top3_hit, 4) if top3_hit != "" else ""},
-        {"metric": "run_top1_hit", "value": row.get("top1_hit", "")},
-        {"metric": "top1_in_top3", "value": row.get("top1_in_top3", "")},
-        {"metric": "top3_exact", "value": row.get("top3_exact", "")},
-    ]
-    if top5_hit != "":
-        summary.insert(1, {"metric": "run_top5_to_top3_hit_rate", "value": top5_hit})
-    return summary
+    summary = []
+    for row in rows:
+        top3_hit = to_float(row.get("top3_hit_count")) / 3.0 if row.get("top3_hit_count") is not None else ""
+        top5_hit_count = compute_top5_hit_count_func(scope_key, row)
+        summary.append(
+            {
+                "predictor": predictor_label(row.get("predictor_id")),
+                "run_top3_hit_rate": round(top3_hit, 4) if top3_hit != "" else "",
+                "run_top5_to_top3_hit_rate": round(top5_hit_count / 3.0, 4) if top5_hit_count is not None else "",
+                "run_top1_hit": row.get("top1_hit", ""),
+                "top1_in_top3": row.get("top1_in_top3", ""),
+                "top3_exact": row.get("top3_exact", ""),
+            }
+        )
+    return sorted(summary, key=lambda r: str(r.get("predictor", "")))
