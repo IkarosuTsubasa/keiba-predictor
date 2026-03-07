@@ -13,6 +13,7 @@ from bet_engine_v2 import generate_bet_plan_v2
 from bet_engine_v3 import generate_bet_plan_v3
 from bet_engine_v4 import generate_bet_plan_v4
 from bet_engine_v5 import generate_bet_plan_v5
+from bet_engine_v6 import generate_bet_plan_v6
 from record_pipeline import (
     estimate_payout_multiplier,
     eval_ticket,
@@ -30,7 +31,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SCOPES = ["central_dirt", "central_turf", "local"]
 DEFAULT_BUDGET = 0
 RUN_ID_RE = re.compile(r"(\d{8}_\d{6})")
-ENGINE_CHOICES = ("v2", "v3", "v4", "v5")
+ENGINE_CHOICES = ("v2", "v3", "v4", "v5", "v6")
 
 
 @dataclass
@@ -390,6 +391,14 @@ def _evaluate_new_engine(
         )
     elif eng == "v5":
         generated_items, _, summary = generate_bet_plan_v5(
+            pred_df=pred_df,
+            odds=odds_payload,
+            bankroll_yen=int(budget_yen),
+            scope_key=scope_key,
+            config=bet_cfg,
+        )
+    elif eng == "v6":
+        generated_items, _, summary = generate_bet_plan_v6(
             pred_df=pred_df,
             odds=odds_payload,
             bankroll_yen=int(budget_yen),

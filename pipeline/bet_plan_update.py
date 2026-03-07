@@ -17,6 +17,7 @@ from bet_engine_v2 import generate_bet_plan_v2
 from bet_engine_v3 import generate_bet_plan_v3
 from bet_engine_v4 import generate_bet_plan_v4
 from bet_engine_v5 import generate_bet_plan_v5
+from bet_engine_v6 import generate_bet_plan_v6
 try:
     from llm.gemini_policy import RacePolicyInput, call_gemini_policy, get_last_call_meta
 except Exception:
@@ -442,11 +443,11 @@ def get_bet_engine_v5_config(predictor_config):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Build bet plan with v2/v3/v4/v5 engines.")
+    parser = argparse.ArgumentParser(description="Build bet plan with v2/v3/v4/v5/v6 engines.")
     parser.add_argument(
         "--engine-version",
-        choices=["v2", "v3", "v4", "v5"],
-        default=os.environ.get("ENGINE_VERSION", "v4"),
+        choices=["v2", "v3", "v4", "v5", "v6"],
+        default=os.environ.get("ENGINE_VERSION", "v6"),
         help="bet engine version",
     )
     parser.add_argument(
@@ -2971,15 +2972,24 @@ def main():
             "[bet_engine_v3] profile={profile} ".format(profile=bet_profile)
             + " ".join([f"{k}={v3_summary.get(k)}" for k in BET_ENGINE_V3_AUDIT_KEYS])
         )
-    elif engine_version in ("v4", "v5"):
+    elif engine_version in ("v4", "v5", "v6"):
         try:
-            payload = {
-                "scope": SCOPE_KEY,
-                "run_id": run_id,
-                "engine_version": engine_version,
-                "v5_profile": (v5_profile if engine_version == "v5" else ""),
-                "params": (bet_engine_v4_cfg if engine_version == "v4" else bet_engine_v5_cfg),
-            }
+            if engine_version == "v6":
+                _v6_cfg = data.get("bet_engine_v6", {}) if isinstance(data, dict) else {}
+                payload = {
+                    "scope": SCOPE_KEY,
+                    "run_id": run_id,
+                    "engine_version": "v6",
+                    "params": _v6_cfg,
+                }
+            else:
+                payload = {
+                    "scope": SCOPE_KEY,
+                    "run_id": run_id,
+                    "engine_version": engine_version,
+                    "v5_profile": (v5_profile if engine_version == "v5" else ""),
+                    "params": (bet_engine_v4_cfg if engine_version == "v4" else bet_engine_v5_cfg),
+                }
             cfg_dump_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception as exc:
             print(f"[WARN] failed to save bet_engine_{engine_version} cfg summary: {exc}")
@@ -3087,6 +3097,24 @@ def main():
                     strategy_text = str(summary_info.get("strategy_text", "") or "").strip()
                     if strategy_text:
                         print(f"[v5][strategy]\n{strategy_text}")
+            elif engine_version == "v6":
+                v6_cfg = data.get("bet_engine_v6", {}) if isinstance(data, dict) else {}
+                items_raw, _, summary_info = generate_bet_plan_v6(
+                    pred_df=pred_df,
+                    odds=odds_payload,
+                    bankroll_yen=budget_yen,
+                    scope_key=SCOPE_KEY,
+                    config=v6_cfg,
+                )
+                normalized_items = normalize_portfolio_items(items_raw)
+                if isinstance(summary_info, dict):
+                    race_diags = summary_info.get("diagnostics", [])
+                    for rd in race_diags:
+                        scenario = rd.get("scenario", "")
+                        print(f"[v6][scenario] {scenario}: {rd.get('ticket_count', 0)} tickets, budget={rd.get('race_budget', 0)}")
+                    strategy_text = str(summary_info.get("strategy_text", "") or "").strip()
+                    if strategy_text:
+                        print(f"[v6][strategy] {strategy_text}")
             else:
                 result = generate_bet_plan_v2(
                     pred_df=pred_df,
@@ -3316,7 +3344,7 @@ def main():
     )
     print(f"Saved: {OUT_PATH}")
     print(f"Saved items: {items_path}")
-    if engine_version in ("v3", "v4", "v5"):
+    if engine_version in ("v3", "v4", "v5", "v6"):
         print(f"Saved bet_engine_{engine_version} cfg: {cfg_dump_path}")
     append_no_bet_logs(NO_BET_LOG_PATH, all_no_bet_rows)
     pause_exit()

@@ -522,7 +522,11 @@ def normalize_jockey_id(value):
     text = str(value).strip()
     if text.lower() in ("nan", "none"):
         return ""
-    return text
+    # Unify format: "01150" and "1150" and 1150 -> "1150"
+    try:
+        return str(int(float(text)))
+    except (ValueError, OverflowError):
+        return text
 
 
 def add_jockey_cum_score(df, prior=20.0):
