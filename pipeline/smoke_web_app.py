@@ -26,23 +26,7 @@ def main():
     run_id = pick_latest_run_id()
     assert_true(bool(run_id), "no run_id found in any scope")
     view_html = web_app.view_run(run_id=run_id, scope_key="")
-    assert_true("Top5 Predictions" in view_html or "Bet Plan" in view_html, "view_run did not render run blocks")
-
-    # 3) update_bet_plan route (validation path, no external odds fetch)
-    update_html = web_app.update_bet_plan(race_id="", scope_key="")
-    assert_true("Enter Run ID or Race ID to update." in update_html, "update_bet_plan validation text mismatch")
-
-    # 4) record_pipeline route (validation path)
-    record_html = web_app.record_pipeline(
-        run_id="",
-        scope_key="",
-        profit="",
-        note="",
-        top1="",
-        top2="",
-        top3="",
-    )
-    assert_true("Actual 1st/2nd/3rd are required." in record_html, "record_pipeline validation text mismatch")
+    assert_true("Top5 Predictions" in view_html or "Gemini Policy" in view_html, "view_run did not render run blocks")
 
     print("smoke_web_app: OK")
 

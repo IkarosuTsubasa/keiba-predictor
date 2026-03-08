@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 5,
   "active_strategy": "balanced",
   "selector": {
     "mode": "epsilon_greedy",
@@ -26,8 +26,8 @@
     "top_score_count": 2,
     "top3_scale": 2.6,
     "model_mode": "hybrid",
-    "blend_alpha": 0.9,
-    "lgb_squash_beta": 1.0,
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5,
     "ranker_label_mode": "top5_gain",
     "ranker_blend_alpha": 0.6,
     "ranker_n_estimators": 300,
@@ -145,10 +145,7 @@
     "ev_ema": 0.9884,
     "risk_score": 0.8915,
     "updated_at": "2026-01-06T16:46:40",
-    "tune_cursor": 12,
-    "predictor_opt_updated_at": "2026-03-08T15:12:45",
-    "predictor_opt_window": 50,
-    "predictor_opt_samples": 36
+    "tune_cursor": 12
   },
   "bet_engine_v4": {
     "enabled": true,

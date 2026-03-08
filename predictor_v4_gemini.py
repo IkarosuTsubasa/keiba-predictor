@@ -61,6 +61,34 @@ def resolve_scope_key():
 SCOPE_KEY = resolve_scope_key()
 
 
+def normalize_name(value):
+    return "".join(str(value or "").split())
+
+
+def load_current_entries_map(odds_path=None):
+    path = Path(odds_path or "odds.csv")
+    if not path.exists():
+        return {}
+    try:
+        odds_df = pd.read_csv(path)
+    except Exception:
+        return {}
+    out = {}
+    for _, row in odds_df.iterrows():
+        raw_name = row.get("name", row.get("HorseName", row.get("horse_name", "")))
+        key = normalize_name(raw_name)
+        if not key or key in out:
+            continue
+        horse_no = parse_int(row.get("horse_no", row.get("horse", row.get("馬番", np.nan))))
+        odds = parse_float(row.get("odds", row.get("win_odds", np.nan)))
+        out[key] = {
+            "horse_no": horse_no,
+            "odds": odds,
+            "name": str(raw_name or "").strip(),
+        }
+    return out
+
+
 def default_surface_for_scope(scope_key):
     return "芝" if str(scope_key or "").strip() == "central_turf" else "ダ"
 
@@ -258,7 +286,7 @@ class SupremeFeatureEngineer:
         races = df.groupby('JockeyId').size()
         self.global_jockey_win_rates = (wins / races).fillna(0).to_dict()
 
-    def create_features(self, df, is_inference=False, target_context=None, target_horses=None):
+    def create_features(self, df, is_inference=False, target_context=None, target_horses=None, current_entries=None):
         """
         Creates features. 
         If is_inference=True, creates features for the *next* race (target_context).
@@ -318,13 +346,14 @@ class SupremeFeatureEngineer:
         df = df.fillna(0)
         
         if is_inference:
-            return self._prepare_inference_rows(df, target_context, target_horses)
+            return self._prepare_inference_rows(df, target_context, target_horses, current_entries=current_entries)
         else:
             return df
 
-    def _prepare_inference_rows(self, df, context, target_horses):
+    def _prepare_inference_rows(self, df, context, target_horses, current_entries=None):
         inference_rows = []
         horse_groups = dict(tuple(df.groupby('HorseName')))
+        current_entries = current_entries or {}
         
         for horse in target_horses:
             if horse in horse_groups:
@@ -379,8 +408,9 @@ class SupremeFeatureEngineer:
                 
                 age = last_row['Age']
                 sex_code = last_row['sex_code']
-                horse_no = last_row.get('horse_no', np.nan)
-                odds = last_row.get('Odds', np.nan)
+                current_meta = current_entries.get(normalize_name(horse), {})
+                horse_no = current_meta.get("horse_no", last_row.get('horse_no', np.nan))
+                odds = current_meta.get("odds", last_row.get('Odds', np.nan))
                 
             else:
                 # No history - New Horse
@@ -388,7 +418,9 @@ class SupremeFeatureEngineer:
                 ti_course_avg, ti_surface_avg, ti_dist_avg, ti_cond_avg = 0, 0, 0, 0
                 jockey_wr, dist_diff = 0, 0
                 age, sex_code = 3, 0
-                horse_no, odds = np.nan, np.nan
+                current_meta = current_entries.get(normalize_name(horse), {})
+                horse_no = current_meta.get("horse_no", np.nan)
+                odds = current_meta.get("odds", np.nan)
             
             row = {
                 "HorseName": horse,
@@ -568,12 +600,14 @@ def main():
     # 4. Inference Data
     target_horses = shutuba_clean['HorseName'].unique()
     print(f"[INFO] Target Horses: {len(target_horses)}")
+    current_entries = load_current_entries_map("odds.csv")
     
     inference_features = engineer.create_features(
         shutuba_clean, 
         is_inference=True, 
         target_context=TARGET_CONTEXT,
-        target_horses=target_horses
+        target_horses=target_horses,
+        current_entries=current_entries,
     )
     
     # 5. Predict
@@ -633,12 +667,14 @@ def main_pipeline_entry():
     else:
         target_horses = []
     print(f"[INFO] Target Horses: {len(target_horses)}")
+    current_entries = load_current_entries_map("odds.csv")
 
     inference_features = engineer.create_features(
         shutuba_clean,
         is_inference=True,
         target_context=target_context,
         target_horses=target_horses,
+        current_entries=current_entries,
     )
 
     results = predictor.predict(inference_features)

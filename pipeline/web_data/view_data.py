@@ -242,11 +242,13 @@ def _build_prediction_map(pred_rows, to_float, odds_rows):
         if not norm or norm in pred_map:
             continue
         score_val = to_float(row.get(score_key)) if score_key else float(max(len(pred_sorted) - idx, 1))
+        odds_horse_no = str(odds_name_to_no.get(norm, "")).strip()
+        pred_horse_no = str(row.get("horse_no", "")).strip()
         pred_map[norm] = {
             "horse_name": str(name).strip(),
             "pred_rank": idx + 1,
             "pred_prob": score_val,
-            "horse_no": str(row.get("horse_no", "")).strip() or str(odds_name_to_no.get(norm, "")),
+            "horse_no": odds_horse_no or pred_horse_no,
             "rank_score": _safe_float(row.get("rank_score"), 0.0),
             "win_odds": float(odds_name_to_win.get(norm, 0.0) or 0.0),
         }
@@ -505,11 +507,13 @@ def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_flo
         if not norm or norm in pred_map:
             continue
         score_val = to_float(row.get(score_key)) if score_key else float(max(len(pred_sorted) - idx, 1))
+        odds_horse_no = str(odds_name_to_no.get(norm, "")).strip()
+        pred_horse_no = str(row.get("horse_no", "")).strip()
         pred_map[norm] = {
             "horse_name": str(name).strip(),
             "pred_rank": idx + 1,
             "pred_prob": score_val,
-            "horse_no": str(row.get("horse_no", "")).strip(),
+            "horse_no": odds_horse_no or pred_horse_no,
             "win_odds": float(odds_name_to_win.get(norm, 0.0) or 0.0),
         }
         pred_order.append(norm)

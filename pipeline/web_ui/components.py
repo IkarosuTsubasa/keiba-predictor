@@ -21,10 +21,38 @@ def _sum_number(rows, col):
     return total
 
 
+def _table_variant(columns):
+    count = len(columns)
+    if count <= 2:
+        return {
+            "panel_class": "panel",
+            "wrap_class": "table-wrap table-wrap--fit",
+            "table_class": "data-table data-table--compact",
+        }
+    if count <= 4:
+        return {
+            "panel_class": "panel",
+            "wrap_class": "table-wrap table-wrap--narrow",
+            "table_class": "data-table data-table--narrow",
+        }
+    if count <= 6:
+        return {
+            "panel_class": "panel",
+            "wrap_class": "table-wrap table-wrap--medium",
+            "table_class": "data-table data-table--medium",
+        }
+    return {
+        "panel_class": "panel",
+        "wrap_class": "table-wrap",
+        "table_class": "data-table",
+    }
+
+
 def _build_plain_table_html(rows, columns, title):
     if not rows or not columns:
         return ""
     head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in columns)
+    variant = _table_variant(columns)
     body_rows = []
     for row in rows:
         cells = []
@@ -33,10 +61,10 @@ def _build_plain_table_html(rows, columns, title):
             cells.append(f"<td>{html.escape(str(val))}</td>")
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
     return f"""
-        <section class="panel">
+        <section class="{variant['panel_class']}">
             <h2>{html.escape(title)}</h2>
-            <div class="table-wrap">
-                <table class="data-table">
+            <div class="{variant['wrap_class']}">
+                <table class="{variant['table_class']}">
                     <thead><tr>{head_cells}</tr></thead>
                     <tbody>
                         {''.join(body_rows)}
@@ -57,6 +85,7 @@ def build_table_html(rows, columns, title):
 
     display_columns = [c for c in columns if c != "budget_yen"] or columns
     head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in display_columns)
+    variant = _table_variant(display_columns)
     group_key = html.escape(f"{title.lower().replace(' ', '-')}-budget")
     tabs = []
     panels = []
@@ -79,8 +108,8 @@ def build_table_html(rows, columns, title):
         panels.append(
             f"""
             <div class="budget-group budget-group-panel{active_class}" data-budget-panel="{budget_key}">
-              <div class="table-wrap">
-                <table class="data-table">
+              <div class="{variant['wrap_class']}">
+                <table class="{variant['table_class']}">
                   <thead><tr>{head_cells}</tr></thead>
                   <tbody>{''.join(body_rows)}</tbody>
                 </table>
@@ -91,73 +120,12 @@ def build_table_html(rows, columns, title):
     if not panels:
         return _build_plain_table_html(rows, columns, title)
     return f"""
-        <section class="panel budget-section" data-budget-group="{group_key}">
+        <section class="{variant['panel_class']} budget-section" data-budget-group="{group_key}">
             <h2>{html.escape(title)}</h2>
             <div class="budget-tab-list">{''.join(tabs)}</div>
             {''.join(panels)}
         </section>
         """
-
-
-def build_bet_plan_table_html(rows, columns, title="Bet Plan"):
-    if not rows or not columns:
-        return ""
-    budgets = [str(r.get("budget_yen", "")).strip() for r in rows if str(r.get("budget_yen", "")).strip()]
-    uniq_budgets = _sort_budget_values(set(budgets))
-    if len(uniq_budgets) <= 1:
-        return _build_plain_table_html(rows, columns, title)
-
-    display_columns = [c for c in columns if c != "budget_yen"] or columns
-    head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in display_columns)
-    group_blocks = []
-    budget_tabs = []
-    for idx, budget in enumerate(uniq_budgets):
-        group_rows = [r for r in rows if str(r.get("budget_yen", "")).strip() == str(budget)]
-        if not group_rows:
-            continue
-        budget_key = html.escape(str(budget))
-        active_class = " is-active" if idx == 0 else ""
-        budget_tabs.append(
-            f'<button type="button" class="budget-tab{active_class}" '
-            f'data-budget-tab="{budget_key}">{budget_key} JPY</button>'
-        )
-        body_rows = []
-        for row in group_rows:
-            cells = []
-            for col in display_columns:
-                val = row.get(col, "")
-                cells.append(f"<td>{html.escape(str(val))}</td>")
-            body_rows.append(f"<tr>{''.join(cells)}</tr>")
-        amt_sum = _sum_number(group_rows, "amount_yen")
-        ret_sum = _sum_number(group_rows, "expected_return_yen")
-        group_blocks.append(
-            f"""
-            <div class="budget-group budget-group-panel{active_class}" data-budget-panel="{budget_key}">
-              <div class="budget-group-head">
-                <h3>Budget {html.escape(str(budget))} JPY</h3>
-                <div class="budget-group-meta">Total Stake: {amt_sum} | Total Expected Return: {ret_sum}</div>
-              </div>
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead><tr>{head_cells}</tr></thead>
-                  <tbody>{''.join(body_rows)}</tbody>
-                </table>
-              </div>
-            </div>
-            """
-        )
-    if not group_blocks:
-        return _build_plain_table_html(rows, columns, title)
-    group_key = html.escape(f"{title.lower().replace(' ', '-')}-budget")
-    return f"""
-        <section class="panel budget-section" data-budget-group="{group_key}">
-            <h2>{html.escape(title)}</h2>
-            <div class="budget-tab-list">{''.join(budget_tabs)}</div>
-            {''.join(group_blocks)}
-        </section>
-        """
-
-
 def build_metric_table(rows, title):
     if not rows:
         return ""
@@ -242,38 +210,3 @@ def build_daily_profit_chart_html(rows, title):
             </div>
         </section>
         """
-
-
-def detect_gate_status(rows):
-    for row in rows:
-        status = str(row.get("gate_status", "")).strip().lower()
-        if status:
-            reason = str(row.get("gate_reason", "")).strip()
-            return status, reason
-    return "", ""
-
-
-def build_gate_notice_html(status, reason):
-    reason_html = f"<div>{html.escape(reason)}</div>" if reason else ""
-    if status == "soft_fail":
-        return (
-            '<div class="alert"><strong>Pass Gate Soft</strong>'
-            "High risk: soft gate failed; still showing tickets."
-            f"{reason_html}</div>"
-        )
-    if status == "hard_fail":
-        return (
-            '<div class="alert"><strong>Pass Gate Hard</strong>'
-            "Hard gate blocked tickets."
-            f"{reason_html}</div>"
-        )
-    return ""
-
-
-def build_gate_notice_text(status, reason):
-    reason_text = f" | {reason}" if reason else ""
-    if status == "soft_fail":
-        return f"[WARN] SOFT_GATE: high risk (showing tickets){reason_text}"
-    if status == "hard_fail":
-        return f"[WARN] HARD_GATE: blocked{reason_text}"
-    return ""

@@ -18,27 +18,17 @@ from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
 from web_ui.components import (
-    build_bet_plan_table_html as ui_build_bet_plan_table_html,
-    build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
-    build_gate_notice_html as ui_build_gate_notice_html,
-    build_gate_notice_text as ui_build_gate_notice_text,
     build_metric_table as ui_build_metric_table,
     build_table_html as ui_build_table_html,
-    detect_gate_status as ui_detect_gate_status,
 )
 from web_ui.template import page_template as ui_page_template
-from web_ui.stats_block import (
-    build_run_summary_block as ui_build_run_summary_block,
-    build_stats_block as ui_build_stats_block,
-)
+from web_ui.stats_block import build_stats_block as ui_build_stats_block
 
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
-BET_PLAN_UPDATE = BASE_DIR / "bet_plan_update.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
-RECORD_PIPELINE = BASE_DIR / "record_pipeline.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
 OPTIMIZE_PREDICTOR = BASE_DIR / "optimize_predictor_params.py"
@@ -46,8 +36,6 @@ OFFLINE_EVAL = BASE_DIR / "offline_eval.py"
 INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
-MIN_RACE_YEAR = 2026
-
 app = FastAPI()
 
 
@@ -451,10 +439,6 @@ def build_metric_table(rows, title):
     return ui_build_metric_table(rows, title)
 
 
-def build_bet_plan_table_html(rows, columns, title):
-    return ui_build_bet_plan_table_html(rows, columns, title)
-
-
 def load_top5_table(scope_key, run_id, run_row=None):
     return view_data.load_top5_table(
         get_data_dir,
@@ -491,34 +475,6 @@ def load_mc_uncertainty_summary(scope_key, run_id, run_row=None):
     )
 
 
-def load_profit_summary(scope_key):
-    return summary_service.load_profit_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
-
-
-def build_run_race_map(scope_key):
-    return summary_service.build_run_race_map(load_runs, infer_run_id_from_row, scope_key)
-
-
-def load_daily_profit_summary(scope_key, days=30):
-    return summary_service.load_daily_profit_summary(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        build_run_race_map,
-        MIN_RACE_YEAR,
-        scope_key,
-        days=days,
-    )
-
-
-def load_daily_profit_summary_all_scopes(days=30):
-    return summary_service.load_daily_profit_summary_all_scopes(load_daily_profit_summary, to_int_or_none, days=days)
-
-
-def build_daily_profit_chart_html(rows, title):
-    return ui_build_daily_profit_chart_html(rows, title)
-
-
 def normalize_name(value):
     return summary_service.normalize_name(value)
 
@@ -531,24 +487,12 @@ def load_top5_names(path):
     return summary_service.load_top5_names(load_csv_rows, to_float, path)
 
 
-def load_odds_name_to_no(path):
-    return summary_service.load_odds_name_to_no(load_csv_rows, path)
-
-
-def load_wide_odds_map(path):
-    return summary_service.load_wide_odds_map(load_csv_rows, path)
-
-
 def resolve_pred_path(scope_key, run_id, run_row):
     return run_resolver.resolve_pred_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def resolve_odds_path(scope_key, run_id, run_row):
     return run_resolver.resolve_odds_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
-
-
-def resolve_wide_odds_path(scope_key, run_id, run_row):
-    return run_resolver.resolve_wide_odds_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
 
 
 def resolve_run_asset_path(scope_key, run_id, run_row, field_name, prefix, ext=".csv"):
@@ -583,56 +527,6 @@ def resolve_predictor_paths(scope_key, run_id, run_row):
     return out
 
 
-def load_race_results(scope_key):
-    return summary_service.load_race_results(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
-
-
-def compute_wide_box_profit(scope_key, run_row, race_row, budget_yen=1000):
-    return summary_service.compute_wide_box_profit(
-        scope_key,
-        run_row,
-        race_row,
-        budget_yen,
-        resolve_pred_path,
-        resolve_odds_path,
-        resolve_wide_odds_path,
-        load_top5_names,
-        load_odds_name_to_no,
-        load_wide_odds_map,
-    )
-
-
-def load_wide_box_daily_profit_summary(scope_key, days=30, budget_yen=1000):
-    return summary_service.load_wide_box_daily_profit_summary(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        load_runs,
-        build_run_race_map,
-        load_race_results,
-        compute_wide_box_profit,
-        MIN_RACE_YEAR,
-        scope_key,
-        days=days,
-        budget_yen=budget_yen,
-    )
-
-
-def load_bet_type_summary(scope_key):
-    return summary_service.load_bet_type_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key)
-
-
-def load_bet_type_profit_summary(scope_key):
-    return summary_service.load_bet_type_profit_summary(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        build_run_race_map,
-        MIN_RACE_YEAR,
-        scope_key,
-    )
-
-
 def compute_top5_hit_count(scope_key, row):
     return summary_service.compute_top5_hit_count(
         get_data_dir,
@@ -651,41 +545,6 @@ def load_predictor_summary(scope_key):
         load_csv_rows,
         compute_top5_hit_count,
         scope_key,
-    )
-
-
-def load_run_result_summary(scope_key, run_id):
-    return summary_service.load_run_result_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
-
-
-def load_run_bet_type_summary(scope_key, run_id):
-    return summary_service.load_run_bet_type_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
-
-
-def load_run_bet_ticket_summary(scope_key, run_id):
-    return summary_service.load_run_bet_ticket_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_key, run_id)
-
-
-def load_run_predictor_summary(scope_key, run_id):
-    return summary_service.load_run_predictor_summary(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        to_float,
-        compute_top5_hit_count,
-        scope_key,
-        run_id,
-    )
-
-
-def load_bet_plan_table(scope_key, run_id, run_row=None):
-    return view_data.load_bet_plan_table(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        scope_key,
-        run_id,
-        run_row,
     )
 
 
@@ -722,17 +581,44 @@ def load_gemini_policy_payload(scope_key, run_id, run_row=None):
     return load_json_file(path)
 
 
+def _policy_chip_row(label, values, tone=""):
+    chips = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        tone_class = f" policy-chip--{tone}" if tone else ""
+        chips.append(f'<span class="policy-chip{tone_class}">{html.escape(text)}</span>')
+    if not chips:
+        chips.append('<span class="policy-chip policy-chip--empty">none</span>')
+    return (
+        '<div class="policy-horse-group">'
+        f'<div class="policy-label">{html.escape(label)}</div>'
+        f'<div class="policy-chip-row">{"".join(chips)}</div>'
+        "</div>"
+    )
+
+
+def _policy_detail_row(label, value, code=False):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    body = f"<code>{html.escape(text)}</code>" if code else f"<span>{html.escape(text)}</span>"
+    return f'<div class="policy-detail-row"><strong>{html.escape(label)}</strong>{body}</div>'
+
+
 def build_gemini_policy_html(payload):
     if not isinstance(payload, dict) or not payload:
         return ""
     budgets = list(payload.get("budgets", []) or [])
-    lines = []
     model = str(payload.get("gemini_model", "") or "")
     policy_engine = str(payload.get("policy_engine", "") or "")
+    header_tags = []
     if model:
-        lines.append(f"model: {model}")
+        header_tags.append(f'<span class="policy-meta-tag">{html.escape(model)}</span>')
     if policy_engine:
-        lines.append(f"policy_engine: {policy_engine}")
+        header_tags.append(f'<span class="policy-meta-tag">{html.escape(policy_engine)}</span>')
+    budget_sections = []
     for item in budgets:
         if not isinstance(item, dict):
             continue
@@ -740,53 +626,113 @@ def build_gemini_policy_html(payload):
         budget = int(to_float(item.get("budget_yen")))
         output = dict(item.get("output", {}) or {})
         meta = dict(item.get("meta", {}) or {})
-        if lines:
-            lines.append("")
         header = "[shared]" if is_shared else f"[{budget}]"
-        lines.append(
-            f"{header} decision={output.get('bet_decision', '')} participation={output.get('participation_level', '')} "
-            f"buy_style={output.get('buy_style', '')} strategy_mode={output.get('strategy_mode', '')}"
+        decision = str(output.get("bet_decision", "") or "")
+        participation = str(output.get("participation_level", "") or "")
+        buy_style = str(output.get("buy_style", "") or "")
+        strategy_mode = str(output.get("strategy_mode", "") or "")
+        summary_tags = "".join(
+            f'<span class="policy-meta-tag">{html.escape(tag)}</span>'
+            for tag in [header, decision, participation, buy_style]
+            if str(tag or "").strip()
         )
-        lines.append(f"enabled_bet_types={json.dumps(output.get('enabled_bet_types', []), ensure_ascii=False)}")
-        lines.append(f"key_horses={json.dumps(output.get('key_horses', []), ensure_ascii=False)}")
-        lines.append(f"secondary_horses={json.dumps(output.get('secondary_horses', []), ensure_ascii=False)}")
-        lines.append(f"longshot_horses={json.dumps(output.get('longshot_horses', []), ensure_ascii=False)}")
-        lines.append(f"max_ticket_count={int(to_float(output.get('max_ticket_count')))} risk_tilt={output.get('risk_tilt', '')}")
-        lines.append(f"pick_ids={json.dumps(output.get('pick_ids', []), ensure_ascii=False)}")
+        horse_groups = "".join(
+            [
+                _policy_chip_row("Key Horses", list(output.get("key_horses", []) or []), "key"),
+                _policy_chip_row("Secondary", list(output.get("secondary_horses", []) or []), "secondary"),
+                _policy_chip_row("Longshot", list(output.get("longshot_horses", []) or []), "longshot"),
+            ]
+        )
         strategy_text = str(output.get("strategy_text_ja", "") or "").strip()
-        if strategy_text:
-            lines.append("strategy_text_ja:")
-            lines.append(strategy_text)
         tendency = str(output.get("bet_tendency_ja", "") or "").strip()
-        if tendency:
-            lines.append(f"bet_tendency_ja: {tendency}")
+        text_cards = ""
+        if strategy_text or tendency:
+            strategy_html = (
+                '<article class="policy-text-card policy-text-card--primary">'
+                '<div class="policy-label">Strategy</div>'
+                f"<p>{html.escape(strategy_text or 'No strategy text.')}</p>"
+                "</article>"
+            )
+            tendency_html = (
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Bet Tendency</div>'
+                f"<p>{html.escape(tendency or 'No tendency text.')}</p>"
+                "</article>"
+            )
+            text_cards = f'<div class="policy-text-grid">{strategy_html}{tendency_html}</div>'
         reason_codes = list(output.get("reason_codes", []) or [])
-        if reason_codes:
-            lines.append("reason_codes: " + ", ".join(str(x) for x in reason_codes))
         warnings = list(output.get("warnings", []) or [])
-        if warnings:
-            lines.append("warnings: " + ", ".join(str(x) for x in warnings))
-        lines.append(
-            "meta: cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} "
-            "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
-            "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}".format(
-                cache_hit=int(bool(meta.get("cache_hit", False))),
-                llm_latency_ms=int(meta.get("llm_latency_ms", 0) or 0),
-                fallback_reason=str(meta.get("fallback_reason", "") or ""),
-                requested_budget_yen=int(meta.get("requested_budget_yen", 0) or 0),
-                requested_race_budget_yen=int(meta.get("requested_race_budget_yen", 0) or 0),
-                reused=int(bool(meta.get("reused", False))),
-                source_budget_yen=int(meta.get("source_budget_yen", 0) or 0),
-                policy_version=str(meta.get("policy_version", "") or ""),
+        detail_rows = []
+        detail_rows.append(
+            _policy_detail_row(
+                "enabled_bet_types",
+                json.dumps(output.get("enabled_bet_types", []), ensure_ascii=False),
+                code=True,
             )
         )
-    text = "\n".join(lines).strip()
-    if not text:
+        detail_rows.append(
+            _policy_detail_row(
+                "max_ticket_count / risk_tilt",
+                f"{int(to_float(output.get('max_ticket_count')))} / {output.get('risk_tilt', '')}",
+                code=True,
+            )
+        )
+        detail_rows.append(
+            _policy_detail_row("pick_ids", json.dumps(output.get("pick_ids", []), ensure_ascii=False), code=True)
+        )
+        detail_rows.append(_policy_detail_row("strategy_mode", strategy_mode, code=True))
+        if reason_codes:
+            detail_rows.append(_policy_detail_row("reason_codes", ", ".join(str(x) for x in reason_codes), code=True))
+        if warnings:
+            detail_rows.append(_policy_detail_row("warnings", ", ".join(str(x) for x in warnings), code=True))
+        detail_rows.append(
+            _policy_detail_row(
+                "meta",
+                (
+                    "cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} "
+                    "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
+                    "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}"
+                ).format(
+                    cache_hit=int(bool(meta.get("cache_hit", False))),
+                    llm_latency_ms=int(meta.get("llm_latency_ms", 0) or 0),
+                    fallback_reason=str(meta.get("fallback_reason", "") or ""),
+                    requested_budget_yen=int(meta.get("requested_budget_yen", 0) or 0),
+                    requested_race_budget_yen=int(meta.get("requested_race_budget_yen", 0) or 0),
+                    reused=int(bool(meta.get("reused", False))),
+                    source_budget_yen=int(meta.get("source_budget_yen", 0) or 0),
+                    policy_version=str(meta.get("policy_version", "") or ""),
+                ),
+                code=True,
+            )
+        )
+        detail_html = "".join(row for row in detail_rows if row)
+        budget_sections.append(
+            f"""
+            <section class="policy-block">
+              <div class="policy-summary">
+                <div class="policy-summary-tags">{summary_tags}</div>
+                <div class="policy-summary-line">{html.escape(f"strategy_mode={strategy_mode}" if strategy_mode else "")}</div>
+              </div>
+              <div class="policy-horse-grid">{horse_groups}</div>
+              {text_cards}
+              <details class="policy-fold">
+                <summary>Other Fields</summary>
+                <div class="policy-detail-grid">
+                  {detail_html}
+                </div>
+              </details>
+            </section>
+            """
+        )
+    if not budget_sections:
         return ""
     return (
-        '<section class="panel">'
-        '<h2>Gemini Policy</h2>'
-        f"<pre>{html.escape(text)}</pre>"
+        '<section class="panel policy-panel">'
+        '<div class="panel-title-row">'
+        '<div><div class="eyebrow">Gemini</div><h2>Gemini Policy</h2></div>'
+        f'<div class="policy-meta-row">{"".join(header_tags)}</div>'
+        "</div>"
+        f'{"".join(budget_sections)}'
         "</section>"
     )
 
@@ -803,18 +749,6 @@ def load_ability_marks_table(scope_key, run_id, run_row=None):
     )
 
 
-def detect_gate_status(rows):
-    return ui_detect_gate_status(rows)
-
-
-def build_gate_notice_html(status, reason):
-    return ui_build_gate_notice_html(status, reason)
-
-
-def build_gate_notice_text(status, reason):
-    return ui_build_gate_notice_text(status, reason)
-
-
 def page_template(
     output_text="",
     error_text="",
@@ -822,14 +756,11 @@ def page_template(
     view_run_options="",
     view_selected_run_id="",
     top5_text="",
-    bet_plan_text="",
     top5_table_html="",
     mark_table_html="",
     mark_note_text="",
-    bet_plan_table_html="",
     gemini_policy_html="",
     summary_table_html="",
-    run_summary_block="",
     stats_block="",
     default_scope="central_dirt",
 ):
@@ -840,14 +771,11 @@ def page_template(
         view_run_options=view_run_options,
         view_selected_run_id=view_selected_run_id,
         top5_text=top5_text,
-        bet_plan_text=bet_plan_text,
         top5_table_html=top5_table_html,
         mark_table_html=mark_table_html,
         mark_note_text=mark_note_text,
-        bet_plan_table_html=bet_plan_table_html,
         gemini_policy_html=gemini_policy_html,
         summary_table_html=summary_table_html,
-        run_summary_block=run_summary_block,
         stats_block=stats_block,
         default_scope=default_scope,
     )
@@ -858,7 +786,6 @@ def render_page(
     output_text="",
     error_text="",
     top5_text="",
-    bet_plan_text="",
     summary_run_id="",
     selected_run_id="",
 ):
@@ -868,16 +795,8 @@ def render_page(
     selected_run_id = str(selected_run_id or "").strip()
     stats_block = ui_build_stats_block(
         scope_norm,
-        load_profit_summary=load_profit_summary,
-        load_daily_profit_summary=load_daily_profit_summary,
-        load_daily_profit_summary_all_scopes=load_daily_profit_summary_all_scopes,
-        load_wide_box_daily_profit_summary=load_wide_box_daily_profit_summary,
-        load_bet_type_profit_summary=load_bet_type_profit_summary,
-        load_bet_type_summary=load_bet_type_summary,
         load_predictor_summary=load_predictor_summary,
-        build_metric_table=build_metric_table,
         build_table_html=build_table_html,
-        build_daily_profit_chart_html=build_daily_profit_chart_html,
     )
     run_id = ""
     run_row = None
@@ -901,10 +820,8 @@ def render_page(
     top5_table_html = ""
     mark_table_html = ""
     mark_note_text = ""
-    bet_plan_table_html = ""
     gemini_policy_html = ""
     summary_table_html = ""
-    bet_rows = []
     if run_id:
         predictor_top_sections = []
         predictor_mark_sections = []
@@ -924,21 +841,20 @@ def render_page(
                     build_table_html(top_rows, top_cols, f"Top5 Predictions - {spec['label']}")
                 )
             ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, predictor_run_row)
-            ability_rows_display = ability_rows
             if ability_rows:
                 predictor_mark_sections.append(
                     build_table_html(ability_rows, ability_cols, f"Ability Marks - {spec['label']}")
                 )
             else:
                 mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, predictor_run_row)
-                ability_rows_display = mark_rows
+                ability_rows = mark_rows
                 if mark_rows:
                     predictor_mark_sections.append(
                         build_table_html(mark_rows, mark_cols, f"Integrated Marks - {spec['label']}")
                     )
             pred_csv_text = load_text_file(pred_path)
             note_text = build_mark_note_text(
-                ability_rows_display if ability_rows_display else [],
+                ability_rows if ability_rows else [],
                 pred_path.name if pred_path else "",
                 pred_csv_text,
                 bet_engine_v3_summary=bet_engine_v3_summary,
@@ -959,27 +875,6 @@ def render_page(
             mark_note_text = "\n\n".join(predictor_note_texts)
         if predictor_summary_sections:
             summary_table_html = "".join(predictor_summary_sections)
-        bet_rows, bet_cols = load_bet_plan_table(scope_norm or scope_key, run_id, run_row)
-        bet_plan_table_html = build_bet_plan_table_html(bet_rows, bet_cols, "Bet Plan")
-    gate_status, gate_reason = detect_gate_status(bet_rows)
-    gate_notice_html = build_gate_notice_html(gate_status, gate_reason)
-    gate_notice_text = build_gate_notice_text(gate_status, gate_reason)
-    if gate_notice_html and bet_plan_table_html:
-        bet_plan_table_html = f"{gate_notice_html}{bet_plan_table_html}"
-    if gate_notice_text and bet_plan_text:
-        bet_plan_text = f"{gate_notice_text}\n{bet_plan_text}"
-    run_summary_block = ""
-    summary_id = summary_run_id or (run_row.get("run_id") if run_row else "")
-    run_summary_block = ui_build_run_summary_block(
-        scope_norm,
-        summary_id,
-        load_run_result_summary=load_run_result_summary,
-        load_run_bet_ticket_summary=load_run_bet_ticket_summary,
-        load_run_predictor_summary=load_run_predictor_summary,
-        load_run_bet_type_summary=load_run_bet_type_summary,
-        build_metric_table=build_metric_table,
-        build_table_html=build_table_html,
-    )
     return page_template(
         output_text=output_text,
         error_text=error_text,
@@ -987,14 +882,11 @@ def render_page(
         view_run_options=view_run_options,
         view_selected_run_id=view_selected_run_id,
         top5_text=top5_text if not top5_table_html else "",
-        bet_plan_text=bet_plan_text if not bet_plan_table_html else "",
         top5_table_html=top5_table_html,
         mark_table_html=mark_table_html,
         mark_note_text=mark_note_text,
-        bet_plan_table_html=bet_plan_table_html,
         gemini_policy_html=gemini_policy_html,
         summary_table_html=summary_table_html,
-        run_summary_block=run_summary_block,
         stats_block=stats_block,
         default_scope=default_scope,
     )
@@ -1113,236 +1005,37 @@ def run_pipeline(
     )
     label = f"Exit code: {code}"
     top5_text = extract_top5(output)
-    bet_plan_text = extract_bet_plan(output)
     return render_page(
         scope_key,
         output_text=f"{label}\n{output}",
         top5_text=top5_text,
-        bet_plan_text=bet_plan_text,
         summary_run_id=parse_run_id(output),
     )
 
 
-@app.post("/update_bet_plan", response_class=HTMLResponse)
-def update_bet_plan(
-    race_id: str = Form(""),
-    scope_key: str = Form(""),
-):
-    raw_id = (race_id or "").strip()
-    scope_key = normalize_scope_key(scope_key)
-    run_row = None
-    if not scope_key:
-        scope_key, run_row = infer_scope_and_run(raw_id)
-    if not scope_key:
-        return render_page("", error_text="Enter Run ID or Race ID to update.")
-    race_id = "" if is_run_id(raw_id) else normalize_race_id(raw_id)
-    if run_row is None:
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
-        elif raw_id:
-            run_row = resolve_run(raw_id, scope_key)
-    if run_row is None:
-        return render_page(scope_key, error_text="Run ID / Race ID not found.")
-    if not race_id:
-        race_id = normalize_race_id(run_row.get("race_id", ""))
-    if not race_id:
-        return render_page(scope_key, error_text="Race ID missing; cannot update.")
-    run_id = str(run_row.get("run_id", "")).strip()
-    if not run_id:
-        run_id = infer_run_id_from_row(run_row)
-        if run_id:
-            update_run_row_fields(scope_key, run_row, {"run_id": run_id})
-            run_row["run_id"] = run_id
-    if not run_id:
-        return render_page(scope_key, error_text="Missing run_id for this race.")
-    pred_path = resolve_pred_path(scope_key, run_id, run_row)
-    if not pred_path.exists():
-        return render_page(scope_key, error_text=f"Predictions file not found: {pred_path}")
-    odds_path = resolve_odds_path(scope_key, run_id, run_row)
-    if not odds_path:
-        return render_page(scope_key, error_text="Odds path not found for this run.")
-
-    wide_path = resolve_wide_odds_path(scope_key, run_id, run_row)
-    fuku_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
-    quinella_path = resolve_run_asset_path(scope_key, run_id, run_row, "quinella_odds_path", "quinella_odds")
-    trifecta_path = resolve_run_asset_path(scope_key, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    predictor_paths = resolve_predictor_paths(scope_key, run_id, run_row)
-    prev_odds_snapshot = load_odds_snapshot(odds_path)
-    warnings = []
-    updated, msg, odds_warnings = refresh_odds_for_run(
-        run_row,
-        scope_key,
-        odds_path,
-        wide_odds_path=wide_path,
-        fuku_odds_path=fuku_path,
-        quinella_odds_path=quinella_path,
-        trifecta_odds_path=trifecta_path,
-    )
-    warnings.extend(odds_warnings)
-    if not updated:
-        return render_page(scope_key, error_text=msg)
-
-    if not odds_path.exists():
-        return render_page(scope_key, error_text=f"Odds file not found: {odds_path}")
-    if wide_path and not wide_path.exists():
-        warnings.append(f"wide odds not found: {wide_path}")
-    if fuku_path and not fuku_path.exists():
-        warnings.append(f"fuku odds not found: {fuku_path}")
-    if quinella_path and not quinella_path.exists():
-        warnings.append(f"quinella odds not found: {quinella_path}")
-
-    extra_env = {
-        "SCOPE_KEY": scope_key,
-        "RACE_ID": race_id,
-        "RUN_ID": run_id,
-        "ODDS_PATH": str(odds_path),
-        "PRED_PATH": str(pred_path),
-        "BET_BUDGETS": "2000,5000,10000,50000",
-    }
-    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False))
-    if wide_path:
-        extra_env["WIDE_ODDS_PATH"] = str(wide_path)
-    if fuku_path:
-        extra_env["FUKU_ODDS_PATH"] = str(fuku_path)
-    if quinella_path:
-        extra_env["QUINELLA_ODDS_PATH"] = str(quinella_path)
-    for spec, predictor_path in predictor_paths:
-        if predictor_path is None:
-            continue
-        predictor_path = Path(predictor_path)
-        if not predictor_path.exists():
-            continue
-        if spec["id"] == "main":
-            extra_env["PRED_PATH"] = str(predictor_path)
-        elif spec["id"] == "v2_opus":
-            extra_env["PRED_PATH_V2_OPUS"] = str(predictor_path)
-        elif spec["id"] == "v3_premium":
-            extra_env["PRED_PATH_V3_PREMIUM"] = str(predictor_path)
-        elif spec["id"] == "v4_gemini":
-            extra_env["PRED_PATH_V4_GEMINI"] = str(predictor_path)
-
-    code, output = run_script(
-        BET_PLAN_UPDATE,
-        inputs=[],
-        extra_blanks=1,
-        extra_env=extra_env,
-    )
-    gemini_policy_path = resolve_run_asset_path(
-        scope_key,
-        run_id,
-        run_row,
-        "gemini_policy_path",
-        "gemini_policy",
-        ext=".json",
-    )
-
-    plan_src = BASE_DIR / "bet_plan_update.csv"
-    if code == 0 and plan_src.exists():
-        plan_dest = resolve_plan_path(scope_key, run_id, run_row)
-        plan_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(plan_src, plan_dest)
-        if not update_run_plan_path(scope_key, run_id, plan_dest):
-            warnings.append("runs.csv not updated; plan_path may be stale.")
-        if gemini_policy_path and gemini_policy_path.exists():
-            update_run_row_fields(scope_key, run_row, {"gemini_policy_path": str(gemini_policy_path)})
-            run_row["gemini_policy_path"] = str(gemini_policy_path)
-    else:
-        if not plan_src.exists():
-            warnings.append("bet_plan_update.csv not found after update.")
-
-    curr_odds_snapshot = load_odds_snapshot(odds_path)
-    diff_lines = format_odds_diff(prev_odds_snapshot, curr_odds_snapshot)
-    label = f"Exit code: {code}"
-    output_lines = [label]
-    if warnings:
-        output_lines.extend([f"[WARN] {item}" for item in warnings])
-    output_lines.append(format_path_mtime(odds_path, "odds_path"))
-    output_lines.append(format_path_mtime(wide_path, "wide_odds_path"))
-    output_lines.append(format_path_mtime(fuku_path, "fuku_odds_path"))
-    output_lines.append(format_path_mtime(quinella_path, "quinella_odds_path"))
-    output_lines.append(format_path_mtime(trifecta_path, "trifecta_odds_path"))
-    output_lines.extend(diff_lines)
-    if output:
-        output_lines.append(output)
-    output_text = "\n".join(output_lines).strip()
-    bet_plan_text = extract_bet_plan(output_text)
-    return render_page(
-        scope_key,
-        output_text=output_text,
-        bet_plan_text=bet_plan_text,
-        summary_run_id=run_id,
-        selected_run_id=run_id,
-    )
-
-
-@app.post("/record_pipeline", response_class=HTMLResponse)
-def record_pipeline(
-    run_id: str = Form(""),
-    scope_key: str = Form(""),
-    profit: str = Form(""),
-    note: str = Form(""),
-    top1: str = Form(""),
-    top2: str = Form(""),
-    top3: str = Form(""),
-):
-    if not top1 or not top2 or not top3:
-        return render_page(
-            scope_key,
-            error_text="Actual 1st/2nd/3rd are required.",
-        )
-    run_id = run_id.strip()
-    scope_key = normalize_scope_key(scope_key)
-    run_row = None
-    if not scope_key:
-        scope_key, run_row = infer_scope_and_run(run_id)
-    if not scope_key:
-        return render_page("", error_text="Enter Run ID or Race ID to record results.")
-    if run_row is None:
-        run_row = resolve_run(run_id, scope_key)
-    if run_row is None:
-        race_id = normalize_race_id(run_id)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
-    if run_row is None:
-        return render_page(
-            scope_key,
-            error_text="Run ID / Race ID not found.",
-        )
-    odds_path = run_row.get("odds_path", "")
-    resolved_run_id = run_row.get("run_id", run_id)
-    if not odds_path:
-        odds_path = str(get_data_dir(BASE_DIR, scope_key) / f"odds_{resolved_run_id}.csv")
-    inputs = [resolved_run_id, profit, note, top1, top2, top3]
-    code, output = run_script(
-        RECORD_PIPELINE,
-        inputs=inputs,
-        extra_blanks=4,
-        extra_env={"SCOPE_KEY": scope_key},
-    )
-    label = f"Exit code: {code}"
-    return render_page(
-        scope_key,
-        output_text=f"{label}\n{output}",
-        summary_run_id=resolved_run_id,
-        selected_run_id=resolved_run_id,
-    )
-
 @app.post("/record_predictor", response_class=HTMLResponse)
 def record_predictor(
+    scope_key: str = Form(""),
     run_id: str = Form(""),
     top1: str = Form(""),
     top2: str = Form(""),
     top3: str = Form(""),
 ):
+    scope_norm = normalize_scope_key(scope_key)
+    run_id = str(run_id or "").strip()
     if not top1 or not top2 or not top3:
-        return page_template(
+        return render_page(
+            scope_norm or scope_key,
             error_text="Top1/Top2/Top3 are required.",
+            selected_run_id=run_id,
         )
     inputs = [run_id, top1, top2, top3]
     code, output = run_script(RECORD_PREDICTOR, inputs=inputs, extra_blanks=2)
     label = f"Exit code: {code}"
-    return page_template(
+    return render_page(
+        scope_norm or scope_key,
         output_text=f"{label}\n{output}",
+        selected_run_id=run_id,
     )
 
 
