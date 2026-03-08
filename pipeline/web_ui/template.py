@@ -408,6 +408,7 @@ def page_template(
     .policy-summary-tags {{ display: flex; flex-wrap: wrap; gap: 8px; }}
     .policy-summary-line {{ color: var(--muted); font-size: 12px; }}
     .policy-horse-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
+    .policy-bankroll-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
     .policy-horse-group {{
       display: grid;
       gap: 10px;
@@ -457,6 +458,27 @@ def page_template(
       font-weight: 700;
       min-width: 64px;
     }}
+    .policy-marks {{
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(61, 68, 62, 0.08);
+    }}
+    .policy-mark-row {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+    .policy-mark-item {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(30, 90, 70, 0.10), rgba(255, 250, 243, 0.86));
+      border: 1px solid rgba(30, 90, 70, 0.14);
+    }}
+    .policy-mark-symbol {{ font-size: 18px; font-weight: 800; color: var(--accent-strong); }}
+    .policy-mark-horse {{ font-size: 15px; font-weight: 800; color: var(--ink); }}
     .policy-text-grid {{ display: grid; gap: 12px; grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.9fr); }}
     .policy-text-card {{
       display: grid;
@@ -471,6 +493,7 @@ def page_template(
       border-color: rgba(30, 90, 70, 0.16);
     }}
     .policy-text-card p {{ margin: 0; line-height: 1.7; color: var(--ink-soft); }}
+    .policy-ticket-block {{ display: grid; gap: 10px; }}
     .policy-fold {{
       border-radius: 16px;
       border: 1px solid rgba(61, 68, 62, 0.10);
@@ -775,6 +798,24 @@ def page_template(
         <section class="panel">
           <div class="section-title">
             <div>
+              <div class="eyebrow">Gemini</div>
+              <h2>Manual Buy</h2>
+            </div>
+            <span class="section-chip">manual</span>
+          </div>
+          <form action="/run_gemini_buy" method="post" class="stack-form">
+            <input type="hidden" name="scope_key" id="gemini_scope_key" value="{html.escape(scope_value)}">
+            <div>
+              <label>Run ID</label>
+              <input name="run_id" id="gemini_run_id" inputmode="text" pattern="[0-9_]*" value="{html.escape(current_run)}" placeholder="e.g. 20250101_123456">
+            </div>
+            <p class="helper-text">Before buying, Gemini will show today's P/L, refresh the latest odds, then generate ticket suggestions manually.</p>
+            <button type="submit">Update Odds + Gemini Buy</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="section-title">
+            <div>
               <div class="eyebrow">Predictor</div>
               <h2>Record Result</h2>
             </div>
@@ -783,24 +824,24 @@ def page_template(
           <form action="/record_predictor" method="post" class="stack-form">
             <input type="hidden" name="scope_key" id="record_scope_key" value="{html.escape(scope_value)}">
             <div>
-              <label>Run ID</label>
-              <input name="run_id" id="record_run_id" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456">
+              <label>Run ID / Race ID</label>
+              <input name="run_id" id="record_run_id" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
             </div>
             <div class="field-grid">
               <div>
                 <label>Top1</label>
-                <input name="top1" inputmode="numeric" pattern="[0-9]*" placeholder="1">
+                <input name="top1" placeholder="1st horse name">
               </div>
               <div>
                 <label>Top2</label>
-                <input name="top2" inputmode="numeric" pattern="[0-9]*" placeholder="2">
+                <input name="top2" placeholder="2nd horse name">
               </div>
               <div>
                 <label>Top3</label>
-                <input name="top3" inputmode="numeric" pattern="[0-9]*" placeholder="3">
+                <input name="top3" placeholder="3rd horse name">
               </div>
             </div>
-            <p class="helper-text">Record the actual top-3 finish to refresh predictor accuracy stats.</p>
+            <p class="helper-text">You can enter either a run ID or a race ID. The latest matching run will be used.</p>
             <button type="submit">Record Predictor</button>
           </form>
         </section>
@@ -823,6 +864,8 @@ def page_template(
     const actionInput = document.getElementById("action_id_input");
     const actionRunId = document.getElementById("action_run_id");
     const actionSubmit = document.getElementById("action-submit");
+    const geminiScopeInput = document.getElementById("gemini_scope_key");
+    const geminiRunInput = document.getElementById("gemini_run_id");
     const recordScopeInput = document.getElementById("record_scope_key");
     const recordRunInput = document.getElementById("record_run_id");
     const scopeRadios = document.querySelectorAll('#scope-radio input[name="scope_key"]');
@@ -834,6 +877,7 @@ def page_template(
     function syncActionIds() {{
       const value = actionInput ? actionInput.value.trim() : "";
       if (actionRunId) actionRunId.value = value;
+      if (geminiRunInput && !geminiRunInput.value.trim()) geminiRunInput.value = value;
       if (recordRunInput && !recordRunInput.value.trim()) recordRunInput.value = value;
     }}
 
@@ -847,6 +891,7 @@ def page_template(
       if (scopePill) scopePill.textContent = `Current scope: ${{label}}`;
       if (recentRunStatus) recentRunStatus.textContent = detailText || `scope: ${{label}}`;
       if (recentScopeInput) recentScopeInput.value = scopeKey;
+      if (geminiScopeInput) geminiScopeInput.value = scopeKey;
       if (recordScopeInput) recordScopeInput.value = scopeKey;
     }}
 

@@ -14,10 +14,12 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
 from predictor_catalog import list_predictors, resolve_run_prediction_path
+from gemini_portfolio import extract_ledger_date, load_daily_profit_rows, load_run_tickets, summarize_bankroll
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
 from web_ui.components import (
+    build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
     build_metric_table as ui_build_metric_table,
     build_table_html as ui_build_table_html,
 )
@@ -28,6 +30,7 @@ from web_ui.stats_block import build_stats_block as ui_build_stats_block
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
+BET_PLAN_UPDATE = BASE_DIR / "bet_plan_update.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
@@ -275,11 +278,11 @@ def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=No
     return result.returncode, output.strip()
 
 
-def build_policy_env(cache_enable=False, budget_reuse=False):
+def build_policy_env(cache_enable=False, budget_reuse=False, policy_engine="none"):
     cache_value = "true" if bool(cache_enable) else "false"
     budget_reuse_value = "true" if bool(budget_reuse) else "false"
     return {
-        "POLICY_ENGINE": str(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
+        "POLICY_ENGINE": str(policy_engine or "none"),
         "GEMINI_MODEL": str(
             os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview"
         ),
@@ -548,6 +551,51 @@ def load_predictor_summary(scope_key):
     )
 
 
+def load_gemini_bankroll_summary(run_id="", timestamp=""):
+    ledger_date = extract_ledger_date(run_id, timestamp)
+    return summarize_bankroll(BASE_DIR, ledger_date)
+
+
+def load_gemini_daily_profit_summary(days=30):
+    return load_daily_profit_rows(BASE_DIR, days=days)
+
+
+def load_gemini_run_ticket_rows(run_id):
+    rows = load_run_tickets(BASE_DIR, run_id)
+    out = []
+    for row in rows:
+        out.append(
+            {
+                "status": row.get("status", ""),
+                "bet_type": row.get("bet_type", ""),
+                "horse_no": row.get("horse_nos", ""),
+                "horse_name": row.get("horse_names", ""),
+                "amount_yen": row.get("stake_yen", ""),
+                "odds_used": row.get("odds_used", ""),
+                "profit_yen": row.get("profit_yen", ""),
+            }
+        )
+    return out
+
+
+def build_gemini_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output):
+    parts = []
+    if summary_before:
+        parts.append(
+            (
+                "[gemini_bankroll_before] date={ledger_date} start_bankroll_yen={start_bankroll_yen} "
+                "realized_profit_yen={realized_profit_yen} open_stake_yen={open_stake_yen} "
+                "available_bankroll_yen={available_bankroll_yen}"
+            ).format(**summary_before)
+        )
+    parts.append(f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip())
+    if refresh_warnings:
+        parts.append("[odds_update][warnings] " + "; ".join(str(x) for x in refresh_warnings))
+    if script_output:
+        parts.append(script_output.strip())
+    return "\n".join([part for part in parts if str(part).strip()]).strip()
+
+
 def load_mark_recommendation_table(scope_key, run_id, run_row=None):
     return view_data.load_mark_recommendation_table(
         get_data_dir,
@@ -607,6 +655,59 @@ def _policy_detail_row(label, value, code=False):
     return f'<div class="policy-detail-row"><strong>{html.escape(label)}</strong>{body}</div>'
 
 
+def _policy_mark_html(marks):
+    items = []
+    for mark in list(marks or []):
+        symbol = str(mark.get("symbol", "") or "").strip()
+        horse_no = str(mark.get("horse_no", "") or "").strip()
+        if not symbol or not horse_no:
+            continue
+        items.append(
+            '<div class="policy-mark-item">'
+            f'<span class="policy-mark-symbol">{html.escape(symbol)}</span>'
+            f'<span class="policy-mark-horse">{html.escape(horse_no)}</span>'
+            "</div>"
+        )
+    if not items:
+        return ""
+    return (
+        '<section class="policy-marks">'
+        '<div class="policy-label">Marks</div>'
+        f'<div class="policy-mark-row">{"".join(items)}</div>'
+        "</section>"
+    )
+
+
+def _policy_ticket_html(rows):
+    if not rows:
+        return ""
+    body = []
+    for row in rows:
+        status = str(row.get("status", "") or "").strip() or "pending"
+        body.append(
+            "<tr>"
+            f"<td>{html.escape(status)}</td>"
+            f"<td>{html.escape(str(row.get('bet_type', '') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('horse_no', '') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('horse_name', '') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('amount_yen', '') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('odds_used', '') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('profit_yen', '') or ''))}</td>"
+            "</tr>"
+        )
+    return (
+        '<section class="policy-ticket-block">'
+        '<div class="policy-label">Ticket Plan</div>'
+        '<div class="table-wrap table-wrap--medium">'
+        '<table class="data-table data-table--medium">'
+        "<thead><tr><th>status</th><th>bet_type</th><th>horse_no</th><th>horse_name</th><th>amount_yen</th><th>odds_used</th><th>profit_yen</th></tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        "</table>"
+        "</div>"
+        "</section>"
+    )
+
+
 def build_gemini_policy_html(payload):
     if not isinstance(payload, dict) or not payload:
         return ""
@@ -631,11 +732,32 @@ def build_gemini_policy_html(payload):
         participation = str(output.get("participation_level", "") or "")
         buy_style = str(output.get("buy_style", "") or "")
         strategy_mode = str(output.get("strategy_mode", "") or "")
+        portfolio = dict(item.get("portfolio", {}) or {})
+        portfolio_before = dict(portfolio.get("before", {}) or {})
+        portfolio_after = dict(portfolio.get("after", {}) or {})
         summary_tags = "".join(
             f'<span class="policy-meta-tag">{html.escape(tag)}</span>'
             for tag in [header, decision, participation, buy_style]
             if str(tag or "").strip()
         )
+        bankroll_cards = ""
+        if portfolio_before or portfolio_after:
+            bankroll_cards = (
+                '<div class="policy-bankroll-grid">'
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Available Before</div>'
+                f"<p>{html.escape(str(portfolio_before.get('available_bankroll_yen', '')))} JPY</p>"
+                "</article>"
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Available After</div>'
+                f"<p>{html.escape(str(portfolio_after.get('available_bankroll_yen', '')))} JPY</p>"
+                "</article>"
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Realized P/L Today</div>'
+                f"<p>{html.escape(str(portfolio_after.get('realized_profit_yen', portfolio_before.get('realized_profit_yen', ''))))} JPY</p>"
+                "</article>"
+                "</div>"
+            )
         horse_groups = "".join(
             [
                 _policy_chip_row("Key Horses", list(output.get("key_horses", []) or []), "key"),
@@ -643,6 +765,8 @@ def build_gemini_policy_html(payload):
                 _policy_chip_row("Longshot", list(output.get("longshot_horses", []) or []), "longshot"),
             ]
         )
+        mark_block = _policy_mark_html(list(output.get("marks", []) or []))
+        ticket_block = _policy_ticket_html(list(item.get("tickets", []) or []))
         strategy_text = str(output.get("strategy_text_ja", "") or "").strip()
         tendency = str(output.get("bet_tendency_ja", "") or "").strip()
         text_cards = ""
@@ -713,8 +837,11 @@ def build_gemini_policy_html(payload):
                 <div class="policy-summary-tags">{summary_tags}</div>
                 <div class="policy-summary-line">{html.escape(f"strategy_mode={strategy_mode}" if strategy_mode else "")}</div>
               </div>
+              {bankroll_cards}
               <div class="policy-horse-grid">{horse_groups}</div>
+              {mark_block}
               {text_cards}
+              {ticket_block}
               <details class="policy-fold">
                 <summary>Other Fields</summary>
                 <div class="policy-detail-grid">
@@ -797,6 +924,9 @@ def render_page(
         scope_norm,
         load_predictor_summary=load_predictor_summary,
         build_table_html=build_table_html,
+        load_gemini_bankroll_summary=load_gemini_bankroll_summary,
+        load_gemini_daily_profit_summary=load_gemini_daily_profit_summary,
+        build_daily_profit_chart_html=ui_build_daily_profit_chart_html,
     )
     run_id = ""
     run_row = None
@@ -829,6 +959,21 @@ def render_page(
         predictor_note_texts = []
         bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
         gemini_policy_payload = load_gemini_policy_payload(scope_norm or scope_key, run_id, run_row)
+        if gemini_policy_payload:
+            gemini_policy_payload = dict(gemini_policy_payload)
+            budget_items = [dict(item) for item in list(gemini_policy_payload.get("budgets", []) or [])]
+            live_summary = load_gemini_bankroll_summary(run_id, (run_row or {}).get("timestamp", ""))
+            live_tickets = load_gemini_run_ticket_rows(run_id)
+            if budget_items:
+                first = dict(budget_items[0])
+                portfolio = dict(first.get("portfolio", {}) or {})
+                portfolio.setdefault("before", dict(live_summary))
+                portfolio["after"] = dict(live_summary)
+                first["portfolio"] = portfolio
+                if live_tickets:
+                    first["tickets"] = live_tickets
+                budget_items[0] = first
+            gemini_policy_payload["budgets"] = budget_items
         gemini_policy_html = build_gemini_policy_html(gemini_policy_payload)
         for spec, pred_path in resolve_predictor_paths(scope_norm or scope_key, run_id, run_row):
             if not pred_path or not pred_path.exists():
@@ -997,7 +1142,7 @@ def run_pipeline(
         track_cond,
     ]
     extra_env = {"SCOPE_KEY": scope_key}
-    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False))
+    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False, policy_engine="none"))
     code, output = run_script(
         RUN_PIPELINE,
         inputs=inputs,
@@ -1013,6 +1158,123 @@ def run_pipeline(
     )
 
 
+@app.post("/run_gemini_buy", response_class=HTMLResponse)
+def run_gemini_buy(
+    scope_key: str = Form(""),
+    run_id: str = Form(""),
+):
+    run_id = str(run_id or "").strip()
+    scope_norm = normalize_scope_key(scope_key)
+    run_row = None
+    if not scope_norm:
+        scope_norm, run_row = infer_scope_and_run(run_id)
+    if not scope_norm:
+        return render_page("", error_text="Enter a valid Run ID before triggering Gemini buy.", selected_run_id=run_id)
+    if run_row is None:
+        run_row = resolve_run(run_id, scope_norm)
+    if run_row is None:
+        race_id = normalize_race_id(run_id)
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
+    if run_row is None:
+        return render_page(
+            scope_norm,
+            error_text="Run ID / Race ID not found for Gemini buy.",
+            selected_run_id=run_id,
+        )
+    resolved_run_id = str(run_row.get("run_id", "")).strip() or run_id
+    if not resolved_run_id:
+        return render_page(scope_norm, error_text="Run ID is required for Gemini buy.")
+
+    bankroll_before = load_gemini_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""))
+    available_bankroll = int(bankroll_before.get("available_bankroll_yen", 0) or 0)
+    if available_bankroll <= 0:
+        output_text = build_gemini_buy_output(
+            bankroll_before,
+            False,
+            "No bankroll available for today.",
+            [],
+            "",
+        )
+        return render_page(
+            scope_norm,
+            output_text=output_text,
+            error_text="Gemini bankroll for today is exhausted.",
+            selected_run_id=resolved_run_id,
+            summary_run_id=resolved_run_id,
+        )
+
+    race_id = normalize_race_id(run_row.get("race_id", ""))
+    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
+    quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
+    trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
+    refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
+        run_row,
+        scope_norm,
+        str(odds_path),
+        wide_odds_path=str(wide_odds_path),
+        fuku_odds_path=str(fuku_odds_path),
+        quinella_odds_path=str(quinella_odds_path),
+        trifecta_odds_path=str(trifecta_odds_path),
+    )
+    if not refresh_ok:
+        output_text = build_gemini_buy_output(bankroll_before, refresh_ok, refresh_message, refresh_warnings, "")
+        return render_page(
+            scope_norm,
+            output_text=output_text,
+            error_text="Odds update failed. Gemini buy was not executed.",
+            selected_run_id=resolved_run_id,
+            summary_run_id=resolved_run_id,
+        )
+
+    predictor_env = {}
+    for spec, pred_path in resolve_predictor_paths(scope_norm, resolved_run_id, run_row):
+        if not pred_path or not pred_path.exists():
+            continue
+        env_name = {
+            "main": "PRED_PATH",
+            "v2_opus": "PRED_PATH_V2_OPUS",
+            "v3_premium": "PRED_PATH_V3_PREMIUM",
+            "v4_gemini": "PRED_PATH_V4_GEMINI",
+        }.get(spec["id"])
+        if env_name:
+            predictor_env[env_name] = str(pred_path)
+
+    extra_env = {
+        "SCOPE_KEY": scope_norm,
+        "RACE_ID": race_id,
+        "RUN_ID": resolved_run_id,
+        "BET_BUDGETS": str(available_bankroll),
+        "ODDS_PATH": str(odds_path),
+        "WIDE_ODDS_PATH": str(wide_odds_path),
+        "FUKU_ODDS_PATH": str(fuku_odds_path),
+        "QUINELLA_ODDS_PATH": str(quinella_odds_path),
+    }
+    extra_env.update(predictor_env)
+    extra_env.update(build_policy_env(cache_enable=True, budget_reuse=False, policy_engine="gemini"))
+    code, output = run_script(
+        BET_PLAN_UPDATE,
+        extra_env=extra_env,
+    )
+    label = f"Exit code: {code}"
+    output_text = build_gemini_buy_output(
+        bankroll_before,
+        refresh_ok,
+        refresh_message,
+        refresh_warnings,
+        f"{label}\n{output}",
+    )
+    return render_page(
+        scope_norm,
+        output_text=output_text,
+        error_text="" if code == 0 else "Gemini buy execution failed.",
+        selected_run_id=resolved_run_id,
+        summary_run_id=resolved_run_id,
+    )
+
+
 @app.post("/record_predictor", response_class=HTMLResponse)
 def record_predictor(
     scope_key: str = Form(""),
@@ -1023,19 +1285,34 @@ def record_predictor(
 ):
     scope_norm = normalize_scope_key(scope_key)
     run_id = str(run_id or "").strip()
+    run_row = None
+    if not scope_norm:
+        scope_norm, run_row = infer_scope_and_run(run_id)
+    if run_row is None and scope_norm:
+        run_row = resolve_run(run_id, scope_norm)
+    if run_row is None and scope_norm:
+        race_id = normalize_race_id(run_id)
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
+    resolved_run_id = str((run_row or {}).get("run_id", "") or "").strip() or run_id
     if not top1 or not top2 or not top3:
         return render_page(
             scope_norm or scope_key,
             error_text="Top1/Top2/Top3 are required.",
-            selected_run_id=run_id,
+            selected_run_id=resolved_run_id,
         )
-    inputs = [run_id, top1, top2, top3]
-    code, output = run_script(RECORD_PREDICTOR, inputs=inputs, extra_blanks=2)
+    inputs = [resolved_run_id, top1, top2, top3]
+    code, output = run_script(
+        RECORD_PREDICTOR,
+        inputs=inputs,
+        extra_blanks=2,
+        extra_env={"SCOPE_KEY": scope_norm or scope_key or "central_dirt"},
+    )
     label = f"Exit code: {code}"
     return render_page(
         scope_norm or scope_key,
         output_text=f"{label}\n{output}",
-        selected_run_id=run_id,
+        selected_run_id=resolved_run_id,
     )
 
 

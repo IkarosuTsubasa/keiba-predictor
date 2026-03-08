@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v6"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v6"
+POLICY_CACHE_VERSION = "gemini_policy_v8"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v8"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -96,6 +96,7 @@ class RacePolicyInput(BaseModel):
     odds_full: Dict[str, Any] = Field(default_factory=dict)
     prediction_field_guide: Dict[str, str] = Field(default_factory=dict)
     multi_predictor: Dict[str, Any] = Field(default_factory=dict)
+    portfolio_history: Dict[str, Any] = Field(default_factory=dict)
     candidates: List[PolicyCandidate] = Field(default_factory=list)
     constraints: PolicyConstraints
 
@@ -103,6 +104,16 @@ class RacePolicyInput(BaseModel):
 class FocusPoint(BaseModel):
     type: Literal["horse", "pair", "bet_type", "concept"]
     value: str
+
+
+class PolicyMark(BaseModel):
+    symbol: Literal["◎", "○", "▲", "△", "☆"]
+    horse_no: str
+
+
+class PolicyTicketPlan(BaseModel):
+    id: str
+    stake_yen: int
 
 
 class RacePolicyOutput(BaseModel):
@@ -131,7 +142,9 @@ class RacePolicyOutput(BaseModel):
     bet_tendency_ja: str
     reason_codes: List[str]
     warnings: Optional[List[str]] = None
+    marks: List[PolicyMark] = Field(default_factory=list)
     pick_ids: List[str] = Field(default_factory=list)
+    ticket_plan: List[PolicyTicketPlan] = Field(default_factory=list)
     focus_points: List[FocusPoint] = Field(default_factory=list)
 
 
@@ -205,7 +218,10 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "odds_full": dict(input_obj.odds_full or {}),
         "prediction_field_guide": dict(input_obj.prediction_field_guide or {}),
         "multi_predictor": dict(input_obj.multi_predictor or {}),
+        "portfolio_history": dict(input_obj.portfolio_history or {}),
         "constraints": {
+            "bankroll_yen": int(input_obj.constraints.bankroll_yen or 0),
+            "race_budget_yen": int(input_obj.constraints.race_budget_yen or 0),
             "max_tickets_per_race": int(input_obj.constraints.max_tickets_per_race or 0),
             "high_odds_threshold": float(input_obj.constraints.high_odds_threshold or 0.0),
             "allowed_types": list(input_obj.constraints.allowed_types or []),
@@ -590,6 +606,17 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、candidates の EV を合わせて判断してください。\n"
         "- 最終判断は『4 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
     )
+    portfolio_history_text = (
+        "【あなた自身の購入履歴と資金推移】\n"
+        "- portfolio_history.today には今日ここまでの開始本金、確定損益、未決済で拘束中の金額、利用可能な本金が入っています。\n"
+        "- portfolio_history.recent_days には直近の日別損益と投資額が入っています。\n"
+        "- portfolio_history.lookback_summary には直近期間の総 stake / payout / profit / hit_rate / roi が入っています。\n"
+        "- portfolio_history.bet_type_breakdown には券種ごとの損益傾向が入っています。\n"
+        "- portfolio_history.recent_tickets には最近の購入・決済の軌跡が入っています。\n"
+        "- 今回の判断では、現在レースの予測とオッズを最優先にしつつ、自分の最近の損益推移と買い方の癖も確認してください。\n"
+        "- 直近で連敗・回撤が大きい、または今日すでに open_stake が重い場合は、無理に取り返しに行かず、より保守的な戦略に寄せてください。\n"
+        "- 逆に直近で勝っていても、過信して点数やリスクを膨らませないでください。履歴は反省材料であり、強気化の免罪符ではありません。\n\n"
+    )
     return (
         "あなたは中央競馬・地方競馬のデータ分析を行う「馬券戦略アナリスト」です。\n"
         "入力されたレース情報・予測・オッズ・市場情報をもとに、"
@@ -645,25 +672,35 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- secondary_horses は相手候補\n"
         "- longshot_horses は穴として考慮する馬\n"
         "ただし無理に全カテゴリを埋める必要はありません。\n\n"
-        "8. 出力形式\n"
+        "8. 資金管理\n"
+        "- constraints.bankroll_yen は今日この時点で残っている共有本金です。\n"
+        "- constraints.race_budget_yen はこのレースで使ってよい上限です。\n"
+        "- 1 日に 5〜6 レース程度買う可能性がある前提で、今回 1 レースに資金を寄せすぎないでください。\n"
+        "- 今日の残り本金を見ながら、後続レースに回す余力を意識して配分してください。\n"
+        "- ticket_plan を使って、残り予算の範囲で今回の買い目と金額を決めてください。\n"
+        "- stake_yen は 100 円単位で、ticket_plan 全体の合計は race_budget_yen を超えないでください。\n\n"
+        "9. 出力形式\n"
         "必ず指定された JSON schema に従って出力してください。\n"
         "説明文は strategy_text_ja と bet_tendency_ja に記述してください。\n"
         "JSON 以外のテキストは出力しないでください。\n\n"
         "【追加の絶対ルール】\n"
         "- 入力に存在しない馬・組み合わせ・券種を創作しない\n"
         "- enabled_bet_types は candidates に存在する bet_type のみ使用可能\n"
-        "- key_horses / secondary_horses / longshot_horses / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
+        "- key_horses / secondary_horses / longshot_horses / marks / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
         "- pick_ids は任意。使う場合も candidates[].id のみ使用可能\n"
+        "- ticket_plan を使う場合、id は candidates[].id のみ使用可能\n"
         "- 単勝への過度な偏りは避け、混戦時は保守的に寄せる\n\n"
         "【判断の実務ルール】\n"
         "- participation_level は no_bet / small_bet / normal_bet から選んでください。\n"
         "- buy_style は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / conservative から選んでください。\n"
         "- strategy_mode は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / spread / conservative_single / small_probe から選んでください。\n"
         "- focus_points は horse / pair / bet_type / concept のみ使用可能です。\n"
+        "- marks は ◎ / ○ / ▲ / △ / ☆ を高評価順に必要なものだけ使ってください。\n"
         "- max_ticket_count は no_bet なら 0、small_bet や conservative なら 1〜2、balanced なら 2〜3、pair_focus や spread でも 3〜4 程度に抑えてください。\n"
         "- risk_tilt は保守参加なら low、balanced なら medium、強気の win_focus や spread でも必要な時だけ medium〜high にしてください。\n"
         "- strategy_text_ja は 2〜4 文の自然な日本語で、レースの見立て、参加レベル、主軸券種、見送りなら理由、small_bet なら軽く参加する理由を含めてください。\n"
-        "- bet_tendency_ja は 1 行のみで書いてください。\n\n"
+        "- bet_tendency_ja は 1 行のみで書いてください。\n"
+        "- 参加判断が bet のときは、可能な限り ticket_plan に実際の買い目を入れてください。\n\n"
         "reason_codes は次から必要なものだけを選んでください。\n"
         "- MIXED_FIELD\n"
         "- NORMAL_FIELD\n"
@@ -682,6 +719,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         f"{ticket_cap_text}"
         f"{full_data_text}"
         f"{multi_predictor_text}"
+        f"{portfolio_history_text}"
         "--------------------------------\n"
         "【入力JSON】\n"
         "--------------------------------\n"
@@ -700,12 +738,15 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         '  "key_horses": [],\n'
         '  "secondary_horses": [],\n'
         '  "longshot_horses": [],\n'
+        '  "marks": [{"symbol": "◎ | ○ | ▲ | △ | ☆", "horse_no": ""}],\n'
         '  "focus_points": [{"type": "horse | pair | bet_type | concept", "value": ""}],\n'
         '  "max_ticket_count": 0,\n'
         '  "risk_tilt": "low | medium | high",\n'
         '  "strategy_text_ja": "",\n'
         '  "bet_tendency_ja": "",\n'
         '  "reason_codes": [],\n'
+        '  "pick_ids": [],\n'
+        '  "ticket_plan": [{"id": "", "stake_yen": 100}],\n'
         '  "warnings": []\n'
         "}\n\n"
         "strict JSON only。response_json_schema は以下です。\n"
@@ -770,6 +811,49 @@ def _sanitize_horse_list(values: List[str], allowed_horses: List[str]) -> List[s
     return out
 
 
+def _sanitize_marks(marks: List[PolicyMark], allowed_horses: List[str]) -> List[Dict[str, str]]:
+    allowed = {str(x) for x in allowed_horses}
+    out = []
+    seen_symbols = set()
+    seen_horses = set()
+    for mark in list(marks or []):
+        symbol = str(getattr(mark, "symbol", "") or "").strip()
+        horse_no = str(getattr(mark, "horse_no", "") or "").strip()
+        if (not symbol) or (not horse_no):
+            continue
+        if symbol in seen_symbols or horse_no in seen_horses:
+            continue
+        if horse_no not in allowed:
+            continue
+        seen_symbols.add(symbol)
+        seen_horses.add(horse_no)
+        out.append({"symbol": symbol, "horse_no": horse_no})
+    return out
+
+
+def _sanitize_ticket_plan(ticket_plan: List[PolicyTicketPlan], allowed_ids: set, max_budget: int) -> List[Dict[str, int]]:
+    budget_cap = max(0, int(max_budget or 0))
+    out = []
+    seen_ids = set()
+    used = 0
+    for item in list(ticket_plan or []):
+        ticket_id = str(getattr(item, "id", "") or "").strip()
+        stake_yen = int(getattr(item, "stake_yen", 0) or 0)
+        if (not ticket_id) or (ticket_id in seen_ids) or (ticket_id not in allowed_ids):
+            continue
+        if stake_yen <= 0:
+            continue
+        stake_yen = int(stake_yen // 100) * 100
+        if stake_yen <= 0:
+            continue
+        if budget_cap > 0 and used + stake_yen > budget_cap:
+            continue
+        seen_ids.add(ticket_id)
+        used += stake_yen
+        out.append({"id": ticket_id, "stake_yen": stake_yen})
+    return out
+
+
 def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> RacePolicyOutput:
     allowed_ids = {str(c.id) for c in input_obj.candidates}
     allowed_types = {str(x).strip().lower() for x in list(input_obj.constraints.allowed_types or []) if str(x).strip()}
@@ -812,6 +896,9 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     hard_cap = int(input_obj.constraints.max_tickets_per_race or 0)
     if hard_cap > 0:
         max_ticket_count = min(max_ticket_count, hard_cap)
+    budget_cap = int(input_obj.constraints.race_budget_yen or 0) or int(input_obj.constraints.bankroll_yen or 0)
+    marks = _sanitize_marks(list(output.marks or []), allowed_horses)
+    ticket_plan = _sanitize_ticket_plan(list(output.ticket_plan or []), allowed_ids, budget_cap)
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()
     bet_decision = str(output.bet_decision or "no_bet").strip().lower()
@@ -827,7 +914,9 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         secondary_horses = []
         longshot_horses = []
         max_ticket_count = 0
+        marks = []
         pick_ids = []
+        ticket_plan = []
 
     focus_points = []
     for point in list(output.focus_points or []):
@@ -861,7 +950,9 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
             "bet_tendency_ja": str(output.bet_tendency_ja or "").strip(),
             "reason_codes": [str(x) for x in list(output.reason_codes or []) if str(x).strip()],
             "warnings": [str(x) for x in list(output.warnings or []) if str(x).strip()] if output.warnings else None,
+            "marks": marks,
             "pick_ids": pick_ids,
+            "ticket_plan": ticket_plan,
             "focus_points": focus_points,
         },
     )

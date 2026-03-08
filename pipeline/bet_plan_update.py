@@ -24,6 +24,7 @@ except Exception:
     RacePolicyInput = None
     call_gemini_policy = None
     get_last_call_meta = None
+from gemini_portfolio import build_history_context, extract_ledger_date, reserve_run_tickets, summarize_bankroll
 from predictor_catalog import list_predictors
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
@@ -1791,7 +1792,18 @@ def extract_ai_payload(merged, summary_info):
     }
 
 
-def resolve_policy_constraints(engine_version, budget_yen, summary_info, candidates_count, v2_cfg, v3_cfg, v4_cfg, v5_cfg):
+def resolve_policy_constraints(
+    engine_version,
+    budget_yen,
+    summary_info,
+    candidates_count,
+    v2_cfg,
+    v3_cfg,
+    v4_cfg,
+    v5_cfg,
+    bankroll_yen=0,
+    race_budget_yen=0,
+):
     high_odds_threshold = 10.0
     max_tickets_per_race = 6
     if engine_version == "v2":
@@ -1808,16 +1820,28 @@ def resolve_policy_constraints(engine_version, budget_yen, summary_info, candida
         high_odds_threshold = safe_float(v5_cfg.get("high_odds_threshold", 10.0))
     if max_tickets_per_race <= 0:
         max_tickets_per_race = int(max(1, candidates_count))
+    bankroll_value = max(0, int(bankroll_yen or 0))
+    race_budget_value = max(0, int(race_budget_yen or bankroll_value or 0))
     return {
-        "bankroll_yen": 0,
-        "race_budget_yen": 0,
+        "bankroll_yen": bankroll_value,
+        "race_budget_yen": race_budget_value,
         "max_tickets_per_race": int(max_tickets_per_race),
         "high_odds_threshold": float(high_odds_threshold if high_odds_threshold > 0 else 10.0),
         "allowed_types": ["win", "place", "wide", "quinella"],
     }
 
 
-def build_policy_input_payload(race_id, scope_key, merged, summary_info, candidates, constraints, odds_payload, multi_predictor=None):
+def build_policy_input_payload(
+    race_id,
+    scope_key,
+    merged,
+    summary_info,
+    candidates,
+    constraints,
+    odds_payload,
+    multi_predictor=None,
+    portfolio_history=None,
+):
     ai_payload = extract_ai_payload(merged, summary_info)
     marks_top5 = build_marks_top5_payload(merged)
     predictions = build_predictions_payload(merged, odds_payload)
@@ -1837,6 +1861,7 @@ def build_policy_input_payload(race_id, scope_key, merged, summary_info, candida
         "odds_full": odds_full,
         "prediction_field_guide": prediction_field_guide,
         "multi_predictor": dict(multi_predictor or {}),
+        "portfolio_history": dict(portfolio_history or {}),
         "candidates": list(candidates or []),
         "constraints": dict(constraints or {}),
     }
@@ -1919,6 +1944,23 @@ def build_tickets_from_policy_blueprint(policy, candidates, bankroll, cfg):
     selected_candidates = list(candidates or [])
     if not selected_candidates or not ticket_item_by_id:
         return []
+
+    explicit_ticket_plan = list(policy.get("ticket_plan", []) or [])
+    if explicit_ticket_plan:
+        out = []
+        for ticket in explicit_ticket_plan:
+            ticket_id = str(ticket.get("id", "") or "").strip()
+            stake_yen = int(ticket.get("stake_yen", 0) or 0)
+            if (not ticket_id) or stake_yen <= 0:
+                continue
+            item = dict(ticket_item_by_id.get(ticket_id, {}) or {})
+            if not item:
+                continue
+            rec = dict(item)
+            rec["stake_yen"] = stake_yen
+            out.append(rec)
+        if out:
+            return out
 
     enabled_types = {
         str(x).strip().lower() for x in list(policy.get("enabled_bet_types", []) or []) if str(x).strip()
@@ -2206,7 +2248,12 @@ def resolve_budget_list():
 
 
 def pause_exit():
-    input("Press Enter to exit...")
+    if not sys.stdin or (hasattr(sys.stdin, "isatty") and not sys.stdin.isatty()):
+        return
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        return
 
 
 def append_no_bet_logs(path, rows):
@@ -3256,6 +3303,7 @@ def main():
     shared_policy_output_payload = None
     shared_policy_meta = {}
     shared_policy_source_budget = None
+    gemini_ledger_date = extract_ledger_date(run_id)
     policy_is_budget_agnostic = bool(policy_engine == "gemini")
     plan_columns = [
         "budget_yen",
@@ -3401,6 +3449,13 @@ def main():
                 )
                 if not policy_candidates:
                     policy_candidates, ticket_item_by_id = build_policy_candidates_from_items(normalized_items)
+                bankroll_summary_before = summarize_bankroll(BASE_DIR, gemini_ledger_date)
+                portfolio_history = build_history_context(
+                    BASE_DIR,
+                    gemini_ledger_date,
+                    lookback_days=14,
+                    recent_ticket_limit=10,
+                )
                 constraints = resolve_policy_constraints(
                     engine_version=engine_version,
                     budget_yen=budget_yen,
@@ -3410,6 +3465,8 @@ def main():
                     v3_cfg=bet_engine_v3_cfg,
                     v4_cfg=bet_engine_v4_cfg,
                     v5_cfg=bet_engine_v5_cfg,
+                    bankroll_yen=int(bankroll_summary_before.get("available_bankroll_yen", 0) or 0),
+                    race_budget_yen=int(bankroll_summary_before.get("available_bankroll_yen", 0) or 0),
                 )
                 policy_payload = build_policy_input_payload(
                     race_id=race_id,
@@ -3420,6 +3477,7 @@ def main():
                     constraints=constraints,
                     odds_payload=odds_payload,
                     multi_predictor=multi_predictor_payload,
+                    portfolio_history=portfolio_history,
                 )
                 try:
                     reused_shared_policy = False
@@ -3461,18 +3519,18 @@ def main():
                     if reused_shared_policy:
                         policy_meta = {
                             **dict(shared_policy_meta),
-                            "requested_budget_yen": 0,
-                            "requested_race_budget_yen": 0,
+                            "requested_budget_yen": int(constraints.get("bankroll_yen", 0) or 0),
+                            "requested_race_budget_yen": int(constraints.get("race_budget_yen", 0) or 0),
                             "reused": True,
-                            "source_budget_yen": 0,
+                            "source_budget_yen": int(constraints.get("bankroll_yen", 0) or 0),
                         }
                     else:
                         policy_meta = {
                             **dict(policy_meta),
-                            "requested_budget_yen": 0,
-                            "requested_race_budget_yen": 0,
+                            "requested_budget_yen": int(constraints.get("bankroll_yen", 0) or 0),
+                            "requested_race_budget_yen": int(constraints.get("race_budget_yen", 0) or 0),
                             "reused": False,
-                            "source_budget_yen": 0,
+                            "source_budget_yen": int(constraints.get("bankroll_yen", 0) or 0),
                         }
                     strategy_text_ja = str(policy_output_payload.get("strategy_text_ja", "") or "").strip()
                     bet_tendency_ja = str(policy_output_payload.get("bet_tendency_ja", "") or "").strip()
@@ -3502,12 +3560,32 @@ def main():
                         if warnings_list:
                             print(f"[gemini][warnings] {', '.join(warnings_list)}")
                     if not reused_shared_policy:
+                        rendered_policy_rows, _ = build_rows_from_bet_items(
+                            items=normalized_items,
+                            budget_yen=0,
+                            horse_meta=horse_meta,
+                        )
+                        reserve_run_tickets(
+                            BASE_DIR,
+                            run_id=run_id,
+                            scope_key=SCOPE_KEY,
+                            race_id=race_id,
+                            ledger_date=gemini_ledger_date,
+                            tickets=rendered_policy_rows,
+                        )
+                        bankroll_summary_after = summarize_bankroll(BASE_DIR, gemini_ledger_date)
                         gemini_policy_records.append(
                             {
                                 "budget_yen": 0,
                                 "shared_policy": True,
                                 "output": dict(policy_output_payload),
                                 "meta": dict(policy_meta),
+                                "portfolio": {
+                                    "ledger_date": gemini_ledger_date,
+                                    "before": dict(bankroll_summary_before),
+                                    "after": dict(bankroll_summary_after),
+                                },
+                                "tickets": list(rendered_policy_rows),
                             }
                         )
                 except Exception as exc:

@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from surface_scope import (
     migrate_legacy_data,
 )
 from predictor_catalog import list_predictors, resolve_run_prediction_path
+from gemini_portfolio import settle_run_tickets
 
 import pandas as pd
 
@@ -44,8 +46,13 @@ def load_runs():
     path = DATA_DIR / "runs.csv"
     if not path.exists():
         return []
-    with open(path, "r", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            with open(path, "r", encoding=enc) as f:
+                return list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            continue
+    return []
 
 
 def resolve_pred_path_for_run(run, run_id, race_id, last_run_id):
@@ -178,6 +185,39 @@ def prompt_actual_top3():
     return [name1, name2, name3]
 
 
+def infer_run_id_from_row(run_row):
+    if not run_row:
+        return ""
+    for key in (
+        "run_id",
+        "predictions_path",
+        "odds_path",
+        "wide_odds_path",
+        "fuku_odds_path",
+        "quinella_odds_path",
+        "trifecta_odds_path",
+        "plan_path",
+        "gemini_policy_path",
+    ):
+        text = str(run_row.get(key, "") or "").strip()
+        if key == "run_id" and text:
+            return text
+        match = re.search(r"(\d{8}_\d{6})", text)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def normalize_race_id(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"race_id=(\d+)", raw)
+    if match:
+        return match.group(1)
+    return re.sub(r"\D", "", raw)
+
+
 def main():
     init_scope()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -186,12 +226,32 @@ def main():
         print("No runs found. Run pipeline/run_pipeline.py first.")
         sys.exit(1)
 
-    last_run = runs[-1]["run_id"]
-    run_id = input(f"Run ID [{last_run}]: ").strip() or last_run
-    run = next((r for r in runs if r["run_id"] == run_id), None)
-    if not run:
-        print("Run ID not found.")
+    resolved_runs = []
+    for row in runs:
+        resolved_run_id = infer_run_id_from_row(row)
+        if not resolved_run_id:
+            continue
+        enriched = dict(row)
+        enriched["_resolved_run_id"] = resolved_run_id
+        resolved_runs.append(enriched)
+    if not resolved_runs:
+        print("No runnable entries found in runs.csv. Missing run_id and artifact-derived fallback.")
         sys.exit(1)
+
+    last_run = resolved_runs[-1]["_resolved_run_id"]
+    run_key = input(f"Run ID / Race ID [{last_run}]: ").strip() or last_run
+    run = next((r for r in resolved_runs if r.get("_resolved_run_id") == run_key), None)
+    if run is None:
+        race_id_key = normalize_race_id(run_key)
+        if race_id_key:
+            for row in reversed(resolved_runs):
+                if normalize_race_id(row.get("race_id", "")) == race_id_key:
+                    run = row
+                    break
+    if not run:
+        print("Run ID / Race ID not found.")
+        sys.exit(1)
+    run_id = str(run.get("_resolved_run_id", "")).strip()
 
     race_id = str(run.get("race_id") or "").strip()
     actual_names_raw = prompt_actual_top3()
@@ -306,6 +366,13 @@ def main():
         sys.exit(1)
     replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
     print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
+    gemini_settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw)
+    if gemini_settlement:
+        print(
+            "[gemini_portfolio] settled_tickets={settled_ticket_count} run_stake_yen={run_stake_yen} "
+            "run_payout_yen={run_payout_yen} run_profit_yen={run_profit_yen} "
+            "available_bankroll_yen={available_bankroll_yen}".format(**gemini_settlement)
+        )
     optimizer = BASE_DIR / "optimize_predictor_params.py"
     if optimizer.exists():
         subprocess.run([sys.executable, str(optimizer)], check=False)
