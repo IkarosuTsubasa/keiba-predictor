@@ -1680,14 +1680,29 @@ if use_classifier_model:
     # Early stopping: hold out 15% by race group for validation
     _lgb_es_split = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=42)
     _lgb_has_rid = "race_id" in train_df.columns and train_df["race_id"].notna().mean() > 0.5
+    _lgb_group_count = 0
     if _lgb_has_rid:
-        _lgb_tr_idx, _lgb_va_idx = next(
-            _lgb_es_split.split(train_df, train_df["y"], train_df["race_id"])
-        )
-        X_lgb_tr, y_lgb_tr = X.iloc[_lgb_tr_idx], y.iloc[_lgb_tr_idx]
-        X_lgb_va, y_lgb_va = X.iloc[_lgb_va_idx], y.iloc[_lgb_va_idx]
-        sw_lgb = sample_weight[_lgb_tr_idx] if sample_weight is not None else None
+        _lgb_group_count = int(train_df["race_id"].dropna().nunique())
+    if _lgb_has_rid and _lgb_group_count >= 2:
+        try:
+            _lgb_tr_idx, _lgb_va_idx = next(
+                _lgb_es_split.split(train_df, train_df["y"], train_df["race_id"])
+            )
+        except Exception as exc:
+            print(f"[WARN] LGB early-stopping split failed: {exc}")
+            _lgb_tr_idx, _lgb_va_idx = None, None
+
+        if _lgb_tr_idx is not None and _lgb_va_idx is not None:
+            X_lgb_tr, y_lgb_tr = X.iloc[_lgb_tr_idx], y.iloc[_lgb_tr_idx]
+            X_lgb_va, y_lgb_va = X.iloc[_lgb_va_idx], y.iloc[_lgb_va_idx]
+            sw_lgb = sample_weight[_lgb_tr_idx] if sample_weight is not None else None
+        else:
+            X_lgb_tr, y_lgb_tr = X, y
+            X_lgb_va, y_lgb_va = None, None
+            sw_lgb = sample_weight
     else:
+        if _lgb_has_rid and _lgb_group_count < 2:
+            print("[INFO] LGB early stopping skipped: not enough race_id groups.")
         X_lgb_tr, y_lgb_tr = X, y
         X_lgb_va, y_lgb_va = None, None
         sw_lgb = sample_weight
@@ -1905,4 +1920,5 @@ pred_out.to_csv("predictions.csv", index=False, encoding="utf-8-sig")
 print("Saved: predictions.csv")
 elapsed = datetime.now() - PIPELINE_START
 print(f"[INFO] pipeline elapsed: {elapsed}")
-input("\nPress Enter to exit...")
+if sys.stdin is not None and sys.stdin.isatty():
+    input("\nPress Enter to exit...")
