@@ -1102,6 +1102,8 @@ def run_pipeline(
     race_url: str = Form(""),
     history_url: str = Form(""),
     scope_key: str = Form(""),
+    location: str = Form(""),
+    race_date: str = Form(""),
     surface: str = Form(""),
     distance: str = Form(""),
     track_cond: str = Form(""),
@@ -1111,10 +1113,12 @@ def run_pipeline(
         return render_page("", error_text="Please select a data scope.")
     race_id = normalize_race_id(race_id or race_url)
     history_url = history_url.strip()
-    if not race_id or not history_url:
+    location = str(location or "").strip()
+    race_date = str(race_date or "").strip()
+    if not race_id or not history_url or not location:
         return render_page(
             scope_key,
-            error_text="Race ID and History URL are required.",
+            error_text="Race ID, History URL, and Location are required.",
         )
     if scope_key == "local":
         race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
@@ -1137,6 +1141,8 @@ def run_pipeline(
     inputs = [
         race_url,
         history_url,
+        location,
+        race_date,
         surface,
         distance,
         track_cond,
@@ -1238,6 +1244,7 @@ def run_gemini_buy(
             "v2_opus": "PRED_PATH_V2_OPUS",
             "v3_premium": "PRED_PATH_V3_PREMIUM",
             "v4_gemini": "PRED_PATH_V4_GEMINI",
+            "v5_stacking": "PRED_PATH_V5_STACKING",
         }.get(spec["id"])
         if env_name:
             predictor_env[env_name] = str(pred_path)

@@ -601,6 +601,9 @@ def main():
         print("Missing race_id in Race URL. Please provide a URL with race_id.")
         sys.exit(1)
     history_url = require_value("History search URL (for new_history): ")
+    target_location = require_value("Location (e.g. 中山): ")
+    default_race_date = datetime.now().strftime("%Y-%m-%d")
+    race_date = input(f"Race date [YYYY-MM-DD] [{default_race_date}]: ").strip() or default_race_date
 
     surface_raw = input("Surface 1=turf 2=dirt [auto]: ").strip()
     if not surface_raw:
@@ -717,6 +720,23 @@ def main():
                     "PREDICTOR_TARGET_CONDITION": track_cond_label,
                 },
             )
+        elif spec["id"] == "v5_stacking":
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [],
+                spec["label"],
+                ROOT_DIR,
+                {
+                    "SCOPE_KEY": scope_key,
+                    "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_TARGET_LOCATION": target_location,
+                    "PREDICTOR_TARGET_SURFACE": surface,
+                    "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                    "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                    "PREDICTOR_TARGET_DATE": race_date,
+                    "PREDICTOR_NO_PROMPT": "1",
+                },
+            )
         else:
             continue
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
@@ -736,6 +756,7 @@ def main():
             "v2_opus": "PRED_PATH_V2_OPUS",
             "v3_premium": "PRED_PATH_V3_PREMIUM",
             "v4_gemini": "PRED_PATH_V4_GEMINI",
+            "v5_stacking": "PRED_PATH_V5_STACKING",
         }.get(spec["id"])
         if env_name:
             bet_plan_env[env_name] = str(pred_latest_path)
@@ -849,8 +870,11 @@ def main():
         "history_url": history_url,
         "trigger_race": "",
         "scope": scope_key,
+        "location": target_location,
+        "race_date": race_date,
         "surface": surface,
         "distance": distance,
+        "track_condition": track_cond_label,
         "budget_yen": ",".join(str(v) for v in DEFAULT_BUDGETS),
         "style": "auto",
         "strategy": strategy_name,
@@ -862,6 +886,7 @@ def main():
         "predictions_v2_opus_path": prediction_snapshot_paths.get("v2_opus", ""),
         "predictions_v3_premium_path": prediction_snapshot_paths.get("v3_premium", ""),
         "predictions_v4_gemini_path": prediction_snapshot_paths.get("v4_gemini", ""),
+        "predictions_v5_stacking_path": prediction_snapshot_paths.get("v5_stacking", ""),
         "odds_path": odds_path,
         "wide_odds_path": wide_odds_path,
         "fuku_odds_path": fuku_odds_path,

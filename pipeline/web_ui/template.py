@@ -750,6 +750,16 @@ def page_template(
               <label>History URL</label>
               <input name="history_url" placeholder="https://db.netkeiba.com/...">
             </div>
+            <div class="field-grid">
+              <div>
+                <label>Location</label>
+                <input name="location" placeholder="e.g. 中山">
+              </div>
+              <div>
+                <label>Race Date</label>
+                <input name="race_date" type="date">
+              </div>
+            </div>
             <div>
               <label>Data Scope</label>
               <div class="radio-group" id="scope-radio">
@@ -773,7 +783,7 @@ def page_template(
                 </div>
               </div>
             </div>
-            <p class="helper-text">Pipeline runs now focus on prediction artifacts and Gemini policy output.</p>
+            <p class="helper-text">Pipeline 会生成多预测器产物，并把 V5 需要的场地与日期上下文一并记录。</p>
             <button type="submit">Run Pipeline</button>
           </form>
         </section>

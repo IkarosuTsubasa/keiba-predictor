@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import argparse
 import heapq
 import itertools
@@ -70,35 +70,43 @@ PREDICTOR_PATH_ENV_MAP = {
     "v2_opus": "PRED_PATH_V2_OPUS",
     "v3_premium": "PRED_PATH_V3_PREMIUM",
     "v4_gemini": "PRED_PATH_V4_GEMINI",
+    "v5_stacking": "PRED_PATH_V5_STACKING",
 }
 PREDICTOR_PROFILE_HINTS = {
     "main": {
         "strengths_ja": [
-            "主系統。校準済み確率と順位系シグナルのバランスが良い。",
-            "全体の基準軸として使いやすく、安定度を見やすい。",
+            "従来型のバランス重視モデルで、全体の基準線として使いやすい。",
+            "過去との比較がしやすく、他モデルとの差分確認に向いている。",
         ],
-        "style_ja": "総合バランス型",
+        "style_ja": "バランス型",
     },
     "v2_opus": {
         "strengths_ja": [
-            "ML寄りの上位判定と能力比較が得意な設計。",
-            "時間指数や近走文脈を使う前提で、上位候補の濃淡を見やすい。",
+            "機械学習寄りの評価で、人気に寄りすぎない候補を拾いやすい。",
+            "波乱寄りの目線を確認したい時の補助線として使いやすい。",
         ],
-        "style_ja": "上位抽出型",
+        "style_ja": "穴寄り探索型",
     },
     "v3_premium": {
         "strengths_ja": [
-            "市場オッズとの整合や説明しやすさを重視した視点。",
-            "保守的な買い方や値頃感の判断材料として使いやすい。",
+            "馬場や文脈を厚めに見て、条件差の影響を拾いやすい。",
+            "補正を多めに入れた総合評価で、展開差の確認に向いている。",
         ],
-        "style_ja": "市場融合型",
+        "style_ja": "文脈重視型",
     },
     "v4_gemini": {
         "strengths_ja": [
-            "分類でのTop3確率とLambdaRankの順位付けを混合したハイブリッド設計。",
-            "コース・距離・馬場・馬場指数寄りの適性を明示的に見るため、条件適合の評価に強い。",
+            "Top3 狙いの順位付けと条件適性の両方を見やすい。",
+            "コースや距離、馬場を横断して整合のある予測を作りやすい。",
         ],
-        "style_ja": "文脈適性ハイブリッド型",
+        "style_ja": "適性ハイブリッド型",
+    },
+    "v5_stacking": {
+        "strengths_ja": [
+            "複数モデルのスタッキングと ranker を組み合わせ、上位評価の整合を取りやすい。",
+            "オッズや出走文脈も併用し、人気だけに寄りすぎない総合評価を作りやすい。",
+        ],
+        "style_ja": "スタッキング統合型",
     },
 }
 
@@ -1386,50 +1394,49 @@ def _prediction_col_desc(col):
         "SexMale": "性別フラグ（牡）",
         "SexFemale": "性別フラグ（牝）",
         "SexGelding": "性別フラグ（騸）",
-        "TargetDistance": "対象距離（m）",
-        "fieldsize_med": "想定頭数の中央値",
-        "best_TimeIndexEff": "タイム指数効率（最良）",
+        "TargetDistance": "対象距離",
+        "fieldsize_med": "想定頭数中央値",
+        "best_TimeIndexEff": "タイム指数効率（最大）",
         "avg_TimeIndexEff": "タイム指数効率（平均）",
-        "dist_close": "距離適性の近さ",
-        "Top3Prob_lr": "ロジスティック回帰モデルの3着内確率",
-        "Top3Prob_lgbm": "LightGBMモデルの3着内確率",
-        "Top3Prob_model": "統合モデルの3着内確率",
-        "Top3Prob_est": "推定3着内確率",
-        "Top3Prob": "3着内確率",
-        "Top3Prob_used": "下注判断に使う3着内確率",
-        "jscore_current": "騎手評価スコア（当該レース時点）",
-        "agg_score": "総合評価スコア",
+        "dist_close": "距離適性",
+        "Top3Prob_lr": "ロジスティック回帰の3着内率",
+        "Top3Prob_lgbm": "LightGBMの3着内率",
+        "Top3Prob_model": "統合モデルの3着内率",
+        "Top3Prob_est": "推定3着内率",
+        "Top3Prob": "3着内率",
+        "Top3Prob_used": "採用3着内率",
+        "jscore_current": "騎手評価スコア",
+        "agg_score": "総合スコア",
         "score": "評価スコア",
-        "rank_score": "順位付け用スコア",
-        "rank_score_norm": "順位付けスコアの正規化値",
-        "confidence_score": "予測信頼度スコア",
-        "stability_score": "予測安定性スコア",
-        "validity_score": "予測妥当性スコア",
-        "consistency_score": "予測整合性スコア",
-        "rank_ema": "順位実績のEMA指標",
-        "ev_ema": "期待値のEMA指標",
-        "risk_score": "リスク/不確実性スコア",
-        "horse_key": "内部用の馬キー",
-        "pred_rank": "予測順位（1が最上位）",
-        "win_odds": "単勝オッズの代表値",
-        "place_odds": "複勝オッズの代表値",
+        "rank_score": "順位付けスコア",
+        "rank_score_norm": "順位付けスコア正規化",
+        "confidence_score": "予測信頼度",
+        "stability_score": "予測安定性",
+        "validity_score": "予測妥当性",
+        "consistency_score": "予測整合性",
+        "rank_ema": "順位EMA",
+        "ev_ema": "EV EMA",
+        "risk_score": "リスクスコア",
+        "horse_key": "馬キー",
+        "pred_rank": "予測順位",
+        "win_odds": "単勝オッズ代表値",
+        "place_odds": "複勝オッズ代表値",
     }
     if col in desc_map:
         return desc_map[col]
     if str(col).startswith("ti_"):
         return "タイム指数系特徴量"
     if str(col).startswith("jscore_"):
-        return "騎手/補正スコア系特徴量"
+        return "騎手・補正スコア系特徴量"
     if str(col).startswith("ps_"):
-        return "走法・ポジション系特徴量"
+        return "走法・位置取り特徴量"
     if str(col).startswith("run_"):
         return "直近走パフォーマンス特徴量"
     if str(col).startswith("cup_"):
-        return "同条件（クラス/距離/馬場）傾向特徴量"
+        return "同条件傾向特徴量"
     if str(col).startswith("top3_ti_"):
-        return "上位3着タイム指数の分位特徴量"
-    return "モデル特徴量（内部定義）"
-
+        return "上位タイム指数分位特徴量"
+    return "モデル内部特徴量"
 
 def build_prediction_field_guide(merged):
     if merged is None or merged.empty:

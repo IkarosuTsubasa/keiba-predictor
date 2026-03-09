@@ -38,6 +38,15 @@ PREDICTOR_SPECS = [
         "snapshot_prefix": "predictions_v4_gemini",
         "is_primary": False,
     },
+    {
+        "id": "v5_stacking",
+        "label": "Predictor V5 Stacking",
+        "script_name": "predictor_v5_omc.py",
+        "run_field": "predictions_v5_stacking_path",
+        "latest_filename": "predictions_v5_stacking.csv",
+        "snapshot_prefix": "predictions_v5_stacking",
+        "is_primary": False,
+    },
 ]
 
 
