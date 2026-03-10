@@ -108,6 +108,44 @@ def _build_smoke_input():
                 "score": round((p_quin * odds_quin - 1.0) * (p_quin**0.5), 6),
             }
         )
+    for a, b, odds_exacta in [(1, 2, 18.6), (2, 1, 22.4), (1, 3, 27.1)]:
+        p_exacta = round(min(0.18, 0.035 + (0.01 * a)), 6)
+        candidates.append(
+            {
+                "id": f"exacta:{a}-{b}",
+                "bet_type": "exacta",
+                "legs": [str(a), str(b)],
+                "odds_used": odds_exacta,
+                "p_hit": p_exacta,
+                "ev": round(p_exacta * odds_exacta - 1.0, 6),
+                "score": round((p_exacta * odds_exacta - 1.0) * (p_exacta**0.5), 6),
+            }
+        )
+    for a, b, c, odds_trio, odds_trifecta in [(1, 2, 3, 41.5, 126.4), (1, 2, 4, 55.2, 188.6)]:
+        p_trio = round(min(0.08, 0.018 + (0.004 * a)), 6)
+        p_trifecta = round(min(0.02, 0.004 + (0.0015 * a)), 6)
+        candidates.append(
+            {
+                "id": f"trio:{a}-{b}-{c}",
+                "bet_type": "trio",
+                "legs": [str(a), str(b), str(c)],
+                "odds_used": odds_trio,
+                "p_hit": p_trio,
+                "ev": round(p_trio * odds_trio - 1.0, 6),
+                "score": round((p_trio * odds_trio - 1.0) * (p_trio**0.5), 6),
+            }
+        )
+        candidates.append(
+            {
+                "id": f"trifecta:{a}-{b}-{c}",
+                "bet_type": "trifecta",
+                "legs": [str(a), str(b), str(c)],
+                "odds_used": odds_trifecta,
+                "p_hit": p_trifecta,
+                "ev": round(p_trifecta * odds_trifecta - 1.0, 6),
+                "score": round((p_trifecta * odds_trifecta - 1.0) * (p_trifecta**0.5), 6),
+            }
+        )
 
     payload = {
         "race_id": race_id,
@@ -138,6 +176,19 @@ def _build_smoke_input():
                 {"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 12.0},
                 {"pair": "1-3", "horse_no_a": "1", "horse_no_b": "3", "odds": 15.5},
                 {"pair": "2-3", "horse_no_a": "2", "horse_no_b": "3", "odds": 14.2},
+            ],
+            "exacta": [
+                {"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 18.6},
+                {"pair": "2-1", "horse_no_a": "2", "horse_no_b": "1", "odds": 22.4},
+                {"pair": "1-3", "horse_no_a": "1", "horse_no_b": "3", "odds": 27.1},
+            ],
+            "trio": [
+                {"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 41.5},
+                {"triple": "1-2-4", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "4", "odds": 55.2},
+            ],
+            "trifecta": [
+                {"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 126.4},
+                {"triple": "1-2-4", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "4", "odds": 188.6},
             ],
         },
         "prediction_field_guide": {
@@ -259,7 +310,7 @@ def _build_smoke_input():
             "race_budget_yen": 1200,
             "max_tickets_per_race": 6,
             "high_odds_threshold": 12.0,
-            "allowed_types": ["win", "place", "wide", "quinella"],
+            "allowed_types": ["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"],
         },
     }
     return RacePolicyInput(**payload)

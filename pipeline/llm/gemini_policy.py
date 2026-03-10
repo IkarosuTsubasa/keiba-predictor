@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v8"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v8"
+POLICY_CACHE_VERSION = "gemini_policy_v9"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v9"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -55,14 +55,14 @@ class PolicyPrediction(BaseModel):
 
 
 class PairOddsSnapshot(BaseModel):
-    bet_type: Literal["wide", "quinella"]
+    bet_type: Literal["wide", "quinella", "exacta", "trio", "trifecta"]
     pair: str
     odds: float
 
 
 class PolicyCandidate(BaseModel):
     id: str
-    bet_type: Literal["win", "place", "wide", "quinella"]
+    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]
     legs: List[str]
     odds_used: float
     p_hit: float
@@ -82,7 +82,7 @@ class PolicyConstraints(BaseModel):
     race_budget_yen: int = 0
     max_tickets_per_race: int
     high_odds_threshold: float
-    allowed_types: List[Literal["win", "place", "wide", "quinella"]] = Field(default_factory=list)
+    allowed_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]] = Field(default_factory=list)
 
 
 class RacePolicyInput(BaseModel):
@@ -132,7 +132,7 @@ class RacePolicyOutput(BaseModel):
         "conservative_single",
         "small_probe",
     ]
-    enabled_bet_types: List[Literal["win", "place", "wide", "quinella"]] = Field(default_factory=list)
+    enabled_bet_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]] = Field(default_factory=list)
     construction_style: Optional[Literal["single_axis", "pair_spread", "value_hunt", "conservative_single"]] = None
     key_horses: List[str] = Field(default_factory=list)
     secondary_horses: List[str] = Field(default_factory=list)
@@ -427,11 +427,20 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     candidates = [
         c for c in input_obj.candidates if (not allowed_types) or (str(c.bet_type) in allowed_types)
     ]
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda c: (
+            -float(c.score or 0.0),
+            -float(c.ev or 0.0),
+            -float(c.p_hit or 0.0),
+            str(c.id or ""),
+        ),
+    )
     horses = _horse_pool(input_obj)
     predictions = list(input_obj.predictions or [])
     high_odds_threshold = float(constraints.high_odds_threshold or 10.0)
     has_value = any(float(c.ev) > 0.0 for c in candidates)
-    has_pair_value = any(str(c.bet_type) in ("wide", "quinella") and float(c.ev) > 0.0 for c in candidates)
+    has_combo_value = any(str(c.bet_type) in ("wide", "quinella", "exacta", "trio", "trifecta") and float(c.ev) > 0.0 for c in candidates)
     longshot_candidates = [c for c in candidates if float(c.odds_used) >= high_odds_threshold and float(c.ev) > 0.0]
     top_key = str(predictions[0].horse_no) if predictions else (horses[0] if horses else "")
     second_key = str(predictions[1].horse_no) if len(predictions) >= 2 else ""
@@ -500,38 +509,62 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             },
         )
 
-    if float(ai.gap) >= 0.08 and float(ai.confidence_score) >= 0.62:
-        participation_level = "normal_bet"
+    prioritized = [c for c in ranked_candidates if float(c.ev or 0.0) > 0.0]
+    if not prioritized:
+        prioritized = ranked_candidates[:]
+    enabled = []
+    for cand in prioritized:
+        bet_type = str(cand.bet_type or "").strip().lower()
+        if (not bet_type) or (bet_type in enabled):
+            continue
+        enabled.append(bet_type)
+        if len(enabled) >= 3:
+            break
+    if not enabled and ranked_candidates:
+        enabled = [str(ranked_candidates[0].bet_type or "").strip().lower()]
+
+    top_type = enabled[0] if enabled else ""
+    multi_leg_types = {"wide", "quinella", "exacta", "trio", "trifecta"}
+    top_is_multi_leg = top_type in multi_leg_types
+    only_place = enabled == ["place"]
+    only_win = enabled == ["win"]
+    combo_only = bool(enabled) and all(item in multi_leg_types for item in enabled)
+
+    strong_edge = bool(prioritized and float(prioritized[0].ev or 0.0) > 0.12)
+    weak_conf = float(ai.gap) < 0.03 or float(ai.confidence_score) < 0.56 or float(ai.stability_score) < 0.48
+    participation_level = "small_bet" if weak_conf and not strong_edge else "normal_bet"
+    max_ticket_count = min(
+        max(1, int(constraints.max_tickets_per_race or 1)),
+        1 if only_place and participation_level == "small_bet" else (2 if participation_level == "small_bet" else max(2, min(4, len(prioritized) or len(enabled) or 1))),
+    )
+
+    if only_place and participation_level == "small_bet":
+        buy_style = "place_only"
+        strategy_mode = "place_only"
+    elif only_win:
         buy_style = "win_focus"
         strategy_mode = "win_focus"
-        enabled = ["win", "place"]
-        max_ticket_count = 2
-    elif has_pair_value and float(ai.stability_score) >= 0.5 and int(input_obj.field_size or 0) >= 10:
-        participation_level = "normal_bet"
-        buy_style = "balanced"
-        strategy_mode = "pair_focus"
-        enabled = ["place", "wide", "quinella"]
-        max_ticket_count = 3
+    elif combo_only or top_is_multi_leg:
+        buy_style = "pair_focus"
+        strategy_mode = "pair_focus" if participation_level == "normal_bet" else "small_probe"
+    elif participation_level == "small_bet":
+        buy_style = "conservative"
+        strategy_mode = "small_probe"
+    elif "place" in enabled and len(enabled) <= 2 and "win" not in enabled and not combo_only:
+        buy_style = "place_focus"
+        strategy_mode = "place_focus"
     else:
-        weak_conf = float(ai.gap) < 0.03 or float(ai.confidence_score) < 0.56 or float(ai.stability_score) < 0.48
-        participation_level = "small_bet" if weak_conf else "normal_bet"
-        if participation_level == "small_bet":
-            buy_style = "place_only" if (not has_pair_value or float(ai.stability_score) < 0.45) else "conservative"
-            strategy_mode = "small_probe" if buy_style == "conservative" else "place_only"
-            enabled = ["place"] if buy_style == "place_only" else ["place", "wide"]
-            max_ticket_count = 1 if buy_style == "place_only" else 2
-        else:
-            buy_style = "place_focus" if float(ai.confidence_score) < 0.60 else "balanced"
-            strategy_mode = "place_focus" if buy_style == "place_focus" else "balanced"
-            enabled = ["place", "wide"]
-            max_ticket_count = 3
-        if buy_style == "balanced" and float(ai.confidence_score) >= 0.62:
-            enabled.insert(0, "win")
+        buy_style = "balanced"
+        strategy_mode = "balanced"
 
     enabled = [x for x in enabled if ((not allowed_types) or (x in allowed_types))]
     if not enabled:
         enabled = [str(candidates[0].bet_type)] if candidates else []
-    risk_tilt = "low" if participation_level == "small_bet" else ("low" if float(ai.stability_score) < 0.5 else "medium")
+    risk_tilt = "low"
+    if participation_level == "normal_bet":
+        risk_tilt = "medium"
+    if top_type in {"trio", "trifecta"} and participation_level != "no_bet":
+        risk_tilt = "high" if strong_edge else "medium"
 
     key_horses = [top_key] if top_key else []
     secondary_horses = [x for x in [second_key, third_key] if x and x != top_key]
@@ -539,7 +572,8 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     if longshot_candidates and participation_level != "no_bet":
         strategy_mode = "small_probe" if participation_level == "small_bet" else strategy_mode
         longshot_horses = [str(longshot_candidates[0].legs[0])] if list(longshot_candidates[0].legs or []) else []
-        risk_tilt = "medium"
+        if risk_tilt == "low":
+            risk_tilt = "medium"
 
     construction_style = _derive_construction_style(strategy_mode, buy_style, participation_level)
     text = _render_strategy_text("bet", participation_level, buy_style, strategy_mode, bool(longshot_horses))
@@ -622,10 +656,10 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "【4 predictor の使い方】\n"
         "- v1 は総合バランス型の主軸視点です。まず基準線として参照してください。\n"
         "- v2 は上位抽出・能力比較寄りの視点です。強い上位候補の濃淡確認に向いています。\n"
-        "- v3 は市場融合・説明性寄りの視点です。値頃感や保守的な買い方の妥当性確認に向いています。\n"
+        "- v3 は市場融合・説明性寄りの視点です。値頃感や市場整合性の確認に向いています。\n"
         "- v4 は文脈適性ハイブリッド型です。Top3確率の分類と順位付けを混合し、コース・距離・馬場条件への適合を強く見ています。\n"
-        "- 4 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズが過度に安く妙味がないなら買い方は保守化してください。\n"
-        "- 4 路の見解差が大きい場合は、単勝偏重を避け、複勝・ワイド中心、または small_bet / conservative を優先してください。\n"
+        "- 4 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズとのバランスが悪い場合は券種や配分を柔軟に調整してください。\n"
+        "- 4 路の見解差が大きい場合は、単勝・複勝、馬連・ワイド・馬単などの組み合わせ系、三連系、見送りのいずれが最も合理的かを、そのレースの予測とオッズに基づいて中立的に判断してください。\n"
         "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、candidates の EV を合わせて判断してください。\n"
         "- 最終判断は『4 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
     )
@@ -667,26 +701,19 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- bet_tendency_ja\n"
         "- reason_codes\n\n"
         "【重要ルール】\n"
-        "1. 見送り(no_bet)は最終手段\n"
-        "no_bet は以下の場合のみ選択してください。\n"
-        "- 予測優位性がほぼ無い\n"
-        "- オッズ妙味が全くない\n"
-        "- レースが完全にランダムに近い\n"
-        "少しでも優位性がある場合は、small_bet や conservative を優先してください。\n\n"
-        "2. 少額参加を積極的に使う\n"
-        "レースの信頼度が低くても、small_bet / place_focus / balanced などの形で小さく参加する戦略を検討してください。\n"
-        "完全な見送りは慎重に判断してください。\n\n"
-        "3. オッズだけを理由に穴狙いしない\n"
-        "高オッズは補助的に扱い、基本は予測確率とのバランスを重視してください。\n\n"
-        "4. 混戦レースでは保守的戦略を優先\n"
-        "混戦時は place_focus / balanced / conservative など、確率寄りの戦略を優先してください。\n\n"
-        "5. 券種の選び方\n"
-        "enabled_bet_types は戦略に応じて選択してください。\n"
-        "例:\n"
-        "- place_focus -> [\"place\"] または [\"place\", \"wide\"]\n"
-        "- balanced -> [\"win\", \"place\", \"wide\"]\n"
-        "- pair_focus -> [\"wide\", \"quinella\"]\n"
-        "- win_focus -> [\"win\"]\n\n"
+        "1. 見送り・少額参加・通常参加は中立に選ぶ\n"
+        "no_bet / small_bet / normal_bet のどれも選択可能です。\n"
+        "無理に参加する必要も、無理に見送る必要もありません。予測優位性、オッズ妙味、不確実性、券種構成を総合して判断してください。\n\n"
+        "2. 特定の券種を先入観で優先しない\n"
+        "win / place / wide / quinella / exacta / trio / trifecta のうち、入力に存在する candidates の中から最も合理的なものを選んでください。\n"
+        "単勝系・複勝系・組み合わせ系・三連系のどれにも初期バイアスを持たず、期待値とリスクのバランスで判断してください。\n\n"
+        "3. 高オッズも低オッズも中立に扱う\n"
+        "高オッズだから買う、低オッズだから避ける、のような固定観念は持たず、予測確率と払戻期待のバランスを見てください。\n\n"
+        "4. 混戦レースの扱いも固定化しない\n"
+        "混戦だから必ず保守、という前提は置かず、分散、見送り、組み合わせ重視、単独重視のどれが妥当かをデータから決めてください。\n\n"
+        "5. 券種構成は候補集合から逆算する\n"
+        "enabled_bet_types は、今回の race で優位性があると判断した candidates の bet_type を中心に選んでください。\n"
+        "1種類に絞ってもよく、複数種類を併用しても構いません。\n\n"
         "6. 点数は必要最小限\n"
         "max_ticket_count は合理的な範囲で設定し、過剰な多点買いは避けてください。\n\n"
         "7. 馬の選び方\n"
@@ -711,15 +738,16 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- key_horses / secondary_horses / longshot_horses / marks / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
         "- pick_ids は補助情報です。実際の購入は ticket_plan を基準にします。\n"
         "- ticket_plan の id は candidates[].id のみ使用可能です。\n"
-        "- 単勝への過度な偏りは避け、混戦時は保守的に寄せる\n\n"
+        "- 特定の券種や買い方を機械的に優遇しない\n\n"
         "【判断の実務ルール】\n"
         "- participation_level は no_bet / small_bet / normal_bet から選んでください。\n"
         "- buy_style は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / conservative から選んでください。\n"
         "- strategy_mode は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / spread / conservative_single / small_probe から選んでください。\n"
         "- focus_points は horse / pair / bet_type / concept のみ使用可能です。\n"
         "- marks は ◎ / ○ / ▲ / △ / ☆ を高評価順に必要なものだけ使ってください。\n"
-        "- max_ticket_count は no_bet なら 0、small_bet や conservative なら 1〜2、balanced なら 2〜3、pair_focus や spread でも 3〜4 程度に抑えてください。\n"
-        "- risk_tilt は保守参加なら low、balanced なら medium、強気の win_focus や spread でも必要な時だけ medium〜high にしてください。\n"
+        "- buy_style / strategy_mode は名前に引きずられず、今回の買い目構成を最も近く表すものを選んでください。\n"
+        "- max_ticket_count は期待値の集中度と分散の必要性に応じて設定してください。\n"
+        "- risk_tilt は券種の種類ではなく、今回の配分と不確実性に応じて low / medium / high を選んでください。\n"
         "- strategy_text_ja は 2〜4 文の自然な日本語で、レースの見立て、参加レベル、主軸券種、見送りなら理由、small_bet なら軽く参加する理由を含めてください。\n"
         "- bet_tendency_ja は 1 行のみで書いてください。\n"
         "- 参加判断が bet のときは、必ず ticket_plan に実際の買い目を入れてください。\n\n"

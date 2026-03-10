@@ -56,6 +56,10 @@ def _build_input():
             "win": [{"horse_no": "1", "odds": 3.4}, {"horse_no": "2", "odds": 5.6}],
             "place": [{"horse_no": "1", "odds": 1.8}, {"horse_no": "2", "odds": 2.2}],
             "wide": [{"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 6.5}],
+            "quinella": [{"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 11.4}],
+            "exacta": [{"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 17.8}],
+            "trio": [{"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 39.2}],
+            "trifecta": [{"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 121.0}],
         },
         "prediction_field_guide": {"Top3Prob_model": "3着内確率", "rank_score": "順位スコア"},
         "multi_predictor": {},
@@ -64,13 +68,15 @@ def _build_input():
             {"id": "place:1", "bet_type": "place", "legs": ["1"], "odds_used": 1.8, "p_hit": 0.42, "ev": -0.244, "score": -0.158},
             {"id": "place:2", "bet_type": "place", "legs": ["2"], "odds_used": 2.2, "p_hit": 0.35, "ev": -0.23, "score": -0.136},
             {"id": "wide:1-2", "bet_type": "wide", "legs": ["1", "2"], "odds_used": 6.5, "p_hit": 0.18, "ev": 0.17, "score": 0.072},
+            {"id": "exacta:1-2", "bet_type": "exacta", "legs": ["1", "2"], "odds_used": 17.8, "p_hit": 0.07, "ev": 0.246, "score": 0.065},
+            {"id": "trio:1-2-3", "bet_type": "trio", "legs": ["1", "2", "3"], "odds_used": 39.2, "p_hit": 0.03, "ev": 0.176, "score": 0.03},
         ],
         "constraints": {
             "bankroll_yen": 10000,
             "race_budget_yen": 2400,
             "max_tickets_per_race": 3,
             "high_odds_threshold": 10.0,
-            "allowed_types": ["place", "wide"],
+            "allowed_types": ["place", "wide", "exacta", "trio", "trifecta"],
         },
     }
     return RacePolicyInput(**payload)

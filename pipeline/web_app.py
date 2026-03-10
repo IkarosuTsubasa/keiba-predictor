@@ -18,11 +18,13 @@ from predictor_catalog import list_predictors, resolve_run_prediction_path
 from gemini_portfolio import (
     build_history_context,
     extract_ledger_date,
+    load_exacta_odds_map,
     load_daily_profit_rows,
     load_name_to_no,
     load_pair_odds_map,
     load_place_odds_map,
     load_run_tickets,
+    load_triple_odds_map,
     load_win_odds_map,
     reserve_run_tickets,
     summarize_bankroll,
@@ -902,7 +904,15 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
     }
 
 
-def build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allowed_types):
+def build_policy_candidates(
+    predictions,
+    wide_odds_map,
+    quinella_odds_map,
+    exacta_odds_map,
+    trio_odds_map,
+    trifecta_odds_map,
+    allowed_types,
+):
     candidates = []
     candidate_lookup = {}
     horse_map = {str(item.get("horse_no", "") or ""): item for item in list(predictions or []) if str(item.get("horse_no", "") or "").strip()}
@@ -993,6 +1003,111 @@ def build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allow
                     }
                     candidates.append(candidate)
                     candidate_lookup[candidate["id"]] = candidate
+            if "exacta" in allowed_types:
+                for first, second, first_pred, second_pred in (
+                    (a, b, left, right),
+                    (b, a, right, left),
+                ):
+                    odds = float(exacta_odds_map.get((first, second), 0.0) or 0.0)
+                    if odds <= 0:
+                        continue
+                    first_win = max(0.0, float(first_pred.get("win_prob_est", 0.0) or 0.0))
+                    second_top3 = max(0.0, float(second_pred.get("top3_prob_model", 0.0) or 0.0))
+                    p_hit = max(0.001, min(0.3, first_win * second_top3 * 0.7))
+                    ev = round(p_hit * odds - 1.0, 6)
+                    candidate = {
+                        "id": f"exacta:{first}-{second}",
+                        "bet_type": "exacta",
+                        "legs": [str(first), str(second)],
+                        "odds_used": round(odds, 6),
+                        "p_hit": round(p_hit, 6),
+                        "ev": ev,
+                        "score": round(ev * math.sqrt(max(p_hit, 1e-6)), 6),
+                    }
+                    candidates.append(candidate)
+                    candidate_lookup[candidate["id"]] = candidate
+
+    triple_source = list(predictions[:5])
+    for idx_a, first in enumerate(triple_source):
+        first_no_text = str(first.get("horse_no", "") or "").strip()
+        if not first_no_text:
+            continue
+        first_no = parse_horse_no(first_no_text)
+        if first_no is None:
+            continue
+        for idx_b in range(idx_a + 1, len(triple_source)):
+            second = triple_source[idx_b]
+            second_no_text = str(second.get("horse_no", "") or "").strip()
+            second_no = parse_horse_no(second_no_text)
+            if second_no is None:
+                continue
+            for idx_c in range(idx_b + 1, len(triple_source)):
+                third = triple_source[idx_c]
+                third_no_text = str(third.get("horse_no", "") or "").strip()
+                third_no = parse_horse_no(third_no_text)
+                if third_no is None:
+                    continue
+                trio_key = tuple(sorted((first_no, second_no, third_no)))
+                trio_prob = max(
+                    0.0005,
+                    min(
+                        0.2,
+                        float(first.get("top3_prob_model", 0.0) or 0.0)
+                        * float(second.get("top3_prob_model", 0.0) or 0.0)
+                        * float(third.get("top3_prob_model", 0.0) or 0.0)
+                        * 0.85,
+                    ),
+                )
+                if "trio" in allowed_types:
+                    trio_odds = float(trio_odds_map.get(trio_key, 0.0) or 0.0)
+                    if trio_odds > 0:
+                        ev = round(trio_prob * trio_odds - 1.0, 6)
+                        candidate = {
+                            "id": f"trio:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}",
+                            "bet_type": "trio",
+                            "legs": [str(trio_key[0]), str(trio_key[1]), str(trio_key[2])],
+                            "odds_used": round(trio_odds, 6),
+                            "p_hit": round(trio_prob, 6),
+                            "ev": ev,
+                            "score": round(ev * math.sqrt(max(trio_prob, 1e-6)), 6),
+                        }
+                        candidates.append(candidate)
+                        candidate_lookup[candidate["id"]] = candidate
+                if "trifecta" in allowed_types:
+                    ordered_triples = [
+                        (first_no, second_no, third_no, first, second, third),
+                        (first_no, third_no, second_no, first, third, second),
+                        (second_no, first_no, third_no, second, first, third),
+                        (second_no, third_no, first_no, second, third, first),
+                        (third_no, first_no, second_no, third, first, second),
+                        (third_no, second_no, first_no, third, second, first),
+                    ]
+                    for a_no, b_no, c_no, a_pred, b_pred, c_pred in ordered_triples:
+                        odds = float(trifecta_odds_map.get((a_no, b_no, c_no), 0.0) or 0.0)
+                        if odds <= 0:
+                            continue
+                        p_hit = max(
+                            0.0001,
+                            min(
+                                0.08,
+                                float(a_pred.get("win_prob_est", 0.0) or 0.0)
+                                * float(b_pred.get("top3_prob_model", 0.0) or 0.0)
+                                * float(c_pred.get("top3_prob_model", 0.0) or 0.0)
+                                * 0.55,
+                            ),
+                        )
+                        ev = round(p_hit * odds - 1.0, 6)
+                        candidate = {
+                            "id": f"trifecta:{a_no}-{b_no}-{c_no}",
+                            "bet_type": "trifecta",
+                            "legs": [str(a_no), str(b_no), str(c_no)],
+                            "odds_used": round(odds, 6),
+                            "p_hit": round(p_hit, 6),
+                            "ev": ev,
+                            "score": round(ev * math.sqrt(max(p_hit, 1e-6)), 6),
+                        }
+                        candidates.append(candidate)
+                        candidate_lookup[candidate["id"]] = candidate
     candidates.sort(key=lambda item: (-float(item.get("score", 0.0) or 0.0), -float(item.get("ev", 0.0) or 0.0), str(item.get("id", ""))))
     return candidates, candidate_lookup, horse_map
 
@@ -1000,15 +1115,15 @@ def build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allow
 def build_pair_odds_top(candidate_lookup):
     rows = []
     for candidate in list(candidate_lookup.values()):
-        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella"):
+        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella", "exacta", "trio", "trifecta"):
             continue
         legs = list(candidate.get("legs", []) or [])
-        if len(legs) != 2:
+        if len(legs) < 2:
             continue
         rows.append(
             {
                 "bet_type": str(candidate.get("bet_type", "") or ""),
-                "pair": f"{legs[0]}-{legs[1]}",
+                "pair": "-".join(str(x) for x in legs),
                 "odds": round(float(candidate.get("odds_used", 0.0) or 0.0), 6),
                 "score": float(candidate.get("score", 0.0) or 0.0),
             }
@@ -1112,6 +1227,9 @@ def build_policy_input_payload(
     place_odds_map = load_place_odds_map(fuku_odds_path)
     wide_odds_map = load_pair_odds_map(wide_odds_path)
     quinella_odds_map = load_pair_odds_map(quinella_odds_path)
+    exacta_odds_map = load_exacta_odds_map(exacta_odds_path)
+    trio_odds_map = load_triple_odds_map(trio_odds_path, ordered=False)
+    trifecta_odds_map = load_triple_odds_map(trifecta_odds_path, ordered=True)
     predictions = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
     if not predictions:
         return None, "No valid prediction rows could be built for policy input."
@@ -1124,9 +1242,23 @@ def build_policy_input_payload(
         allowed_types.append("wide")
     if quinella_odds_map:
         allowed_types.append("quinella")
+    if exacta_odds_map:
+        allowed_types.append("exacta")
+    if trio_odds_map:
+        allowed_types.append("trio")
+    if trifecta_odds_map:
+        allowed_types.append("trifecta")
     if not allowed_types:
         return None, "No usable odds were found for LLM buy."
-    candidates, candidate_lookup, horse_map = build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allowed_types)
+    candidates, candidate_lookup, horse_map = build_policy_candidates(
+        predictions,
+        wide_odds_map,
+        quinella_odds_map,
+        exacta_odds_map,
+        trio_odds_map,
+        trifecta_odds_map,
+        allowed_types,
+    )
     if not candidates:
         return None, "Candidate generation failed because odds data is incomplete."
     ledger_date = extract_ledger_date(run_id, (run_row or {}).get("timestamp", ""))

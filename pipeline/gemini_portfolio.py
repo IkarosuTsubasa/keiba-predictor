@@ -290,6 +290,46 @@ def load_pair_odds_map(path):
     return out
 
 
+def load_exacta_odds_map(path):
+    rows = load_rows(path)
+    if not rows:
+        return {}
+    out = {}
+    for row in rows:
+        a = parse_horse_no(row.get("horse_no_a"))
+        b = parse_horse_no(row.get("horse_no_b"))
+        if a is None or b is None:
+            continue
+        try:
+            odds = float(row.get("odds", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if odds > 0:
+            out[(a, b)] = odds
+    return out
+
+
+def load_triple_odds_map(path, ordered=False):
+    rows = load_rows(path)
+    if not rows:
+        return {}
+    out = {}
+    for row in rows:
+        a = parse_horse_no(row.get("horse_no_a"))
+        b = parse_horse_no(row.get("horse_no_b"))
+        c = parse_horse_no(row.get("horse_no_c"))
+        if a is None or b is None or c is None:
+            continue
+        key = (a, b, c) if ordered else tuple(sorted((a, b, c)))
+        try:
+            odds = float(row.get("odds", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if odds > 0:
+            out[key] = odds
+    return out
+
+
 def eval_ticket_hit(bet_type, horse_names, actual_order):
     names = [normalize_name(x) for x in list(horse_names or []) if normalize_name(x)]
     actual = [normalize_name(x) for x in list(actual_order or []) if normalize_name(x)]
@@ -306,6 +346,12 @@ def eval_ticket_hit(bet_type, horse_names, actual_order):
         return 1 if len(names) >= 2 and names[0] in top3 and names[1] in top3 else 0
     if bet == "quinella":
         return 1 if len(names) >= 2 and names[0] in top2 and names[1] in top2 else 0
+    if bet == "exacta":
+        return 1 if len(names) >= 2 and names[0] == actual[0] and names[1] == actual[1] else 0
+    if bet == "trio":
+        return 1 if len(names) >= 3 and set(names[:3]) == set(top3) else 0
+    if bet == "trifecta":
+        return 1 if len(names) >= 3 and names[:3] == top3 else 0
     return 0
 
 
