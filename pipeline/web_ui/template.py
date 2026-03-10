@@ -89,8 +89,6 @@ def page_template(
     scope_label = _scope_label(scope_value)
     current_run = str(view_selected_run_id or "").strip()
     recent_options = view_run_options or run_options or ""
-    policy_engine_value = str(default_policy_engine or "gemini").strip().lower() or "gemini"
-    policy_model_value = str(default_policy_model or "").strip()
 
     output_panel = ""
     if output_text:
@@ -253,8 +251,6 @@ def page_template(
     central_turf_checked = " checked" if scope_value == "central_turf" else ""
     local_checked = " checked" if scope_value == "local" else ""
 
-    policy_engine_gemini_selected = " selected" if policy_engine_value == "gemini" else ""
-    policy_engine_siliconflow_selected = " selected" if policy_engine_value == "siliconflow" else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -739,7 +735,7 @@ def page_template(
       <div class="hero-copy">
         <div class="eyebrow">Keiba Workstation</div>
         <h1>Keiba Local Console</h1>
-        <p>One focused workspace for launching runs, reviewing predictions, inspecting marks, and checking multi-LLM policy output without carrying the old betting workflow.</p>
+        <p>One focused workspace for launching runs, reviewing predictions, inspecting marks, and running the current LLM purchase flow without bringing back the old bet engine stack.</p>
         <div class="hero-subline">
           <span class="hero-pill" id="scope-pill">Current scope: {html.escape(scope_label)}</span>
           <span class="hero-pill">{html.escape("Recent runs ready" if recent_options else "Open a scope to load run history")}</span>
@@ -829,44 +825,40 @@ def page_template(
               <div class="eyebrow">LLM</div>
               <h2>Manual Buy</h2>
             </div>
-            <span class="section-chip">manual</span>
+            <span class="section-chip">policy</span>
           </div>
           <form action="/run_llm_buy" method="post" class="stack-form">
-            <input type="hidden" name="scope_key" id="gemini_scope_key" value="{html.escape(scope_value)}">
+            <input type="hidden" name="scope_key" id="llm_scope_key" value="{html.escape(scope_value)}">
             <div>
-              <label>Run ID</label>
-              <input name="run_id" id="gemini_run_id" inputmode="text" pattern="[0-9_]*" value="{html.escape(current_run)}" placeholder="e.g. 20250101_123456">
+              <label>Run ID / Race ID</label>
+              <input name="run_id" id="llm_run_id" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
             </div>
             <div class="field-grid">
               <div>
-                <label>LLM Engine</label>
-                <select name="policy_engine" id="policy_engine_select">
-                  <option value="gemini"{policy_engine_gemini_selected}>Gemini</option>
-                  <option value="siliconflow"{policy_engine_siliconflow_selected}>SiliconFlow</option>
+                <label>Policy Engine</label>
+                <select name="policy_engine" id="llm_policy_engine">
+                  <option value="gemini"{' selected' if default_policy_engine == 'gemini' else ''}>Gemini</option>
+                  <option value="siliconflow"{' selected' if default_policy_engine == 'siliconflow' else ''}>DeepSeek</option>
                 </select>
               </div>
               <div>
                 <label>Policy Model</label>
-                <input name="policy_model" id="policy_model_input" value="{html.escape(policy_model_value)}" placeholder="leave blank to use default">
+                <input name="policy_model" value="{html.escape(default_policy_model)}" placeholder="leave blank for default">
               </div>
             </div>
-            <p class="helper-text">The selected LLM will reuse the same bankroll, odds refresh, and 10000-yen daily policy flow.</p>
-            <button type="submit">Update Odds + LLM Buy</button>
-          </form>
-          <form action="/run_all_llm_buy" method="post" class="stack-form" style="margin-top:12px;">
-            <input type="hidden" name="scope_key" id="all_llm_scope_key" value="{html.escape(scope_value)}">
-            <div>
-              <label>Run ID</label>
-              <input name="run_id" id="all_llm_run_id" inputmode="text" pattern="[0-9_]*" value="{html.escape(current_run)}" placeholder="e.g. 20250101_123456">
+            <label class="radio-option">
+              <input type="checkbox" name="refresh_odds" value="1" checked>
+              <span class="radio-text">Refresh Odds</span>
+            </label>
+            <p class="helper-text">This runs the policy-only LLM buy flow and writes policy JSON plus ledger reservations. It does not restore the old bet engine.</p>
+            <div class="field-grid">
+              <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
+              <button type="submit" formaction="/run_gemini_buy" class="secondary-button">Gemini Buy</button>
             </div>
-            <p class="helper-text">Run Gemini and DeepSeek in one click with separate bankrolls.</p>
-            <button type="submit">Update Odds + Run All LLMs</button>
+            <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run Gemini + DeepSeek</button>
           </form>
           <form action="/reset_llm_state" method="post" class="stack-form" style="margin-top:12px;">
-            <input type="hidden" name="scope_key" id="reset_llm_scope_key" value="{html.escape(scope_value)}">
-            <input type="hidden" name="run_id" id="reset_llm_run_id" value="{html.escape(current_run)}">
-            <p class="helper-text">Reset all LLM bankrolls and delete generated buy plans/policy artifacts.</p>
-            <button type="submit" class="secondary-button">Reset All LLM State</button>
+            <button type="submit" class="secondary-button">Reset LLM State</button>
           </form>
         </section>
         <section class="panel">
@@ -921,20 +913,10 @@ def page_template(
     const actionInput = document.getElementById("action_id_input");
     const actionRunId = document.getElementById("action_run_id");
     const actionSubmit = document.getElementById("action-submit");
-    const geminiScopeInput = document.getElementById("gemini_scope_key");
-    const geminiRunInput = document.getElementById("gemini_run_id");
-    const allLlmScopeInput = document.getElementById("all_llm_scope_key");
-    const allLlmRunInput = document.getElementById("all_llm_run_id");
-    const resetLlmScopeInput = document.getElementById("reset_llm_scope_key");
-    const resetLlmRunInput = document.getElementById("reset_llm_run_id");
-    const policyEngineSelect = document.getElementById("policy_engine_select");
-    const policyModelInput = document.getElementById("policy_model_input");
+    const llmScopeInput = document.getElementById("llm_scope_key");
+    const llmRunInput = document.getElementById("llm_run_id");
     const recordScopeInput = document.getElementById("record_scope_key");
     const recordRunInput = document.getElementById("record_run_id");
-    const policyDefaults = {{
-      gemini: "gemini-3.1-flash-lite-preview",
-      siliconflow: "Pro/deepseek-ai/DeepSeek-V3.2",
-    }};
     const scopeRadios = document.querySelectorAll('#scope-radio input[name="scope_key"]');
     const recentSelect = document.getElementById("recent_run_select");
     const recentScopeInput = document.getElementById("recent_scope_key");
@@ -944,9 +926,7 @@ def page_template(
     function syncActionIds() {{
       const value = actionInput ? actionInput.value.trim() : "";
       if (actionRunId) actionRunId.value = value;
-      if (geminiRunInput && !geminiRunInput.value.trim()) geminiRunInput.value = value;
-      if (allLlmRunInput && !allLlmRunInput.value.trim()) allLlmRunInput.value = value;
-      if (resetLlmRunInput && !resetLlmRunInput.value.trim()) resetLlmRunInput.value = value;
+      if (llmRunInput) llmRunInput.value = value;
       if (recordRunInput && !recordRunInput.value.trim()) recordRunInput.value = value;
     }}
 
@@ -960,9 +940,7 @@ def page_template(
       if (scopePill) scopePill.textContent = `Current scope: ${{label}}`;
       if (recentRunStatus) recentRunStatus.textContent = detailText || `scope: ${{label}}`;
       if (recentScopeInput) recentScopeInput.value = scopeKey;
-      if (geminiScopeInput) geminiScopeInput.value = scopeKey;
-      if (allLlmScopeInput) allLlmScopeInput.value = scopeKey;
-      if (resetLlmScopeInput) resetLlmScopeInput.value = scopeKey;
+      if (llmScopeInput) llmScopeInput.value = scopeKey;
       if (recordScopeInput) recordScopeInput.value = scopeKey;
     }}
 
@@ -1033,20 +1011,6 @@ def page_template(
         }});
       }});
       updateScopeLabels(getSelectedScope());
-    }}
-
-    if (policyEngineSelect && policyModelInput) {{
-      const syncPolicyModel = () => {{
-        const engine = (policyEngineSelect.value || "gemini").trim().toLowerCase();
-        const defaultModel = policyDefaults[engine] || "";
-        const current = (policyModelInput.value || "").trim();
-        const knownDefaults = Object.values(policyDefaults);
-        if (!current || knownDefaults.includes(current)) {{
-          policyModelInput.value = defaultModel;
-        }}
-      }};
-      policyEngineSelect.addEventListener("change", syncPolicyModel);
-      syncPolicyModel();
     }}
 
     const copyNoteBtn = document.getElementById("copy-note-marks");

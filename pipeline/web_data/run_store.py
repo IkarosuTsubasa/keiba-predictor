@@ -90,25 +90,3 @@ def update_run_row_fields(
             writer.writerow({name: row.get(name, "") for name in fieldnames})
     return True
 
-
-def update_run_plan_path(get_data_dir, base_dir, load_runs_with_header_func, scope_key, run_id, plan_path):
-    runs_path = get_data_dir(base_dir, scope_key) / "runs.csv"
-    rows, fieldnames, enc = load_runs_with_header_func(scope_key)
-    if not rows or not fieldnames:
-        return False
-    updated = False
-    if "plan_path" not in fieldnames:
-        fieldnames.append("plan_path")
-    for row in rows:
-        if row.get("run_id") == run_id:
-            row["plan_path"] = str(plan_path)
-            updated = True
-            break
-    if not updated:
-        return False
-    with open(runs_path, "w", newline="", encoding=enc, errors="replace") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({name: row.get(name, "") for name in fieldnames})
-    return True

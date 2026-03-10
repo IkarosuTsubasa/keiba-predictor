@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,30 @@ def prompt_value(label):
     return input(label).strip()
 
 
+def parse_amount_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    parts = re.split(r"[,\s/]+", text)
+    total = 0.0
+    found = False
+    for part in parts:
+        token = str(part or "").strip()
+        if not token:
+            continue
+        try:
+            total += float(token)
+            found = True
+        except ValueError:
+            continue
+    if not found:
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            return 0
+    return int(total)
+
+
 def main():
     init_scope()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,16 +110,9 @@ def main():
         print("Invalid profit value.")
         sys.exit(1)
 
-    base_amount = 0
-    try:
-        base_amount = int(float(run.get("amount_yen", 0)))
-    except ValueError:
-        base_amount = 0
+    base_amount = parse_amount_value(run.get("amount_yen", 0))
     if base_amount <= 0:
-        try:
-            base_amount = int(float(run.get("budget_yen", 0)))
-        except ValueError:
-            base_amount = 0
+        base_amount = parse_amount_value(run.get("budget_yen", 0))
 
     roi = ""
     if base_amount > 0:

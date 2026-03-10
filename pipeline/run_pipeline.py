@@ -746,32 +746,6 @@ def main():
             sys.exit(1)
         sleep_between_scrapes()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    bet_plan_env = {"RACE_ID": race_id, "RUN_ID": run_id}
-    for spec in predictor_specs:
-        pred_latest_path = latest_prediction_paths.get(spec["id"])
-        if not pred_latest_path:
-            continue
-        env_name = {
-            "main": "PRED_PATH",
-            "v2_opus": "PRED_PATH_V2_OPUS",
-            "v3_premium": "PRED_PATH_V3_PREMIUM",
-            "v4_gemini": "PRED_PATH_V4_GEMINI",
-            "v5_stacking": "PRED_PATH_V5_STACKING",
-        }.get(spec["id"])
-        if env_name:
-            bet_plan_env[env_name] = str(pred_latest_path)
-    if strategy_name:
-        bet_plan_env["BET_STRATEGY"] = strategy_name
-    bet_plan_env["BET_BUDGETS"] = ",".join(str(v) for v in DEFAULT_BUDGETS)
-    run_script(
-        BASE_DIR / "bet_plan_update.py",
-        [],
-        "bet_plan_update",
-        BASE_DIR,
-        bet_plan_env,
-        extra_lines=1,
-    )
-
     race_suffix = f"_{race_id}"
     race_dir = DATA_DIR / race_id
     race_dir.mkdir(parents=True, exist_ok=True)
@@ -821,47 +795,6 @@ def main():
         shutil.copy2(trifecta_src, trifecta_dest)
         trifecta_odds_path = str(trifecta_dest)
 
-    plan_path = BASE_DIR / "bet_plan_update.csv"
-    plan_log_path = ""
-    gemini_policy_path = ""
-    tickets = 0
-    amount_yen = 0
-    if plan_path.exists():
-        plan_dest = race_dir / f"bet_plan_{run_id}{race_suffix}.csv"
-        shutil.copy2(plan_path, plan_dest)
-        plan_log_path = str(plan_dest)
-        df = None
-        try:
-            import pandas as pd
-
-            df = pd.read_csv(plan_path, encoding="utf-8-sig")
-        except Exception:
-            df = None
-        if df is not None and not df.empty:
-            hard_blocked = False
-            if "gate_status" in df.columns:
-                hard_blocked = (
-                    df["gate_status"].astype(str).str.lower().eq("hard_fail").any()
-                )
-            if hard_blocked:
-                tickets = 0
-                amount_yen = 0
-            else:
-                metric_df = df
-                if "budget_yen" in metric_df.columns:
-                    metric_df = metric_df[
-                        pd.to_numeric(metric_df["budget_yen"], errors="coerce").fillna(0).astype(int) == 2000
-                    ]
-                metric_df = metric_df[
-                    metric_df["bet_type"].astype(str).str.lower() != "trifecta_rec"
-                ] if "bet_type" in metric_df.columns else metric_df
-                tickets = int(len(metric_df))
-                if "amount_yen" in metric_df.columns:
-                    amount_yen = int(pd.to_numeric(metric_df["amount_yen"], errors="coerce").fillna(0).sum())
-    gemini_policy_file = race_dir / f"gemini_policy_{run_id}{race_suffix}.json"
-    if gemini_policy_file.exists():
-        gemini_policy_path = str(gemini_policy_file)
-
     row = {
         "run_id": run_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -892,10 +825,11 @@ def main():
         "fuku_odds_path": fuku_odds_path,
         "quinella_odds_path": quinella_odds_path,
         "trifecta_odds_path": trifecta_odds_path,
-        "plan_path": plan_log_path or str(plan_path),
-        "gemini_policy_path": gemini_policy_path,
-        "tickets": tickets,
-        "amount_yen": amount_yen,
+        "plan_path": "",
+        "gemini_policy_path": "",
+        "siliconflow_policy_path": "",
+        "tickets": "",
+        "amount_yen": "",
     }
     append_csv(DATA_DIR / "runs.csv", list(row.keys()), row)
     print(f"\nLogged run: {run_id}")

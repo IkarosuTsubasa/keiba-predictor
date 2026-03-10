@@ -1,6 +1,7 @@
 import csv
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -14,14 +15,26 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
 from predictor_catalog import list_predictors, resolve_run_prediction_path
-from gemini_portfolio import extract_ledger_date, load_daily_profit_rows, load_run_tickets, summarize_bankroll
+from gemini_portfolio import (
+    build_history_context,
+    extract_ledger_date,
+    load_daily_profit_rows,
+    load_name_to_no,
+    load_pair_odds_map,
+    load_place_odds_map,
+    load_run_tickets,
+    load_win_odds_map,
+    reserve_run_tickets,
+    summarize_bankroll,
+)
 from llm.policy_runtime import (
     DEFAULT_GEMINI_MODEL,
-    DEFAULT_SILICONFLOW_MODEL,
+    call_policy,
+    get_last_call_meta,
     normalize_policy_engine,
     resolve_policy_model,
 )
-from llm_state import reset_llm_state
+from llm_state import reset_llm_state as reset_llm_state_files
 from local_env import load_local_env
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
@@ -39,7 +52,6 @@ from web_ui.stats_block import build_stats_block as ui_build_stats_block
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
-BET_PLAN_UPDATE = BASE_DIR / "bet_plan_update.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
@@ -153,21 +165,6 @@ def update_run_row_fields(scope_key, run_row, updates):
         scope_key,
         run_row,
         updates,
-    )
-
-
-def resolve_plan_path(scope_key, run_id, run_row):
-    return run_resolver.resolve_plan_path(get_data_dir, BASE_DIR, scope_key, run_id, run_row)
-
-
-def update_run_plan_path(scope_key, run_id, plan_path):
-    return run_store.update_run_plan_path(
-        get_data_dir,
-        BASE_DIR,
-        load_runs_with_header,
-        scope_key,
-        run_id,
-        plan_path,
     )
 
 
@@ -288,27 +285,6 @@ def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=No
     return result.returncode, output.strip()
 
 
-def build_policy_env(cache_enable=False, budget_reuse=False, policy_engine="none", policy_model=""):
-    cache_value = "true" if bool(cache_enable) else "false"
-    budget_reuse_value = "true" if bool(budget_reuse) else "false"
-    engine = normalize_policy_engine(policy_engine)
-    model = resolve_policy_model(
-        engine,
-        policy_model,
-        os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-    )
-    return {
-        "POLICY_ENGINE": str(engine or "none"),
-        "POLICY_MODEL": str(model or ""),
-        "GEMINI_MODEL": str(os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL) or DEFAULT_GEMINI_MODEL),
-        "SILICONFLOW_MODEL": str(
-            os.environ.get("SILICONFLOW_MODEL", DEFAULT_SILICONFLOW_MODEL) or DEFAULT_SILICONFLOW_MODEL
-        ),
-        "POLICY_CACHE_ENABLE": cache_value,
-        "POLICY_BUDGET_REUSE": budget_reuse_value,
-    }
-
-
 def extract_section(output_text, start_label, end_label=None):
     if not output_text:
         return ""
@@ -328,16 +304,6 @@ def extract_section(output_text, start_label, end_label=None):
 
 def extract_top5(output_text):
     return extract_section(output_text, "Top5 predictions:", "Saved: predictions.csv")
-
-
-def extract_bet_plan(output_text):
-    section = extract_section(output_text, "Bet plan:")
-    if not section:
-        return ""
-    end_idx = section.find("Saved:")
-    if end_idx >= 0:
-        section = section[:end_idx]
-    return section.strip()
 
 def parse_run_id(output_text):
     if not output_text:
@@ -632,7 +598,7 @@ def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_wa
             (
                 "[bankroll_before] date={ledger_date} start_bankroll_yen={start_bankroll_yen} "
                 "realized_profit_yen={realized_profit_yen} open_stake_yen={open_stake_yen} "
-                "available_bankroll_yen={available_bankroll_yen}"
+                "available_bankroll_yen={available_bankroll_yen} pending_tickets={pending_tickets}"
             ).format(**summary_before)
         )
     parts.append(f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip())
@@ -647,6 +613,845 @@ def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_wa
 
 def build_gemini_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output):
     return build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output, "gemini")
+
+
+def load_csv_rows_flexible(path):
+    if not path:
+        return []
+    path = Path(path)
+    if not path.exists():
+        return []
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            with open(path, "r", encoding=enc, newline="") as f:
+                return list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            continue
+    return []
+
+
+def parse_horse_no(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        pass
+    digits = re.findall(r"\d+", text)
+    if len(digits) == 1:
+        return int(digits[0])
+    return None
+
+
+def _pick_first_value(row, keys, default=""):
+    for key in keys:
+        if key in row:
+            value = row.get(key)
+            text = str(value or "").strip()
+            if text:
+                return value
+    return default
+
+
+def _prediction_prob_value(row):
+    for key in ("Top3Prob_model", "top3_prob_model", "Top3Prob", "top3_prob"):
+        if key in row:
+            return max(0.0, to_float(row.get(key)))
+    return 0.0
+
+
+def _prediction_rank_value(row, fallback_rank):
+    explicit = to_int_or_none(_pick_first_value(row, ("pred_rank", "PredRank", "rank", "Rank"), ""))
+    return explicit if explicit is not None and explicit > 0 else int(fallback_rank)
+
+
+def _prediction_score_value(row):
+    for key in ("rank_score_norm", "rank_score", "RankScore", "score"):
+        if key in row:
+            value = to_float(row.get(key))
+            if value:
+                return value
+    return 0.0
+
+
+def _linear_rank_norm(index, total):
+    if total <= 1:
+        return 1.0
+    return round(max(0.05, 1.0 - (float(index) / float(total - 1))), 6)
+
+
+def _normalize_score_list(items):
+    if not items:
+        return items
+    values = [float(item.get("_raw_rank_score", 0.0) or 0.0) for item in items]
+    max_v = max(values)
+    min_v = min(values)
+    if max_v > min_v:
+        span = max_v - min_v
+        for item in items:
+            raw = float(item.get("_raw_rank_score", 0.0) or 0.0)
+            item["rank_score_norm"] = round((raw - min_v) / span, 6)
+        return items
+    for idx, item in enumerate(items):
+        item["rank_score_norm"] = _linear_rank_norm(idx, len(items))
+    return items
+
+
+def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map):
+    items = []
+    for idx, row in enumerate(list(pred_rows or []), start=1):
+        horse_name = str(_pick_first_value(row, ("HorseName", "horse_name", "name"), "") or "").strip()
+        if not horse_name:
+            continue
+        horse_no_raw = _pick_first_value(row, ("horse_no", "HorseNo", "umaban", "馬番"), "")
+        horse_no = str(horse_no_raw or "").strip()
+        if not horse_no:
+            mapped = name_to_no_map.get(normalize_name(horse_name))
+            if mapped is not None:
+                horse_no = str(mapped)
+        top3_prob = _prediction_prob_value(row)
+        items.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": horse_name,
+                "pred_rank": _prediction_rank_value(row, idx),
+                "top3_prob_model": top3_prob,
+                "confidence_score": max(0.0, to_float(row.get("confidence_score"))),
+                "stability_score": max(0.0, to_float(row.get("stability_score"))),
+                "risk_score": max(0.0, to_float(row.get("risk_score"))),
+                "_raw_rank_score": _prediction_score_value(row),
+                "source_row": dict(row),
+            }
+        )
+    if not items:
+        return []
+    items.sort(
+        key=lambda item: (
+            int(item.get("pred_rank", 9999) or 9999),
+            -float(item.get("top3_prob_model", 0.0) or 0.0),
+            str(item.get("horse_no", "")),
+            str(item.get("horse_name", "")),
+        )
+    )
+    for idx, item in enumerate(items, start=1):
+        item["pred_rank"] = idx
+    _normalize_score_list(items)
+    top3_sum = sum(max(float(item.get("top3_prob_model", 0.0) or 0.0), 0.000001) for item in items)
+    for item in items:
+        horse_name = str(item.get("horse_name", "") or "")
+        horse_no_int = parse_horse_no(item.get("horse_no"))
+        item["win_odds"] = round(float(win_odds_map.get(normalize_name(horse_name), 0.0) or 0.0), 6)
+        item["place_odds"] = round(float(place_odds_map.get(horse_no_int, 0.0) or 0.0), 6) if horse_no_int else 0.0
+        item["win_prob_est"] = round(
+            min(
+                float(item.get("top3_prob_model", 0.0) or 0.0),
+                float(item.get("top3_prob_model", 0.0) or 0.0) / max(top3_sum, 1e-6),
+            ),
+            6,
+        )
+    return items
+
+
+def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map):
+    profiles = []
+    summaries = []
+    consensus = {}
+    available_ids = []
+    top1_horses = []
+    for spec, pred_path in resolve_predictor_paths(scope_key, run_id, run_row):
+        if not pred_path or not pred_path.exists():
+            continue
+        pred_rows = load_csv_rows_flexible(pred_path)
+        ranking = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
+        if not ranking:
+            continue
+        available_ids.append(spec["id"])
+        profiles.append(
+            {
+                "predictor_id": spec["id"],
+                "predictor_label": spec["label"],
+                "available": True,
+                "style_ja": "",
+                "strengths_ja": [],
+            }
+        )
+        top_slice = ranking[:5]
+        top_choice = top_slice[0]
+        top1_horses.append(str(top_choice.get("horse_no", "") or ""))
+        summaries.append(
+            {
+                "predictor_id": spec["id"],
+                "predictor_label": spec["label"],
+                "top_choice_horse_no": str(top_choice.get("horse_no", "") or ""),
+                "top_choice_horse_name": str(top_choice.get("horse_name", "") or ""),
+                "top_choice_top3_prob_model": round(float(top_choice.get("top3_prob_model", 0.0) or 0.0), 6),
+                "top_horses": [
+                    {
+                        "horse_no": str(item.get("horse_no", "") or ""),
+                        "horse_name": str(item.get("horse_name", "") or ""),
+                        "pred_rank": int(item.get("pred_rank", 0) or 0),
+                        "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                        "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+                        "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+                        "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+                    }
+                    for item in top_slice
+                ],
+            }
+        )
+        for item in top_slice:
+            horse_no = str(item.get("horse_no", "") or "").strip()
+            if not horse_no:
+                continue
+            entry = consensus.setdefault(
+                horse_no,
+                {
+                    "horse_no": horse_no,
+                    "horse_name": str(item.get("horse_name", "") or ""),
+                    "top1_votes": 0,
+                    "top3_votes": 0,
+                    "predictor_count": 0,
+                    "pred_rank_total": 0.0,
+                    "top3_prob_total": 0.0,
+                    "rank_score_total": 0.0,
+                    "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+                    "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+                    "predictors_support": [],
+                },
+            )
+            entry["predictor_count"] += 1
+            entry["pred_rank_total"] += float(item.get("pred_rank", 0) or 0)
+            entry["top3_prob_total"] += float(item.get("top3_prob_model", 0.0) or 0.0)
+            entry["rank_score_total"] += float(item.get("rank_score_norm", 0.0) or 0.0)
+            if int(item.get("pred_rank", 99) or 99) == 1:
+                entry["top1_votes"] += 1
+            if int(item.get("pred_rank", 99) or 99) <= 3:
+                entry["top3_votes"] += 1
+            entry["predictors_support"].append(spec["label"])
+    consensus_rows = []
+    for horse_no, entry in consensus.items():
+        count = max(1, int(entry.get("predictor_count", 0) or 0))
+        consensus_rows.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": str(entry.get("horse_name", "") or ""),
+                "top1_votes": int(entry.get("top1_votes", 0) or 0),
+                "top3_votes": int(entry.get("top3_votes", 0) or 0),
+                "predictor_count": count,
+                "avg_pred_rank": round(float(entry.get("pred_rank_total", 0.0) or 0.0) / count, 4),
+                "avg_top3_prob_model": round(float(entry.get("top3_prob_total", 0.0) or 0.0) / count, 6),
+                "avg_rank_score_norm": round(float(entry.get("rank_score_total", 0.0) or 0.0) / count, 6),
+                "win_odds": round(float(entry.get("win_odds", 0.0) or 0.0), 6),
+                "place_odds": round(float(entry.get("place_odds", 0.0) or 0.0), 6),
+                "predictors_support": list(entry.get("predictors_support", []) or []),
+            }
+        )
+    consensus_rows.sort(
+        key=lambda item: (
+            -int(item.get("top1_votes", 0) or 0),
+            -int(item.get("top3_votes", 0) or 0),
+            float(item.get("avg_pred_rank", 999.0) or 999.0),
+            str(item.get("horse_no", "")),
+        )
+    )
+    return {
+        "profiles": profiles,
+        "summaries": summaries,
+        "consensus": consensus_rows[:8],
+        "meta": {
+            "available_predictor_ids": available_ids,
+            "available_predictor_count": len(available_ids),
+            "unique_top1_horses": sorted({horse for horse in top1_horses if horse}),
+            "unique_top1_count": len({horse for horse in top1_horses if horse}),
+            "consensus_top_horse_no": str(consensus_rows[0].get("horse_no", "") or "") if consensus_rows else "",
+        },
+    }
+
+
+def build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allowed_types):
+    candidates = []
+    candidate_lookup = {}
+    horse_map = {str(item.get("horse_no", "") or ""): item for item in list(predictions or []) if str(item.get("horse_no", "") or "").strip()}
+    for item in predictions:
+        horse_no = str(item.get("horse_no", "") or "").strip()
+        if not horse_no:
+            continue
+        top3_prob = max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0))
+        win_prob = max(0.01, float(item.get("win_prob_est", 0.0) or 0.0))
+        if "win" in allowed_types:
+            win_odds = float(item.get("win_odds", 0.0) or 0.0)
+            if win_odds > 0:
+                ev = round(win_prob * win_odds - 1.0, 6)
+                candidate = {
+                    "id": f"win:{horse_no}",
+                    "bet_type": "win",
+                    "legs": [horse_no],
+                    "odds_used": round(win_odds, 6),
+                    "p_hit": round(win_prob, 6),
+                    "ev": ev,
+                    "score": round(ev * math.sqrt(max(win_prob, 1e-6)), 6),
+                }
+                candidates.append(candidate)
+                candidate_lookup[candidate["id"]] = candidate
+        if "place" in allowed_types:
+            place_odds = float(item.get("place_odds", 0.0) or 0.0)
+            if place_odds > 0:
+                place_prob = max(0.01, min(0.95, top3_prob))
+                ev = round(place_prob * place_odds - 1.0, 6)
+                candidate = {
+                    "id": f"place:{horse_no}",
+                    "bet_type": "place",
+                    "legs": [horse_no],
+                    "odds_used": round(place_odds, 6),
+                    "p_hit": round(place_prob, 6),
+                    "ev": ev,
+                    "score": round(ev * math.sqrt(max(place_prob, 1e-6)), 6),
+                }
+                candidates.append(candidate)
+                candidate_lookup[candidate["id"]] = candidate
+    pair_source = list(predictions[:6])
+    for idx, left in enumerate(pair_source):
+        left_no = str(left.get("horse_no", "") or "").strip()
+        if not left_no:
+            continue
+        for right in pair_source[idx + 1 :]:
+            right_no = str(right.get("horse_no", "") or "").strip()
+            if not right_no:
+                continue
+            a = parse_horse_no(left_no)
+            b = parse_horse_no(right_no)
+            if a is None or b is None:
+                continue
+            pair = (min(a, b), max(a, b))
+            left_top3 = max(0.0, float(left.get("top3_prob_model", 0.0) or 0.0))
+            right_top3 = max(0.0, float(right.get("top3_prob_model", 0.0) or 0.0))
+            left_win = max(0.0, float(left.get("win_prob_est", 0.0) or 0.0))
+            right_win = max(0.0, float(right.get("win_prob_est", 0.0) or 0.0))
+            if "wide" in allowed_types:
+                odds = float(wide_odds_map.get(pair, 0.0) or 0.0)
+                if odds > 0:
+                    p_hit = max(0.01, min(0.85, left_top3 * right_top3 * 0.9))
+                    ev = round(p_hit * odds - 1.0, 6)
+                    candidate = {
+                        "id": f"wide:{pair[0]}-{pair[1]}",
+                        "bet_type": "wide",
+                        "legs": [str(pair[0]), str(pair[1])],
+                        "odds_used": round(odds, 6),
+                        "p_hit": round(p_hit, 6),
+                        "ev": ev,
+                        "score": round(ev * math.sqrt(max(p_hit, 1e-6)), 6),
+                    }
+                    candidates.append(candidate)
+                    candidate_lookup[candidate["id"]] = candidate
+            if "quinella" in allowed_types:
+                odds = float(quinella_odds_map.get(pair, 0.0) or 0.0)
+                if odds > 0:
+                    p_hit = max(0.005, min(0.35, (left_win * max(right_top3, right_win) + right_win * max(left_top3, left_win)) * 0.5))
+                    ev = round(p_hit * odds - 1.0, 6)
+                    candidate = {
+                        "id": f"quinella:{pair[0]}-{pair[1]}",
+                        "bet_type": "quinella",
+                        "legs": [str(pair[0]), str(pair[1])],
+                        "odds_used": round(odds, 6),
+                        "p_hit": round(p_hit, 6),
+                        "ev": ev,
+                        "score": round(ev * math.sqrt(max(p_hit, 1e-6)), 6),
+                    }
+                    candidates.append(candidate)
+                    candidate_lookup[candidate["id"]] = candidate
+    candidates.sort(key=lambda item: (-float(item.get("score", 0.0) or 0.0), -float(item.get("ev", 0.0) or 0.0), str(item.get("id", ""))))
+    return candidates, candidate_lookup, horse_map
+
+
+def build_pair_odds_top(candidate_lookup):
+    rows = []
+    for candidate in list(candidate_lookup.values()):
+        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella"):
+            continue
+        legs = list(candidate.get("legs", []) or [])
+        if len(legs) != 2:
+            continue
+        rows.append(
+            {
+                "bet_type": str(candidate.get("bet_type", "") or ""),
+                "pair": f"{legs[0]}-{legs[1]}",
+                "odds": round(float(candidate.get("odds_used", 0.0) or 0.0), 6),
+                "score": float(candidate.get("score", 0.0) or 0.0),
+            }
+        )
+    rows.sort(key=lambda item: (-float(item.get("score", 0.0) or 0.0), float(item.get("odds", 0.0) or 0.0)))
+    return [{"bet_type": row["bet_type"], "pair": row["pair"], "odds": row["odds"]} for row in rows[:10]]
+
+
+def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows):
+    def _pair_rows(rows):
+        out = []
+        for row in list(rows or []):
+            a = str(row.get("horse_no_a", "") or "").strip()
+            b = str(row.get("horse_no_b", "") or "").strip()
+            if not a or not b:
+                continue
+            odds = to_float(row.get("odds_mid", row.get("odds", 0)) or 0)
+            out.append({"pair": f"{a}-{b}", "horse_no_a": a, "horse_no_b": b, "odds": round(odds, 6)})
+        return out
+
+    def _single_rows(rows, odds_key):
+        out = []
+        for row in list(rows or []):
+            horse_no = str(row.get("horse_no", "") or "").strip()
+            if not horse_no:
+                continue
+            out.append(
+                {
+                    "horse_no": horse_no,
+                    "name": str(row.get("name", "") or "").strip(),
+                    "odds": round(to_float(row.get(odds_key, 0) or 0), 6),
+                }
+            )
+        return out
+
+    return {
+        "win": _single_rows(win_rows, "odds"),
+        "place": _single_rows(place_rows, "odds_mid" if place_rows and "odds_mid" in place_rows[0] else "odds_low"),
+        "wide": _pair_rows(wide_rows),
+        "quinella": _pair_rows(quinella_rows),
+    }
+
+
+def build_prediction_field_guide():
+    return {
+        "horse_no": "马番",
+        "HorseName": "马名",
+        "pred_rank": "模型排序",
+        "Top3Prob_model": "模型给出的前三概率",
+        "rank_score_norm": "归一化排序分数",
+        "confidence_score": "置信度分数",
+        "stability_score": "稳定性分数",
+        "risk_score": "风险分数",
+        "win_odds": "单胜赔率",
+        "place_odds": "位置赔率",
+    }
+
+
+def build_policy_input_payload(scope_key, run_id, run_row, pred_path, odds_path, fuku_odds_path, wide_odds_path, quinella_odds_path, policy_engine):
+    pred_rows = load_csv_rows_flexible(pred_path)
+    if not pred_rows:
+        return None, "Prediction file is missing or empty."
+    name_to_no_map = load_name_to_no(odds_path)
+    win_odds_map = load_win_odds_map(odds_path)
+    place_odds_map = load_place_odds_map(fuku_odds_path)
+    wide_odds_map = load_pair_odds_map(wide_odds_path)
+    quinella_odds_map = load_pair_odds_map(quinella_odds_path)
+    predictions = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
+    if not predictions:
+        return None, "No valid prediction rows could be built for policy input."
+    allowed_types = []
+    if any(float(item.get("win_odds", 0.0) or 0.0) > 0 for item in predictions):
+        allowed_types.append("win")
+    if any(float(item.get("place_odds", 0.0) or 0.0) > 0 for item in predictions):
+        allowed_types.append("place")
+    if wide_odds_map:
+        allowed_types.append("wide")
+    if quinella_odds_map:
+        allowed_types.append("quinella")
+    if not allowed_types:
+        return None, "No usable odds were found for LLM buy."
+    candidates, candidate_lookup, horse_map = build_policy_candidates(predictions, wide_odds_map, quinella_odds_map, allowed_types)
+    if not candidates:
+        return None, "Candidate generation failed because odds data is incomplete."
+    ledger_date = extract_ledger_date(run_id, (run_row or {}).get("timestamp", ""))
+    bankroll = summarize_bankroll(BASE_DIR, ledger_date, policy_engine=policy_engine)
+    bankroll_yen = max(0, int(bankroll.get("available_bankroll_yen", 0) or 0))
+    multi_predictor = build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map)
+    payload = {
+        "race_id": str((run_row or {}).get("race_id", "") or ""),
+        "scope_key": str(scope_key or ""),
+        "field_size": len(predictions),
+        "ai": {
+            "gap": round(
+                max(
+                    0.0,
+                    float(predictions[0].get("top3_prob_model", 0.0) or 0.0)
+                    - float(predictions[1].get("top3_prob_model", 0.0) or 0.0 if len(predictions) > 1 else 0.0),
+                ),
+                6,
+            ),
+            "confidence_score": round(float(predictions[0].get("confidence_score", 0.5) or 0.5), 6),
+            "stability_score": round(float(predictions[0].get("stability_score", 0.5) or 0.5), 6),
+            "risk_score": round(float(predictions[0].get("risk_score", 0.5) or 0.5), 6),
+        },
+        "marks_top5": [
+            {
+                "horse_no": str(item.get("horse_no", "") or ""),
+                "horse_name": str(item.get("horse_name", "") or ""),
+                "pred_rank": int(item.get("pred_rank", 0) or 0),
+                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+            }
+            for item in predictions[:5]
+        ],
+        "predictions": [
+            {
+                "horse_no": str(item.get("horse_no", "") or ""),
+                "horse_name": str(item.get("horse_name", "") or ""),
+                "pred_rank": int(item.get("pred_rank", 0) or 0),
+                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+                "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+                "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+            }
+            for item in predictions[:10]
+        ],
+        "predictions_full": [
+            {
+                **dict(item.get("source_row", {}) or {}),
+                "horse_no": str(item.get("horse_no", "") or ""),
+                "HorseName": str(item.get("horse_name", "") or ""),
+                "pred_rank": int(item.get("pred_rank", 0) or 0),
+                "Top3Prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+                "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+                "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+            }
+            for item in predictions
+        ],
+        "pair_odds_top": build_pair_odds_top(candidate_lookup),
+        "odds_full": build_odds_full(
+            load_csv_rows_flexible(odds_path),
+            load_csv_rows_flexible(fuku_odds_path),
+            load_csv_rows_flexible(wide_odds_path),
+            load_csv_rows_flexible(quinella_odds_path),
+        ),
+        "prediction_field_guide": build_prediction_field_guide(),
+        "multi_predictor": multi_predictor,
+        "portfolio_history": build_history_context(BASE_DIR, ledger_date, lookback_days=14, recent_ticket_limit=8, policy_engine=policy_engine),
+        "candidates": candidates,
+        "constraints": {
+            "bankroll_yen": bankroll_yen,
+            "race_budget_yen": bankroll_yen,
+            "max_tickets_per_race": min(8, max(1, len(allowed_types) * 2)),
+            "high_odds_threshold": 12.0,
+            "allowed_types": allowed_types,
+        },
+    }
+    return {
+        "input": payload,
+        "predictions": predictions,
+        "candidate_lookup": candidate_lookup,
+        "horse_map": horse_map,
+        "summary_before": bankroll,
+        "ledger_date": ledger_date,
+    }, ""
+
+
+def apply_local_ticket_plan_fallback(output_dict, candidate_lookup, race_budget_yen):
+    payload = dict(output_dict or {})
+    ticket_plan = list(payload.get("ticket_plan", []) or [])
+    if ticket_plan or str(payload.get("bet_decision", "") or "") != "bet":
+        return payload
+    enabled_types = {str(item or "").strip() for item in list(payload.get("enabled_bet_types", []) or []) if str(item or "").strip()}
+    key_horses = {
+        str(item or "").strip()
+        for item in list(payload.get("key_horses", []) or []) + list(payload.get("secondary_horses", []) or [])
+        if str(item or "").strip()
+    }
+    ranked = []
+    for candidate in list(candidate_lookup.values()):
+        bet_type = str(candidate.get("bet_type", "") or "").strip()
+        legs = [str(x or "").strip() for x in list(candidate.get("legs", []) or []) if str(x or "").strip()]
+        if enabled_types and bet_type not in enabled_types:
+            continue
+        priority = 1 if key_horses and any(leg in key_horses for leg in legs) else 0
+        ranked.append(
+            (
+                -priority,
+                -float(candidate.get("score", 0.0) or 0.0),
+                -float(candidate.get("ev", 0.0) or 0.0),
+                str(candidate.get("id", "") or ""),
+                candidate,
+            )
+        )
+    ranked.sort()
+    max_tickets = max(1, int(payload.get("max_ticket_count", 1) or 1))
+    budget_cap = max(0, int(race_budget_yen or 0))
+    remaining = max(0, (budget_cap // 100) * 100)
+    selected = [item[-1] for item in ranked[:max_tickets]]
+    fallback_plan = []
+    stake_template = [500, 300, 200, 100]
+    for idx, candidate in enumerate(selected):
+        slots_left = len(selected) - idx
+        if remaining < 100:
+            break
+        template_stake = stake_template[idx] if idx < len(stake_template) else 100
+        reserve_floor = max(0, (slots_left - 1) * 100)
+        stake = min(template_stake, remaining - reserve_floor)
+        stake = max(100, (stake // 100) * 100)
+        if stake > remaining:
+            stake = max(100, (remaining // 100) * 100)
+        if stake < 100:
+            continue
+        remaining -= stake
+        fallback_plan.append({"id": str(candidate.get("id", "") or ""), "stake_yen": int(stake)})
+    if fallback_plan:
+        payload["ticket_plan"] = fallback_plan
+        if not list(payload.get("pick_ids", []) or []):
+            payload["pick_ids"] = [str(item["id"]) for item in fallback_plan]
+        warnings = [str(item or "").strip() for item in list(payload.get("warnings", []) or []) if str(item or "").strip()]
+        if "LOCAL_TICKET_PLAN_FALLBACK" not in warnings:
+            warnings.append("LOCAL_TICKET_PLAN_FALLBACK")
+        payload["warnings"] = warnings
+    return payload
+
+
+def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_engine):
+    output_dict = dict(policy_output or {})
+    tickets = []
+    for item in list(output_dict.get("ticket_plan", []) or []):
+        candidate_id = str(item.get("id", "") or "").strip()
+        stake_yen = max(0, int(item.get("stake_yen", 0) or 0))
+        if not candidate_id or stake_yen <= 0:
+            continue
+        candidate = dict(candidate_lookup.get(candidate_id, {}) or {})
+        if not candidate:
+            continue
+        legs = [str(x or "").strip() for x in list(candidate.get("legs", []) or []) if str(x or "").strip()]
+        horse_names = []
+        for leg in legs:
+            horse = dict(horse_map.get(leg, {}) or {})
+            horse_names.append(str(horse.get("horse_name", "") or leg))
+        bet_type = str(candidate.get("bet_type", "") or "")
+        odds_used = round(float(candidate.get("odds_used", 0.0) or 0.0), 6)
+        p_hit = round(float(candidate.get("p_hit", 0.0) or 0.0), 6)
+        ev = round(float(candidate.get("ev", 0.0) or 0.0), 6)
+        expected_return_yen = int(round(stake_yen * max(0.0, p_hit * odds_used)))
+        tickets.append(
+            {
+                "ticket_id": candidate_id,
+                "budget_yen": 0,
+                "bet_type": bet_type,
+                "horse_no": "-".join(legs),
+                "horse_name": " / ".join(horse_names),
+                "units": max(1, stake_yen // 100),
+                "amount_yen": stake_yen,
+                "hit_prob_est": p_hit,
+                "hit_prob_se": "",
+                "hit_prob_ci95_low": "",
+                "hit_prob_ci95_high": "",
+                "payout_mult": odds_used,
+                "ev_ratio_est": round(p_hit * odds_used, 6),
+                "expected_return_yen": expected_return_yen,
+                "odds_used": odds_used,
+                "p_hit": p_hit,
+                "edge": ev,
+                "kelly_f": 0.0,
+                "score": round(float(candidate.get("score", 0.0) or 0.0), 6),
+                "stake_yen": stake_yen,
+                "notes": "policy_pool=shared;policy={buy_style};decision={decision};construction={construction};reasons={reasons}".format(
+                    buy_style=str(output_dict.get("buy_style", "") or ""),
+                    decision=str(output_dict.get("bet_decision", "") or ""),
+                    construction=str(output_dict.get("strategy_mode", "") or ""),
+                    reasons=",".join(str(x) for x in list(output_dict.get("reason_codes", []) or [])),
+                ),
+                "strategy_text_ja": str(output_dict.get("strategy_text_ja", "") or ""),
+                "bet_tendency_ja": str(output_dict.get("bet_tendency_ja", "") or ""),
+                "policy_engine": policy_engine,
+                "policy_buy_style": str(output_dict.get("buy_style", "") or ""),
+                "policy_bet_decision": str(output_dict.get("bet_decision", "") or ""),
+                "policy_construction_style": str(output_dict.get("strategy_mode", "") or ""),
+            }
+        )
+    return tickets
+
+
+def save_policy_payload(scope_key, run_id, race_id, payload, policy_engine):
+    scope_norm = normalize_scope_key(scope_key)
+    if not scope_norm:
+        return None
+    race_dir = get_data_dir(BASE_DIR, scope_norm) / str(race_id or "")
+    race_dir.mkdir(parents=True, exist_ok=True)
+    engine = normalize_policy_engine(policy_engine)
+    path = race_dir / f"{engine}_policy_{run_id}_{race_id}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", policy_model=""):
+    scope_norm = normalize_scope_key(scope_key)
+    engine = normalize_policy_engine(policy_engine)
+    resolved_model = resolve_policy_model(engine, policy_model, DEFAULT_GEMINI_MODEL)
+    pred_path = resolve_pred_path(scope_norm, run_id, run_row)
+    odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "odds_path", "odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
+    wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
+    quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
+    context, error = build_policy_input_payload(
+        scope_norm,
+        run_id,
+        run_row,
+        pred_path,
+        odds_path,
+        fuku_odds_path,
+        wide_odds_path,
+        quinella_odds_path,
+        engine,
+    )
+    if error:
+        raise ValueError(error)
+    policy_output = call_policy(
+        input=context["input"],
+        policy_engine=engine,
+        model=resolved_model,
+        timeout_s=resolve_policy_timeout(engine),
+        cache_enable=True,
+    )
+    meta = get_last_call_meta()
+    output_dict = policy_output.model_dump() if hasattr(policy_output, "model_dump") else policy_output.dict()
+    output_dict = apply_local_ticket_plan_fallback(
+        output_dict,
+        context["candidate_lookup"],
+        context["input"]["constraints"]["race_budget_yen"],
+    )
+    tickets = build_policy_ticket_rows(output_dict, context["candidate_lookup"], context["horse_map"], engine)
+    reserve_run_tickets(
+        BASE_DIR,
+        run_id=run_id,
+        scope_key=scope_norm,
+        race_id=str((run_row or {}).get("race_id", "") or ""),
+        ledger_date=context["ledger_date"],
+        tickets=tickets,
+        policy_engine=engine,
+    )
+    summary_after = summarize_bankroll(BASE_DIR, context["ledger_date"], policy_engine=engine)
+    payload = {
+        "scope": scope_norm,
+        "race_id": str((run_row or {}).get("race_id", "") or ""),
+        "run_id": str(run_id or ""),
+        "policy_engine": engine,
+        "policy_model": resolved_model,
+        "gemini_model": resolved_model if engine == "gemini" else "",
+        "policy_budget_reuse": False,
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "budgets": [
+            {
+                "budget_yen": 0,
+                "shared_policy": True,
+                "output": output_dict,
+                "meta": meta,
+                "portfolio": {
+                    "ledger_date": context["ledger_date"],
+                    "before": context["summary_before"],
+                    "after": summary_after,
+                },
+                "tickets": tickets,
+            }
+        ],
+    }
+    path = save_policy_payload(scope_norm, run_id, (run_row or {}).get("race_id", ""), payload, engine)
+    updates = {f"{engine}_policy_path": str(path or "")}
+    if engine == "gemini":
+        updates["gemini_policy_path"] = str(path or "")
+        updates["tickets"] = str(len(tickets))
+        updates["amount_yen"] = str(sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets))
+    update_run_row_fields(scope_norm, run_row, updates)
+    output_lines = [
+        f"[llm_buy] run_id={run_id} engine={engine} model={resolved_model}",
+        f"[policy_save] path={path}" if path else "[policy_save] path=",
+        (
+            "[tickets] count={count} amount_yen={amount} decision={decision} buy_style={buy_style}".format(
+                count=len(tickets),
+                amount=sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets),
+                decision=str(output_dict.get("bet_decision", "") or ""),
+                buy_style=str(output_dict.get("buy_style", "") or ""),
+            )
+        ),
+        (
+            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback}".format(
+                cache_hit=int(bool(meta.get("cache_hit", False))),
+                latency=int(meta.get("llm_latency_ms", 0) or 0),
+                fallback=str(meta.get("fallback_reason", "") or ""),
+            )
+        ),
+    ]
+    for ticket in tickets:
+        output_lines.append(
+            "[ticket] {bet_type} {horse_no} {horse_name} stake={stake_yen} odds={odds_used} p_hit={p_hit}".format(
+                bet_type=str(ticket.get("bet_type", "") or ""),
+                horse_no=str(ticket.get("horse_no", "") or ""),
+                horse_name=str(ticket.get("horse_name", "") or ""),
+                stake_yen=int(ticket.get("stake_yen", 0) or 0),
+                odds_used=str(ticket.get("odds_used", "") or ""),
+                p_hit=str(ticket.get("p_hit", "") or ""),
+            )
+        )
+    return {
+        "engine": engine,
+        "model": resolved_model,
+        "summary_before": context["summary_before"],
+        "summary_after": summary_after,
+        "payload_path": str(path or ""),
+        "tickets": tickets,
+        "meta": meta,
+        "output_text": "\n".join(line for line in output_lines if str(line).strip()),
+    }
+
+
+def resolve_run_selection(scope_key, run_id):
+    scope_norm = normalize_scope_key(scope_key)
+    run_text = str(run_id or "").strip()
+    run_row = None
+    if not scope_norm:
+        scope_norm, run_row = infer_scope_and_run(run_text)
+    if run_row is None and scope_norm:
+        run_row = resolve_run(run_text, scope_norm)
+    if run_row is None and scope_norm:
+        race_id = normalize_race_id(run_text)
+        if race_id:
+            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
+    resolved_run_id = str((run_row or {}).get("run_id", "") or "").strip() or run_text
+    return scope_norm, run_row, resolved_run_id
+
+
+def maybe_refresh_run_odds(scope_norm, run_row, run_id, refresh_enabled):
+    if not refresh_enabled:
+        return True, "odds refresh skipped.", []
+    if run_row is None or not scope_norm:
+        return False, "Run row missing for odds update.", []
+    odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "odds_path", "odds")
+    wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
+    quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
+    return refresh_odds_for_run(
+        run_row,
+        scope_norm,
+        odds_path,
+        wide_odds_path=wide_odds_path,
+        fuku_odds_path=fuku_odds_path,
+        quinella_odds_path=quinella_odds_path,
+    )
+
+
+def resolve_policy_timeout(policy_engine):
+    engine = normalize_policy_engine(policy_engine)
+    env_keys = []
+    default_timeout = 20
+    if engine == "siliconflow":
+        env_keys = ["SILICONFLOW_POLICY_TIMEOUT", "POLICY_TIMEOUT_SILICONFLOW", "POLICY_TIMEOUT"]
+        default_timeout = 75
+    elif engine == "gemini":
+        env_keys = ["GEMINI_POLICY_TIMEOUT", "POLICY_TIMEOUT_GEMINI", "POLICY_TIMEOUT"]
+        default_timeout = 60
+    for key in env_keys:
+        raw = str(os.environ.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return default_timeout
 
 
 def load_mark_recommendation_table(scope_key, run_id, run_row=None):
@@ -861,6 +1666,14 @@ def build_policy_html(payload):
                 '<article class="policy-text-card">'
                 '<div class="policy-label">Realized P/L Today</div>'
                 f"<p>{html.escape(str(portfolio_after.get('realized_profit_yen', portfolio_before.get('realized_profit_yen', ''))))} JPY</p>"
+                "</article>"
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Pending Tickets Before</div>'
+                f"<p>{html.escape(str(portfolio_before.get('pending_tickets', '')))}</p>"
+                "</article>"
+                '<article class="policy-text-card">'
+                '<div class="policy-label">Pending Tickets After</div>'
+                f"<p>{html.escape(str(portfolio_after.get('pending_tickets', '')))}</p>"
                 "</article>"
                 "</div>"
             )
@@ -1303,7 +2116,6 @@ def run_pipeline(
         track_cond,
     ]
     extra_env = {"SCOPE_KEY": scope_key}
-    extra_env.update(build_policy_env(cache_enable=False, budget_reuse=False, policy_engine="none"))
     code, output = run_script(
         RUN_PIPELINE,
         inputs=inputs,
@@ -1316,312 +2128,6 @@ def run_pipeline(
         output_text=f"{label}\n{output}",
         top5_text=top5_text,
         summary_run_id=parse_run_id(output),
-    )
-
-
-def _run_llm_buy_impl(scope_key="", run_id="", policy_engine="gemini", policy_model=""):
-    run_id = str(run_id or "").strip()
-    scope_norm = normalize_scope_key(scope_key)
-    policy_engine = normalize_policy_engine(policy_engine)
-    if policy_engine not in ("gemini", "siliconflow"):
-        policy_engine = "gemini"
-    policy_model = resolve_policy_model(
-        policy_engine,
-        policy_model,
-        os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-    )
-    run_row = None
-    if not scope_norm:
-        scope_norm, run_row = infer_scope_and_run(run_id)
-    if not scope_norm:
-        return render_page("", error_text="Enter a valid Run ID before triggering LLM buy.", selected_run_id=run_id)
-    if run_row is None:
-        run_row = resolve_run(run_id, scope_norm)
-    if run_row is None:
-        race_id = normalize_race_id(run_id)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
-    if run_row is None:
-        return render_page(
-            scope_norm,
-            error_text="Run ID / Race ID not found for LLM buy.",
-            selected_run_id=run_id,
-        )
-    resolved_run_id = str(run_row.get("run_id", "")).strip() or run_id
-    if not resolved_run_id:
-        return render_page(scope_norm, error_text="Run ID is required for LLM buy.")
-
-    bankroll_before = load_policy_bankroll_summary(
-        resolved_run_id,
-        run_row.get("timestamp", ""),
-        policy_engine=policy_engine,
-    )
-    available_bankroll = int(bankroll_before.get("available_bankroll_yen", 0) or 0)
-    if available_bankroll <= 0:
-        output_text = build_llm_buy_output(
-            bankroll_before,
-            False,
-            "No bankroll available for today.",
-            [],
-            "",
-            policy_engine=policy_engine,
-        )
-        return render_page(
-            scope_norm,
-            output_text=output_text,
-            error_text="Today's bankroll is exhausted.",
-            selected_run_id=resolved_run_id,
-            summary_run_id=resolved_run_id,
-        )
-
-    race_id = normalize_race_id(run_row.get("race_id", ""))
-    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
-    wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
-    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-    quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
-        run_row,
-        scope_norm,
-        str(odds_path),
-        wide_odds_path=str(wide_odds_path),
-        fuku_odds_path=str(fuku_odds_path),
-        quinella_odds_path=str(quinella_odds_path),
-        trifecta_odds_path=str(trifecta_odds_path),
-    )
-    if not refresh_ok:
-        output_text = build_llm_buy_output(
-            bankroll_before,
-            refresh_ok,
-            refresh_message,
-            refresh_warnings,
-            "",
-            policy_engine=policy_engine,
-        )
-        return render_page(
-            scope_norm,
-            output_text=output_text,
-            error_text="Odds update failed. LLM buy was not executed.",
-            selected_run_id=resolved_run_id,
-            summary_run_id=resolved_run_id,
-        )
-
-    predictor_env = {}
-    for spec, pred_path in resolve_predictor_paths(scope_norm, resolved_run_id, run_row):
-        if not pred_path or not pred_path.exists():
-            continue
-        env_name = {
-            "main": "PRED_PATH",
-            "v2_opus": "PRED_PATH_V2_OPUS",
-            "v3_premium": "PRED_PATH_V3_PREMIUM",
-            "v4_gemini": "PRED_PATH_V4_GEMINI",
-            "v5_stacking": "PRED_PATH_V5_STACKING",
-        }.get(spec["id"])
-        if env_name:
-            predictor_env[env_name] = str(pred_path)
-
-    extra_env = {
-        "SCOPE_KEY": scope_norm,
-        "RACE_ID": race_id,
-        "RUN_ID": resolved_run_id,
-        "BET_BUDGETS": str(available_bankroll),
-        "ODDS_PATH": str(odds_path),
-        "WIDE_ODDS_PATH": str(wide_odds_path),
-        "FUKU_ODDS_PATH": str(fuku_odds_path),
-        "QUINELLA_ODDS_PATH": str(quinella_odds_path),
-    }
-    extra_env.update(predictor_env)
-    extra_env.update(
-        build_policy_env(
-            cache_enable=False,
-            budget_reuse=False,
-            policy_engine=policy_engine,
-            policy_model=policy_model,
-        )
-    )
-    code, output = run_script(
-        BET_PLAN_UPDATE,
-        extra_env=extra_env,
-    )
-    label = f"Exit code: {code}"
-    output_text = build_llm_buy_output(
-        bankroll_before,
-        refresh_ok,
-        refresh_message,
-        refresh_warnings,
-        f"{label}\n{output}",
-        policy_engine=policy_engine,
-    )
-    return render_page(
-        scope_norm,
-        output_text=output_text,
-        error_text="" if code == 0 else "LLM buy execution failed.",
-        selected_run_id=resolved_run_id,
-        summary_run_id=resolved_run_id,
-    )
-
-
-@app.post("/run_all_llm_buy", response_class=HTMLResponse)
-def run_all_llm_buy(
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-):
-    run_id = str(run_id or "").strip()
-    scope_norm = normalize_scope_key(scope_key)
-    run_row = None
-    if not scope_norm:
-        scope_norm, run_row = infer_scope_and_run(run_id)
-    if not scope_norm:
-        return render_page("", error_text="Enter a valid Run ID before triggering all LLMs.", selected_run_id=run_id)
-    if run_row is None:
-        run_row = resolve_run(run_id, scope_norm)
-    if run_row is None:
-        race_id = normalize_race_id(run_id)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
-    if run_row is None:
-        return render_page(
-            scope_norm,
-            error_text="Run ID / Race ID not found for all-LLM execution.",
-            selected_run_id=run_id,
-        )
-    resolved_run_id = str(run_row.get("run_id", "")).strip() or run_id
-    if not resolved_run_id:
-        return render_page(scope_norm, error_text="Run ID is required for all-LLM execution.")
-
-    race_id = normalize_race_id(run_row.get("race_id", ""))
-    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
-    wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
-    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-    quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
-        run_row,
-        scope_norm,
-        str(odds_path),
-        wide_odds_path=str(wide_odds_path),
-        fuku_odds_path=str(fuku_odds_path),
-        quinella_odds_path=str(quinella_odds_path),
-        trifecta_odds_path=str(trifecta_odds_path),
-    )
-    if not refresh_ok:
-        return render_page(
-            scope_norm,
-            output_text=build_llm_buy_output({}, refresh_ok, refresh_message, refresh_warnings, "", policy_engine="all"),
-            error_text="Odds update failed. All-LLM execution was not executed.",
-            selected_run_id=resolved_run_id,
-            summary_run_id=resolved_run_id,
-        )
-
-    predictor_env = build_predictor_env(scope_norm, resolved_run_id, run_row)
-    sections = []
-    any_error = False
-    for policy_engine in ("gemini", "siliconflow"):
-        bankroll_before = load_policy_bankroll_summary(
-            resolved_run_id,
-            run_row.get("timestamp", ""),
-            policy_engine=policy_engine,
-        )
-        available_bankroll = int(bankroll_before.get("available_bankroll_yen", 0) or 0)
-        policy_model = resolve_policy_model(
-            policy_engine,
-            "",
-            os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-        )
-        if available_bankroll <= 0:
-            sections.append(
-                f"[{policy_engine}]\n"
-                + build_llm_buy_output(
-                    bankroll_before,
-                    True,
-                    "Skipped because bankroll is exhausted.",
-                    refresh_warnings,
-                    "",
-                    policy_engine=policy_engine,
-                )
-            )
-            continue
-        extra_env = {
-            "SCOPE_KEY": scope_norm,
-            "RACE_ID": race_id,
-            "RUN_ID": resolved_run_id,
-            "BET_BUDGETS": str(available_bankroll),
-            "ODDS_PATH": str(odds_path),
-            "WIDE_ODDS_PATH": str(wide_odds_path),
-            "FUKU_ODDS_PATH": str(fuku_odds_path),
-            "QUINELLA_ODDS_PATH": str(quinella_odds_path),
-        }
-        extra_env.update(predictor_env)
-        extra_env.update(
-            build_policy_env(
-                cache_enable=False,
-                budget_reuse=False,
-                policy_engine=policy_engine,
-                policy_model=policy_model,
-            )
-        )
-        code, output = run_script(BET_PLAN_UPDATE, extra_env=extra_env)
-        if code != 0:
-            any_error = True
-        section_text = build_llm_buy_output(
-            bankroll_before,
-            refresh_ok,
-            refresh_message,
-            refresh_warnings,
-            f"Exit code: {code}\n{output}",
-            policy_engine=policy_engine,
-        )
-        sections.append(f"[{policy_engine}]\n{section_text}")
-
-    return render_page(
-        scope_norm,
-        output_text="\n\n".join(sections),
-        error_text="One or more LLM runs failed." if any_error else "",
-        selected_run_id=resolved_run_id,
-        summary_run_id=resolved_run_id,
-    )
-
-
-@app.post("/reset_llm_state", response_class=HTMLResponse)
-def reset_llm_state_route(scope_key: str = Form(""), run_id: str = Form("")):
-    summary = reset_llm_state(BASE_DIR)
-    lines = [
-        "[reset_llm_state]",
-        f"ledger_files_removed={summary.get('ledger_files_removed', 0)}",
-        f"cache_files_removed={summary.get('cache_files_removed', 0)}",
-        f"policy_files_removed={summary.get('policy_files_removed', 0)}",
-        f"plan_files_removed={summary.get('plan_files_removed', 0)}",
-        f"plan_item_files_removed={summary.get('plan_item_files_removed', 0)}",
-        f"root_files_removed={summary.get('root_files_removed', 0)}",
-        f"runs_rows_reset={summary.get('runs_rows_reset', 0)}",
-    ]
-    return render_page(
-        normalize_scope_key(scope_key) or "central_dirt",
-        output_text="\n".join(lines),
-        selected_run_id=str(run_id or "").strip(),
-    )
-
-
-@app.post("/run_llm_buy", response_class=HTMLResponse)
-def run_llm_buy(
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-    policy_engine: str = Form("gemini"),
-    policy_model: str = Form(""),
-):
-    return _run_llm_buy_impl(scope_key, run_id, policy_engine, policy_model)
-
-
-@app.post("/run_gemini_buy", response_class=HTMLResponse)
-def run_gemini_buy(
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-):
-    return _run_llm_buy_impl(
-        scope_key,
-        run_id,
-        "gemini",
-        os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
     )
 
 
@@ -1686,6 +2192,131 @@ def record_predictor(
         scope_norm or scope_key,
         output_text="\n".join(part for part in output_parts if str(part).strip()),
         selected_run_id=resolved_run_id,
+    )
+
+
+@app.post("/run_llm_buy", response_class=HTMLResponse)
+def run_llm_buy(
+    scope_key: str = Form(""),
+    run_id: str = Form(""),
+    policy_engine: str = Form("gemini"),
+    policy_model: str = Form(""),
+    refresh_odds: str = Form("1"),
+):
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return render_page(
+            scope_norm or scope_key,
+            error_text="Run ID / Race ID not found for LLM buy.",
+            selected_run_id=resolved_run_id or str(run_id or "").strip(),
+        )
+    refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
+    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    try:
+        result = execute_policy_buy(
+            scope_norm,
+            run_row,
+            resolved_run_id,
+            policy_engine=policy_engine,
+            policy_model=policy_model,
+        )
+    except Exception as exc:
+        return render_page(
+            scope_norm,
+            error_text=build_llm_buy_output(
+                load_policy_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine),
+                refresh_ok,
+                refresh_message,
+                refresh_warnings,
+                f"[llm_buy][error] {exc}",
+                policy_engine=normalize_policy_engine(policy_engine),
+            ),
+            selected_run_id=resolved_run_id,
+        )
+    return render_page(
+        scope_norm,
+        output_text=build_llm_buy_output(
+            result["summary_before"],
+            refresh_ok,
+            refresh_message,
+            refresh_warnings,
+            result["output_text"],
+            result["engine"],
+        ),
+        selected_run_id=resolved_run_id,
+    )
+
+
+@app.post("/run_gemini_buy", response_class=HTMLResponse)
+def run_gemini_buy(
+    scope_key: str = Form(""),
+    run_id: str = Form(""),
+    policy_model: str = Form(""),
+    refresh_odds: str = Form("1"),
+):
+    return run_llm_buy(
+        scope_key=scope_key,
+        run_id=run_id,
+        policy_engine="gemini",
+        policy_model=policy_model,
+        refresh_odds=refresh_odds,
+    )
+
+
+@app.post("/run_all_llm_buy", response_class=HTMLResponse)
+def run_all_llm_buy(
+    scope_key: str = Form(""),
+    run_id: str = Form(""),
+    refresh_odds: str = Form("1"),
+):
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return render_page(
+            scope_norm or scope_key,
+            error_text="Run ID / Race ID not found for LLM buy.",
+            selected_run_id=resolved_run_id or str(run_id or "").strip(),
+        )
+    refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
+    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    result_blocks = []
+    error_blocks = []
+    for engine in ("gemini", "siliconflow"):
+        try:
+            result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=engine, policy_model="")
+            result_blocks.append(
+                build_llm_buy_output(
+                    result["summary_before"],
+                    refresh_ok,
+                    refresh_message,
+                    refresh_warnings,
+                    result["output_text"],
+                    result["engine"],
+                )
+            )
+        except Exception as exc:
+            error_blocks.append(f"[llm_buy][{engine}] {exc}")
+    if error_blocks and not result_blocks:
+        return render_page(
+            scope_norm,
+            error_text="\n\n".join(error_blocks),
+            selected_run_id=resolved_run_id,
+        )
+    output_text = "\n\n".join(block for block in result_blocks if str(block).strip())
+    if error_blocks:
+        output_text = "\n\n".join([output_text] + error_blocks if output_text else error_blocks)
+    return render_page(
+        scope_norm,
+        output_text=output_text,
+        selected_run_id=resolved_run_id,
+    )
+
+
+@app.post("/reset_llm_state", response_class=HTMLResponse)
+def reset_llm_state():
+    summary = reset_llm_state_files(BASE_DIR)
+    return render_page(
+        "",
+        output_text=json.dumps(summary, ensure_ascii=False, indent=2),
     )
 
 

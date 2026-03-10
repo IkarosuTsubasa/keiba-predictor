@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "active_strategy": "balanced",
   "selector": {
     "mode": "epsilon_greedy",
@@ -17,14 +17,94 @@
     "tau_window": 300,
     "tau_min": 300.0,
     "tau_max": 1200.0,
-    "smooth_p": 1.1,
+    "smooth_p": 1.15,
     "surf_floor": 0.2,
     "dist_floor": 0.3,
-    "record_weight_base": 0.75,
-    "record_weight_match": 0.25,
-    "recent_race_count": 5,
+    "record_weight_base": 0.7,
+    "record_weight_match": 0.3,
+    "recent_race_count": 4,
     "top_score_count": 2,
-    "top3_scale": 2.4
+    "top3_scale": 2.4,
+    "blend_alpha": 0.3,
+    "lgb_squash_beta": 0.5,
+    "model_mode": "hybrid",
+    "ranker_label_mode": "top5_gain",
+    "ranker_blend_alpha": 0.6,
+    "ranker_n_estimators": 300,
+    "ranker_learning_rate": 0.05,
+    "ranker_num_leaves": 31,
+    "ranker_min_child_samples": 20,
+    "ranker_subsample": 0.8,
+    "ranker_colsample_bytree": 0.8
+  },
+  "bet_engine_v2": {
+    "p_mix_w": 0.6,
+    "rank_temperature": 1.0,
+    "K_place": 3.0,
+    "place_bias": 0.0,
+    "place_power": 1.0,
+    "C_wide": 1.6,
+    "C_quinella": 1.6,
+    "odds_penalty": 0.0,
+    "win_odds_penalty": 0.0,
+    "place_odds_penalty": 0.02,
+    "wide_odds_penalty": 0.05,
+    "quinella_odds_penalty": 0.0,
+    "kelly_scale": 0.25,
+    "min_ev_per_ticket": 0.02,
+    "min_p_hit_threshold": 0.05,
+    "max_ticket_share": 0.2,
+    "max_race_share": 0.4,
+    "min_yen_unit": 100,
+    "max_single_horses": 8,
+    "max_tickets_per_race": 0
+  },
+  "calibration": {
+    "win_temp": 1.0,
+    "enabled": true
+  },
+  "bet_engine_v3": {
+    "enabled": true,
+    "p_mix_w": 0.6,
+    "rank_temperature": 1.0,
+    "p_mid_odds_threshold": 0.18,
+    "N_rank": 12,
+    "N_value": 12,
+    "target_risk_share": 0.25,
+    "kelly_scale": 1.0,
+    "odds_power": 0.7,
+    "max_ticket_share": 0.15,
+    "min_yen_unit": 100,
+    "min_p_hit_per_ticket": 0.04,
+    "min_p_win_per_ticket": 0.03,
+    "rank_weight_floor": 0.55,
+    "rank_weight_ceil": 1.0,
+    "min_edge_per_ticket": 0.0,
+    "max_high_odds_tickets_per_race": 1,
+    "min_low_or_mid_presence": true,
+    "min_ev": {
+      "win": 0.03,
+      "place": 0.01,
+      "wide": 0.01,
+      "quinella": 0.02
+    },
+    "min_p": {
+      "win": 0.03,
+      "place": 0.05,
+      "wide": 0.04,
+      "quinella": 0.04
+    },
+    "penalty": {
+      "win": 0.0,
+      "place": 0.02,
+      "wide": 0.02,
+      "quinella": 0.0
+    },
+    "fallback_max_odds_place": 15.0,
+    "high_bucket_odds_threshold": 10.0,
+    "high_exposure_cap_share": 0.15,
+    "low_mid_min_share": 0.6,
+    "exposure_enforcement_mode": "trim"
   },
   "strategies": {
     "balanced": {
@@ -66,5 +146,40 @@
     "risk_score": 0.8915,
     "updated_at": "2026-01-06T16:46:40",
     "tune_cursor": 12
+  },
+  "bet_engine_v4": {
+    "enabled": true,
+    "race_budget_share": 0.02,
+    "max_tickets_per_race": 3,
+    "high_odds_threshold": 10.0,
+    "max_high_odds_per_race": 1,
+    "ensure_diversity": true,
+    "min_yen_unit": 100
+  },
+  "bet_engine_v5": {
+    "enabled": true,
+    "target_risk_share": 0.02,
+    "min_race_budget": 400,
+    "min_yen_unit": 100,
+    "base_lambda_market": 0.2,
+    "lambda_min": 0.05,
+    "lambda_max": 0.45,
+    "odds_power": 0.72,
+    "ev_margin": 0.01,
+    "min_ev_per_ticket": -0.02,
+    "kelly_scale": 0.45,
+    "f_cap_by_type": {
+      "win": 0.25,
+      "place": 0.25,
+      "pair": 0.2
+    },
+    "min_p_by_type": {
+      "win": 0.02,
+      "place": 0.05,
+      "wide": 0.03,
+      "quinella": 0.03
+    },
+    "max_tickets_per_race": 6,
+    "ensure_diversity": true
   }
 }

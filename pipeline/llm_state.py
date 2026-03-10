@@ -37,12 +37,9 @@ def _reset_runs_csv(path: Path):
         return 0
 
     reset_fields = [
-        "plan_path",
         "policy_path",
         "gemini_policy_path",
         "siliconflow_policy_path",
-        "tickets",
-        "amount_yen",
     ]
     touched = 0
     for row in rows:
@@ -68,23 +65,17 @@ def reset_llm_state(base_dir):
     removed = {
         "ledger_files": [],
         "policy_files": [],
-        "plan_files": [],
-        "plan_item_files": [],
-        "root_files": [],
         "cache_files": [],
     }
 
     if shared_dir.exists():
         removed["ledger_files"] = _remove_files(shared_dir.glob("*_ticket_ledger.csv"))
 
-    removed["root_files"] = _remove_files([base_path / "bet_plan_update.csv"])
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_gemini").glob("*.json")))
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_siliconflow").glob("*.json")))
 
     for scope_dir in _iter_scope_dirs(data_dir):
-        removed["plan_item_files"].extend(_remove_files(scope_dir.glob("bet_plan_items_*.csv")))
         removed["policy_files"].extend(_remove_files(scope_dir.rglob("*_policy_*.json")))
-        removed["plan_files"].extend(_remove_files(scope_dir.rglob("bet_plan_*.csv")))
 
     runs_updated = 0
     for scope_dir in _iter_scope_dirs(data_dir):
@@ -93,9 +84,6 @@ def reset_llm_state(base_dir):
     summary = {
         "ledger_files_removed": len(removed["ledger_files"]),
         "policy_files_removed": len(removed["policy_files"]),
-        "plan_files_removed": len(removed["plan_files"]),
-        "plan_item_files_removed": len(removed["plan_item_files"]),
-        "root_files_removed": len(removed["root_files"]),
         "cache_files_removed": len(removed["cache_files"]),
         "runs_rows_reset": runs_updated,
         "removed_files": removed,

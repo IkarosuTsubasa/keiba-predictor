@@ -1,6 +1,6 @@
 # Keiba Pipeline
 
-End-to-end local workflow for JRA race data: build race cards, collect history, generate predictions, fetch odds, produce a betting plan, and log results.
+End-to-end local workflow for JRA race data: build race cards, collect history, generate predictions, fetch odds, and log results.
 
 ## Table of Contents
 - Overview
@@ -16,7 +16,7 @@ End-to-end local workflow for JRA race data: build race cards, collect history, 
 
 ## Overview
 Pipeline order (run by `pipeline/run_pipeline.py`):
-`race_card.py` -> `new_history.py` -> `predictor.py` -> `odds_extract.py` -> `pipeline/bet_plan_update.py`
+`race_card.py` -> `new_history.py` -> `predictor.py` -> `odds_extract.py`
 
 ## Project Layout
 - Root scripts: `race_card.py`, `new_history.py`, `predictor.py`, `odds_extract.py`
@@ -45,7 +45,7 @@ python -m pip install pandas numpy scikit-learn lightgbm beautifulsoup4 selenium
 2. 可选离线/CI 模式：
    `set GEMINI_POLICY_MOCK=1`（仅用本地 deterministic policy）
 3. 运行带 Gemini policy 的下注计划：
-   `python pipeline/bet_plan_update.py --engine-version v5 --policy-engine gemini --gemini-model gemini-2.5-flash-lite --policy-cache-enable true`
+   Legacy manual-buy command removed from this repository.
 4. 默认缓存目录：
    `pipeline/data/policy_cache_gemini/`
 5. 运行 smoke：
@@ -83,7 +83,7 @@ python pipeline/record_predictor_result.py
 python pipeline/record_pipeline.py
 ```
 - Records results and prediction accuracy
-- Writes bet stats: `bet_ticket_results.csv`, `bet_type_stats.csv`, `race_results.csv`, `wide_box_results.csv`
+- Writes race stats: `race_results.csv`, `wide_box_results.csv`
 - Runs both optimizers and `offline_eval`
 
 ### Optimize and evaluate
@@ -94,7 +94,7 @@ python pipeline/offline_eval.py
 ```
 
 ## Configuration
-- Bet plan config: `pipeline/config_<scope>.json`
+- Runtime config: `pipeline/config_<scope>.json`
 - Predictor config: `pipeline/predictor_config_<scope>.json`
 - No-bet log: `pipeline/no_bet_log_<scope>.csv`
 - Optimizer history:
@@ -106,7 +106,6 @@ python pipeline/offline_eval.py
 | Name | Purpose | Example |
 | --- | --- | --- |
 | `SCOPE_KEY` / `SURFACE_KEY` | Select scope (`central_dirt`, `central_turf`, `local`) | `SCOPE_KEY=central_dirt` |
-| `BET_STRATEGY` | Override bet strategy | `BET_STRATEGY=balanced` |
 | `PREDICTOR_STRATEGY` | Override predictor strategy | `PREDICTOR_STRATEGY=steady` |
 | `PIPELINE_SHARED_CHROME` | Disable shared Chrome (`0` = off) | `PIPELINE_SHARED_CHROME=0` |
 | `PIPELINE_HEADLESS` | Headless mode toggle | `PIPELINE_HEADLESS=1` |
@@ -115,7 +114,6 @@ python pipeline/offline_eval.py
 | `PIPELINE_SCRAPE_DELAY` | Fixed delay between scraping steps | `PIPELINE_SCRAPE_DELAY=3` |
 | `CHROME_BIN` / `GOOGLE_CHROME_BIN` / `CHROME_PATH` | Chrome binary override | `CHROME_BIN=C:\\Path\\To\\chrome.exe` |
 | `CHROME_DEBUGGER_ADDRESS` | Attach to existing Chrome | `CHROME_DEBUGGER_ADDRESS=127.0.0.1:9222` |
-| `BET_OPT_WINDOW` / `BET_OPT_MIN_SAMPLES` / `BET_OPT_MAX_ROI_STD` | Bet optimizer tuning | `BET_OPT_WINDOW=10` |
 | `PRED_OPT_WINDOW` / `PRED_OPT_MIN_SAMPLES` / `PRED_OPT_MAX_STD` | Predictor optimizer tuning | `PRED_OPT_WINDOW=10` |
 | `PRED_OPT_RISK_SLOW` / `PRED_OPT_RISK_FREEZE` | Predictor risk gates | `PRED_OPT_RISK_FREEZE=0.2` |
 
@@ -128,9 +126,8 @@ python pipeline/web_server.py
 
 ## Data and Outputs
 - Root outputs (latest run): `predictions.csv`, `odds.csv`, `fuku_odds.csv`, `wide_odds.csv`, `quinella_odds.csv`, `trifecta_odds.csv`
-- Pipeline outputs: `pipeline/bet_plan_update.csv`
 - Per-scope logs: `pipeline/data/<scope>/runs.csv`, `results.csv`, `predictor_results.csv`, and optimizer logs
-- Per-race snapshots: `pipeline/data/<scope>/<race_id>/` (predictions, odds, bet plans)
+- Per-race snapshots: `pipeline/data/<scope>/<race_id>/` (predictions and odds)
 
 ## Notes
 - `odds_extract.py` is Selenium-based.

@@ -53,17 +53,6 @@ def infer_run_id_from_row(run_row):
     return ""
 
 
-def resolve_plan_path(get_data_dir, base_dir, scope_key, run_id, run_row):
-    path = str(run_row.get("plan_path", "")).strip() if run_row else ""
-    if path:
-        return Path(path)
-    race_id = str(run_row.get("race_id", "") or "") if run_row else ""
-    if race_id:
-        race_dir = get_data_dir(base_dir, scope_key) / race_id
-        return race_dir / f"bet_plan_{run_id}_{race_id}.csv"
-    return get_data_dir(base_dir, scope_key) / f"bet_plan_{run_id}.csv"
-
-
 def find_run_in_scope(load_runs, normalize_race_id, scope_key, id_text):
     if not scope_key or not id_text:
         return None
