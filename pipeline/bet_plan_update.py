@@ -19,17 +19,44 @@ from bet_engine_v4 import generate_bet_plan_v4
 from bet_engine_v5 import generate_bet_plan_v5
 from bet_engine_v6 import generate_bet_plan_v6
 try:
-    from llm.gemini_policy import RacePolicyInput, call_gemini_policy, get_last_call_meta
+    from llm.policy_runtime import (
+        DEFAULT_GEMINI_MODEL,
+        DEFAULT_SILICONFLOW_MODEL,
+        RacePolicyInput,
+        call_policy,
+        get_last_call_meta,
+        normalize_policy_engine,
+        resolve_policy_model,
+    )
 except Exception:
+    DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+    DEFAULT_SILICONFLOW_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
     RacePolicyInput = None
-    call_gemini_policy = None
+    call_policy = None
     get_last_call_meta = None
+
+    def normalize_policy_engine(value):
+        text = str(value or "").strip().lower()
+        if text in ("gemini", "siliconflow"):
+            return text
+        return "none"
+
+    def resolve_policy_model(policy_engine, model="", gemini_model_compat=""):
+        explicit = str(model or "").strip()
+        if explicit:
+            return explicit
+        if str(policy_engine or "").strip().lower() == "siliconflow":
+            return DEFAULT_SILICONFLOW_MODEL
+        compat = str(gemini_model_compat or "").strip()
+        return compat or DEFAULT_GEMINI_MODEL
 from gemini_portfolio import build_history_context, extract_ledger_date, reserve_run_tickets, summarize_bankroll
+from local_env import load_local_env
 from predictor_catalog import list_predictors
 from surface_scope import get_data_dir, get_predictor_config_path, migrate_legacy_data
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
+load_local_env(BASE_DIR)
 
 
 def resolve_scope_key():
@@ -513,14 +540,19 @@ def parse_args():
     )
     parser.add_argument(
         "--policy-engine",
-        choices=["none", "gemini"],
+        choices=["none", "gemini", "siliconflow"],
         default=os.environ.get("POLICY_ENGINE", "none"),
         help="policy engine selector",
     )
     parser.add_argument(
+        "--policy-model",
+        default=os.environ.get("POLICY_MODEL", ""),
+        help="provider-specific policy model name",
+    )
+    parser.add_argument(
         "--gemini-model",
-        default=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
-        help="Gemini model name for policy layer",
+        default=os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+        help="legacy Gemini model override",
     )
     parser.add_argument(
         "--policy-cache-enable",
@@ -530,7 +562,7 @@ def parse_args():
     parser.add_argument(
         "--policy-budget-reuse",
         default=os.environ.get("POLICY_BUDGET_REUSE", "false"),
-        help="reuse gemini policy across budget tiers (true/false)",
+        help="reuse policy output across budget tiers (true/false)",
     )
     return parser.parse_args()
 
@@ -1946,198 +1978,27 @@ def build_tickets_from_policy_blueprint(policy, candidates, bankroll, cfg):
         return []
     if str(policy.get("buy_style", "") or "").strip().lower() == "no_bet":
         return []
-    constraints = dict((cfg or {}).get("constraints", {}) or {})
     ticket_item_by_id = dict((cfg or {}).get("ticket_item_by_id", {}) or {})
-    selected_candidates = list(candidates or [])
-    if not selected_candidates or not ticket_item_by_id:
+    if not ticket_item_by_id:
         return []
 
     explicit_ticket_plan = list(policy.get("ticket_plan", []) or [])
-    if explicit_ticket_plan:
-        out = []
-        for ticket in explicit_ticket_plan:
-            ticket_id = str(ticket.get("id", "") or "").strip()
-            stake_yen = int(ticket.get("stake_yen", 0) or 0)
-            if (not ticket_id) or stake_yen <= 0:
-                continue
-            item = dict(ticket_item_by_id.get(ticket_id, {}) or {})
-            if not item:
-                continue
-            rec = dict(item)
-            rec["stake_yen"] = stake_yen
-            out.append(rec)
-        if out:
-            return out
-
-    enabled_types = {
-        str(x).strip().lower() for x in list(policy.get("enabled_bet_types", []) or []) if str(x).strip()
-    }
-    focus_points = list(policy.get("focus_points", []) or [])
-    key_horses = {str(x).strip() for x in list(policy.get("key_horses", []) or []) if str(x).strip()}
-    secondary_horses = {str(x).strip() for x in list(policy.get("secondary_horses", []) or []) if str(x).strip()}
-    longshot_horses = {str(x).strip() for x in list(policy.get("longshot_horses", []) or []) if str(x).strip()}
-    if not key_horses:
-        for point in focus_points:
-            if str(point.get("type", "")).strip().lower() == "horse":
-                value = str(point.get("value", "")).strip()
-                if value:
-                    key_horses.add(value)
-                    break
-    if not enabled_types:
-        for point in focus_points:
-            if str(point.get("type", "")).strip().lower() == "bet_type":
-                value = str(point.get("value", "")).strip().lower()
-                if value:
-                    enabled_types.add(value)
-    preferred_ids = {str(x).strip() for x in list(policy.get("pick_ids", []) or []) if str(x).strip()}
-    max_tickets = int(policy.get("max_ticket_count", 0) or 0)
-    hard_cap = int(constraints.get("max_tickets_per_race", 0) or 0)
-    if hard_cap > 0:
-        max_tickets = min(max_tickets if max_tickets > 0 else hard_cap, hard_cap)
-    if max_tickets <= 0:
-        max_tickets = max(1, min(len(selected_candidates), 2))
-    strategy_mode = str(policy.get("strategy_mode", "") or "").strip().lower()
-    participation_level = str(policy.get("participation_level", "") or "").strip().lower()
-    construction_style = str(policy.get("construction_style", "") or "").strip().lower()
-    if not construction_style:
-        if strategy_mode in ("pair_focus", "spread"):
-            construction_style = "pair_spread"
-        elif strategy_mode in ("place_only", "conservative_single", "small_probe"):
-            construction_style = "conservative_single"
-        else:
-            construction_style = "single_axis"
-    risk_tilt = str(policy.get("risk_tilt", "") or "").strip().lower()
-    high_odds_threshold = float(constraints.get("high_odds_threshold", 10.0) or 10.0)
-
-    def style_score(candidate):
-        bet_type = str(candidate.get("bet_type", "") or "").strip().lower()
-        legs = [str(x) for x in list(candidate.get("legs", []) or []) if str(x).strip()]
-        base = float(candidate.get("score", candidate.get("ev", 0.0)) or 0.0)
-        score = base
-        if preferred_ids and str(candidate.get("id", "")) in preferred_ids:
-            score += 5.0
-        if enabled_types and bet_type not in enabled_types:
-            score -= 1000.0
-        key_hits = len(key_horses.intersection(legs))
-        secondary_hits = len(secondary_horses.intersection(legs))
-        longshot_hits = len(longshot_horses.intersection(legs))
-        score += 1.8 * float(key_hits)
-        score += 0.8 * float(secondary_hits)
-        if construction_style == "single_axis":
-            if bet_type == "place" and key_hits:
-                score += 2.4
-            elif bet_type == "win" and key_hits:
-                score += 2.1
-            elif bet_type in ("wide", "quinella") and key_hits:
-                score += 1.8 + (0.6 * float(secondary_hits))
-            elif bet_type in ("wide", "quinella"):
-                score -= 1.2
-        elif construction_style == "pair_spread":
-            if bet_type in ("wide", "quinella"):
-                score += 2.3 + (0.5 * float(key_hits + secondary_hits))
-            else:
-                score -= 0.8
-        elif construction_style == "value_hunt":
-            if longshot_hits:
-                score += 2.0
-            if float(candidate.get("ev", 0.0) or 0.0) > 0.0:
-                score += 0.9
-            if bet_type == "place" and key_hits:
-                score += 1.3
-        elif construction_style == "conservative_single":
-            if bet_type == "place":
-                score += 2.4 + (0.4 * float(key_hits))
-            elif bet_type == "win" and key_hits:
-                score += 0.7
-            elif bet_type in ("wide", "quinella") and key_hits and secondary_hits:
-                score += 0.6
-            else:
-                score -= 1.4
-        if risk_tilt == "low":
-            if bet_type == "place":
-                score += 0.5
-            if float(candidate.get("odds_used", 0.0) or 0.0) >= high_odds_threshold:
-                score -= 0.7
-        elif risk_tilt == "high":
-            if bet_type in ("wide", "quinella"):
-                score += 0.4
-        if participation_level == "small_bet" and bet_type in ("wide", "quinella"):
-            score -= 0.4
-        return score
-
-    ordered = sorted(
-        selected_candidates,
-        key=lambda x: (
-            -style_score(x),
-            -float(x.get("p_hit", 0.0) or 0.0),
-            -float(x.get("ev", 0.0) or 0.0),
-            str(x.get("id", "")),
-        ),
-    )
-    picked = []
-    high_count = 0
-    longshot_count = 0
-    seen_ids = set()
-    for candidate in ordered:
-        cid = str(candidate.get("id", "") or "").strip()
-        if (not cid) or (cid in seen_ids):
+    out = []
+    for ticket in explicit_ticket_plan:
+        ticket_id = str(ticket.get("id", "") or "").strip()
+        stake_yen = int(ticket.get("stake_yen", 0) or 0)
+        if (not ticket_id) or stake_yen <= 0:
             continue
-        item = dict(ticket_item_by_id.get(cid, {}) or {})
+        item = dict(ticket_item_by_id.get(ticket_id, {}) or {})
         if not item:
             continue
-        odds_used = float(item.get("odds_used", 0.0) or 0.0)
-        item_horses = {str(x) for x in list(item.get("horses", ()) or ()) if str(x).strip()}
-        is_high = odds_used >= high_odds_threshold
-        is_longshot = bool(item_horses.intersection(longshot_horses)) or is_high
-        if is_high and high_count >= 1:
-            continue
-        if is_longshot and longshot_horses and longshot_count >= 1:
-            continue
-        seen_ids.add(cid)
-        picked.append(item)
-        if is_high:
-            high_count += 1
-        if is_longshot and longshot_horses:
-            longshot_count += 1
-        if len(picked) >= max_tickets:
-            break
-    if not picked:
-        return []
-
-    units_total = int(max(0, int(bankroll) // int(UNIT_YEN)))
-    if units_total <= 0:
-        return []
-    weights = blueprint_group_weights(policy, picked)
-    group_items = {"win": [], "place": [], "pair": []}
-    for item in picked:
-        group_items[policy_group_for_type(item.get("bet_type", ""))].append(item)
-    units_by_group = split_units(units_total, [weights["win"], weights["place"], weights["pair"]])
-    alloc_map = {"win": int(units_by_group[0]), "place": int(units_by_group[1]), "pair": int(units_by_group[2])}
-    out = []
-    for group_name in ("win", "place", "pair"):
-        rows = list(group_items[group_name] or [])
-        if not rows:
-            continue
-        units_g = int(alloc_map.get(group_name, 0) or 0)
-        if units_g <= 0:
-            continue
-        row_weights = []
-        for row in rows:
-            score = float(row.get("score", row.get("edge", 0.0)) or 0.0)
-            if score <= 0:
-                score = max(1e-6, float(row.get("p_hit", 0.0) or 0.0))
-            row_weights.append(max(1e-6, score))
-        alloc = split_units(units_g, row_weights)
-        for row, units in zip(rows, alloc):
-            if int(units) <= 0:
-                continue
-            rec = dict(row)
-            rec["stake_yen"] = int(units) * int(UNIT_YEN)
-            out.append(rec)
+        rec = dict(item)
+        rec["stake_yen"] = stake_yen
+        out.append(rec)
     return out
 
 
-def attach_policy_text(items, policy_output):
+def attach_policy_text(items, policy_output, policy_engine=""):
     if not items:
         return []
     strategy_text_ja = str(policy_output.get("strategy_text_ja", "") or "")
@@ -2160,7 +2021,7 @@ def attach_policy_text(items, policy_output):
         rec["notes"] = f"{notes};{policy_note}" if notes else policy_note
         rec["strategy_text_ja"] = strategy_text_ja
         rec["bet_tendency_ja"] = bet_tendency_ja
-        rec["policy_engine"] = "gemini"
+        rec["policy_engine"] = str(policy_engine or "")
         rec["policy_buy_style"] = buy_style
         rec["policy_bet_decision"] = bet_decision
         rec["policy_construction_style"] = construction_style
@@ -2168,17 +2029,18 @@ def attach_policy_text(items, policy_output):
     return out
 
 
-def build_gemini_policy_artifact_path(scope_data_dir, race_id, run_id):
+def build_policy_artifact_path(scope_data_dir, race_id, run_id, policy_engine):
     race_text = str(race_id or "").strip()
     run_text = str(run_id or "").strip()
+    engine_text = normalize_policy_engine(policy_engine) or "policy"
     if race_text:
         race_dir = scope_data_dir / race_text
         race_dir.mkdir(parents=True, exist_ok=True)
-        return race_dir / f"gemini_policy_{run_text}_{race_text}.json"
-    return scope_data_dir / f"gemini_policy_{run_text}.json"
+        return race_dir / f"{engine_text}_policy_{run_text}_{race_text}.json"
+    return scope_data_dir / f"{engine_text}_policy_{run_text}.json"
 
 
-def save_gemini_policy_artifact(path, payload):
+def save_policy_artifact(path, payload):
     if not path or not payload:
         return False
     try:
@@ -2186,7 +2048,7 @@ def save_gemini_policy_artifact(path, payload):
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
     except Exception as exc:
-        print(f"[WARN] failed to save gemini_policy artifact: {exc}")
+        print(f"[WARN] failed to save policy artifact: {exc}")
         return False
 
 
@@ -3175,11 +3037,13 @@ def main():
     engine_version = resolve_engine_version(args.engine_version)
     bet_profile = resolve_bet_profile(args.bet_profile)
     v5_profile = resolve_v5_profile(getattr(args, "v5_profile", "default"))
-    policy_engine = str(getattr(args, "policy_engine", "none") or "none").strip().lower()
-    if policy_engine not in ("none", "gemini"):
+    policy_engine = normalize_policy_engine(getattr(args, "policy_engine", "none"))
+    if policy_engine not in ("none", "gemini", "siliconflow"):
         policy_engine = "none"
-    gemini_model = str(
-        getattr(args, "gemini_model", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview"
+    policy_model = resolve_policy_model(
+        policy_engine,
+        getattr(args, "policy_model", ""),
+        getattr(args, "gemini_model", DEFAULT_GEMINI_MODEL),
     ).strip()
     policy_cache_enable = parse_bool_text(getattr(args, "policy_cache_enable", "true"), default=True)
     policy_budget_reuse = parse_bool_text(getattr(args, "policy_budget_reuse", "false"), default=False)
@@ -3305,13 +3169,13 @@ def main():
     out_rows = []
     item_rows_all = []
     all_no_bet_rows = []
-    gemini_policy_records = []
-    gemini_policy_path = None
+    policy_records = []
+    policy_artifact_path = None
     shared_policy_output_payload = None
     shared_policy_meta = {}
     shared_policy_source_budget = None
     gemini_ledger_date = extract_ledger_date(run_id)
-    policy_is_budget_agnostic = bool(policy_engine == "gemini")
+    policy_is_budget_agnostic = False
     plan_columns = [
         "budget_yen",
         "bet_type",
@@ -3445,23 +3309,29 @@ def main():
             )
             normalized_items = build_items_from_v2_result(result)
 
-        if policy_engine == "gemini":
-            if (RacePolicyInput is None) or (call_gemini_policy is None):
-                print("[WARN] policy_engine=gemini but module unavailable; keep original plan.")
+        if policy_engine in ("gemini", "siliconflow"):
+            if (RacePolicyInput is None) or (call_policy is None):
+                print(f"[WARN] policy_engine={policy_engine} but module unavailable; keep original plan.")
             else:
                 policy_candidates, ticket_item_by_id = build_policy_candidate_pool(
                     merged=merged,
                     odds_payload=odds_payload,
-                    per_type_caps={"win": 5, "place": 5, "wide": 10, "quinella": 10},
+                    per_type_caps={
+                        "win": int(len(merged) if merged is not None else 0),
+                        "place": int(len(merged) if merged is not None else 0),
+                        "wide": 12,
+                        "quinella": 12,
+                    },
                 )
                 if not policy_candidates:
                     policy_candidates, ticket_item_by_id = build_policy_candidates_from_items(normalized_items)
-                bankroll_summary_before = summarize_bankroll(BASE_DIR, gemini_ledger_date)
+                bankroll_summary_before = summarize_bankroll(BASE_DIR, gemini_ledger_date, policy_engine=policy_engine)
                 portfolio_history = build_history_context(
                     BASE_DIR,
                     gemini_ledger_date,
                     lookback_days=14,
                     recent_ticket_limit=10,
+                    policy_engine=policy_engine,
                 )
                 constraints = resolve_policy_constraints(
                     engine_version=engine_version,
@@ -3491,10 +3361,17 @@ def main():
                     use_shared_policy = bool(policy_is_budget_agnostic or policy_budget_reuse)
                     if (not use_shared_policy) or (shared_policy_output_payload is None):
                         policy_input_obj = RacePolicyInput(**policy_payload)
-                        policy_output_obj = call_gemini_policy(
+                        if policy_engine == "siliconflow":
+                            policy_timeout_s = 75
+                        elif policy_engine == "gemini":
+                            policy_timeout_s = 60
+                        else:
+                            policy_timeout_s = 35
+                        policy_output_obj = call_policy(
                             input=policy_input_obj,
-                            model=gemini_model,
-                            timeout_s=20,
+                            policy_engine=policy_engine,
+                            model=policy_model,
+                            timeout_s=policy_timeout_s,
                             cache_enable=policy_cache_enable,
                         )
                         if hasattr(policy_output_obj, "model_dump"):
@@ -3519,10 +3396,10 @@ def main():
                             "ticket_item_by_id": ticket_item_by_id,
                         },
                     )
-                    rebalanced = attach_policy_text(rebalanced, policy_output_payload)
+                    rebalanced = attach_policy_text(rebalanced, policy_output_payload, policy_engine=policy_engine)
                     normalized_items = rebalanced
                     policy_applied = True
-                    engine_used = f"{engine_used}+gemini"
+                    engine_used = f"{engine_used}+{policy_engine}"
                     if reused_shared_policy:
                         policy_meta = {
                             **dict(shared_policy_meta),
@@ -3547,8 +3424,9 @@ def main():
                         pass
                     else:
                         print(
-                            "[policy][gemini] scope=race decision={decision} buy_style={buy_style} max_ticket_count={picked} "
+                            "[policy][{policy_engine}] scope=race decision={decision} buy_style={buy_style} max_ticket_count={picked} "
                             "enabled={enabled} construction={construction} cache_hit={cache_hit} fallback_reason={fallback_reason}".format(
+                                policy_engine=policy_engine,
                                 decision=str(policy_output_payload.get("bet_decision", "")),
                                 buy_style=str(policy_output_payload.get("buy_style", "")),
                                 picked=int(policy_output_payload.get("max_ticket_count", 0) or 0),
@@ -3559,13 +3437,13 @@ def main():
                             )
                         )
                         if strategy_text_ja:
-                            print(f"[gemini][strategy]\n{strategy_text_ja}")
+                            print(f"[{policy_engine}][strategy]\n{strategy_text_ja}")
                         if bet_tendency_ja:
-                            print(f"[gemini][tendency] {bet_tendency_ja}")
+                            print(f"[{policy_engine}][tendency] {bet_tendency_ja}")
                         if reason_codes:
-                            print(f"[gemini][reasons] {', '.join(reason_codes)}")
+                            print(f"[{policy_engine}][reasons] {', '.join(reason_codes)}")
                         if warnings_list:
-                            print(f"[gemini][warnings] {', '.join(warnings_list)}")
+                            print(f"[{policy_engine}][warnings] {', '.join(warnings_list)}")
                     if not reused_shared_policy:
                         rendered_policy_rows, _ = build_rows_from_bet_items(
                             items=normalized_items,
@@ -3579,9 +3457,14 @@ def main():
                             race_id=race_id,
                             ledger_date=gemini_ledger_date,
                             tickets=rendered_policy_rows,
+                            policy_engine=policy_engine,
                         )
-                        bankroll_summary_after = summarize_bankroll(BASE_DIR, gemini_ledger_date)
-                        gemini_policy_records.append(
+                        bankroll_summary_after = summarize_bankroll(
+                            BASE_DIR,
+                            gemini_ledger_date,
+                            policy_engine=policy_engine,
+                        )
+                        policy_records.append(
                             {
                                 "budget_yen": 0,
                                 "shared_policy": True,
@@ -3596,7 +3479,7 @@ def main():
                             }
                         )
                 except Exception as exc:
-                    print(f"[WARN] gemini policy failed for budget={budget_yen}, keep original plan: {exc}")
+                    print(f"[WARN] {policy_engine} policy failed for budget={budget_yen}, keep original plan: {exc}")
 
         budget_rows, budget_item_rows = build_rows_from_bet_items(
             items=normalized_items,
@@ -3630,28 +3513,29 @@ def main():
     out_df.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
     items_df = pd.DataFrame(item_rows_all, columns=item_columns)
     items_df.to_csv(items_path, index=False, encoding="utf-8-sig")
-    if policy_engine == "gemini" and gemini_policy_records:
-        gemini_policy_path = build_gemini_policy_artifact_path(scope_data_dir, race_id, run_id)
+    if policy_engine in ("gemini", "siliconflow") and policy_records:
+        policy_artifact_path = build_policy_artifact_path(scope_data_dir, race_id, run_id, policy_engine)
         artifact_payload = {
             "scope": SCOPE_KEY,
             "race_id": str(race_id or ""),
             "run_id": str(run_id or ""),
-            "policy_engine": "gemini",
-            "gemini_model": gemini_model,
+            "policy_engine": policy_engine,
+            "policy_model": policy_model,
+            "gemini_model": policy_model if policy_engine == "gemini" else "",
             "policy_budget_reuse": bool(policy_budget_reuse),
             "saved_at": datetime.now().isoformat(timespec="seconds"),
-            "budgets": gemini_policy_records,
+            "budgets": policy_records,
         }
-        if save_gemini_policy_artifact(gemini_policy_path, artifact_payload):
-            print(f"Saved Gemini policy: {gemini_policy_path}")
+        if save_policy_artifact(policy_artifact_path, artifact_payload):
+            print(f"Saved policy artifact: {policy_artifact_path}")
     total_stake_all, ticket_count_all, edge_sum_all, weighted_edge_all = calc_plan_summary(item_rows_all)
 
     if strategy_used:
         print(f"Strategy: {strategy_used}")
     print(f"Engine version: {engine_version}")
     print(f"Policy engine: {policy_engine}")
-    if policy_engine == "gemini":
-        print(f"Gemini model: {gemini_model}")
+    if policy_engine in ("gemini", "siliconflow"):
+        print(f"Policy model: {policy_model}")
         print(f"Policy cache: {int(bool(policy_cache_enable))}")
         print(f"Policy budget reuse: {int(bool(policy_budget_reuse))}")
     if engine_version == "v3":

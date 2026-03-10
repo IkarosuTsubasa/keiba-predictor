@@ -54,6 +54,8 @@ def main():
         )
         summary = summarize_bankroll(base_dir, ledger_date)
         assert_true(summary["available_bankroll_yen"] == 9300, "reserve did not reduce bankroll")
+        other_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
+        assert_true(other_summary["available_bankroll_yen"] == 10000, "other provider bankroll should stay isolated")
 
         odds_dir = base_dir / "data" / "central_dirt" / "202603090101"
         odds_path = odds_dir / "odds.csv"
@@ -89,6 +91,30 @@ def main():
 
         summary_after = summarize_bankroll(base_dir, ledger_date)
         assert_true(summary_after["available_bankroll_yen"] == 11070, "settlement did not restore bankroll")
+        other_summary_after = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
+        assert_true(other_summary_after["available_bankroll_yen"] == 10000, "other provider bankroll changed unexpectedly")
+        reserve_run_tickets(
+            base_dir,
+            run_id="20260309_223344",
+            scope_key="central_dirt",
+            race_id="202603090102",
+            ledger_date=ledger_date,
+            tickets=[
+                {
+                    "ticket_id": "place-2",
+                    "bet_type": "place",
+                    "horse_no": "2",
+                    "horse_name": "Delta",
+                    "amount_yen": 500,
+                    "odds_used": 2.4,
+                }
+            ],
+            policy_engine="siliconflow",
+        )
+        siliconflow_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
+        assert_true(siliconflow_summary["available_bankroll_yen"] == 9500, "siliconflow reserve should use its own bankroll")
+        gemini_summary_final = summarize_bankroll(base_dir, ledger_date)
+        assert_true(gemini_summary_final["available_bankroll_yen"] == 11070, "gemini bankroll changed after siliconflow reserve")
 
         daily = load_daily_profit_rows(base_dir, days=30)
         assert_true(daily and int(daily[0]["profit_yen"]) == 1070, "daily profit summary mismatch")

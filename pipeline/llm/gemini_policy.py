@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -189,6 +190,31 @@ def _stable_json_dumps(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise json.JSONDecodeError("empty", text, 0)
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(text):
+        if ch not in "[{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[idx:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    raise json.JSONDecodeError("no json object found", text, 0)
+
+
 def _candidate_digest(candidates: List[PolicyCandidate]) -> str:
     slim = []
     for item in candidates:
@@ -220,8 +246,6 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "multi_predictor": dict(input_obj.multi_predictor or {}),
         "portfolio_history": dict(input_obj.portfolio_history or {}),
         "constraints": {
-            "bankroll_yen": int(input_obj.constraints.bankroll_yen or 0),
-            "race_budget_yen": int(input_obj.constraints.race_budget_yen or 0),
             "max_tickets_per_race": int(input_obj.constraints.max_tickets_per_race or 0),
             "high_odds_threshold": float(input_obj.constraints.high_odds_threshold or 0.0),
             "allowed_types": list(input_obj.constraints.allowed_types or []),
@@ -575,11 +599,10 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     ticket_cap_text = (
         "【ローカル制約】\n"
         f"- max_tickets_per_race: {int(constraints.max_tickets_per_race)}\n"
-        "- あなたは購入金額を決める役割ではありません。\n"
-        "- 予算の大小に応じた金額配分はローカル実行器が担当します。\n"
-        "- あなたは、入力データだけをもとに、このレースで最も合理的な購入方針・券種構成・注目対象を決めてください。\n"
-        "- 予算が小さいか大きいかに関わらず、まず「どう買うべきか」を決めてください。\n"
-        "- 「いくら買うか」は考えなくて構いません。\n\n"
+        "- あなたが購入方針だけでなく、実際の買い目と金額まで決めてください。\n"
+        "- ローカル側はデータ整形・検証・記録だけを行い、買い目の選定や配分には介入しません。\n"
+        "- bet_decision が bet の場合は、必ず ticket_plan に実際の買い目と stake_yen を入れてください。\n"
+        "- ticket_plan が空なら、ローカル側は購入しません。\n\n"
     )
     full_data_text = (
         "【入力データの読み方】\n"
@@ -621,9 +644,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "あなたは中央競馬・地方競馬のデータ分析を行う「馬券戦略アナリスト」です。\n"
         "入力されたレース情報・予測・オッズ・市場情報をもとに、"
         "このレースで最も合理的な購入方針を決定してください。\n\n"
-        "あなたの役割は「いくら買うか」を決めることではありません。\n"
-        "購入金額の配分はローカル実行エンジンが担当します。\n"
-        "あなたはどういう戦略で買うべきかを判断してください。\n\n"
+        "あなたはこのレースでどう買うかだけでなく、何をいくら買うかまで決めてください。\n"
+        "ローカル実行側はあなたの出力を検証して記録するだけで、買い目や金額の再構成は行いません。\n\n"
         "【判断対象】\n"
         "- レースの難易度\n"
         "- 予測上位の優位性\n"
@@ -687,8 +709,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- 入力に存在しない馬・組み合わせ・券種を創作しない\n"
         "- enabled_bet_types は candidates に存在する bet_type のみ使用可能\n"
         "- key_horses / secondary_horses / longshot_horses / marks / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
-        "- pick_ids は任意。使う場合も candidates[].id のみ使用可能\n"
-        "- ticket_plan を使う場合、id は candidates[].id のみ使用可能\n"
+        "- pick_ids は補助情報です。実際の購入は ticket_plan を基準にします。\n"
+        "- ticket_plan の id は candidates[].id のみ使用可能です。\n"
         "- 単勝への過度な偏りは避け、混戦時は保守的に寄せる\n\n"
         "【判断の実務ルール】\n"
         "- participation_level は no_bet / small_bet / normal_bet から選んでください。\n"
@@ -700,7 +722,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- risk_tilt は保守参加なら low、balanced なら medium、強気の win_focus や spread でも必要な時だけ medium〜high にしてください。\n"
         "- strategy_text_ja は 2〜4 文の自然な日本語で、レースの見立て、参加レベル、主軸券種、見送りなら理由、small_bet なら軽く参加する理由を含めてください。\n"
         "- bet_tendency_ja は 1 行のみで書いてください。\n"
-        "- 参加判断が bet のときは、可能な限り ticket_plan に実際の買い目を入れてください。\n\n"
+        "- 参加判断が bet のときは、必ず ticket_plan に実際の買い目を入れてください。\n\n"
         "reason_codes は次から必要なものだけを選んでください。\n"
         "- MIXED_FIELD\n"
         "- NORMAL_FIELD\n"
@@ -866,7 +888,7 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         if (not sid) or (sid in seen_ids):
             continue
         if sid not in allowed_ids:
-            raise ValueError("pick_ids contains unknown id")
+            continue
         seen_ids.add(sid)
         pick_ids.append(sid)
 
@@ -899,11 +921,14 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     budget_cap = int(input_obj.constraints.race_budget_yen or 0) or int(input_obj.constraints.bankroll_yen or 0)
     marks = _sanitize_marks(list(output.marks or []), allowed_horses)
     ticket_plan = _sanitize_ticket_plan(list(output.ticket_plan or []), allowed_ids, budget_cap)
+    warnings = [str(x) for x in list(output.warnings or []) if str(x).strip()] if output.warnings else []
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()
     bet_decision = str(output.bet_decision or "no_bet").strip().lower()
     buy_style = str(output.buy_style or "no_bet").strip().lower()
     strategy_mode = str(output.strategy_mode or "no_bet").strip().lower()
+    if bet_decision == "bet" and not ticket_plan:
+        warnings.append("MISSING_TICKET_PLAN")
     if bet_decision == "no_bet" or buy_style == "no_bet":
         bet_decision = "no_bet"
         participation_level = "no_bet"
@@ -949,7 +974,7 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
             "strategy_text_ja": str(output.strategy_text_ja or "").strip(),
             "bet_tendency_ja": str(output.bet_tendency_ja or "").strip(),
             "reason_codes": [str(x) for x in list(output.reason_codes or []) if str(x).strip()],
-            "warnings": [str(x) for x in list(output.warnings or []) if str(x).strip()] if output.warnings else None,
+            "warnings": warnings or None,
             "marks": marks,
             "pick_ids": pick_ids,
             "ticket_plan": ticket_plan,
@@ -998,7 +1023,7 @@ def get_last_call_meta() -> Dict[str, Any]:
 def call_gemini_policy(
     input: RacePolicyInput,
     model: str = DEFAULT_GEMINI_MODEL,
-    timeout_s: int = 20,
+    timeout_s: int = 60,
     cache_enable: bool = True,
 ) -> RacePolicyOutput:
     input_obj = _model_validate(RacePolicyInput, input)
@@ -1039,32 +1064,46 @@ def call_gemini_policy(
             output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _make_prompt(input_obj)
-            start = time.perf_counter()
+            retry_count_raw = str(os.environ.get("GEMINI_POLICY_RETRIES", "3") or "3").strip()
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    fut = executor.submit(_call_gemini_once, prompt, model, api_key)
-                    raw_text = fut.result(timeout=max(1, int(timeout_s or 1)))
-                llm_latency_ms = int((time.perf_counter() - start) * 1000)
-                payload = json.loads(raw_text)
-                parsed = _model_validate(RacePolicyOutput, payload)
-                output = _sanitize_output(parsed, input_obj)
-            except concurrent.futures.TimeoutError:
-                fallback_reason = "timeout"
-            except json.JSONDecodeError:
-                fallback_reason = "json_parse_failed"
-            except ValueError as exc:
-                if "unknown id" in str(exc).lower():
-                    fallback_reason = "unknown_pick_id"
-                else:
-                    fallback_reason = "value_error"
-            except Exception as exc:
-                text = str(exc).lower()
-                if "429" in text or "quota" in text or "rate" in text:
-                    fallback_reason = "quota_or_429"
-                elif "api key" in text or "permission" in text or "auth" in text:
-                    fallback_reason = "auth_error"
-                else:
-                    fallback_reason = "network_or_sdk_error"
+                max_attempts = max(1, int(retry_count_raw))
+            except ValueError:
+                max_attempts = 3
+            for attempt_idx in range(max_attempts):
+                start = time.perf_counter()
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        fut = executor.submit(_call_gemini_once, prompt, model, api_key)
+                        raw_text = fut.result(timeout=max(1, int(timeout_s or 1)))
+                    llm_latency_ms = int((time.perf_counter() - start) * 1000)
+                    payload = _parse_json_payload(raw_text)
+                    parsed = _model_validate(RacePolicyOutput, payload)
+                    output = _sanitize_output(parsed, input_obj)
+                    fallback_reason = ""
+                    break
+                except concurrent.futures.TimeoutError:
+                    fallback_reason = "timeout"
+                except json.JSONDecodeError:
+                    fallback_reason = "json_parse_failed"
+                except ValueError as exc:
+                    if "unknown id" in str(exc).lower():
+                        fallback_reason = "unknown_pick_id"
+                    else:
+                        fallback_reason = "value_error"
+                except Exception as exc:
+                    text = str(exc).lower()
+                    if "503" in text or "unavailable" in text or "high demand" in text:
+                        fallback_reason = "service_unavailable"
+                    elif "429" in text or "quota" in text or "rate" in text:
+                        fallback_reason = "quota_or_429"
+                    elif "api key" in text or "permission" in text or "auth" in text:
+                        fallback_reason = "auth_error"
+                    else:
+                        fallback_reason = "network_or_sdk_error"
+                if output is not None or attempt_idx + 1 >= max_attempts:
+                    break
+                if fallback_reason in ("timeout", "service_unavailable", "network_or_sdk_error"):
+                    time.sleep(min(3.0, 1.0 + attempt_idx))
 
             if output is None:
                 output = deterministic_policy(input_obj, fallback_reason=fallback_reason)

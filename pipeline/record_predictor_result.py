@@ -190,6 +190,7 @@ def infer_run_id_from_row(run_row):
         return ""
     for key in (
         "run_id",
+        "policy_path",
         "predictions_path",
         "odds_path",
         "wide_odds_path",
@@ -198,6 +199,7 @@ def infer_run_id_from_row(run_row):
         "trifecta_odds_path",
         "plan_path",
         "gemini_policy_path",
+        "siliconflow_policy_path",
     ):
         text = str(run_row.get(key, "") or "").strip()
         if key == "run_id" and text:
@@ -366,13 +368,14 @@ def main():
         sys.exit(1)
     replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
     print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
-    gemini_settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw)
-    if gemini_settlement:
-        print(
-            "[gemini_portfolio] settled_tickets={settled_ticket_count} run_stake_yen={run_stake_yen} "
-            "run_payout_yen={run_payout_yen} run_profit_yen={run_profit_yen} "
-            "available_bankroll_yen={available_bankroll_yen}".format(**gemini_settlement)
-        )
+    for policy_engine in ("gemini", "siliconflow"):
+        settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw, policy_engine=policy_engine)
+        if settlement:
+            print(
+                "[{policy_engine}_portfolio] settled_tickets={settled_ticket_count} run_stake_yen={run_stake_yen} "
+                "run_payout_yen={run_payout_yen} run_profit_yen={run_profit_yen} "
+                "available_bankroll_yen={available_bankroll_yen}".format(**settlement)
+            )
     optimizer = BASE_DIR / "optimize_predictor_params.py"
     if optimizer.exists():
         subprocess.run([sys.executable, str(optimizer)], check=False)

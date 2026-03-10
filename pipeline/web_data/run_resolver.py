@@ -36,6 +36,7 @@ def infer_run_id_from_row(run_row):
     if not run_row:
         return ""
     for key in (
+        "policy_path",
         "predictions_path",
         "odds_path",
         "wide_odds_path",
@@ -43,6 +44,8 @@ def infer_run_id_from_row(run_row):
         "quinella_odds_path",
         "trifecta_odds_path",
         "plan_path",
+        "gemini_policy_path",
+        "siliconflow_policy_path",
     ):
         run_id = infer_run_id_from_path(run_row.get(key, ""))
         if run_id:

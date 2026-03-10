@@ -5,8 +5,10 @@ import re
 
 
 DAILY_BANKROLL_YEN = 10000
+DEFAULT_POLICY_ENGINE = "gemini"
 LEDGER_HEADERS = [
     "ledger_date",
+    "policy_engine",
     "run_id",
     "scope_key",
     "race_id",
@@ -33,8 +35,18 @@ def _shared_dir(base_dir):
     return path
 
 
-def ledger_path(base_dir):
-    return _shared_dir(base_dir) / "gemini_ticket_ledger.csv"
+def normalize_policy_engine(policy_engine="gemini"):
+    text = str(policy_engine or "").strip().lower()
+    text = re.sub(r"[^a-z0-9_]+", "_", text).strip("_")
+    return text or DEFAULT_POLICY_ENGINE
+
+
+def ledger_path(base_dir, policy_engine="gemini"):
+    engine = normalize_policy_engine(policy_engine)
+    if engine == "gemini":
+        legacy = _shared_dir(base_dir) / "gemini_ticket_ledger.csv"
+        return legacy
+    return _shared_dir(base_dir) / f"{engine}_ticket_ledger.csv"
 
 
 def ensure_csv_header(path, fieldnames):
@@ -117,9 +129,10 @@ def extract_ledger_date(run_id="", timestamp=""):
     return datetime.now().strftime("%Y%m%d")
 
 
-def summarize_bankroll(base_dir, ledger_date):
+def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
     date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
-    rows = [row for row in load_rows(ledger_path(base_dir)) if str(row.get("ledger_date", "")).strip() == date_key]
+    engine = normalize_policy_engine(policy_engine)
+    rows = [row for row in load_rows(ledger_path(base_dir, engine)) if str(row.get("ledger_date", "")).strip() == date_key]
     open_stake = 0
     realized_profit = 0
     pending_runs = set()
@@ -148,18 +161,25 @@ def summarize_bankroll(base_dir, ledger_date):
         "settled_runs": len(settled_runs),
         "pending_tickets": sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "pending"),
         "settled_tickets": sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "settled"),
+        "policy_engine": engine,
     }
 
 
-def load_run_tickets(base_dir, run_id):
-    rows = [row for row in load_rows(ledger_path(base_dir)) if str(row.get("run_id", "")).strip() == str(run_id or "").strip()]
+def load_run_tickets(base_dir, run_id, policy_engine="gemini"):
+    engine = normalize_policy_engine(policy_engine)
+    rows = [
+        row
+        for row in load_rows(ledger_path(base_dir, engine))
+        if str(row.get("run_id", "")).strip() == str(run_id or "").strip()
+    ]
     if not rows:
         return []
     return rows
 
 
-def reserve_run_tickets(base_dir, run_id, scope_key, race_id, ledger_date, tickets):
-    path = ledger_path(base_dir)
+def reserve_run_tickets(base_dir, run_id, scope_key, race_id, ledger_date, tickets, policy_engine="gemini"):
+    engine = normalize_policy_engine(policy_engine)
+    path = ledger_path(base_dir, engine)
     existing = load_rows(path)
     keep = []
     run_text = str(run_id or "").strip()
@@ -174,6 +194,7 @@ def reserve_run_tickets(base_dir, run_id, scope_key, race_id, ledger_date, ticke
         keep.append(
             {
                 "ledger_date": str(ledger_date or ""),
+                "policy_engine": engine,
                 "run_id": run_text,
                 "scope_key": str(scope_key or ""),
                 "race_id": str(race_id or ""),
@@ -288,11 +309,12 @@ def eval_ticket_hit(bet_type, horse_names, actual_order):
     return 0
 
 
-def settle_run_tickets(base_dir, run_row, actual_top3_names):
+def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemini"):
     run_id = str((run_row or {}).get("run_id", "")).strip()
     if not run_id:
         return None
-    path = ledger_path(base_dir)
+    engine = normalize_policy_engine(policy_engine)
+    path = ledger_path(base_dir, engine)
     rows = load_rows(path)
     pending = [row for row in rows if str(row.get("run_id", "")).strip() == run_id and str(row.get("status", "")).strip().lower() == "pending"]
     if not pending:
@@ -349,10 +371,15 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names):
         settled_row["settled_at"] = settled_at
         updated.append(settled_row)
     write_rows(path, LEDGER_HEADERS, updated)
-    summary = summarize_bankroll(base_dir, extract_ledger_date(run_id, (run_row or {}).get("timestamp", "")))
+    summary = summarize_bankroll(
+        base_dir,
+        extract_ledger_date(run_id, (run_row or {}).get("timestamp", "")),
+        policy_engine=engine,
+    )
     summary.update(
         {
             "run_id": run_id,
+            "policy_engine": engine,
             "settled_ticket_count": settled_count,
             "run_stake_yen": total_stake,
             "run_payout_yen": total_payout,
@@ -362,14 +389,15 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names):
     return summary
 
 
-def load_daily_profit_rows(base_dir, days=30):
+def load_daily_profit_rows(base_dir, days=30, policy_engine="gemini"):
     try:
         days = int(days)
     except (TypeError, ValueError):
         days = 30
     cutoff = datetime.now().date() - timedelta(days=max(0, days - 1))
     daily = {}
-    for row in load_rows(ledger_path(base_dir)):
+    engine = normalize_policy_engine(policy_engine)
+    for row in load_rows(ledger_path(base_dir, engine)):
         if str(row.get("status", "")).strip().lower() != "settled":
             continue
         date_key = str(row.get("ledger_date", "")).strip()
@@ -401,6 +429,7 @@ def load_daily_profit_rows(base_dir, days=30):
                 "profit_yen": profit,
                 "base_amount": base,
                 "roi": roi,
+                "policy_engine": engine,
             }
         )
     return out
@@ -424,7 +453,7 @@ def _row_datetime_key(row):
     return datetime.min
 
 
-def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket_limit=8):
+def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket_limit=8, policy_engine="gemini"):
     try:
         lookback_days = int(lookback_days)
     except (TypeError, ValueError):
@@ -437,7 +466,8 @@ def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket
     recent_ticket_limit = max(1, recent_ticket_limit)
     today_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
     cutoff = datetime.now().date() - timedelta(days=max(0, lookback_days - 1))
-    rows = load_rows(ledger_path(base_dir))
+    engine = normalize_policy_engine(policy_engine)
+    rows = load_rows(ledger_path(base_dir, engine))
     settled_rows = []
     active_rows = []
     bet_type_stats = {}
@@ -507,8 +537,8 @@ def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket
         stat["roi"] = round(payout_yen / stake_yen, 4) if stake_yen > 0 else ""
         bet_type_rows.append(stat)
     return {
-        "today": summarize_bankroll(base_dir, today_key),
-        "recent_days": load_daily_profit_rows(base_dir, days=lookback_days),
+        "today": summarize_bankroll(base_dir, today_key, policy_engine=engine),
+        "recent_days": load_daily_profit_rows(base_dir, days=lookback_days, policy_engine=engine),
         "lookback_summary": {
             "days": lookback_days,
             "settled_runs": len({str(row.get("run_id", "")).strip() for row in settled_rows if str(row.get("run_id", "")).strip()}),
@@ -523,4 +553,5 @@ def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket
         },
         "bet_type_breakdown": bet_type_rows,
         "recent_tickets": recent_tickets,
+        "policy_engine": engine,
     }

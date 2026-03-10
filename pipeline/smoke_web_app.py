@@ -27,6 +27,8 @@ def main():
     assert_true(bool(run_id), "no run_id found in any scope")
     view_html = web_app.view_run(run_id=run_id, scope_key="")
     assert_true("Top5 Predictions" in view_html or "Gemini Policy" in view_html, "view_run did not render run blocks")
+    predictor_env = web_app.build_predictor_env("central_turf", run_id, web_app.resolve_run(run_id, "central_turf") or {})
+    assert_true(isinstance(predictor_env, dict), "build_predictor_env did not return dict")
 
     print("smoke_web_app: OK")
 
