@@ -175,6 +175,8 @@ def refresh_odds_for_run(
     wide_odds_path=None,
     fuku_odds_path=None,
     quinella_odds_path=None,
+    exacta_odds_path=None,
+    trio_odds_path=None,
     trifecta_odds_path=None,
 ):
     race_url = str(run_row.get("race_url") or "").strip()
@@ -245,6 +247,24 @@ def refresh_odds_for_run(
             return False, f"Failed to update quinella odds file: {exc}", []
     elif quinella_odds_path:
         warnings.append("quinella_odds.csv not generated.")
+    exacta_tmp = ROOT_DIR / "exacta_odds.csv"
+    if exacta_odds_path and exacta_tmp.exists():
+        try:
+            Path(exacta_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exacta_tmp, exacta_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update exacta odds file: {exc}", []
+    elif exacta_odds_path:
+        warnings.append("exacta_odds.csv not generated.")
+    trio_tmp = ROOT_DIR / "trio_odds.csv"
+    if trio_odds_path and trio_tmp.exists():
+        try:
+            Path(trio_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(trio_tmp, trio_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update trio odds file: {exc}", []
+    elif trio_odds_path:
+        warnings.append("trio_odds.csv not generated.")
     trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
     if trifecta_odds_path and trifecta_tmp.exists():
         try:
@@ -528,6 +548,19 @@ def build_predictor_env(scope_norm, resolved_run_id, run_row):
         }.get(spec["id"])
         if env_name:
             predictor_env[env_name] = str(pred_path)
+    odds_env_map = {
+        "odds_path": ("ODDS_PATH", "odds"),
+        "fuku_odds_path": ("FUKU_ODDS_PATH", "fuku_odds"),
+        "wide_odds_path": ("WIDE_ODDS_PATH", "wide_odds"),
+        "quinella_odds_path": ("QUINELLA_ODDS_PATH", "quinella_odds"),
+        "exacta_odds_path": ("EXACTA_ODDS_PATH", "exacta_odds"),
+        "trio_odds_path": ("TRIO_ODDS_PATH", "trio_odds"),
+        "trifecta_odds_path": ("TRIFECTA_ODDS_PATH", "trifecta_odds"),
+    }
+    for field_name, (env_name, prefix) in odds_env_map.items():
+        path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, field_name, prefix)
+        if path and path.exists():
+            predictor_env[env_name] = str(path)
     return predictor_env
 
 
@@ -984,7 +1017,7 @@ def build_pair_odds_top(candidate_lookup):
     return [{"bet_type": row["bet_type"], "pair": row["pair"], "odds": row["odds"]} for row in rows[:10]]
 
 
-def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows):
+def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None, trifecta_rows=None):
     def _pair_rows(rows):
         out = []
         for row in list(rows or []):
@@ -994,6 +1027,26 @@ def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows):
                 continue
             odds = to_float(row.get("odds_mid", row.get("odds", 0)) or 0)
             out.append({"pair": f"{a}-{b}", "horse_no_a": a, "horse_no_b": b, "odds": round(odds, 6)})
+        return out
+
+    def _triple_rows(rows):
+        out = []
+        for row in list(rows or []):
+            a = str(row.get("horse_no_a", "") or "").strip()
+            b = str(row.get("horse_no_b", "") or "").strip()
+            c = str(row.get("horse_no_c", "") or "").strip()
+            if not a or not b or not c:
+                continue
+            odds = to_float(row.get("odds", 0) or 0)
+            out.append(
+                {
+                    "triple": f"{a}-{b}-{c}",
+                    "horse_no_a": a,
+                    "horse_no_b": b,
+                    "horse_no_c": c,
+                    "odds": round(odds, 6),
+                }
+            )
         return out
 
     def _single_rows(rows, odds_key):
@@ -1016,6 +1069,9 @@ def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows):
         "place": _single_rows(place_rows, "odds_mid" if place_rows and "odds_mid" in place_rows[0] else "odds_low"),
         "wide": _pair_rows(wide_rows),
         "quinella": _pair_rows(quinella_rows),
+        "exacta": _pair_rows(exacta_rows),
+        "trio": _triple_rows(trio_rows),
+        "trifecta": _triple_rows(trifecta_rows),
     }
 
 
@@ -1034,7 +1090,20 @@ def build_prediction_field_guide():
     }
 
 
-def build_policy_input_payload(scope_key, run_id, run_row, pred_path, odds_path, fuku_odds_path, wide_odds_path, quinella_odds_path, policy_engine):
+def build_policy_input_payload(
+    scope_key,
+    run_id,
+    run_row,
+    pred_path,
+    odds_path,
+    fuku_odds_path,
+    wide_odds_path,
+    quinella_odds_path,
+    exacta_odds_path,
+    trio_odds_path,
+    trifecta_odds_path,
+    policy_engine,
+):
     pred_rows = load_csv_rows_flexible(pred_path)
     if not pred_rows:
         return None, "Prediction file is missing or empty."
@@ -1122,6 +1191,9 @@ def build_policy_input_payload(scope_key, run_id, run_row, pred_path, odds_path,
             load_csv_rows_flexible(fuku_odds_path),
             load_csv_rows_flexible(wide_odds_path),
             load_csv_rows_flexible(quinella_odds_path),
+            load_csv_rows_flexible(exacta_odds_path),
+            load_csv_rows_flexible(trio_odds_path),
+            load_csv_rows_flexible(trifecta_odds_path),
         ),
         "prediction_field_guide": build_prediction_field_guide(),
         "multi_predictor": multi_predictor,
@@ -1285,6 +1357,9 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
     fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
     wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
     quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
+    exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
+    trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
+    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
     context, error = build_policy_input_payload(
         scope_norm,
         run_id,
@@ -1294,6 +1369,9 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
         fuku_odds_path,
         wide_odds_path,
         quinella_odds_path,
+        exacta_odds_path,
+        trio_odds_path,
+        trifecta_odds_path,
         engine,
     )
     if error:
@@ -1423,6 +1501,9 @@ def maybe_refresh_run_odds(scope_norm, run_row, run_id, refresh_enabled):
     wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
     fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
     quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
+    exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
+    trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
+    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
     return refresh_odds_for_run(
         run_row,
         scope_norm,
@@ -1430,6 +1511,9 @@ def maybe_refresh_run_odds(scope_norm, run_row, run_id, refresh_enabled):
         wide_odds_path=wide_odds_path,
         fuku_odds_path=fuku_odds_path,
         quinella_odds_path=quinella_odds_path,
+        exacta_odds_path=exacta_odds_path,
+        trio_odds_path=trio_odds_path,
+        trifecta_odds_path=trifecta_odds_path,
     )
 
 
@@ -2173,6 +2257,8 @@ def record_predictor(
         wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
         fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
         quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
+        exacta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "exacta_odds_path", "exacta_odds")
+        trio_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trio_odds_path", "trio_odds")
         trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
         refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
             run_row,
@@ -2181,6 +2267,8 @@ def record_predictor(
             wide_odds_path=wide_odds_path,
             fuku_odds_path=fuku_odds_path,
             quinella_odds_path=quinella_odds_path,
+            exacta_odds_path=exacta_odds_path,
+            trio_odds_path=trio_odds_path,
             trifecta_odds_path=trifecta_odds_path,
         )
     inputs = [resolved_run_id, top1, top2, top3]

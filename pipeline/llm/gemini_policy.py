@@ -611,7 +611,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- multi_predictor.profiles は各 predictor の設計上の強みです。絶対評価ではなく、視点の違いとして扱ってください。\n"
         "- multi_predictor.summaries は predictor ごとの上位馬一覧です。\n"
         "- multi_predictor.consensus は馬番単位で揃えた共識表です。top1_votes / top3_votes / avg_pred_rank を優先的に見てください。\n"
-        "- odds_full には win/place/wide/quinella の全量オッズが入っています。\n"
+        "- odds_full には win/place/wide/quinella/exacta/trio/trifecta の全量オッズが入っています。\n"
         "- prediction_field_guide には predictions_full の各列が何を意味するかの説明があります。\n"
         "- 要約だけで判断せず、multi_predictor・predictions_full・odds_full・prediction_field_guide を必ず参照して考えてください。\n"
         "- candidates や要約情報は補助材料です。最終判断では multi_predictor・predictions_full・odds_full を優先して参照してください。\n"

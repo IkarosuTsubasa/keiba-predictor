@@ -645,6 +645,9 @@ def main():
         "fuku_odds.csv": ROOT_DIR / "fuku_odds.csv",
         "wide_odds.csv": ROOT_DIR / "wide_odds.csv",
         "quinella_odds.csv": ROOT_DIR / "quinella_odds.csv",
+        "exacta_odds.csv": ROOT_DIR / "exacta_odds.csv",
+        "trio_odds.csv": ROOT_DIR / "trio_odds.csv",
+        "trifecta_odds.csv": ROOT_DIR / "trifecta_odds.csv",
     }
     ok, msg = validate_odds_outputs(odds_extract_start, odds_required)
     if not ok:
@@ -735,6 +738,13 @@ def main():
                     "PREDICTOR_TARGET_CONDITION": track_cond_label,
                     "PREDICTOR_TARGET_DATE": race_date,
                     "PREDICTOR_NO_PROMPT": "1",
+                    "ODDS_PATH": str(ROOT_DIR / "odds.csv"),
+                    "FUKU_ODDS_PATH": str(ROOT_DIR / "fuku_odds.csv"),
+                    "WIDE_ODDS_PATH": str(ROOT_DIR / "wide_odds.csv"),
+                    "QUINELLA_ODDS_PATH": str(ROOT_DIR / "quinella_odds.csv"),
+                    "EXACTA_ODDS_PATH": str(ROOT_DIR / "exacta_odds.csv"),
+                    "TRIO_ODDS_PATH": str(ROOT_DIR / "trio_odds.csv"),
+                    "TRIFECTA_ODDS_PATH": str(ROOT_DIR / "trifecta_odds.csv"),
                 },
             )
         else:
@@ -788,6 +798,20 @@ def main():
         shutil.copy2(quinella_src, quinella_dest)
         quinella_odds_path = str(quinella_dest)
 
+    exacta_odds_path = ""
+    exacta_src = ROOT_DIR / "exacta_odds.csv"
+    if exacta_src.exists():
+        exacta_dest = race_dir / f"exacta_odds_{run_id}{race_suffix}.csv"
+        shutil.copy2(exacta_src, exacta_dest)
+        exacta_odds_path = str(exacta_dest)
+
+    trio_odds_path = ""
+    trio_src = ROOT_DIR / "trio_odds.csv"
+    if trio_src.exists():
+        trio_dest = race_dir / f"trio_odds_{run_id}{race_suffix}.csv"
+        shutil.copy2(trio_src, trio_dest)
+        trio_odds_path = str(trio_dest)
+
     trifecta_odds_path = ""
     trifecta_src = ROOT_DIR / "trifecta_odds.csv"
     if trifecta_src.exists():
@@ -824,6 +848,8 @@ def main():
         "wide_odds_path": wide_odds_path,
         "fuku_odds_path": fuku_odds_path,
         "quinella_odds_path": quinella_odds_path,
+        "exacta_odds_path": exacta_odds_path,
+        "trio_odds_path": trio_odds_path,
         "trifecta_odds_path": trifecta_odds_path,
         "plan_path": "",
         "gemini_policy_path": "",

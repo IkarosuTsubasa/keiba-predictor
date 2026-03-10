@@ -212,6 +212,8 @@ def refresh_odds_for_run(
     wide_odds_path,
     fuku_odds_path,
     quinella_odds_path,
+    exacta_odds_path,
+    trio_odds_path,
     trifecta_odds_path,
 ):
     race_url = (run_row.get("race_url") or "").strip()
@@ -279,6 +281,20 @@ def refresh_odds_for_run(
             shutil.copy2(quinella_tmp, quinella_odds_path)
         except Exception as exc:
             return False, f"Failed to update quinella odds file: {exc}"
+    exacta_tmp = ROOT_DIR / "exacta_odds.csv"
+    if exacta_tmp.exists() and exacta_odds_path:
+        try:
+            Path(exacta_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exacta_tmp, exacta_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update exacta odds file: {exc}"
+    trio_tmp = ROOT_DIR / "trio_odds.csv"
+    if trio_tmp.exists() and trio_odds_path:
+        try:
+            Path(trio_odds_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(trio_tmp, trio_odds_path)
+        except Exception as exc:
+            return False, f"Failed to update trio odds file: {exc}"
     trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
     if trifecta_tmp.exists() and trifecta_odds_path:
         try:
@@ -903,6 +919,12 @@ def main():
     wide_odds_path = run.get("wide_odds_path") or str(race_dir / f"wide_odds_{run_id}_{race_id}.csv")
     fuku_odds_path = run.get("fuku_odds_path") or str(race_dir / f"fuku_odds_{run_id}_{race_id}.csv")
     quinella_odds_path = run.get("quinella_odds_path") or str(race_dir / f"quinella_odds_{run_id}_{race_id}.csv")
+    exacta_odds_path = run.get("exacta_odds_path") or str(
+        race_dir / f"exacta_odds_{run_id}_{race_id}.csv"
+    )
+    trio_odds_path = run.get("trio_odds_path") or str(
+        race_dir / f"trio_odds_{run_id}_{race_id}.csv"
+    )
     trifecta_odds_path = run.get("trifecta_odds_path") or str(
         race_dir / f"trifecta_odds_{run_id}_{race_id}.csv"
     )
@@ -915,6 +937,8 @@ def main():
         wide_odds_path,
         fuku_odds_path,
         quinella_odds_path,
+        exacta_odds_path,
+        trio_odds_path,
         trifecta_odds_path,
     )
     if updated:

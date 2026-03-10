@@ -202,6 +202,8 @@ CSV_SPECS = {
         "wide_odds_path",
         "fuku_odds_path",
         "quinella_odds_path",
+        "exacta_odds_path",
+        "trio_odds_path",
         "trifecta_odds_path",
         "plan_path",
         "tickets",

@@ -236,6 +236,9 @@ class OddsEngine:
         place_path: str = "fuku_odds.csv",
         wide_path: str = "wide_odds.csv",
         quinella_path: str = "quinella_odds.csv",
+        exacta_path: str = "exacta_odds.csv",
+        trio_path: str = "trio_odds.csv",
+        trifecta_path: str = "trifecta_odds.csv",
     ) -> None:
         # Win odds (required — warn loudly if missing or malformed)
         if not Path(win_path).exists():
@@ -381,6 +384,76 @@ class OddsEngine:
             )
             self._features[name]["market_centrality"] = all_centrality[hno] / max_cent
 
+        def _load_combo_market_strength(
+            csv_path: str,
+            required_cols,
+            horse_cols,
+            odds_col: str,
+            feature_name: str,
+        ) -> None:
+            path = Path(csv_path)
+            if not path.exists():
+                print(f"[WARN] {feature_name} odds file not found: {csv_path}")
+                return
+            try:
+                df = pd.read_csv(path)
+                missing = set(required_cols) - set(df.columns)
+                if missing:
+                    print(f"[WARN] {csv_path} missing columns: {missing}")
+                    return
+                strength: Dict[int, float] = defaultdict(float)
+                counts: Dict[int, int] = defaultdict(int)
+                for _, r in df.iterrows():
+                    odds = _pf(r.get(odds_col, np.nan))
+                    if not (pd.notna(odds) and odds > 0):
+                        continue
+                    score = 1.0 / odds
+                    horse_nos = []
+                    for col in horse_cols:
+                        hno = _pi(r.get(col, 0))
+                        if hno > 0:
+                            horse_nos.append(hno)
+                    for hno in horse_nos:
+                        strength[hno] += score
+                        counts[hno] += 1
+                max_strength = max(strength.values()) if strength else 1.0
+                if max_strength <= 0:
+                    max_strength = 1.0
+                for hno, total_strength in strength.items():
+                    name = self._hno_to_name.get(hno, "")
+                    if not name or name not in self._features:
+                        continue
+                    count = counts.get(hno, 0)
+                    self._features[name][feature_name] = (
+                        (total_strength / count) if count > 0 else 0.0
+                    )
+                    self._features[name][f"{feature_name}_norm"] = total_strength / max_strength
+                print(f"[INFO] Loaded {len(df)} rows from {csv_path} for {feature_name}")
+            except Exception as e:
+                print(f"[ERROR] Failed to read {csv_path}: {e}")
+
+        _load_combo_market_strength(
+            exacta_path,
+            {"horse_no_a", "horse_no_b", "odds"},
+            ["horse_no_a", "horse_no_b"],
+            "odds",
+            "exacta_network_strength",
+        )
+        _load_combo_market_strength(
+            trio_path,
+            {"horse_no_a", "horse_no_b", "horse_no_c", "odds"},
+            ["horse_no_a", "horse_no_b", "horse_no_c"],
+            "odds",
+            "trio_network_strength",
+        )
+        _load_combo_market_strength(
+            trifecta_path,
+            {"horse_no_a", "horse_no_b", "horse_no_c", "odds"},
+            ["horse_no_a", "horse_no_b", "horse_no_c"],
+            "odds",
+            "trifecta_network_strength",
+        )
+
         # Fill missing place/combo features
         for name, feat in self._features.items():
             if "implied_prob_place" not in feat:
@@ -392,6 +465,18 @@ class OddsEngine:
                 feat["quinella_network_strength"] = 0.0
             if "market_centrality" not in feat:
                 feat["market_centrality"] = 0.0
+            if "exacta_network_strength" not in feat:
+                feat["exacta_network_strength"] = 0.0
+            if "exacta_network_strength_norm" not in feat:
+                feat["exacta_network_strength_norm"] = 0.0
+            if "trio_network_strength" not in feat:
+                feat["trio_network_strength"] = 0.0
+            if "trio_network_strength_norm" not in feat:
+                feat["trio_network_strength_norm"] = 0.0
+            if "trifecta_network_strength" not in feat:
+                feat["trifecta_network_strength"] = 0.0
+            if "trifecta_network_strength_norm" not in feat:
+                feat["trifecta_network_strength_norm"] = 0.0
 
     def get_features(self, horse_name: str) -> Dict[str, float]:
         key = _normalize_name(horse_name)
@@ -403,6 +488,12 @@ class OddsEngine:
             "wide_network_strength": 0.0,
             "quinella_network_strength": 0.0,
             "market_centrality": 0.0,
+            "exacta_network_strength": 0.0,
+            "exacta_network_strength_norm": 0.0,
+            "trio_network_strength": 0.0,
+            "trio_network_strength_norm": 0.0,
+            "trifecta_network_strength": 0.0,
+            "trifecta_network_strength_norm": 0.0,
             "horse_no": 0.0,
         }
         return self._features.get(key, default)
@@ -955,6 +1046,12 @@ class FeatureEngine:
             feat["wide_network_strength"] = odds_feat.get("wide_network_strength", 0.0)
             feat["quinella_network_strength"] = odds_feat.get("quinella_network_strength", 0.0)
             feat["market_centrality"] = odds_feat.get("market_centrality", 0.0)
+            feat["exacta_network_strength"] = odds_feat.get("exacta_network_strength", 0.0)
+            feat["exacta_network_strength_norm"] = odds_feat.get("exacta_network_strength_norm", 0.0)
+            feat["trio_network_strength"] = odds_feat.get("trio_network_strength", 0.0)
+            feat["trio_network_strength_norm"] = odds_feat.get("trio_network_strength_norm", 0.0)
+            feat["trifecta_network_strength"] = odds_feat.get("trifecta_network_strength", 0.0)
+            feat["trifecta_network_strength_norm"] = odds_feat.get("trifecta_network_strength_norm", 0.0)
         else:
             feat["odds_win"] = 0.0
             feat["implied_prob_win"] = 0.0
@@ -962,6 +1059,12 @@ class FeatureEngine:
             feat["wide_network_strength"] = 0.0
             feat["quinella_network_strength"] = 0.0
             feat["market_centrality"] = 0.0
+            feat["exacta_network_strength"] = 0.0
+            feat["exacta_network_strength_norm"] = 0.0
+            feat["trio_network_strength"] = 0.0
+            feat["trio_network_strength_norm"] = 0.0
+            feat["trifecta_network_strength"] = 0.0
+            feat["trifecta_network_strength_norm"] = 0.0
 
         feat["popularity_pct"] = popularity / max(field_size, 1) if popularity > 0 else 0.5
 
@@ -1066,6 +1169,12 @@ class FeatureEngine:
                     "wide_network_strength": 0.0,
                     "quinella_network_strength": 0.0,
                     "market_centrality": 0.0,
+                    "exacta_network_strength": 0.0,
+                    "exacta_network_strength_norm": 0.0,
+                    "trio_network_strength": 0.0,
+                    "trio_network_strength_norm": 0.0,
+                    "trifecta_network_strength": 0.0,
+                    "trifecta_network_strength_norm": 0.0,
                 }
 
                 feat = self.compute_horse_features(
@@ -1653,7 +1762,15 @@ def main():
 
     # Load odds
     odds_engine = OddsEngine()
-    odds_engine.load_and_compute()
+    odds_engine.load_and_compute(
+        win_path=os.environ.get("ODDS_PATH", "odds.csv"),
+        place_path=os.environ.get("FUKU_ODDS_PATH", "fuku_odds.csv"),
+        wide_path=os.environ.get("WIDE_ODDS_PATH", "wide_odds.csv"),
+        quinella_path=os.environ.get("QUINELLA_ODDS_PATH", "quinella_odds.csv"),
+        exacta_path=os.environ.get("EXACTA_ODDS_PATH", "exacta_odds.csv"),
+        trio_path=os.environ.get("TRIO_ODDS_PATH", "trio_odds.csv"),
+        trifecta_path=os.environ.get("TRIFECTA_ODDS_PATH", "trifecta_odds.csv"),
+    )
 
     # Build inference features (shutuba_df is pure history, no current race entry)
     inference_df = engine.create_inference_features(shutuba_df, odds_engine, target_race_date=target_race_date)

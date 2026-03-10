@@ -6,6 +6,7 @@ import re
 import time
 import sys
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -28,6 +29,21 @@ BLOCK_PATTERNS = (
     "access denied",
     "request blocked",
     "err_too_many_requests",
+)
+
+JRA_API_TYPE_WIN_PLACE = "1"
+JRA_API_TYPE_QUINELLA = "4"
+JRA_API_TYPE_WIDE = "5"
+JRA_API_TYPE_EXACTA = "6"
+JRA_API_TYPE_TRIO = "7"
+JRA_API_TYPE_TRIFECTA = "8"
+JRA_API_TYPES = (
+    JRA_API_TYPE_WIN_PLACE,
+    JRA_API_TYPE_QUINELLA,
+    JRA_API_TYPE_WIDE,
+    JRA_API_TYPE_EXACTA,
+    JRA_API_TYPE_TRIO,
+    JRA_API_TYPE_TRIFECTA,
 )
 
 
@@ -202,6 +218,52 @@ def extract_json_payload(text):
         return None
 
 
+def fetch_text_url(url, timeout=15):
+    req = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            )
+        },
+    )
+    with urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    for enc in ("utf-8", "euc-jp", "cp932"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def parse_float_text(value):
+    raw = str(value or "").strip().replace(",", "")
+    if raw in ("", "-", "---.-"):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def normalize_horse_no(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw = raw.lstrip("0")
+    return raw or "0"
+
+
+def split_combo_key(combo_key):
+    raw = re.sub(r"\D", "", str(combo_key or ""))
+    if not raw or len(raw) % 2 != 0:
+        return []
+    return [normalize_horse_no(raw[idx : idx + 2]) for idx in range(0, len(raw), 2)]
+
+
 def dedupe_horse_results(items):
     seen = set()
     deduped = []
@@ -339,6 +401,275 @@ def build_quinella_odds_url(race_url):
     if "race.netkeiba.com" in host:
         return f"https://race.netkeiba.com/odds/index.html?type=b4&race_id={race_id}&housiki=c0"
     return ""
+
+
+def build_exacta_odds_url(race_url):
+    race_id = extract_race_id(race_url)
+    if not race_id:
+        return ""
+    host = urlparse(race_url).netloc.lower()
+    if "nar.netkeiba.com" in host:
+        return f"https://nar.netkeiba.com/odds/?race_id={race_id}&type=b6"
+    if "race.netkeiba.com" in host:
+        return f"https://race.netkeiba.com/odds/index.html?type=b6&race_id={race_id}&housiki=c0"
+    return ""
+
+
+def build_nar_odds_page_url(race_url, odds_type):
+    race_id = extract_race_id(race_url)
+    if not race_id:
+        return ""
+    host = urlparse(race_url).netloc.lower()
+    if "nar.netkeiba.com" not in host:
+        return ""
+    return f"https://nar.netkeiba.com/odds/?race_id={race_id}&type={odds_type}"
+
+
+def build_nar_odds_fragment_url(race_url, odds_type, jiku):
+    race_id = extract_race_id(race_url)
+    if not race_id:
+        return ""
+    host = urlparse(race_url).netloc.lower()
+    if "nar.netkeiba.com" not in host:
+        return ""
+    return f"https://nar.netkeiba.com/odds/odds_get_form.html?type={odds_type}&race_id={race_id}&jiku={jiku}"
+
+
+def build_race_card_url(race_url):
+    race_id = extract_race_id(race_url)
+    if not race_id:
+        return ""
+    host = urlparse(race_url).netloc.lower()
+    if "race.netkeiba.com" in host:
+        return f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}"
+    if "nar.netkeiba.com" in host:
+        return f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
+    return race_url
+
+
+def build_jra_odds_api_url(race_id, odds_type):
+    return (
+        "https://race.netkeiba.com/api/api_get_jra_odds.html"
+        f"?pid=api_get_jra_odds&input=UTF-8&output=jsonp&race_id={race_id}"
+        f"&type={odds_type}&action=init&sort=odds&compress=0"
+    )
+
+
+def fetch_jra_api_payload(race_id, odds_type):
+    payload = extract_json_payload(fetch_text_url(build_jra_odds_api_url(race_id, odds_type)))
+    if not payload:
+        raise RuntimeError(f"Failed to parse JRA odds api payload: type={odds_type}")
+    if payload.get("status") != "result":
+        raise RuntimeError(
+            f"JRA odds api returned status={payload.get('status')} type={odds_type}"
+        )
+    return payload
+
+
+def build_horse_name_map_from_race_page(race_url):
+    card_url = build_race_card_url(race_url)
+    if not card_url:
+        return {}
+    try:
+        html = fetch_text_url(card_url)
+    except Exception:
+        return {}
+    entries = parse_odds_from_page(html)
+    out = {}
+    for item in entries:
+        horse_no = normalize_horse_no(item.get("horse_no"))
+        name = str(item.get("name", "")).strip()
+        if horse_no and name and horse_no not in out:
+            out[horse_no] = name
+    return out
+
+
+def parse_jra_type1_payload(payload, horse_name_map):
+    odds_root = (((payload or {}).get("data") or {}).get("odds") or {})
+    win_map = odds_root.get("1") or {}
+    place_map = odds_root.get("2") or {}
+    win_results = []
+    place_results = []
+    for horse_key in sorted(win_map.keys(), key=lambda x: int(re.sub(r"\D", "", x) or "0")):
+        horse_no = normalize_horse_no(horse_key)
+        row = win_map.get(horse_key) or []
+        odds = parse_float_text(row[0] if len(row) > 0 else "")
+        if odds is None:
+            continue
+        win_results.append(
+            {
+                "horse_no": horse_no,
+                "name": horse_name_map.get(horse_no, ""),
+                "odds": str(odds),
+            }
+        )
+    for horse_key in sorted(
+        place_map.keys(), key=lambda x: int(re.sub(r"\D", "", x) or "0")
+    ):
+        horse_no = normalize_horse_no(horse_key)
+        row = place_map.get(horse_key) or []
+        low = parse_float_text(row[0] if len(row) > 0 else "")
+        high = parse_float_text(row[1] if len(row) > 1 else "")
+        if low is None and high is None:
+            continue
+        if low is None:
+            low = high
+        if high is None:
+            high = low
+        mid = round((float(low) + float(high)) / 2.0, 3)
+        place_results.append(
+            {
+                "horse_no": horse_no,
+                "name": horse_name_map.get(horse_no, ""),
+                "odds_low": float(low),
+                "odds_high": float(high),
+                "odds_mid": mid,
+            }
+        )
+    return win_results, place_results
+
+
+def parse_jra_pair_payload(payload, odds_type):
+    odds_root = (((payload or {}).get("data") or {}).get("odds") or {})
+    pair_map = odds_root.get(str(odds_type)) or {}
+    results = []
+    for combo_key in sorted(pair_map.keys()):
+        parts = split_combo_key(combo_key)
+        if len(parts) != 2:
+            continue
+        row = pair_map.get(combo_key) or []
+        if odds_type == JRA_API_TYPE_WIDE:
+            low = parse_float_text(row[0] if len(row) > 0 else "")
+            high = parse_float_text(row[1] if len(row) > 1 else "")
+            if low is None and high is None:
+                continue
+            if low is None:
+                low = high
+            if high is None:
+                high = low
+            mid = round((float(low) + float(high)) / 2.0, 3)
+            results.append(
+                {
+                    "horse_no_a": parts[0],
+                    "horse_no_b": parts[1],
+                    "odds_low": float(low),
+                    "odds_high": float(high),
+                    "odds_mid": mid,
+                }
+            )
+            continue
+        odds = parse_float_text(row[0] if len(row) > 0 else "")
+        if odds is None:
+            continue
+        results.append({"horse_no_a": parts[0], "horse_no_b": parts[1], "odds": float(odds)})
+    return results
+
+
+def parse_jra_triple_payload(payload, odds_type):
+    odds_root = (((payload or {}).get("data") or {}).get("odds") or {})
+    triple_map = odds_root.get(str(odds_type)) or {}
+    results = []
+    for combo_key in sorted(triple_map.keys()):
+        parts = split_combo_key(combo_key)
+        if len(parts) != 3:
+            continue
+        row = triple_map.get(combo_key) or []
+        odds = parse_float_text(row[0] if len(row) > 0 else "")
+        if odds is None:
+            continue
+        results.append(
+            {
+                "horse_no_a": parts[0],
+                "horse_no_b": parts[1],
+                "horse_no_c": parts[2],
+                "odds": float(odds),
+            }
+        )
+    return results
+
+
+def save_csv(path, fieldnames, rows):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Saved: {path}")
+
+
+def fetch_and_save_jra_api_odds(race_url):
+    race_id = extract_race_id(race_url)
+    if not race_id:
+        return False
+    horse_name_map = build_horse_name_map_from_race_page(race_url)
+
+    payloads = {}
+    for odds_type in JRA_API_TYPES:
+        payloads[odds_type] = fetch_jra_api_payload(race_id, odds_type)
+
+    official_time = (
+        (((payloads.get(JRA_API_TYPE_WIN_PLACE) or {}).get("data") or {}).get("official_datetime"))
+        or ""
+    )
+    if official_time:
+        print(f"Official time: {official_time}")
+
+    win_results, place_results = parse_jra_type1_payload(
+        payloads[JRA_API_TYPE_WIN_PLACE], horse_name_map
+    )
+    if win_results:
+        for item in win_results:
+            print(f"{item['horse_no']}\t{item['name']}\t{item['odds']}")
+        save_csv("odds.csv", ["horse_no", "name", "odds"], win_results)
+    if place_results:
+        save_csv(
+            "fuku_odds.csv",
+            ["horse_no", "name", "odds_low", "odds_high", "odds_mid"],
+            place_results,
+        )
+
+    quinella_results = parse_jra_pair_payload(
+        payloads[JRA_API_TYPE_QUINELLA], JRA_API_TYPE_QUINELLA
+    )
+    if quinella_results:
+        save_csv("quinella_odds.csv", ["horse_no_a", "horse_no_b", "odds"], quinella_results)
+
+    wide_results = parse_jra_pair_payload(payloads[JRA_API_TYPE_WIDE], JRA_API_TYPE_WIDE)
+    if wide_results:
+        save_csv(
+            "wide_odds.csv",
+            ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
+            wide_results,
+        )
+
+    exacta_results = parse_jra_pair_payload(payloads[JRA_API_TYPE_EXACTA], JRA_API_TYPE_EXACTA)
+    if exacta_results:
+        save_csv("exacta_odds.csv", ["horse_no_a", "horse_no_b", "odds"], exacta_results)
+
+    trio_results = parse_jra_triple_payload(payloads[JRA_API_TYPE_TRIO], JRA_API_TYPE_TRIO)
+    if trio_results:
+        save_csv(
+            "trio_odds.csv", ["horse_no_a", "horse_no_b", "horse_no_c", "odds"], trio_results
+        )
+
+    trifecta_results = parse_jra_triple_payload(
+        payloads[JRA_API_TYPE_TRIFECTA], JRA_API_TYPE_TRIFECTA
+    )
+    if trifecta_results:
+        save_csv(
+            "trifecta_odds.csv",
+            ["horse_no_a", "horse_no_b", "horse_no_c", "odds"],
+            trifecta_results,
+        )
+
+    return bool(
+        win_results
+        or place_results
+        or quinella_results
+        or wide_results
+        or exacta_results
+        or trio_results
+        or trifecta_results
+    )
 
 
 def parse_tan_odds_from_page(html):
@@ -514,6 +845,180 @@ def parse_quinella_odds_from_page(html):
     return results
 
 
+def parse_exacta_odds_from_page(html):
+    soup = BeautifulSoup(html, "html.parser")
+    tables = soup.select(".GraphOdds table.Odds_Table")
+    if not tables:
+        tables = soup.select("table.Odds_Table")
+    results = []
+    seen = set()
+
+    def parse_pair_from_token(token):
+        if not token:
+            return "", ""
+        match = re.search(r"_([0-9]+)_([0-9]+)$", token)
+        if match:
+            left = normalize_horse_no(match.group(1))
+            right = normalize_horse_no(match.group(2))
+            return left, right
+        match = re.search(r"odds-6-(\d+)", token)
+        if match:
+            digits = match.group(1)
+            if len(digits) % 2 == 0:
+                mid = len(digits) // 2
+                return normalize_horse_no(digits[:mid]), normalize_horse_no(digits[mid:])
+        return "", ""
+
+    for table in tables:
+        head = table.select_one("tr.col_label th")
+        base_no = re.sub(r"\D", "", head.get_text(strip=True) if head else "")
+        if not base_no:
+            continue
+        for row in table.select("tr"):
+            cells = row.select("td")
+            if not cells:
+                continue
+            horse_no = re.sub(r"\D", "", cells[0].get_text(strip=True))
+            odds_cell = row.select_one("td.Odds") or (cells[1] if len(cells) > 1 else None)
+            odds_span = odds_cell.select_one('span[id^="odds-6-"]') if odds_cell else None
+            odds_text = odds_span.get_text(" ", strip=True) if odds_span else ""
+            if not odds_text and odds_cell:
+                odds_text = odds_cell.get_text(" ", strip=True)
+            odds_nums = extract_numbers(odds_text)
+            if not odds_nums:
+                continue
+            a = normalize_horse_no(base_no)
+            b = normalize_horse_no(horse_no)
+            if not a or not b or a == b:
+                token = ""
+                if odds_cell is not None:
+                    token = odds_cell.get("cart-item") or odds_cell.get("name") or odds_cell.get("id") or ""
+                if not token:
+                    token = row.get("id") or ""
+                a, b = parse_pair_from_token(token)
+            if not a or not b or a == b:
+                continue
+            key = (a, b)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({"horse_no_a": a, "horse_no_b": b, "odds": float(odds_nums[0])})
+
+    if results:
+        return results
+
+    for odds_cell in soup.select('.GraphOdds td[cart-item], td[cart-item]'):
+        odds_span = odds_cell.select_one('span[id^="odds-6-"]') or odds_cell.select_one(
+            'span[id^="odds-"]'
+        )
+        odds_text = odds_span.get_text(" ", strip=True) if odds_span else ""
+        if not odds_text:
+            odds_text = odds_cell.get_text(" ", strip=True)
+        odds_nums = extract_numbers(odds_text)
+        if not odds_nums:
+            continue
+        token = odds_cell.get("cart-item") or odds_cell.get("name") or odds_cell.get("id") or ""
+        a, b = parse_pair_from_token(token)
+        if not a or not b or a == b:
+            continue
+        key = (a, b)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({"horse_no_a": a, "horse_no_b": b, "odds": float(odds_nums[0])})
+    return results
+
+
+def parse_nar_jiku_list(html):
+    soup = BeautifulSoup(html, "html.parser")
+    values = []
+    seen = set()
+    for option in soup.select("#list_select_horse option"):
+        value = normalize_horse_no(option.get("value", ""))
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
+
+
+def parse_nar_triple_odds_from_page(html, keep_order):
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    seen = set()
+
+    def parse_triple_from_token(token):
+        if not token:
+            return []
+        match = re.search(r"_([0-9]+)_([0-9]+)_([0-9]+)$", token)
+        if not match:
+            return []
+        parts = [
+            normalize_horse_no(match.group(1)),
+            normalize_horse_no(match.group(2)),
+            normalize_horse_no(match.group(3)),
+        ]
+        if any(not part for part in parts):
+            return []
+        return parts
+
+    for odds_cell in soup.select(".GraphOdds td.Odds[cart-item], td.Odds[cart-item]"):
+        odds_text = odds_cell.get_text(" ", strip=True)
+        odds_nums = extract_numbers(odds_text)
+        if not odds_nums:
+            continue
+        token = odds_cell.get("cart-item") or odds_cell.get("name") or odds_cell.get("id") or ""
+        parts = parse_triple_from_token(token)
+        if len(parts) != 3:
+            continue
+        if keep_order:
+            key = tuple(parts)
+        else:
+            key = tuple(sorted(parts, key=lambda x: int(x)))
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(
+            {
+                "horse_no_a": key[0],
+                "horse_no_b": key[1],
+                "horse_no_c": key[2],
+                "odds": float(odds_nums[0]),
+            }
+        )
+    return results
+
+
+def fetch_and_save_nar_triple_odds(race_url, odds_type, out_path, keep_order):
+    page_url = build_nar_odds_page_url(race_url, odds_type)
+    if not page_url:
+        return []
+    initial_html = fetch_text_url(page_url)
+    jiku_list = parse_nar_jiku_list(initial_html)
+    if not jiku_list:
+        return []
+
+    results = []
+    seen = set()
+    for idx, jiku in enumerate(jiku_list):
+        if idx > 0:
+            sleep_jitter()
+        fragment_url = build_nar_odds_fragment_url(race_url, odds_type, jiku)
+        if not fragment_url:
+            continue
+        html = fetch_text_url(fragment_url)
+        for item in parse_nar_triple_odds_from_page(html, keep_order=keep_order):
+            key = (item["horse_no_a"], item["horse_no_b"], item["horse_no_c"])
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(item)
+
+    if results:
+        save_csv(out_path, ["horse_no_a", "horse_no_b", "horse_no_c", "odds"], results)
+    return results
+
+
 def extract_wide_odds_numbers(odds_cell):
     if odds_cell is None:
         return []
@@ -587,12 +1092,15 @@ def safe_parse(label, func, *args):
         return []
 
 
-def main():
-    url = input("Race URL: ").strip()
-    if not url:
-        print("No URL provided.")
-        return
+def is_jra_host(host):
+    return "race.netkeiba.com" in host
 
+
+def is_nar_host(host):
+    return "nar.netkeiba.com" in host
+
+
+def build_webdriver():
     options = Options()
     if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
         options.page_load_strategy = PAGE_LOAD_STRATEGY
@@ -610,107 +1118,149 @@ def main():
             options.add_argument(f"--user-data-dir={profile_dir}")
             if profile_name:
                 options.add_argument(f"--profile-directory={profile_name}")
-
-    try:
-        driver = webdriver.Chrome(options=options)
-    except Exception as exc:
-        print(f"[ERROR] Selenium unavailable: {exc}")
-        return
+    driver = webdriver.Chrome(options=options)
     try:
         page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
         driver.set_page_load_timeout(page_load_timeout)
     except Exception:
         pass
-    try:
-        if should_inject_cookies():
-            cookies = load_cookies_from_json_file("cookie.txt")
-            driver.get("https://db.netkeiba.com")
-            assert_not_blocked(driver.page_source, driver.title or "", "https://db.netkeiba.com")
-            for cookie in cookies:
-                driver.add_cookie(cookie)
-        else:
-            print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
-        tan_url = build_tan_odds_url(url)
-        fuku_results = []
-        if tan_url:
-            sleep_jitter()
-            page = get_page_source(tan_url, driver, wait_css="span[id^='odds-']")
-            results = safe_parse("tan", parse_tan_odds_from_page, page)
-            fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
-            if not results:
-                results = safe_parse("odds", parse_odds_from_page, page)
-        else:
-            sleep_jitter()
-            page = get_page_source(url, driver, wait_css="span[id^='odds-']")
+    return driver, shared_driver
+
+
+def prepare_driver_session(driver):
+    if should_inject_cookies():
+        cookies = load_cookies_from_json_file("cookie.txt")
+        driver.get("https://db.netkeiba.com")
+        assert_not_blocked(driver.page_source, driver.title or "", "https://db.netkeiba.com")
+        for cookie in cookies:
+            driver.add_cookie(cookie)
+        return
+    print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
+
+
+def fetch_primary_odds_via_browser(race_url, driver):
+    tan_url = build_tan_odds_url(race_url)
+    fuku_results = []
+    if tan_url:
+        sleep_jitter()
+        page = get_page_source(tan_url, driver, wait_css="span[id^='odds-']")
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+        fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+        if not results:
             results = safe_parse("odds", parse_odds_from_page, page)
-            if not results:
-                results = safe_parse("tan", parse_tan_odds_from_page, page)
-            fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+        return results, fuku_results
+
+    sleep_jitter()
+    page = get_page_source(race_url, driver, wait_css="span[id^='odds-']")
+    results = safe_parse("odds", parse_odds_from_page, page)
+    if not results:
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+    fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+    return results, fuku_results
+
+
+def save_primary_odds_results(results, fuku_results):
+    for item in results:
+        print(f"{item['horse_no']}\t{item['name']}\t{item['odds']}")
+    save_csv("odds.csv", ["horse_no", "name", "odds"], results)
+    if fuku_results:
+        save_csv(
+            "fuku_odds.csv",
+            ["horse_no", "name", "odds_low", "odds_high", "odds_mid"],
+            fuku_results,
+        )
+
+
+def fetch_and_save_html_odds(race_url, driver, label, build_url, wait_css, parse_func, out_path, fieldnames):
+    odds_url = build_url(race_url)
+    if not odds_url:
+        return []
+    sleep_jitter()
+    results = safe_parse(label, parse_func, get_page_source(odds_url, driver, wait_css=wait_css))
+    if results:
+        save_csv(out_path, fieldnames, results)
+    return results
+
+
+def fetch_and_save_nar_triple_series(race_url):
+    try:
+        fetch_and_save_nar_triple_odds(race_url, "b7", "trio_odds.csv", keep_order=False)
+    except Exception as exc:
+        print(f"[WARN] trio fetch failed: {exc}")
+    try:
+        fetch_and_save_nar_triple_odds(race_url, "b8", "trifecta_odds.csv", keep_order=True)
+    except Exception as exc:
+        print(f"[WARN] trifecta fetch failed: {exc}")
+
+
+def run_browser_odds_flow(race_url, host):
+    try:
+        driver, shared_driver = build_webdriver()
+    except Exception as exc:
+        print(f"[ERROR] Selenium unavailable: {exc}")
+        return
+
+    try:
+        prepare_driver_session(driver)
+        results, fuku_results = fetch_primary_odds_via_browser(race_url, driver)
         if not results:
             print("No odds found.")
             return
 
-        for item in results:
-            print(f"{item['horse_no']}\t{item['name']}\t{item['odds']}")
+        save_primary_odds_results(results, fuku_results)
 
-        out_path = "odds.csv"
-        with open(out_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["horse_no", "name", "odds"])
-            writer.writeheader()
-            writer.writerows(results)
-        print(f"Saved: {out_path}")
+        fetch_and_save_html_odds(
+            race_url,
+            driver,
+            "wide",
+            build_wide_odds_url,
+            "span[id^='odds-5-']",
+            parse_wide_odds_from_page,
+            "wide_odds.csv",
+            ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
+        )
+        fetch_and_save_html_odds(
+            race_url,
+            driver,
+            "quinella",
+            build_quinella_odds_url,
+            "span[id^='odds-4-']",
+            parse_quinella_odds_from_page,
+            "quinella_odds.csv",
+            ["horse_no_a", "horse_no_b", "odds"],
+        )
+        fetch_and_save_html_odds(
+            race_url,
+            driver,
+            "exacta",
+            build_exacta_odds_url,
+            "span[id^='odds-6-'], td.Odds",
+            parse_exacta_odds_from_page,
+            "exacta_odds.csv",
+            ["horse_no_a", "horse_no_b", "odds"],
+        )
 
-        if fuku_results:
-            fuku_path = "fuku_odds.csv"
-            with open(fuku_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=["horse_no", "name", "odds_low", "odds_high", "odds_mid"],
-                )
-                writer.writeheader()
-                writer.writerows(fuku_results)
-            print(f"Saved: {fuku_path}")
-
-        wide_url = build_wide_odds_url(url)
-        if wide_url:
-            sleep_jitter()
-            wide_results = safe_parse(
-                "wide",
-                parse_wide_odds_from_page,
-                get_page_source(wide_url, driver, wait_css="span[id^='odds-5-']"),
-            )
-            if wide_results:
-                wide_path = "wide_odds.csv"
-                with open(wide_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(
-                        f,
-                        fieldnames=["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
-                    )
-                    writer.writeheader()
-                    writer.writerows(wide_results)
-                print(f"Saved: {wide_path}")
-
-        quinella_url = build_quinella_odds_url(url)
-        if quinella_url:
-            sleep_jitter()
-            quinella_results = safe_parse(
-                "quinella",
-                parse_quinella_odds_from_page,
-                get_page_source(quinella_url, driver, wait_css="span[id^='odds-4-']"),
-            )
-            if quinella_results:
-                quinella_path = "quinella_odds.csv"
-                with open(quinella_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(
-                        f,
-                        fieldnames=["horse_no_a", "horse_no_b", "odds"],
-                    )
-                    writer.writeheader()
-                    writer.writerows(quinella_results)
-                print(f"Saved: {quinella_path}")
+        if is_nar_host(host):
+            fetch_and_save_nar_triple_series(race_url)
     finally:
         if driver and not shared_driver:
             driver.quit()
+
+
+def main():
+    url = input("Race URL: ").strip()
+    if not url:
+        print("No URL provided.")
+        return
+
+    host = urlparse(url).netloc.lower()
+    if is_jra_host(host):
+        try:
+            if fetch_and_save_jra_api_odds(url):
+                return
+        except Exception as exc:
+            print(f"[WARN] JRA api odds fetch failed, fallback to browser flow: {exc}")
+    run_browser_odds_flow(url, host)
 
 
 if __name__ == "__main__":
