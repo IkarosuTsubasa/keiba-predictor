@@ -200,6 +200,7 @@ def infer_run_id_from_row(run_row):
         "plan_path",
         "gemini_policy_path",
         "siliconflow_policy_path",
+        "openai_policy_path",
     ):
         text = str(run_row.get(key, "") or "").strip()
         if key == "run_id" and text:
@@ -368,7 +369,7 @@ def main():
         sys.exit(1)
     replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
     print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
-    for policy_engine in ("gemini", "siliconflow"):
+    for policy_engine in ("gemini", "siliconflow", "openai"):
         settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw, policy_engine=policy_engine)
         if settlement:
             print(

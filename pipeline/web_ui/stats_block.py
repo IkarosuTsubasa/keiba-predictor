@@ -14,9 +14,10 @@ def build_llm_compare_block(
     policy_labels = {
         "gemini": "Gemini",
         "siliconflow": "DeepSeek",
+        "openai": "GPT-5.4",
     }
     compare_rows = []
-    for policy_engine in ("gemini", "siliconflow"):
+    for policy_engine in ("gemini", "siliconflow", "openai"):
         title = policy_labels.get(policy_engine, policy_engine)
         bankroll = load_policy_bankroll_summary(policy_engine=policy_engine) or {}
         daily_rows = load_policy_daily_profit_summary(days=30, policy_engine=policy_engine) or []
@@ -94,10 +95,11 @@ def build_stats_block(
     policy_labels = {
         "gemini": "Gemini",
         "siliconflow": "SiliconFlow",
+        "openai": "GPT-5.4",
     }
 
     parts = []
-    for policy_engine in ("gemini", "siliconflow"):
+    for policy_engine in ("gemini", "siliconflow", "openai"):
         title = policy_labels.get(policy_engine, policy_engine)
         bankroll = load_policy_bankroll_summary(policy_engine=policy_engine)
         daily_rows = load_policy_daily_profit_summary(days=30, policy_engine=policy_engine)

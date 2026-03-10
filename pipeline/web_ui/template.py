@@ -839,6 +839,7 @@ def page_template(
                 <select name="policy_engine" id="llm_policy_engine">
                   <option value="gemini"{' selected' if default_policy_engine == 'gemini' else ''}>Gemini</option>
                   <option value="siliconflow"{' selected' if default_policy_engine == 'siliconflow' else ''}>DeepSeek</option>
+                  <option value="openai"{' selected' if default_policy_engine == 'openai' else ''}>GPT-5.4</option>
                 </select>
               </div>
               <div>
@@ -855,7 +856,7 @@ def page_template(
               <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
               <button type="submit" formaction="/run_gemini_buy" class="secondary-button">Gemini Buy</button>
             </div>
-            <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run Gemini + DeepSeek</button>
+            <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run All LLMs</button>
           </form>
           <form action="/reset_llm_state" method="post" class="stack-form" style="margin-top:12px;">
             <button type="submit" class="secondary-button">Reset LLM State</button>

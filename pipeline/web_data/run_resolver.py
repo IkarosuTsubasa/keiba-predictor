@@ -46,6 +46,7 @@ def infer_run_id_from_row(run_row):
         "plan_path",
         "gemini_policy_path",
         "siliconflow_policy_path",
+        "openai_policy_path",
     ):
         run_id = infer_run_id_from_path(run_row.get(key, ""))
         if run_id:

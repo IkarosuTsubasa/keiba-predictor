@@ -828,6 +828,7 @@ def main():
         "plan_path": "",
         "gemini_policy_path": "",
         "siliconflow_policy_path": "",
+        "openai_policy_path": "",
         "tickets": "",
         "amount_yen": "",
     }
