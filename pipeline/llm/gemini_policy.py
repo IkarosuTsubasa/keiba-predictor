@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v9"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v9"
+POLICY_CACHE_VERSION = "gemini_policy_v11"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v11"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -388,35 +388,65 @@ def _render_strategy_text(
     buy_style: str,
     strategy_mode: str,
     has_longshot: bool,
+    enabled_bet_types: Optional[List[str]] = None,
 ) -> Dict[str, str]:
+    type_labels = {
+        "win": "単勝",
+        "place": "複勝",
+        "wide": "ワイド",
+        "quinella": "馬連",
+        "exacta": "馬単",
+        "trio": "三連複",
+        "trifecta": "三連単",
+    }
+    ordered_types = []
+    seen_types = set()
+    for value in list(enabled_bet_types or []):
+        text = str(value or "").strip().lower()
+        if (not text) or (text in seen_types):
+            continue
+        seen_types.add(text)
+        ordered_types.append(text)
+    labels = [type_labels.get(item, item) for item in ordered_types]
+    if not labels:
+        labels = ["券種未設定"]
+    if len(labels) == 1:
+        type_text = labels[0]
+    elif len(labels) == 2:
+        type_text = f"{labels[0]}・{labels[1]}"
+    else:
+        type_text = "・".join(labels[:-1]) + f" を中心に、{labels[-1]}も候補に入れる形"
+
     if bet_decision == "no_bet":
         return {
             "strategy_text_ja": "優位性が薄く、軽く入る形も作りにくいため、今回は見送りとします。\n券種を絞っても買う根拠が弱く、無理に参加しない判断を優先します。",
             "bet_tendency_ja": "買い目傾向：見送り",
         }
-    if participation_level == "small_bet" and strategy_mode in ("place_only", "conservative_single", "small_probe"):
-        return {
-            "strategy_text_ja": "混戦寄りで上位の差は大きくありませんが、完全に見送るほどではないと判断しました。\n今回は点数を絞り、複勝中心で小さく入る方針です。",
-            "bet_tendency_ja": "買い目傾向：複勝中心",
-        }
-    if buy_style == "win_focus":
-        return {
-            "strategy_text_ja": "上位の軸は比較的見えており、通常通り参加できるレースと見ています。\n単勝を少し前に置きつつ、複勝で土台を作る組み立てが自然です。",
-            "bet_tendency_ja": "買い目傾向：単勝を少し厚め＋複勝で保険",
-        }
-    if strategy_mode in ("pair_focus", "spread"):
-        return {
-            "strategy_text_ja": "上位は混戦寄りですが、見送りではなく組み合わせの妙味で参加できると見ています。\n複勝で土台を残しつつ、ワイド・馬連を少点数で組む形が自然です。",
-            "bet_tendency_ja": "買い目傾向：複勝・ワイド中心",
-        }
+    if participation_level == "small_bet":
+        strategy_text = (
+            "混戦寄りで断定しにくい面はありますが、完全に見送るほどではないと判断しました。\n"
+            f"今回は点数を絞り、{type_text}を中心に小さく参加する方針です。"
+        )
+    elif buy_style == "win_focus":
+        strategy_text = (
+            "上位の軸は比較的見えており、通常参加できるレースと見ています。\n"
+            f"今回は{type_text}を主軸に、期待値と配分のバランスを取りながら組み立てます。"
+        )
+    elif strategy_mode in ("pair_focus", "spread"):
+        strategy_text = (
+            "単独の軸だけでなく、組み合わせや並びまで含めて妙味を取りにいけるレースと見ています。\n"
+            f"今回は{type_text}を中心に、候補の中から合理的な組み合わせを選ぶ方針です。"
+        )
+    else:
+        strategy_text = (
+            "上位の信頼は極端ではありませんが、参加の根拠は十分にあると判断しました。\n"
+            f"今回は{type_text}を中心に、無理のない範囲で期待値を取りにいく方針です。"
+        )
     if has_longshot:
-        return {
-            "strategy_text_ja": "強気に広げる局面ではありませんが、見送りよりは軽く参加できると判断しました。\n本線は保守的に置きつつ、妙味のある高配当は1点だけ補助で狙います。",
-            "bet_tendency_ja": "買い目傾向：複勝中心＋高配当は1点だけ",
-        }
+        strategy_text += "\n高配当側に妙味がある候補もあるため、本線を崩さない範囲で補助的に評価します。"
     return {
-        "strategy_text_ja": "上位の信頼は極端ではありませんが、完全に見送るほどでもありません。\n今回は複勝を主軸に、必要な相手券だけを添える無理のない形で参加します。",
-        "bet_tendency_ja": "買い目傾向：複勝＋ワイドを少額で",
+        "strategy_text_ja": strategy_text,
+        "bet_tendency_ja": f"買い目傾向：{type_text}",
     }
 
 
@@ -447,7 +477,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     third_key = str(predictions[2].horse_no) if len(predictions) >= 3 else ""
 
     if not candidates:
-        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False)
+        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
         warnings = ["NO_POSITIVE_EV"] if not has_value else []
         if float(ai.stability_score) < 0.45:
             warnings.append("HIGH_UNCERTAINTY")
@@ -480,7 +510,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
 
     no_bet_case = (not has_value) and float(ai.confidence_score) < 0.34 and float(ai.stability_score) < 0.32
     if no_bet_case:
-        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False)
+        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
         warnings = ["NO_POSITIVE_EV"]
         if fallback_reason:
             warnings.append(f"FALLBACK_{str(fallback_reason).upper()}")
@@ -576,7 +606,14 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             risk_tilt = "medium"
 
     construction_style = _derive_construction_style(strategy_mode, buy_style, participation_level)
-    text = _render_strategy_text("bet", participation_level, buy_style, strategy_mode, bool(longshot_horses))
+    text = _render_strategy_text(
+        "bet",
+        participation_level,
+        buy_style,
+        strategy_mode,
+        bool(longshot_horses),
+        enabled,
+    )
     warnings: List[str] = []
     if float(ai.stability_score) < 0.45:
         warnings.append("HIGH_UNCERTAINTY")
@@ -645,6 +682,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- multi_predictor.profiles は各 predictor の設計上の強みです。絶対評価ではなく、視点の違いとして扱ってください。\n"
         "- multi_predictor.summaries は predictor ごとの上位馬一覧です。\n"
         "- multi_predictor.consensus は馬番単位で揃えた共識表です。top1_votes / top3_votes / avg_pred_rank を優先的に見てください。\n"
+        "- multi_predictor.performance には current_context と、現在の分類範囲（central_turf / central_dirt / local）で集計した predictor 別 hit rate が入っています。\n"
+        "- multi_predictor.performance.current_scope_history の samples が少ない場合は弱い参考情報です。samples が十分ある predictor ほど、その predictor の見解信頼度判断に使ってください。\n"
         "- odds_full には win/place/wide/quinella/exacta/trio/trifecta の全量オッズが入っています。\n"
         "- prediction_field_guide には predictions_full の各列が何を意味するかの説明があります。\n"
         "- 要約だけで判断せず、multi_predictor・predictions_full・odds_full・prediction_field_guide を必ず参照して考えてください。\n"
@@ -658,6 +697,9 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- v2 は上位抽出・能力比較寄りの視点です。強い上位候補の濃淡確認に向いています。\n"
         "- v3 は市場融合・説明性寄りの視点です。値頃感や市場整合性の確認に向いています。\n"
         "- v4 は文脈適性ハイブリッド型です。Top3確率の分類と順位付けを混合し、コース・距離・馬場条件への適合を強く見ています。\n"
+        "- multi_predictor.performance.current_scope_history を使って、現在が中央芝・中央ダート・地方のどれかに応じた predictor の履歴命中率を参照してください。\n"
+        "- ある predictor が現在の分類範囲で長期的に弱いなら、その predictor の単独主張は割り引いてください。逆に同分類で samples が十分あり hit rate が安定して高い predictor はやや重く見て構いません。\n"
+        "- ただし samples が少ない場合は過信せず、共識・個別予測・オッズとの整合を優先してください。\n"
         "- 4 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズとのバランスが悪い場合は券種や配分を柔軟に調整してください。\n"
         "- 4 路の見解差が大きい場合は、単勝・複勝、馬連・ワイド・馬単などの組み合わせ系、三連系、見送りのいずれが最も合理的かを、そのレースの予測とオッズに基づいて中立的に判断してください。\n"
         "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、candidates の EV を合わせて判断してください。\n"

@@ -2,10 +2,12 @@
 import hashlib
 import json
 import os
+import re
 import socket
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -15,7 +17,7 @@ from .gemini_policy import RacePolicyInput, RacePolicyOutput, deterministic_poli
 
 DEFAULT_GEMINI_MODEL = _gemini.DEFAULT_GEMINI_MODEL
 DEFAULT_SILICONFLOW_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
-DEFAULT_OPENAI_MODEL = "gpt-5.4"
+DEFAULT_OPENAI_MODEL = "gpt-5-mini-2025-08-07"
 POLICY_ENGINE_DEFAULTS = {
     "gemini": DEFAULT_GEMINI_MODEL,
     "siliconflow": DEFAULT_SILICONFLOW_MODEL,
@@ -24,7 +26,7 @@ POLICY_ENGINE_DEFAULTS = {
 POLICY_CACHE_VERSION_MAP = {
     "gemini": _gemini.POLICY_CACHE_VERSION,
     "siliconflow": "siliconflow_policy_v1",
-    "openai": "openai_policy_v1",
+    "openai": "openai_policy_v3",
 }
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
@@ -38,6 +40,7 @@ _LAST_CALL_META = {
     "cache_hit": False,
     "llm_latency_ms": 0,
     "fallback_reason": "",
+    "error_detail": "",
     "picked_count": 0,
     "buy_style": "",
     "requested_budget_yen": 0,
@@ -110,6 +113,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
         "cache_hit": bool(meta.get("cache_hit", False)),
         "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
+        "error_detail": str(meta.get("error_detail", "") or ""),
         "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
         "buy_style": str(output.buy_style or ""),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
@@ -122,7 +126,8 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
     }
     print(
         "[policy_runtime] engine={policy_engine} model={policy_model} cache_hit={cache_hit} "
-        "llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} picked_count={picked_count} "
+        "llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} error_detail={error_detail} "
+        "picked_count={picked_count} "
         "buy_style={buy_style} requested_budget_yen={requested_budget_yen} "
         "requested_race_budget_yen={requested_race_budget_yen} reused={reused} "
         "source_budget_yen={source_budget_yen} policy_version={policy_version}".format(**_LAST_CALL_META)
@@ -168,6 +173,80 @@ def _extract_openai_text(response_payload: Dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in ("1", "true", "yes", "on")
+
+
+def _normalize_base_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "https://api.openai.com/v1"
+    return text.rstrip("/")
+
+
+def _get_openai_api_style() -> str:
+    style = str(os.environ.get("OPENAI_API_STYLE", "responses") or "responses").strip().lower()
+    if style in ("responses", "chat_completions"):
+        return style
+    return "responses"
+
+
+def _normalize_openai_reasoning_effort(value: str) -> str:
+    effort = str(value or "").strip().lower()
+    if effort in ("low", "medium", "high"):
+        return effort
+    return "low"
+
+
+def _build_openai_endpoint() -> str:
+    explicit = str(os.environ.get("OPENAI_RESPONSES_URL", "") or "").strip()
+    if explicit:
+        return explicit
+    base_url = _normalize_base_url(
+        str(
+            os.environ.get("OPENAI_BASE_URL", "")
+            or os.environ.get("OPENAI_API_BASE", "")
+            or os.environ.get("OPENAI_BASE", "")
+            or ""
+        )
+    )
+    style = _get_openai_api_style()
+    if re.search(r"/(responses|chat/completions)$", base_url, flags=re.IGNORECASE):
+        return base_url
+    if style == "chat_completions":
+        return urllib.parse.urljoin(f"{base_url}/", "chat/completions")
+    return urllib.parse.urljoin(f"{base_url}/", "responses")
+
+
+def _extract_http_error_detail(exc: urllib.error.HTTPError) -> str:
+    detail = ""
+    try:
+        raw = exc.read()
+        if raw:
+            detail = raw.decode("utf-8", errors="replace").strip()
+    except Exception:
+        detail = ""
+    if not detail:
+        return ""
+    try:
+        payload = json.loads(detail)
+    except Exception:
+        return detail[:500]
+    if isinstance(payload, dict):
+        error_obj = payload.get("error")
+        if isinstance(error_obj, dict):
+            message = str(error_obj.get("message", "") or "").strip()
+            code = str(error_obj.get("code", "") or "").strip()
+            param = str(error_obj.get("param", "") or "").strip()
+            parts = [part for part in (message, f"code={code}" if code else "", f"param={param}" if param else "") if part]
+            if parts:
+                return " | ".join(parts)[:500]
+    return detail[:500]
+
+
 def _call_siliconflow_once(prompt: str, model: str, api_key: str, timeout_s: int) -> str:
     body = {
         "model": str(model or DEFAULT_SILICONFLOW_MODEL),
@@ -210,24 +289,52 @@ def _call_siliconflow_once(prompt: str, model: str, api_key: str, timeout_s: int
 
 
 def _call_openai_once(prompt: str, model: str, api_key: str, timeout_s: int) -> str:
-    body: Dict[str, Any] = {
-        "model": str(model or DEFAULT_OPENAI_MODEL),
-        "input": prompt,
-        "reasoning": {
-            "effort": str(os.environ.get("OPENAI_POLICY_REASONING_EFFORT", "none") or "none"),
-        },
-        "text": {
-            "verbosity": str(os.environ.get("OPENAI_POLICY_VERBOSITY", "medium") or "medium"),
-        },
-    }
-    max_output_tokens_raw = str(os.environ.get("OPENAI_POLICY_MAX_OUTPUT_TOKENS", "") or "").strip()
-    if max_output_tokens_raw:
-        try:
-            body["max_output_tokens"] = int(max_output_tokens_raw)
-        except ValueError:
-            pass
+    style = _get_openai_api_style()
+    model_name = str(model or DEFAULT_OPENAI_MODEL)
+    body: Dict[str, Any]
+    if style == "chat_completions":
+        body = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "你是一个严格输出JSON的赛马策略助手。"},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        max_tokens_raw = str(os.environ.get("OPENAI_POLICY_MAX_OUTPUT_TOKENS", "") or "").strip()
+        if max_tokens_raw:
+            try:
+                body["max_tokens"] = int(max_tokens_raw)
+            except ValueError:
+                pass
+        temperature_raw = str(os.environ.get("OPENAI_POLICY_TEMPERATURE", "") or "").strip()
+        if temperature_raw:
+            try:
+                body["temperature"] = float(temperature_raw)
+            except ValueError:
+                pass
+    else:
+        body = {
+            "model": model_name,
+            "input": prompt,
+        }
+        if _bool_env("OPENAI_POLICY_INCLUDE_REASONING", False):
+            body["reasoning"] = {
+                "effort": _normalize_openai_reasoning_effort(
+                    str(os.environ.get("OPENAI_POLICY_REASONING_EFFORT", "low") or "low")
+                ),
+            }
+        if _bool_env("OPENAI_POLICY_INCLUDE_TEXT", True):
+            body["text"] = {
+                "verbosity": str(os.environ.get("OPENAI_POLICY_VERBOSITY", "medium") or "medium"),
+            }
+        max_output_tokens_raw = str(os.environ.get("OPENAI_POLICY_MAX_OUTPUT_TOKENS", "") or "").strip()
+        if max_output_tokens_raw:
+            try:
+                body["max_output_tokens"] = int(max_output_tokens_raw)
+            except ValueError:
+                pass
     request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
+        _build_openai_endpoint(),
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
@@ -237,7 +344,11 @@ def _call_openai_once(prompt: str, model: str, api_key: str, timeout_s: int) -> 
     )
     with urllib.request.urlopen(request, timeout=max(1, int(timeout_s or 1))) as response:
         raw = response.read().decode("utf-8")
-    text = _extract_openai_text(json.loads(raw))
+    payload = json.loads(raw)
+    if style == "chat_completions":
+        text = _extract_siliconflow_text(payload)
+    else:
+        text = _extract_openai_text(payload)
     if not text:
         raise ValueError("empty_response_content")
     return text
@@ -274,6 +385,7 @@ def call_siliconflow_policy(
             return cached
 
     fallback_reason = ""
+    error_detail = ""
     llm_latency_ms = 0
     output: Optional[RacePolicyOutput] = None
     mock_enabled = str(os.environ.get("SILICONFLOW_POLICY_MOCK", "") or "").strip() == "1"
@@ -306,13 +418,17 @@ def call_siliconflow_policy(
                     parsed = _gemini._model_validate(RacePolicyOutput, payload)
                     output = _gemini._sanitize_output(parsed, input_obj)
                     fallback_reason = ""
+                    error_detail = ""
                     break
                 except (concurrent.futures.TimeoutError, TimeoutError, socket.timeout):
                     fallback_reason = "timeout"
+                    error_detail = ""
                 except json.JSONDecodeError:
                     fallback_reason = "json_parse_failed"
+                    error_detail = ""
                 except ValueError as exc:
                     text = str(exc).lower()
+                    error_detail = str(exc).strip()
                     if "unknown id" in text:
                         fallback_reason = "unknown_pick_id"
                     elif "http error 401" in text or "http error 403" in text:
@@ -323,6 +439,7 @@ def call_siliconflow_policy(
                         fallback_reason = "value_error"
                 except urllib.error.HTTPError as exc:
                     code = int(getattr(exc, "code", 0) or 0)
+                    error_detail = _extract_http_error_detail(exc)
                     if code in (401, 403):
                         fallback_reason = "auth_error"
                     elif code == 429:
@@ -331,8 +448,10 @@ def call_siliconflow_policy(
                         fallback_reason = f"http_{code or 'error'}"
                 except urllib.error.URLError:
                     fallback_reason = "network_error"
+                    error_detail = ""
                 except Exception as exc:
                     text = str(exc).lower()
+                    error_detail = str(exc).strip()
                     if "429" in text or "quota" in text or "rate" in text:
                         fallback_reason = "quota_or_429"
                     elif "auth" in text or "permission" in text or "api key" in text:
@@ -351,6 +470,7 @@ def call_siliconflow_policy(
         "cache_hit": False,
         "llm_latency_ms": int(llm_latency_ms),
         "fallback_reason": str(fallback_reason or ""),
+        "error_detail": str(error_detail or ""),
     }
     if bool(cache_enable):
         _gemini._write_cache(cache_path, final_output, meta)

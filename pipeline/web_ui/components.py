@@ -48,11 +48,23 @@ def _table_variant(columns):
     }
 
 
+def _table_title_modifiers(title):
+    title_text = str(title or "")
+    if "Ability Marks" in title_text:
+        return {
+            "panel_class": " panel--tight",
+            "wrap_class": " table-wrap--tight",
+            "table_class": " data-table--tight",
+        }
+    return {"panel_class": "", "wrap_class": "", "table_class": ""}
+
+
 def _build_plain_table_html(rows, columns, title):
     if not rows or not columns:
         return ""
     head_cells = "".join(f"<th>{html.escape(col)}</th>" for col in columns)
     variant = _table_variant(columns)
+    modifiers = _table_title_modifiers(title)
     body_rows = []
     for row in rows:
         cells = []
@@ -61,10 +73,10 @@ def _build_plain_table_html(rows, columns, title):
             cells.append(f"<td>{html.escape(str(val))}</td>")
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
     return f"""
-        <section class="{variant['panel_class']}">
+        <section class="{variant['panel_class']}{modifiers['panel_class']}">
             <h2>{html.escape(title)}</h2>
-            <div class="{variant['wrap_class']}">
-                <table class="{variant['table_class']}">
+            <div class="{variant['wrap_class']}{modifiers['wrap_class']}">
+                <table class="{variant['table_class']}{modifiers['table_class']}">
                     <thead><tr>{head_cells}</tr></thead>
                     <tbody>
                         {''.join(body_rows)}

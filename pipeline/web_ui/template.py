@@ -73,6 +73,7 @@ def page_template(
     run_options="",
     view_run_options="",
     view_selected_run_id="",
+    current_race_id="",
     top5_text="",
     top5_table_html="",
     mark_table_html="",
@@ -88,6 +89,7 @@ def page_template(
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
     current_run = str(view_selected_run_id or "").strip()
+    current_race = str(current_race_id or "").strip()
     recent_options = view_run_options or run_options or ""
 
     output_panel = ""
@@ -276,19 +278,29 @@ def page_template(
       --body-font: "Aptos", "Segoe UI Variable Text", "Trebuchet MS", "Yu Gothic UI", sans-serif;
     }}
     * {{ box-sizing: border-box; }}
-    html {{ scroll-behavior: smooth; }}
+    html {{ scroll-behavior: smooth; height: 100%; }}
     body {{
       margin: 0;
       font-family: var(--body-font);
       color: var(--ink);
       min-height: 100vh;
+      height: 100%;
+      overflow: hidden;
       background:
         radial-gradient(1200px 500px at -5% -10%, rgba(226, 208, 181, 0.75) 0%, transparent 60%),
         radial-gradient(960px 620px at 100% 0%, rgba(206, 227, 217, 0.72) 0%, transparent 58%),
         linear-gradient(180deg, #f7f3ec 0%, var(--bg) 40%, var(--bg-strong) 100%);
     }}
     a {{ color: inherit; }}
-    .page-shell {{ max-width: 1520px; margin: 0 auto; padding: 28px 22px 44px; }}
+    .page-shell {{
+      max-width: 1520px;
+      height: 100vh;
+      margin: 0 auto;
+      padding: 28px 22px 24px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 22px;
+    }}
     .hero {{
       position: relative;
       overflow: hidden;
@@ -356,7 +368,7 @@ def page_template(
       color: var(--muted);
     }}
     .hero-metric strong {{ font-size: 20px; line-height: 1.18; word-break: break-word; }}
-    .jump-links {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 4px 0; }}
+    .jump-links {{ display: flex; flex-wrap: wrap; gap: 10px; margin: -6px 4px 0; }}
     .jump-link {{
       display: inline-flex;
       align-items: center;
@@ -371,9 +383,23 @@ def page_template(
       font-size: 13px;
       font-weight: 600;
     }}
-    .app-shell {{ display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 22px; margin-top: 22px; align-items: start; }}
-    .control-rail {{ position: sticky; top: 18px; display: grid; gap: 16px; }}
-    .content-stage {{ display: grid; gap: 18px; }}
+    .app-shell {{
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 22px;
+      min-height: 0;
+      align-items: stretch;
+    }}
+    .control-rail,
+    .content-stage {{
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      padding-right: 6px;
+    }}
+    .control-rail {{ display: grid; gap: 16px; align-content: start; }}
+    .content-stage {{ display: grid; gap: 18px; align-content: start; }}
     .panel, .fold-panel {{
       background: var(--surface);
       border: 1px solid rgba(255, 255, 255, 0.58);
@@ -381,6 +407,7 @@ def page_template(
       backdrop-filter: blur(12px);
     }}
     .panel {{ border-radius: 22px; padding: 18px; }}
+    .panel--tight {{ padding: 14px 14px 12px; }}
     .panel-hero {{
       background:
         linear-gradient(155deg, rgba(255, 255, 255, 0.82), rgba(246, 239, 227, 0.9)),
@@ -551,6 +578,7 @@ def page_template(
     }}
     .section-title h2, .cluster-head h2, .panel h2, .panel h3 {{ margin: 0; font-size: 28px; line-height: 1.02; }}
     .panel h2, .panel h3 {{ font-size: 21px; margin-bottom: 10px; }}
+    .panel--tight h2 {{ font-size: 18px; margin-bottom: 8px; }}
     .cluster-head p, .fold-note {{ margin: 0; max-width: 44ch; color: var(--muted); font-size: 13px; line-height: 1.6; }}
     .section-chip, .panel-tag {{
       display: inline-flex;
@@ -634,6 +662,7 @@ def page_template(
     .table-wrap--fit {{ display: inline-block; max-width: 100%; }}
     .table-wrap--narrow {{ width: min(100%, 780px); }}
     .table-wrap--medium {{ width: min(100%, 980px); }}
+    .table-wrap--tight {{ width: min(100%, 520px); }}
     .data-table {{
       width: 100%;
       border-collapse: separate;
@@ -652,11 +681,20 @@ def page_template(
     .data-table--medium {{
       min-width: 560px;
     }}
+    .data-table--tight {{
+      min-width: 0;
+      width: auto;
+      font-size: 12px;
+    }}
     .data-table th, .data-table td {{
       padding: 10px 12px;
       border-bottom: 1px solid rgba(61, 68, 62, 0.08);
       text-align: left;
       vertical-align: top;
+    }}
+    .data-table--tight th, .data-table--tight td {{
+      padding: 7px 10px;
+      white-space: nowrap;
     }}
     .data-table th {{
       position: sticky;
@@ -711,12 +749,15 @@ def page_template(
     .empty-state {{ padding: 26px; background: linear-gradient(155deg, rgba(255, 255, 255, 0.86), rgba(239, 246, 242, 0.78)); }}
     .empty-state p {{ margin: 0; max-width: 56ch; color: var(--ink-soft); line-height: 1.7; }}
     @media (max-width: 1180px) {{
+      body {{ height: auto; overflow: auto; }}
+      .page-shell {{ height: auto; min-height: 100vh; padding-bottom: 44px; grid-template-rows: auto auto auto; }}
       .hero {{ grid-template-columns: minmax(0, 1fr); }}
       .app-shell {{ grid-template-columns: minmax(0, 1fr); }}
-      .control-rail {{ position: static; }}
+      .control-rail,
+      .content-stage {{ overflow: visible; min-height: auto; padding-right: 0; }}
     }}
     @media (max-width: 760px) {{
-      .page-shell {{ padding: 16px 14px 30px; }}
+      .page-shell {{ padding: 16px 14px 30px; gap: 18px; }}
       .hero {{ padding: 22px 18px; border-radius: 24px; }}
       .hero-metrics {{ grid-template-columns: minmax(0, 1fr); }}
       .section-title, .cluster-head, .panel-title-row, .fold-panel summary {{ flex-direction: column; align-items: flex-start; }}
@@ -831,7 +872,7 @@ def page_template(
             <input type="hidden" name="scope_key" id="llm_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>
-              <input name="run_id" id="llm_run_id" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
+              <input name="run_id" id="llm_run_id" value="{html.escape(current_race)}" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
             </div>
             <div class="field-grid">
               <div>
@@ -839,7 +880,7 @@ def page_template(
                 <select name="policy_engine" id="llm_policy_engine">
                   <option value="gemini"{' selected' if default_policy_engine == 'gemini' else ''}>Gemini</option>
                   <option value="siliconflow"{' selected' if default_policy_engine == 'siliconflow' else ''}>DeepSeek</option>
-                  <option value="openai"{' selected' if default_policy_engine == 'openai' else ''}>GPT-5.4</option>
+                  <option value="openai"{' selected' if default_policy_engine == 'openai' else ''}>OpenAI GPT-5</option>
                 </select>
               </div>
               <div>
@@ -852,13 +893,10 @@ def page_template(
               <span class="radio-text">Refresh Odds</span>
             </label>
             <p class="helper-text">This runs the policy-only LLM buy flow and writes policy JSON plus ledger reservations. It does not restore the old bet engine.</p>
-            <div class="field-grid">
-              <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
-              <button type="submit" formaction="/run_gemini_buy" class="secondary-button">Gemini Buy</button>
-            </div>
+            <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
             <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run All LLMs</button>
           </form>
-          <form action="/reset_llm_state" method="post" class="stack-form" style="margin-top:12px;">
+          <form action="/reset_llm_state" method="post" class="stack-form" id="reset-llm-form" style="margin-top:12px;">
             <button type="submit" class="secondary-button">Reset LLM State</button>
           </form>
         </section>
@@ -874,7 +912,7 @@ def page_template(
             <input type="hidden" name="scope_key" id="record_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>
-              <input name="run_id" id="record_run_id" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
+              <input name="run_id" id="record_run_id" value="{html.escape(current_race)}" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 20250101_123456 or 202501010101">
             </div>
             <div class="field-grid">
               <div>
@@ -909,6 +947,7 @@ def page_template(
   </div>
   <script>
     const defaultScope = "{html.escape(scope_value)}";
+    const currentRaceId = "{html.escape(current_race)}";
     const scopeLabels = {{ central_dirt: "Central Dirt", central_turf: "Central Turf", local: "Local" }};
     const actionForm = document.getElementById("single-action-form");
     const actionInput = document.getElementById("action_id_input");
@@ -918,6 +957,7 @@ def page_template(
     const llmRunInput = document.getElementById("llm_run_id");
     const recordScopeInput = document.getElementById("record_scope_key");
     const recordRunInput = document.getElementById("record_run_id");
+    const resetLlmForm = document.getElementById("reset-llm-form");
     const scopeRadios = document.querySelectorAll('#scope-radio input[name="scope_key"]');
     const recentSelect = document.getElementById("recent_run_select");
     const recentScopeInput = document.getElementById("recent_scope_key");
@@ -926,9 +966,10 @@ def page_template(
 
     function syncActionIds() {{
       const value = actionInput ? actionInput.value.trim() : "";
+      const syncedValue = value || currentRaceId;
       if (actionRunId) actionRunId.value = value;
-      if (llmRunInput) llmRunInput.value = value;
-      if (recordRunInput && !recordRunInput.value.trim()) recordRunInput.value = value;
+      if (llmRunInput && syncedValue) llmRunInput.value = syncedValue;
+      if (recordRunInput && syncedValue) recordRunInput.value = syncedValue;
     }}
 
     function getSelectedScope() {{
@@ -994,6 +1035,13 @@ def page_template(
     if (actionForm && actionSubmit) {{
       actionForm.action = "/view_run";
       actionSubmit.textContent = "View Run";
+    }}
+
+    if (resetLlmForm) {{
+      resetLlmForm.addEventListener("submit", (event) => {{
+        const ok = window.confirm("Reset all cached LLM state for the current workspace?");
+        if (!ok) event.preventDefault();
+      }});
     }}
 
     if (recentSelect) {{

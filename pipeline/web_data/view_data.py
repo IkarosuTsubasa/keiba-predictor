@@ -392,7 +392,6 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
     pred_map = ctx["pred_map"]
     pred_order = ctx["pred_order"]
     bet_map = ctx["bet_map"]
-    gate_status = ctx["gate_status"]
     risk_share = ctx["risk_share"]
     strategy_text_ja = str(ctx.get("strategy_text_ja", "") or "")
     bet_tendency_ja = str(ctx.get("bet_tendency_ja", "") or "")
@@ -403,8 +402,6 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
 
     max_pred_prob = max((float(pred_map.get(k, {}).get("pred_prob", 0.0) or 0.0) for k in pred_order), default=0.0)
     pred_total = max(1, len(pred_map))
-    max_amount = max((float(bet_map.get(k, {}).get("amount_max", 0.0) or 0.0) for k in candidate_keys), default=0.0)
-
     scored = []
     for key in candidate_keys:
         pred = pred_map.get(key, {})
@@ -421,9 +418,6 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
         ability_score = pred_prob_norm if pred_prob_norm > 0 else rank_norm
 
         bet_types = _format_bet_types(bet.get("bet_types", set()))
-        rec_bet_types = _recommended_bet_types(pred_rank, bet_types)
-        support_strength = _support_strength_label(float(bet.get("amount_max", 0.0) or 0.0), max_amount)
-        risk_signal = _risk_signal_label(gate_status, bool(bet_types), pred_rank, support_strength)
         reason_tags = _build_reason_tags(pred_rank, bet_types)
 
         scored.append(
@@ -438,8 +432,6 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
                 "rank_norm": float(rank_norm),
                 "rank_score_norm": float(rank_score_norm),
                 "bet_types": bet_types or "-",
-                "recommended_bet_types": rec_bet_types,
-                "risk_signal": risk_signal,
                 "reason_tags": " / ".join(reason_tags),
             }
         )
@@ -456,12 +448,9 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
                 "mark": marks[idx],
                 "horse_no": row.get("horse_no", ""),
                 "horse_name": row.get("horse_name", ""),
-                "pred_rank": row.get("pred_rank", ""),
                 "ability_score": round(float(row.get("ability_score", 0.0) or 0.0), 6),
                 "top3_prob": row.get("top3_prob", ""),
                 "bet_types": row.get("bet_types", "-"),
-                "recommended_bet_types": row.get("recommended_bet_types", "place"),
-                "risk_signal": row.get("risk_signal", "标准"),
                 "reason_tags": row.get("reason_tags", ""),
                 "race_type": race_type,
                 "confidence": confidence,
@@ -471,7 +460,7 @@ def load_ability_marks_table(get_data_dir, base_dir, load_csv_rows, to_float, sc
                 "bet_tendency_ja": bet_tendency_ja,
             }
         )
-    columns = ["mark", "horse_no", "horse_name", "pred_rank", "recommended_bet_types", "risk_signal"]
+    columns = ["mark", "horse_no", "horse_name"]
     return out_rows, columns
 
 

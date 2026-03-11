@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
-from predictor_catalog import list_predictors, resolve_run_prediction_path
+from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
 from gemini_portfolio import (
     build_history_context,
     extract_ledger_date,
@@ -788,6 +788,76 @@ def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_
     return items
 
 
+def _build_predictor_history_summary(scope_key, items, predictor_ids):
+    rows_by_predictor = {}
+    for row in items:
+        predictor_id = canonical_predictor_id(row.get("predictor_id"))
+        if predictor_ids and predictor_id not in predictor_ids:
+            continue
+        rows_by_predictor.setdefault(predictor_id, []).append(row)
+    summary = []
+    for predictor_id in predictor_ids or sorted(rows_by_predictor.keys()):
+        predictor_rows = rows_by_predictor.get(predictor_id, [])
+        total = len(predictor_rows)
+        top1_hit = sum(int(float(r.get("top1_hit", 0) or 0)) for r in predictor_rows)
+        top1_in_top3 = sum(int(float(r.get("top1_in_top3", 0) or 0)) for r in predictor_rows)
+        top3_exact = sum(int(float(r.get("top3_exact", 0) or 0)) for r in predictor_rows)
+        top3_hit = sum(int(float(r.get("top3_hit_count", 0) or 0)) for r in predictor_rows)
+        top5_hit = 0
+        top5_total = 0
+        for row in predictor_rows:
+            hit_count = compute_top5_hit_count(scope_key, row)
+            if hit_count is None:
+                continue
+            top5_hit += hit_count
+            top5_total += 1
+        summary.append(
+            {
+                "predictor_id": predictor_id,
+                "predictor_label": predictor_label(predictor_id),
+                "samples": total,
+                "top1_hit_rate": round(top1_hit / total, 4) if total else "",
+                "top1_in_top3_rate": round(top1_in_top3 / total, 4) if total else "",
+                "top3_hit_rate": round(top3_hit / (3 * total), 4) if total else "",
+                "top3_exact_rate": round(top3_exact / total, 4) if total else "",
+                "top5_to_top3_hit_rate": round(top5_hit / (3 * top5_total), 4) if top5_total else "",
+            }
+        )
+    return summary
+
+
+def build_predictor_performance_context(scope_key, run_id, run_row, predictor_ids):
+    predictor_ids = [str(item or "").strip() for item in list(predictor_ids or []) if str(item or "").strip()]
+    path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
+    predictor_rows = load_csv_rows(path)
+    scope_label_map = {
+        "central_turf": "中央草地",
+        "central_dirt": "中央泥地",
+        "local": "地方",
+    }
+    filtered_rows = []
+    for row in predictor_rows:
+        row_run_id = str(row.get("run_id", "") or "").strip()
+        if row_run_id and row_run_id == str(run_id or "").strip():
+            continue
+        filtered_rows.append(row)
+    if not predictor_rows:
+        return {
+            "current_context": {
+                "scope_key": str(scope_key or ""),
+                "scope_label_ja": scope_label_map.get(str(scope_key or ""), str(scope_key or "")),
+            },
+            "current_scope_history": _build_predictor_history_summary(scope_key, [], predictor_ids),
+        }
+    return {
+        "current_context": {
+            "scope_key": str(scope_key or ""),
+            "scope_label_ja": scope_label_map.get(str(scope_key or ""), str(scope_key or "")),
+        },
+        "current_scope_history": _build_predictor_history_summary(scope_key, filtered_rows, predictor_ids),
+    }
+
+
 def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map):
     profiles = []
     summaries = []
@@ -894,6 +964,7 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
         "profiles": profiles,
         "summaries": summaries,
         "consensus": consensus_rows[:8],
+        "performance": build_predictor_performance_context(scope_key, run_id, run_row, available_ids),
         "meta": {
             "available_predictor_ids": available_ids,
             "available_predictor_count": len(available_ids),
@@ -1578,10 +1649,11 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
             )
         ),
         (
-            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback}".format(
+            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback} error_detail={detail}".format(
                 cache_hit=int(bool(meta.get("cache_hit", False))),
                 latency=int(meta.get("llm_latency_ms", 0) or 0),
                 fallback=str(meta.get("fallback_reason", "") or ""),
+                detail=str(meta.get("error_detail", "") or ""),
             )
         ),
     ]
@@ -1846,7 +1918,7 @@ def build_policy_html(payload):
     engine_label_map = {
         "gemini": "Gemini",
         "siliconflow": "DeepSeek",
-        "openai": "GPT-5.4",
+        "openai": "OpenAI GPT-5",
     }
     panel_title = engine_label_map.get(policy_engine, policy_engine or "LLM")
     header_tags = []
@@ -1914,9 +1986,12 @@ def build_policy_html(payload):
         tendency = str(output.get("bet_tendency_ja", "") or "").strip()
         text_cards = ""
         fallback_reason = str(meta.get("fallback_reason", "") or "").strip()
-        if strategy_text or tendency or fallback_reason:
+        error_detail = str(meta.get("error_detail", "") or "").strip()
+        if strategy_text or tendency or fallback_reason or error_detail:
             if fallback_reason:
                 error_lines = [fallback_reason]
+                if error_detail:
+                    error_lines.append(error_detail)
                 for warn in list(output.get("warnings", []) or []):
                     text = str(warn or "").strip()
                     if text and text not in error_lines:
@@ -1972,12 +2047,14 @@ def build_policy_html(payload):
                 "meta",
                 (
                     "cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} "
-                    "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
+                    "error_detail={error_detail} requested_budget_yen={requested_budget_yen} "
+                    "requested_race_budget_yen={requested_race_budget_yen} "
                     "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}"
                 ).format(
                     cache_hit=int(bool(meta.get("cache_hit", False))),
                     llm_latency_ms=int(meta.get("llm_latency_ms", 0) or 0),
                     fallback_reason=str(meta.get("fallback_reason", "") or ""),
+                    error_detail=str(meta.get("error_detail", "") or ""),
                     requested_budget_yen=int(meta.get("requested_budget_yen", 0) or 0),
                     requested_race_budget_yen=int(meta.get("requested_race_budget_yen", 0) or 0),
                     reused=int(bool(meta.get("reused", False))),
@@ -2053,6 +2130,7 @@ def page_template(
     run_options="",
     view_run_options="",
     view_selected_run_id="",
+    current_race_id="",
     top5_text="",
     top5_table_html="",
     mark_table_html="",
@@ -2069,6 +2147,7 @@ def page_template(
         run_options=run_options,
         view_run_options=view_run_options,
         view_selected_run_id=view_selected_run_id,
+        current_race_id=current_race_id,
         top5_text=top5_text,
         top5_table_html=top5_table_html,
         mark_table_html=mark_table_html,
@@ -2130,6 +2209,13 @@ def render_page(
                 if run_row:
                     run_id = run_row.get("run_id", "")
     view_selected_run_id = selected_run_id or run_id or summary_run_id
+    current_race_id = ""
+    if run_row:
+        current_race_id = normalize_race_id(run_row.get("race_id", ""))
+    if not current_race_id:
+        race_candidate = re.sub(r"\D", "", selected_run_id or summary_run_id or "")
+        if re.fullmatch(r"\d{12}", race_candidate):
+            current_race_id = race_candidate
     view_run_options = build_run_options(scope_norm or scope_key, view_selected_run_id)
     top5_table_html = ""
     mark_table_html = ""
@@ -2217,6 +2303,7 @@ def render_page(
         run_options=run_options,
         view_run_options=view_run_options,
         view_selected_run_id=view_selected_run_id,
+        current_race_id=current_race_id,
         top5_text=top5_text if not top5_table_html else "",
         top5_table_html=top5_table_html,
         mark_table_html=mark_table_html,
