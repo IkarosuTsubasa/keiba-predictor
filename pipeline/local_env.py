@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 
-def load_local_env(base_dir):
+def load_local_env(base_dir, override=False):
     base_path = Path(base_dir)
     candidates = [
         base_path / "data" / "_shared" / "local_env.json",
@@ -24,7 +24,7 @@ def load_local_env(base_dir):
             if not name:
                 continue
             text = str(value or "")
-            if name not in os.environ or not str(os.environ.get(name, "")).strip():
+            if override or name not in os.environ or not str(os.environ.get(name, "")).strip():
                 os.environ[name] = text
                 loaded[name] = True
     return loaded

@@ -3,6 +3,7 @@ import time
 
 from llm.policy_runtime import (
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_GROK_MODEL,
     DEFAULT_SILICONFLOW_MODEL,
     RacePolicyInput,
     call_policy,
@@ -95,8 +96,10 @@ def main():
 
     os.environ["GEMINI_POLICY_MOCK"] = "1"
     os.environ["SILICONFLOW_POLICY_MOCK"] = "1"
+    os.environ["GROK_POLICY_MOCK"] = "1"
     os.environ.pop("GEMINI_API_KEY", None)
     os.environ.pop("SILICONFLOW_API_KEY", None)
+    os.environ.pop("XAI_API_KEY", None)
 
     gemini_key = get_policy_cache_key(policy_input, policy_engine="gemini", model=DEFAULT_GEMINI_MODEL)
     siliconflow_key = get_policy_cache_key(
@@ -104,7 +107,13 @@ def main():
         policy_engine="siliconflow",
         model=DEFAULT_SILICONFLOW_MODEL,
     )
+    grok_key = get_policy_cache_key(
+        policy_input,
+        policy_engine="grok",
+        model=DEFAULT_GROK_MODEL,
+    )
     assert gemini_key != siliconflow_key
+    assert grok_key != siliconflow_key
 
     gemini_output = call_policy(
         input=policy_input,
@@ -126,13 +135,25 @@ def main():
     siliconflow_meta = get_last_call_meta()
     _assert_output(siliconflow_output, siliconflow_meta, "siliconflow")
 
+    grok_output = call_policy(
+        input=policy_input,
+        policy_engine="grok",
+        model=DEFAULT_GROK_MODEL,
+        timeout_s=5,
+        cache_enable=True,
+    )
+    grok_meta = get_last_call_meta()
+    _assert_output(grok_output, grok_meta, "grok")
+
     print("OK: smoke_policy_runtime passed")
     print(
-        "gemini_cache={g} siliconflow_cache={s} gemini_style={gs} siliconflow_style={ss}".format(
+        "gemini_cache={g} siliconflow_cache={s} grok_cache={k} gemini_style={gs} siliconflow_style={ss} grok_style={ks}".format(
             g=gemini_key[:12],
             s=siliconflow_key[:12],
+            k=grok_key[:12],
             gs=str(gemini_output.buy_style),
             ss=str(siliconflow_output.buy_style),
+            ks=str(grok_output.buy_style),
         )
     )
 

@@ -63,7 +63,7 @@ INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
 app = FastAPI()
-load_local_env(BASE_DIR)
+load_local_env(BASE_DIR, override=True)
 
 
 def load_runs(scope_key):
@@ -1636,6 +1636,8 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
         updates["amount_yen"] = str(sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets))
     elif engine == "openai":
         updates["openai_policy_path"] = str(path or "")
+    elif engine == "grok":
+        updates["grok_policy_path"] = str(path or "")
     update_run_row_fields(scope_norm, run_row, updates)
     output_lines = [
         f"[llm_buy] run_id={run_id} engine={engine} model={resolved_model}",
@@ -1731,6 +1733,9 @@ def resolve_policy_timeout(policy_engine):
     elif engine == "openai":
         env_keys = ["OPENAI_POLICY_TIMEOUT", "POLICY_TIMEOUT_OPENAI", "POLICY_TIMEOUT"]
         default_timeout = 90
+    elif engine == "grok":
+        env_keys = ["GROK_POLICY_TIMEOUT", "POLICY_TIMEOUT_GROK", "POLICY_TIMEOUT"]
+        default_timeout = 120
     elif engine == "gemini":
         env_keys = ["GEMINI_POLICY_TIMEOUT", "POLICY_TIMEOUT_GEMINI", "POLICY_TIMEOUT"]
         default_timeout = 60
@@ -1774,6 +1779,7 @@ def load_policy_payload(scope_key, run_id, run_row=None):
         ("gemini_policy_path", "gemini_policy"),
         ("siliconflow_policy_path", "siliconflow_policy"),
         ("openai_policy_path", "openai_policy"),
+        ("grok_policy_path", "grok_policy"),
     ]
     for field_name, prefix in candidates:
         path = resolve_run_asset_path(
@@ -1797,6 +1803,7 @@ def load_policy_payloads(scope_key, run_id, run_row=None):
         ("gemini", "gemini_policy_path", "gemini_policy"),
         ("siliconflow", "siliconflow_policy_path", "siliconflow_policy"),
         ("openai", "openai_policy_path", "openai_policy"),
+        ("grok", "grok_policy_path", "grok_policy"),
         ("", "policy_path", "policy"),
     ]
     for default_engine, field_name, prefix in candidates:
@@ -1919,6 +1926,7 @@ def build_policy_html(payload):
         "gemini": "Gemini",
         "siliconflow": "DeepSeek",
         "openai": "OpenAI GPT-5",
+        "grok": "xAI Grok",
     }
     panel_title = engine_label_map.get(policy_engine, policy_engine or "LLM")
     header_tags = []
@@ -2595,7 +2603,7 @@ def run_all_llm_buy(
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
     result_blocks = []
     error_blocks = []
-    for engine in ("gemini", "siliconflow", "openai"):
+    for engine in ("gemini", "siliconflow", "openai", "grok"):
         try:
             result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=engine, policy_model="")
             result_blocks.append(

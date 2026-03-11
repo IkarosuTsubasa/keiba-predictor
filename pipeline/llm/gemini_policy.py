@@ -881,7 +881,7 @@ def _call_gemini_once(prompt: str, model: str, api_key: str) -> str:
     config = {
         "response_mime_type": "application/json",
         "response_json_schema": response_schema,
-        "temperature": 0.1,
+        "temperature": 0.2,
     }
     response = client.models.generate_content(
         model=str(model or DEFAULT_GEMINI_MODEL),
