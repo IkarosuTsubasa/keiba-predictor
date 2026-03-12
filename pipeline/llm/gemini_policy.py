@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v11"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v11"
+POLICY_CACHE_VERSION = "gemini_policy_v12"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v12"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -34,6 +34,20 @@ def _model_json_schema(model_cls):
     if hasattr(model_cls, "model_json_schema"):
         return model_cls.model_json_schema()
     return model_cls.schema()
+
+
+def _normalize_horse_no_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(float(text)))
+    except (TypeError, ValueError):
+        pass
+    digits = re.findall(r"\d+", text)
+    if len(digits) == 1:
+        return str(int(digits[0]))
+    return text
 
 
 class MarkTop5(BaseModel):
@@ -313,13 +327,13 @@ def _horse_pool(input_obj: RacePolicyInput) -> List[str]:
     seen = set()
     horses = []
     for row in list(input_obj.predictions or []) + list(input_obj.marks_top5 or []):
-        horse_no = str(getattr(row, "horse_no", "") or "").strip()
+        horse_no = _normalize_horse_no_text(getattr(row, "horse_no", ""))
         if horse_no and horse_no not in seen:
             seen.add(horse_no)
             horses.append(horse_no)
     for cand in input_obj.candidates:
         for leg in list(cand.legs or []):
-            text = str(leg or "").strip()
+            text = _normalize_horse_no_text(leg)
             if text and text not in seen:
                 seen.add(text)
                 horses.append(text)
@@ -448,6 +462,46 @@ def _render_strategy_text(
         "strategy_text_ja": strategy_text,
         "bet_tendency_ja": f"買い目傾向：{type_text}",
     }
+
+
+def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = "") -> RacePolicyOutput:
+    ai = input_obj.ai
+    text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
+    warnings: List[str] = []
+    if fallback_reason:
+        warnings.append(f"FALLBACK_{str(fallback_reason).upper()}")
+    return _model_validate(
+        RacePolicyOutput,
+        {
+            "bet_decision": "no_bet",
+            "participation_level": "no_bet",
+            "buy_style": "no_bet",
+            "strategy_mode": "no_bet",
+            "enabled_bet_types": [],
+            "construction_style": "conservative_single",
+            "key_horses": [],
+            "secondary_horses": [],
+            "longshot_horses": [],
+            "marks": [],
+            "focus_points": [{"type": "concept", "value": "fallback_no_bet"}],
+            "max_ticket_count": 0,
+            "risk_tilt": "low",
+            "strategy_text_ja": text["strategy_text_ja"],
+            "bet_tendency_ja": text["bet_tendency_ja"],
+            "reason_codes": _reason_codes_for(
+                ai,
+                int(input_obj.field_size or 0),
+                False,
+                "no_bet",
+                "no_bet",
+                "no_bet",
+                False,
+            ),
+            "pick_ids": [],
+            "ticket_plan": [],
+            "warnings": warnings or None,
+        },
+    )
 
 
 def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") -> RacePolicyOutput:
@@ -678,32 +732,33 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     full_data_text = (
         "【入力データの読み方】\n"
         "- predictions は要約版、predictions_full は全馬・全列の予測テーブルです。\n"
-        "- multi_predictor には v1-v4 全 predictor の要約・設計上の特徴・共識表が入っています。\n"
+        "- multi_predictor には v1-v5 全 predictor の要約・設計上の特徴・共識表が入っています。\n"
         "- multi_predictor.profiles は各 predictor の設計上の強みです。絶対評価ではなく、視点の違いとして扱ってください。\n"
         "- multi_predictor.summaries は predictor ごとの上位馬一覧です。\n"
         "- multi_predictor.consensus は馬番単位で揃えた共識表です。top1_votes / top3_votes / avg_pred_rank を優先的に見てください。\n"
         "- multi_predictor.performance には current_context と、現在の分類範囲（central_turf / central_dirt / local）で集計した predictor 別 hit rate が入っています。\n"
-        "- multi_predictor.performance.current_scope_history の samples が少ない場合は弱い参考情報です。samples が十分ある predictor ほど、その predictor の見解信頼度判断に使ってください。\n"
+        "- multi_predictor.performance.current_scope_history は、samples の多少にかかわらず、各 predictor の現在分類での信頼度判断に使ってください。\n"
         "- odds_full には win/place/wide/quinella/exacta/trio/trifecta の全量オッズが入っています。\n"
         "- prediction_field_guide には predictions_full の各列が何を意味するかの説明があります。\n"
         "- 要約だけで判断せず、multi_predictor・predictions_full・odds_full・prediction_field_guide を必ず参照して考えてください。\n"
-        "- candidates や要約情報は補助材料です。最終判断では multi_predictor・predictions_full・odds_full を優先して参照してください。\n"
+        "- candidates は実際に ticket_plan へ記入するための ID 一覧です。候補の採否判断そのものは multi_predictor・predictions_full・odds_full を優先してください。\n"
         "- 特に軸馬・相手・券種構成を決める際は、全馬の予測順位、確率、スコア、オッズのバランスを見てください。\n"
         "- 入力に含まれる horse_no / pair / candidates の範囲から逸脱してはいけません。\n\n"
     )
     multi_predictor_text = (
-        "【4 predictor の使い方】\n"
+        "【5 predictor の使い方】\n"
         "- v1 は総合バランス型の主軸視点です。まず基準線として参照してください。\n"
         "- v2 は上位抽出・能力比較寄りの視点です。強い上位候補の濃淡確認に向いています。\n"
         "- v3 は市場融合・説明性寄りの視点です。値頃感や市場整合性の確認に向いています。\n"
         "- v4 は文脈適性ハイブリッド型です。Top3確率の分類と順位付けを混合し、コース・距離・馬場条件への適合を強く見ています。\n"
+        "- v5 はスタッキング統合型です。複数 predictor の見解と文脈特徴を再統合した、最終寄りの視点として扱ってください。\n"
         "- multi_predictor.performance.current_scope_history を使って、現在が中央芝・中央ダート・地方のどれかに応じた predictor の履歴命中率を参照してください。\n"
-        "- ある predictor が現在の分類範囲で長期的に弱いなら、その predictor の単独主張は割り引いてください。逆に同分類で samples が十分あり hit rate が安定して高い predictor はやや重く見て構いません。\n"
-        "- ただし samples が少ない場合は過信せず、共識・個別予測・オッズとの整合を優先してください。\n"
-        "- 4 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズとのバランスが悪い場合は券種や配分を柔軟に調整してください。\n"
-        "- 4 路の見解差が大きい場合は、単勝・複勝、馬連・ワイド・馬単などの組み合わせ系、三連系、見送りのいずれが最も合理的かを、そのレースの予測とオッズに基づいて中立的に判断してください。\n"
-        "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、candidates の EV を合わせて判断してください。\n"
-        "- 最終判断は『4 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
+        "- ある predictor が現在の分類範囲で弱いなら、その predictor の単独主張は割り引いてください。逆に同分類で hit rate が高い predictor は積極的に重く見て構いません。\n"
+        "- samples の多少だけを理由に重みを下げず、現在の hit rate 指標そのものを信頼して判断してください。\n"
+        "- 5 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズとのバランスが悪い場合は券種や配分を柔軟に調整してください。\n"
+        "- 5 路の見解差が大きい場合は、単勝・複勝、馬連・ワイド・馬単などの組み合わせ系、三連系、見送りのいずれが最も合理的かを、そのレースの予測とオッズに基づいて中立的に判断してください。\n"
+        "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、全体の順位・確率の整合を合わせて判断してください。\n"
+        "- 最終判断は『5 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
     )
     portfolio_history_text = (
         "【あなた自身の購入履歴と資金推移】\n"
@@ -742,19 +797,41 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- strategy_text_ja\n"
         "- bet_tendency_ja\n"
         "- reason_codes\n\n"
+        "【判断の優先順位】\n"
+        "- まず multi_predictor / predictions_full を用いて、各馬・各組み合わせの予測上の優位性、安定性、共識度を評価してください。\n"
+        "- 次に、その予測優位が十分に確認できた候補に対してのみ、odds を使って買う価値があるかを判断してください。\n"
+        "- odds は予測優位の確認後に使う補助情報であり、予測優位の弱い候補をオッズの高さだけで採用してはいけません。\n"
+        "- 同程度に合理的な選択肢が複数ある場合は、一撃の高配当よりも、命中確率と再現性が高い構成を優先してください。\n\n"
+        "【value の定義】\n"
+        "- この prompt における value とは、単にオッズが高いことではありません。\n"
+        "- value とは「予測上の勝率・入着率・上位安定性に対して、市場オッズが相対的に過小評価になっている状態」です。\n"
+        "- 予測根拠が弱い高オッズ候補は value と見なしてはいけません。\n\n"
+        "【高オッズに関する絶対ルール】\n"
+        "- 高オッズであること自体は買い理由になりません。\n"
+        "- predictor の支持が弱い候補、または predictions_full の順位・確率・スコアの裏付けが薄い候補は、オッズが高くても主軸にしてはいけません。\n"
+        "- 1つの predictor だけが強く推す穴馬は、他の裏付けが十分でない限り、ticket_plan の中心にしてはいけません。\n\n"
+        "【券種選択の原則】\n"
+        "- predictor の共識が強い場合は、単勝・複勝・ワイド・馬連など、予測優位を素直に反映しやすい券種を優先してください。\n"
+        "- trio / trifecta は、上位構成の確度が十分に高い場合にのみ限定的に使ってください。\n"
+        "- 高配当を理由に三連系を優先してはいけません。\n\n"
+        "【避けるべき失敗パターン】\n"
+        "- predictor の支持が弱いのに、オッズが高いことだけを理由に採用する\n"
+        "- 的中率の低い券種を、回収期待だけで主戦略にする\n"
+        "- 本命の信頼度が高いのに、配当妙味を求めすぎて主軸を崩す\n"
+        "- narrative を優先して、共識や確率の裏付けを軽視する\n\n"
         "【重要ルール】\n"
         "1. 見送り・少額参加・通常参加は中立に選ぶ\n"
         "no_bet / small_bet / normal_bet のどれも選択可能です。\n"
         "無理に参加する必要も、無理に見送る必要もありません。予測優位性、オッズ妙味、不確実性、券種構成を総合して判断してください。\n\n"
         "2. 特定の券種を先入観で優先しない\n"
-        "win / place / wide / quinella / exacta / trio / trifecta のうち、入力に存在する candidates の中から最も合理的なものを選んでください。\n"
+        "win / place / wide / quinella / exacta / trio / trifecta のうち、odds_full と predictions_full を見て最も合理的なものを選んでください。\n"
         "単勝系・複勝系・組み合わせ系・三連系のどれにも初期バイアスを持たず、期待値とリスクのバランスで判断してください。\n\n"
         "3. 高オッズも低オッズも中立に扱う\n"
         "高オッズだから買う、低オッズだから避ける、のような固定観念は持たず、予測確率と払戻期待のバランスを見てください。\n\n"
         "4. 混戦レースの扱いも固定化しない\n"
         "混戦だから必ず保守、という前提は置かず、分散、見送り、組み合わせ重視、単独重視のどれが妥当かをデータから決めてください。\n\n"
-        "5. 券種構成は候補集合から逆算する\n"
-        "enabled_bet_types は、今回の race で優位性があると判断した candidates の bet_type を中心に選んでください。\n"
+        "5. 券種構成は全量データから決める\n"
+        "enabled_bet_types は、今回の race で優位性があると判断した券種を選んでください。\n"
         "1種類に絞ってもよく、複数種類を併用しても構いません。\n\n"
         "6. 点数は必要最小限\n"
         "max_ticket_count は合理的な範囲で設定し、過剰な多点買いは避けてください。\n\n"
@@ -776,7 +853,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "JSON 以外のテキストは出力しないでください。\n\n"
         "【追加の絶対ルール】\n"
         "- 入力に存在しない馬・組み合わせ・券種を創作しない\n"
-        "- enabled_bet_types は candidates に存在する bet_type のみ使用可能\n"
+        "- enabled_bet_types は odds_full に存在する bet_type のみ使用可能\n"
         "- key_horses / secondary_horses / longshot_horses / marks / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
         "- pick_ids は補助情報です。実際の購入は ticket_plan を基準にします。\n"
         "- ticket_plan の id は candidates[].id のみ使用可能です。\n"
@@ -891,11 +968,11 @@ def _call_gemini_once(prompt: str, model: str, api_key: str) -> str:
     return _extract_response_text(response)
 
 def _sanitize_horse_list(values: List[str], allowed_horses: List[str]) -> List[str]:
-    allowed = {str(x) for x in allowed_horses}
+    allowed = {_normalize_horse_no_text(x) for x in allowed_horses if _normalize_horse_no_text(x)}
     out = []
     seen = set()
     for value in list(values or []):
-        text = str(value or "").strip()
+        text = _normalize_horse_no_text(value)
         if (not text) or (text in seen) or (text not in allowed):
             continue
         seen.add(text)
@@ -904,13 +981,13 @@ def _sanitize_horse_list(values: List[str], allowed_horses: List[str]) -> List[s
 
 
 def _sanitize_marks(marks: List[PolicyMark], allowed_horses: List[str]) -> List[Dict[str, str]]:
-    allowed = {str(x) for x in allowed_horses}
+    allowed = {_normalize_horse_no_text(x) for x in allowed_horses if _normalize_horse_no_text(x)}
     out = []
     seen_symbols = set()
     seen_horses = set()
     for mark in list(marks or []):
         symbol = str(getattr(mark, "symbol", "") or "").strip()
-        horse_no = str(getattr(mark, "horse_no", "") or "").strip()
+        horse_no = _normalize_horse_no_text(getattr(mark, "horse_no", ""))
         if (not symbol) or (not horse_no):
             continue
         if symbol in seen_symbols or horse_no in seen_horses:
@@ -1128,10 +1205,10 @@ def call_gemini_policy(
         api_key = str(os.environ.get("GEMINI_API_KEY", "") or "").strip()
         if not api_key:
             fallback_reason = "missing_api_key"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         elif not _TOKEN_BUCKET.consume(1.0):
             fallback_reason = "rate_limited_local"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _make_prompt(input_obj)
             retry_count_raw = str(os.environ.get("GEMINI_POLICY_RETRIES", "3") or "3").strip()
@@ -1176,7 +1253,7 @@ def call_gemini_policy(
                     time.sleep(min(3.0, 1.0 + attempt_idx))
 
             if output is None:
-                output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+                output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
 
     final_output = _sanitize_output(output, input_obj)
     meta = {
@@ -1197,6 +1274,7 @@ __all__ = [
     "RacePolicyOutput",
     "call_gemini_policy",
     "deterministic_policy",
+    "fallback_no_bet_policy",
     "get_last_call_meta",
     "get_policy_cache_key",
 ]

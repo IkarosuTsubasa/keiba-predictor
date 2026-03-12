@@ -297,8 +297,8 @@ def _build_smoke_input():
                 },
             ],
             "meta": {
-                "available_predictor_ids": ["main", "v2_opus", "v3_premium", "v4_gemini"],
-                "available_predictor_count": 4,
+                "available_predictor_ids": ["main", "v2_opus", "v3_premium", "v4_gemini", "v5_stacking"],
+                "available_predictor_count": 5,
                 "unique_top1_horses": ["1", "2"],
                 "unique_top1_count": 2,
                 "consensus_top_horse_no": "1",

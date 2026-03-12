@@ -78,8 +78,14 @@ def page_template(
     top5_table_html="",
     mark_table_html="",
     mark_note_text="",
+    llm_battle_html="",
+    llm_note_text="",
     llm_compare_html="",
     gemini_policy_html="",
+    daily_report_html="",
+    daily_report_text="",
+    weekly_report_html="",
+    weekly_report_text="",
     summary_table_html="",
     stats_block="",
     default_scope="central_dirt",
@@ -127,26 +133,119 @@ def page_template(
         </section>
         """
 
+    primary_note_text = llm_note_text or mark_note_text
+    primary_note_label = "単レース note" if llm_note_text else "Note"
+    primary_note_button = "単レース note をコピー" if llm_note_text else "Note をコピー"
+    note_copy_blocks = []
+    hidden_copy_sources = []
+    if primary_note_text:
+        note_copy_blocks.append(
+            f"""
+            <section class="copy-block">
+              <div class="copy-block-head">
+                <div class="copy-block-title">
+                  <strong>{html.escape(primary_note_label)}</strong>
+                  <span>単レース note 用。公開部分と有料部分の Strategy を分けてコピーできます。</span>
+                </div>
+                <span class="section-chip">single race</span>
+              </div>
+              <div class="copy-row">
+                <button
+                  type="button"
+                  class="secondary-button"
+                  data-copy-target="primary-note-text"
+                  data-copy-status="primary-note-status"
+                  data-copy-empty="No note text available."
+                >{html.escape(primary_note_button)}</button>
+                <span id="primary-note-status" class="copy-status"></span>
+              </div>
+              <details class="mini-fold">
+                <summary>{html.escape(primary_note_label)} をプレビュー</summary>
+                <pre>{html.escape(primary_note_text)}</pre>
+              </details>
+            </section>
+            """
+        )
+        hidden_copy_sources.append(
+            f'<textarea id="primary-note-text" class="hidden-copy-source" readonly>{html.escape(primary_note_text)}</textarea>'
+        )
+    if daily_report_text:
+        note_copy_blocks.append(
+            f"""
+            <section class="copy-block">
+              <div class="copy-block-head">
+                <div class="copy-block-title">
+                  <strong>日報テキスト</strong>
+                  <span>レース別対戦、ROI、ランキングをまとめた日報用テキストです。</span>
+                </div>
+                <span class="section-chip">daily</span>
+              </div>
+              <div class="copy-row">
+                <button
+                  type="button"
+                  class="secondary-button"
+                  data-copy-target="daily-report-text"
+                  data-copy-status="daily-report-status"
+                  data-copy-empty="No daily report text available."
+                >日報をコピー</button>
+                <span id="daily-report-status" class="copy-status"></span>
+              </div>
+              <details class="mini-fold">
+                <summary>日報テキストをプレビュー</summary>
+                <pre>{html.escape(daily_report_text)}</pre>
+              </details>
+            </section>
+            """
+        )
+        hidden_copy_sources.append(
+            f'<textarea id="daily-report-text" class="hidden-copy-source" readonly>{html.escape(daily_report_text)}</textarea>'
+        )
+    if weekly_report_text:
+        note_copy_blocks.append(
+            f"""
+            <section class="copy-block">
+              <div class="copy-block-head">
+                <div class="copy-block-title">
+                  <strong>週報テキスト</strong>
+                  <span>週間の投資、回収、収支、回収率、的中率と今週のベストをまとめた週報用テキストです。</span>
+                </div>
+                <span class="section-chip">weekly</span>
+              </div>
+              <div class="copy-row">
+                <button
+                  type="button"
+                  class="secondary-button"
+                  data-copy-target="weekly-report-text"
+                  data-copy-status="weekly-report-status"
+                  data-copy-empty="No weekly report text available."
+                >週報をコピー</button>
+                <span id="weekly-report-status" class="copy-status"></span>
+              </div>
+              <details class="mini-fold">
+                <summary>週報テキストをプレビュー</summary>
+                <pre>{html.escape(weekly_report_text)}</pre>
+              </details>
+            </section>
+            """
+        )
+        hidden_copy_sources.append(
+            f'<textarea id="weekly-report-text" class="hidden-copy-source" readonly>{html.escape(weekly_report_text)}</textarea>'
+        )
     note_copy_panel = ""
-    if mark_note_text:
+    if note_copy_blocks:
         note_copy_panel = f"""
         <section class="panel panel-note-copy">
           <div class="section-title">
             <div>
               <div class="eyebrow">Utility</div>
-              <h2>Note Copy</h2>
+              <h2>コピーパネル</h2>
             </div>
             <span class="section-chip">clipboard</span>
           </div>
-          <div class="copy-row">
-            <button type="button" class="secondary-button" id="copy-note-marks">Copy Note</button>
-            <span id="copy-note-status" class="copy-status"></span>
+          <div class="copy-stack">
+            {''.join(note_copy_blocks)}
           </div>
-          <textarea id="note-marks-text" class="hidden-copy-source" readonly>{html.escape(mark_note_text)}</textarea>
-          <details class="mini-fold">
-            <summary>Preview note text</summary>
-            <pre>{html.escape(mark_note_text)}</pre>
-          </details>
+          {''.join(hidden_copy_sources)}
         </section>
         """
 
@@ -159,6 +258,14 @@ def page_template(
         "Keep prediction tables, marks, and model status together.",
         f"{top5_block}{mark_block}{summary_table_html or ''}",
         "cluster-grid--double",
+    )
+    battle_cluster = _cluster(
+        "battle-zone",
+        "LLM Battle",
+        "単レース note",
+        "公開部分を先に、有料部分の Strategy を最後に置く note 用レイアウトです。",
+        llm_battle_html or "",
+        "cluster-grid--stack",
     )
     compare_cluster = _cluster(
         "compare-zone",
@@ -174,6 +281,22 @@ def page_template(
         "Policy Workspace",
         "Keep the current LLM policy output and bankroll view in one place.",
         gemini_policy_html or "",
+        "cluster-grid--stack",
+    )
+    daily_cluster = _cluster(
+        "daily-zone",
+        "Daily Report",
+        "日報まとめ",
+        "選択日の全レースをまとめて、そのまま日報へ転記できる構成です。",
+        daily_report_html or "",
+        "cluster-grid--stack",
+    )
+    weekly_cluster = _cluster(
+        "weekly-zone",
+        "Weekly Report",
+        "週報まとめ",
+        "週単位の総合成績と今週のベストを確認できる構成です。",
+        weekly_report_html or "",
         "cluster-grid--stack",
     )
     stats_cluster = _fold_cluster(
@@ -196,10 +319,16 @@ def page_template(
     jump_links = []
     if analysis_cluster:
         jump_links.append(_section_link("analysis-zone", "Analysis"))
+    if battle_cluster:
+        jump_links.append(_section_link("battle-zone", "Battle"))
     if compare_cluster:
         jump_links.append(_section_link("compare-zone", "Compare"))
     if policy_cluster:
         jump_links.append(_section_link("policy-zone", "Policy"))
+    if daily_cluster:
+        jump_links.append(_section_link("daily-zone", "Daily"))
+    if weekly_cluster:
+        jump_links.append(_section_link("weekly-zone", "Weekly"))
     if stats_cluster:
         jump_links.append(_section_link("stats-zone", "Stats"))
     if console_cluster:
@@ -237,14 +366,14 @@ def page_template(
         """
 
     empty_state = ""
-    if not any([analysis_cluster, compare_cluster, policy_cluster, stats_cluster, console_cluster]):
+    if not any([analysis_cluster, battle_cluster, compare_cluster, policy_cluster, daily_cluster, weekly_cluster, stats_cluster, console_cluster]):
         empty_state = """
         <section class="empty-state panel">
           <div class="eyebrow">Workspace</div>
           <h2>Prediction First</h2>
           <p>
             Start with a new pipeline run on the left, or open a recent run to inspect predictions,
-            marks, model comparison, LLM policy output, and model status.
+            marks, the 4-LLM note layout, daily report, weekly report, model comparison, and raw policy output.
           </p>
         </section>
         """
@@ -422,6 +551,24 @@ def page_template(
     .panel-note-copy {{
       background: linear-gradient(160deg, rgba(247, 244, 255, 0.74), rgba(255, 250, 243, 0.88));
     }}
+    .copy-stack {{ display: grid; gap: 14px; }}
+    .copy-block {{
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(61, 68, 62, 0.08);
+    }}
+    .copy-block-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .copy-block-title {{ display: grid; gap: 4px; }}
+    .copy-block-title strong {{ font-size: 16px; color: var(--ink); }}
+    .copy-block-title span {{ font-size: 12px; line-height: 1.5; color: var(--muted); }}
     .policy-panel {{ display: grid; gap: 16px; }}
     .policy-meta-row {{ display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }}
     .policy-meta-tag {{
@@ -498,6 +645,146 @@ def page_template(
       font-size: 12px;
       font-weight: 700;
       min-width: 64px;
+    }}
+    .battle-grid {{
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      margin-top: 14px;
+    }}
+    .battle-overview-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      margin-top: 14px;
+    }}
+    .battle-overview-card {{
+      display: grid;
+      gap: 8px;
+      padding: 16px;
+      border-radius: 18px;
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(247, 243, 236, 0.84));
+      border: 1px solid rgba(61, 68, 62, 0.08);
+    }}
+    .battle-overview-card strong {{
+      font-size: 24px;
+      line-height: 1.05;
+      color: var(--ink);
+      letter-spacing: 0.03em;
+    }}
+    .battle-card {{
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 20px;
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(241, 247, 243, 0.78));
+      border: 1px solid rgba(61, 68, 62, 0.09);
+    }}
+    .battle-card-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .battle-card-head h3 {{
+      margin: 4px 0 0;
+      font-size: 24px;
+      line-height: 1.02;
+    }}
+    .battle-meta-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }}
+    .battle-meta-chip {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: rgba(30, 90, 70, 0.10);
+      color: var(--accent-strong);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }}
+    .battle-mark-band {{
+      display: grid;
+      gap: 6px;
+      padding: 14px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(30, 90, 70, 0.10), rgba(255, 250, 243, 0.92));
+      border: 1px solid rgba(30, 90, 70, 0.14);
+    }}
+    .battle-mark-band strong {{
+      font-size: 24px;
+      letter-spacing: 0.04em;
+      color: var(--ink);
+    }}
+    .battle-band-label {{
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .battle-public-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr);
+    }}
+    .battle-copy-card {{
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(61, 68, 62, 0.08);
+    }}
+    .battle-copy-card p {{
+      margin: 0;
+      color: var(--ink-soft);
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }}
+    .battle-result-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(255, 252, 246, 0.84);
+      border: 1px dashed rgba(61, 68, 62, 0.14);
+    }}
+    .battle-result-row code {{
+      color: var(--accent-strong);
+      font-size: 16px;
+      font-weight: 800;
+    }}
+    .battle-premium {{
+      border-radius: 16px;
+      border: 1px solid rgba(184, 87, 63, 0.18);
+      background: linear-gradient(165deg, rgba(255, 248, 243, 0.95), rgba(255, 255, 255, 0.82));
+      overflow: hidden;
+    }}
+    .battle-premium summary {{
+      list-style: none;
+      cursor: pointer;
+      padding: 13px 14px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--danger);
+    }}
+    .battle-premium summary::-webkit-details-marker {{ display: none; }}
+    .battle-premium-body {{
+      padding: 0 14px 14px;
+      color: var(--ink-soft);
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
     }}
     .policy-marks {{
       display: grid;
@@ -761,6 +1048,7 @@ def page_template(
       .hero {{ padding: 22px 18px; border-radius: 24px; }}
       .hero-metrics {{ grid-template-columns: minmax(0, 1fr); }}
       .section-title, .cluster-head, .panel-title-row, .fold-panel summary {{ flex-direction: column; align-items: flex-start; }}
+      .copy-block-head, .battle-card-head, .battle-result-row {{ flex-direction: column; align-items: flex-start; }}
       .cluster-grid--double {{ grid-template-columns: minmax(0, 1fr); }}
       .panel, .fold-panel summary {{ padding-left: 16px; padding-right: 16px; }}
       .table-wrap--fit, .table-wrap--narrow, .table-wrap--medium {{ width: 100%; max-width: 100%; }}
@@ -838,7 +1126,7 @@ def page_template(
                 </div>
               </div>
             </div>
-            <p class="helper-text">Pipeline 会生成多预测器产物，并把 V5 需要的场地与日期上下文一并记录。</p>
+            <p class="helper-text">Pipeline は複数 predictor の出力を生成し、V5 に必要な場別・日付別コンテキストも併せて保存します。</p>
             <button type="submit">Run Pipeline</button>
           </form>
         </section>
@@ -938,8 +1226,11 @@ def page_template(
       </aside>
       <main class="content-stage">
         {analysis_cluster}
+        {battle_cluster}
         {compare_cluster}
         {policy_cluster}
+        {daily_cluster}
+        {weekly_cluster}
         {stats_cluster}
         {console_cluster}
         {empty_state}
@@ -1063,33 +1354,36 @@ def page_template(
       updateScopeLabels(getSelectedScope());
     }}
 
-    const copyNoteBtn = document.getElementById("copy-note-marks");
-    const copyNoteStatus = document.getElementById("copy-note-status");
-    const copySource = document.getElementById("note-marks-text");
-    if (copyNoteBtn && copySource) {{
-      copyNoteBtn.addEventListener("click", async () => {{
-        const text = copySource.value || "";
+    const copyButtons = document.querySelectorAll("[data-copy-target]");
+    copyButtons.forEach((button) => {{
+      button.addEventListener("click", async () => {{
+        const targetId = button.getAttribute("data-copy-target") || "";
+        const statusId = button.getAttribute("data-copy-status") || "";
+        const emptyText = button.getAttribute("data-copy-empty") || "No copy text available.";
+        const source = targetId ? document.getElementById(targetId) : null;
+        const status = statusId ? document.getElementById(statusId) : null;
+        const text = source ? (source.value || "") : "";
         if (!text) {{
-          if (copyNoteStatus) copyNoteStatus.textContent = "No note text available.";
+          if (status) status.textContent = emptyText;
           return;
         }}
         try {{
           if (navigator.clipboard && window.isSecureContext) {{
             await navigator.clipboard.writeText(text);
-          }} else {{
-            copySource.focus();
-            copySource.select();
+          }} else if (source) {{
+            source.focus();
+            source.select();
             document.execCommand("copy");
           }}
-          if (copyNoteStatus) copyNoteStatus.textContent = "Copied.";
+          if (status) status.textContent = "Copied.";
           setTimeout(() => {{
-            if (copyNoteStatus) copyNoteStatus.textContent = "";
+            if (status) status.textContent = "";
           }}, 1500);
         }} catch (e) {{
-          if (copyNoteStatus) copyNoteStatus.textContent = "Copy failed. Please copy manually.";
+          if (status) status.textContent = "Copy failed. Please copy manually.";
         }}
       }});
-    }}
+    }});
 
   </script>
 </body>

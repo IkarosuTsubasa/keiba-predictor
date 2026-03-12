@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 
 from local_env import load_local_env
 from . import gemini_policy as _gemini
-from .gemini_policy import RacePolicyInput, RacePolicyOutput, deterministic_policy
+from .gemini_policy import RacePolicyInput, RacePolicyOutput, deterministic_policy, fallback_no_bet_policy
 
 DEFAULT_GEMINI_MODEL = _gemini.DEFAULT_GEMINI_MODEL
 DEFAULT_SILICONFLOW_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
@@ -460,10 +460,10 @@ def call_siliconflow_policy(
         api_key = str(os.environ.get("SILICONFLOW_API_KEY", "") or "").strip()
         if not api_key:
             fallback_reason = "missing_api_key"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         elif not _SILICONFLOW_BUCKET.consume(1.0):
             fallback_reason = "rate_limited_local"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _gemini._make_prompt(input_obj)
             retry_count_raw = str(os.environ.get("SILICONFLOW_POLICY_RETRIES", "2") or "2").strip()
@@ -526,7 +526,7 @@ def call_siliconflow_policy(
                     break
 
             if output is None:
-                output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+                output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
 
     final_output = _gemini._sanitize_output(output, input_obj)
     meta = {
@@ -583,10 +583,10 @@ def call_openai_policy(
         api_key = str(os.environ.get("OPENAI_API_KEY", "") or "").strip()
         if not api_key:
             fallback_reason = "missing_api_key"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         elif not _OPENAI_BUCKET.consume(1.0):
             fallback_reason = "rate_limited_local"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _gemini._make_prompt(input_obj)
             retry_count_raw = str(os.environ.get("OPENAI_POLICY_RETRIES", "3") or "3").strip()
@@ -642,7 +642,7 @@ def call_openai_policy(
                     break
 
             if output is None:
-                output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+                output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
 
     final_output = _gemini._sanitize_output(output, input_obj)
     meta = {
@@ -699,10 +699,10 @@ def call_grok_policy(
         api_key = str(os.environ.get("XAI_API_KEY", "") or "").strip()
         if not api_key:
             fallback_reason = "missing_api_key"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         elif not _GROK_BUCKET.consume(1.0):
             fallback_reason = "rate_limited_local"
-            output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+            output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _gemini._make_prompt(input_obj)
             retry_count_raw = str(os.environ.get("GROK_POLICY_RETRIES", "3") or "3").strip()
@@ -765,7 +765,7 @@ def call_grok_policy(
                     break
 
             if output is None:
-                output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
+                output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
 
     final_output = _gemini._sanitize_output(output, input_obj)
     meta = {
@@ -823,7 +823,7 @@ def call_policy(
             cache_enable=cache_enable,
         )
 
-    output = deterministic_policy(input_obj, fallback_reason="policy_engine_none")
+    output = fallback_no_bet_policy(input_obj, fallback_reason="policy_engine_none")
     meta = {
         **_gemini._build_request_meta(input_obj),
         "cache_hit": False,
