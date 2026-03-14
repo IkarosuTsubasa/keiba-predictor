@@ -29,18 +29,15 @@ def main():
     console_html = web_app.console_index()
     assert_true("Run Pipeline" in console_html, "console missing Run Pipeline block")
     assert_true('action="/view_run"' in console_html, "console missing view_run form")
-
-    race_jobs_html = web_app.race_jobs_board()
-    assert_true('action="/race_jobs/create"' in race_jobs_html, "race_jobs missing create form")
-    assert_true('action="/race_jobs/run_due_now"' in race_jobs_html, "race_jobs missing run_due_now form")
+    assert_true('id="admin-zone"' in console_html, "console missing admin workspace")
+    assert_true('action="/console/tasks/create"' in console_html, "console missing merged task create form")
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"
     try:
-        protected_jobs = web_app.race_jobs_board(token="bad-token")
-        assert_true("Protected" in protected_jobs, "race_jobs should be protected with wrong token")
         unlocked_console = web_app.console_index(token="smoke-token")
         assert_true("Management Access" in unlocked_console, "console missing admin access panel")
+        assert_true("任务后台" in unlocked_console, "console missing merged admin workspace")
         denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
         assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
         denied_run_due = web_app.internal_run_due(token="bad-token")

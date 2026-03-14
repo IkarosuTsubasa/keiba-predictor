@@ -94,6 +94,7 @@ def page_template(
     default_policy_model="",
     admin_token="",
     admin_enabled=False,
+    admin_workspace_html="",
 ):
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
@@ -102,8 +103,8 @@ def page_template(
     recent_options = view_run_options or run_options or ""
     admin_token_value = str(admin_token or "").strip()
     encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
-    race_jobs_href = f"/race_jobs?token={encoded_admin_token}" if encoded_admin_token else "/race_jobs"
     console_href = f"/console?token={encoded_admin_token}" if encoded_admin_token else "/console"
+    admin_zone_href = f"{console_href}#admin-zone"
 
     output_panel = ""
     if output_text:
@@ -326,6 +327,8 @@ def page_template(
     jump_links = []
     if analysis_cluster:
         jump_links.append(_section_link("analysis-zone", "Analysis"))
+    if admin_workspace_html:
+        jump_links.append(_section_link("admin-zone", "Tasks"))
     if battle_cluster:
         jump_links.append(_section_link("battle-zone", "Battle"))
     if compare_cluster:
@@ -395,12 +398,12 @@ def page_template(
               <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="required for execution">
             </div>
             <p class="helper-text">{html.escape(admin_note)}</p>
-            <button type="submit">Unlock Console</button>
+            <button type="submit">进入控制台</button>
           </form>
           <div class="copy-row" style="margin-top:12px;">
-            <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
-            <a href="{html.escape(console_href)}" class="secondary-button">Console Home</a>
-            <a href="/llm_today" class="secondary-button">Public Board</a>
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
+            <a href="/llm_today" class="secondary-button">用户前台</a>
           </div>
         </section>
         """
@@ -416,9 +419,9 @@ def page_template(
           </div>
           <p class="helper-text">ADMIN_TOKEN is not set. This console is in local development mode.</p>
           <div class="copy-row" style="margin-top:12px;">
-            <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
-            <a href="{html.escape(console_href)}" class="secondary-button">Console Home</a>
-            <a href="/llm_today" class="secondary-button">Public Board</a>
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
+            <a href="/llm_today" class="secondary-button">用户前台</a>
           </div>
         </section>
         """
@@ -1290,6 +1293,7 @@ def page_template(
         {recent_runs_panel}
       </aside>
       <main class="content-stage">
+        {admin_workspace_html}
         {analysis_cluster}
         {battle_cluster}
         {compare_cluster}
