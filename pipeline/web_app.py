@@ -64,7 +64,7 @@ INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
 app = FastAPI()
-load_local_env(BASE_DIR, override=True)
+load_local_env(BASE_DIR, override=False)
 
 
 def load_runs(scope_key):
