@@ -1,4 +1,5 @@
 import html
+from urllib.parse import quote_plus
 
 
 def _scope_label(scope_key):
@@ -91,12 +92,18 @@ def page_template(
     default_scope="central_dirt",
     default_policy_engine="gemini",
     default_policy_model="",
+    admin_token="",
+    admin_enabled=False,
 ):
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
     current_run = str(view_selected_run_id or "").strip()
     current_race = str(current_race_id or "").strip()
     recent_options = view_run_options or run_options or ""
+    admin_token_value = str(admin_token or "").strip()
+    encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
+    race_jobs_href = f"/race_jobs?token={encoded_admin_token}" if encoded_admin_token else "/race_jobs"
+    home_href = f"/?token={encoded_admin_token}" if encoded_admin_token else "/"
 
     output_panel = ""
     if output_text:
@@ -356,12 +363,61 @@ def page_template(
           </div>
           <form action="/view_run" method="post" class="stack-form">
             <input type="hidden" name="scope_key" id="recent_scope_key" value="{html.escape(scope_value)}">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <label>Latest Run Snapshot</label>
             <select name="run_id" id="recent_run_select">
               {recent_options}
             </select>
             <button type="submit">Open Selected Run</button>
           </form>
+        </section>
+        """
+
+    if admin_enabled:
+        admin_state = "Unlocked" if admin_token_value else "Locked"
+        admin_note = (
+            "Execution routes are unlocked for this page. The current token will be forwarded to management forms."
+            if admin_token_value
+            else "Execution routes are locked until you provide ADMIN_TOKEN. Read-only panels remain available."
+        )
+        admin_panel = f"""
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Admin</div>
+              <h2>Management Access</h2>
+            </div>
+            <span class="section-chip">{html.escape(admin_state)}</span>
+          </div>
+          <form action="/" method="get" class="stack-form">
+            <div>
+              <label>ADMIN_TOKEN</label>
+              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="required for execution">
+            </div>
+            <p class="helper-text">{html.escape(admin_note)}</p>
+            <button type="submit">Unlock Console</button>
+          </form>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
+            <a href="/llm_today" class="secondary-button">Public Board</a>
+          </div>
+        </section>
+        """
+    else:
+        admin_panel = f"""
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Admin</div>
+              <h2>Management Links</h2>
+            </div>
+            <span class="section-chip">local</span>
+          </div>
+          <p class="helper-text">ADMIN_TOKEN is not set. This console is in local development mode.</p>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
+            <a href="/llm_today" class="secondary-button">Public Board</a>
+          </div>
         </section>
         """
 
@@ -1076,6 +1132,7 @@ def page_template(
     <nav class="jump-links" aria-label="Page sections">{''.join(jump_links)}</nav>
     <div class="app-shell">
       <aside class="control-rail">
+        {admin_panel}
         <section class="panel panel-hero">
           <div class="section-title">
             <div>
@@ -1085,6 +1142,7 @@ def page_template(
             <span class="section-chip">new run</span>
           </div>
           <form action="/run_pipeline" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <div>
               <label>Race ID</label>
               <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
@@ -1139,6 +1197,7 @@ def page_template(
             <span class="section-chip">view</span>
           </div>
           <form id="single-action-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <div>
               <label>Run ID / Race ID</label>
               <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
@@ -1157,6 +1216,7 @@ def page_template(
             <span class="section-chip">policy</span>
           </div>
           <form action="/run_llm_buy" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <input type="hidden" name="scope_key" id="llm_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>
@@ -1187,6 +1247,7 @@ def page_template(
             <button type="submit" formaction="/topup_all_llm_budget" class="secondary-button">Add 10000 JPY To All LLMs</button>
           </form>
           <form action="/reset_llm_state" method="post" class="stack-form" id="reset-llm-form" style="margin-top:12px;">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <button type="submit" class="secondary-button">Reset LLM State</button>
           </form>
         </section>
@@ -1199,6 +1260,7 @@ def page_template(
             <span class="section-chip">stats</span>
           </div>
           <form action="/record_predictor" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <input type="hidden" name="scope_key" id="record_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>

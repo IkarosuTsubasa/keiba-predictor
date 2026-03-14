@@ -3,3 +3,7 @@
 **/data/
 AGENTS.md
 *.csv
+__pycache__/
+*.pyc
+tmp_*.html
+tmp_*.log

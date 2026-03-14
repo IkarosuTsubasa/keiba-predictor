@@ -5,6 +5,7 @@ lightgbm
 numpy
 pandas
 pydantic
+python-multipart
 scikit-learn
 selenium
 uvicorn

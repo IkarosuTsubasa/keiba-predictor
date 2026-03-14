@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse
 
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
@@ -39,6 +40,14 @@ from llm.policy_runtime import (
 )
 from llm_state import reset_llm_state as reset_llm_state_files
 from local_env import load_local_env
+from race_job_store import (
+    apply_job_action as apply_race_job_action,
+    create_job as create_race_job,
+    load_jobs as load_race_jobs,
+    save_artifact as save_race_job_artifact,
+    scan_due_jobs as scan_due_race_jobs,
+    update_job as update_race_job,
+)
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
@@ -65,6 +74,22 @@ DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
 app = FastAPI()
 load_local_env(BASE_DIR, override=False)
+
+
+def _admin_token_expected():
+    return str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
+
+
+def _admin_token_enabled():
+    return bool(_admin_token_expected())
+
+
+def _admin_token_valid(token=""):
+    expected = _admin_token_expected()
+    if not expected:
+        return True
+    supplied = str(token or "").strip()
+    return bool(supplied) and secrets.compare_digest(supplied, expected)
 
 
 def load_runs(scope_key):
@@ -3210,6 +3235,1194 @@ def _build_llm_weekly_report_bundle(scope_key, current_run_row, actual_result_ma
     }
 
 
+def _jst_today_text():
+    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
+def _normalize_report_date_text(date_text=""):
+    text = _safe_text(date_text)
+    if not text:
+        return _jst_today_text()
+    if re.fullmatch(r"\d{8}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    parsed = _parse_run_date(text)
+    if parsed:
+        return parsed.strftime("%Y-%m-%d")
+    return _jst_today_text()
+
+
+def _llm_today_scope_keys(scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    if scope_norm:
+        return [scope_norm]
+    return list(LLM_REPORT_SCOPE_KEYS)
+
+
+def _llm_today_status_meta(ticket_summary, actual_names):
+    status = _safe_text((ticket_summary or {}).get("status", "")).lower()
+    actual_ready = any(_safe_text(name) for name in list(actual_names or []))
+    if status == "settled":
+        return "已结算", "settled"
+    if status == "pending":
+        return "待结算", "pending"
+    if actual_ready:
+        return "已录入结果", "result"
+    return "待录入结果", "planned"
+
+
+def _format_yen_text(value):
+    try:
+        amount = int(value or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    sign = "-" if amount < 0 else ""
+    return f"{sign}{abs(amount):,}円"
+
+
+def _format_percent_text(value):
+    if value in ("", None):
+        return "-"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def build_llm_today_page(date_text="", scope_key=""):
+    target_date = _normalize_report_date_text(date_text)
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    actual_result_maps = {
+        report_scope_key: _load_actual_result_map(report_scope_key)
+        for report_scope_key in scope_keys
+    }
+    runs = []
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        runs.append(row)
+    runs.sort(
+        key=lambda row: (
+            _safe_text(row.get("race_date")),
+            _safe_text(row.get("location")),
+            _safe_text(row.get("race_id")),
+            _safe_text(row.get("timestamp")),
+            _safe_text(row.get("run_id")),
+        )
+    )
+
+    summary_by_engine = {
+        engine: {
+            "label": LLM_BATTLE_LABELS.get(engine, engine),
+            "races": 0,
+            "settled_races": 0,
+            "pending_races": 0,
+            "hit_races": 0,
+            "ticket_count": 0,
+            "stake_yen": 0,
+            "payout_yen": 0,
+            "profit_yen": 0,
+        }
+        for engine in LLM_BATTLE_ORDER
+    }
+    race_sections = []
+
+    for run_row in runs:
+        run_id = _safe_text(run_row.get("run_id"))
+        report_scope_key = _report_scope_key_for_row(run_row, scope_norm)
+        payload_map = {}
+        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
+            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
+            if engine:
+                payload_map[engine] = payload
+        if not payload_map:
+            continue
+
+        actual_snapshot = _actual_result_snapshot(
+            report_scope_key,
+            run_id,
+            run_row,
+            actual_result_maps.get(report_scope_key, {}),
+        )
+        actual_names = list(actual_snapshot.get("actual_names", []) or [])
+        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
+        actual_text = " / ".join(
+            f"{idx + 1}着 {name}"
+            for idx, name in enumerate(actual_names[:3])
+            if _safe_text(name)
+        ) or "待录入"
+
+        engine_cards = []
+        for engine in LLM_BATTLE_ORDER:
+            payload = payload_map.get(engine)
+            if not payload:
+                continue
+            output = _policy_primary_output(payload)
+            marks_map = _policy_marks_map(payload)
+            ticket_run_id = _payload_run_id(payload, run_id)
+            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
+                _policy_primary_budget(payload).get("tickets", []) or []
+            )
+            ticket_summary = _summarize_ticket_rows(ticket_rows)
+            status_label, status_tone = _llm_today_status_meta(ticket_summary, actual_names)
+            ticket_text = _format_ticket_plan_text(ticket_rows, output).replace("\n", "<br>")
+            marks_text = _format_marks_text(marks_map)
+            result_triplet = _format_triplet_text(_marks_result_triplet(marks_map, actual_horse_nos))
+            strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "未生成"
+            tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "未生成"
+            decision_text = _safe_text(output.get("bet_decision")) or "-"
+            stats = summary_by_engine[engine]
+            stats["races"] += 1
+            stats["ticket_count"] += int(ticket_summary.get("ticket_count", 0) or 0)
+            stats["stake_yen"] += int(ticket_summary.get("stake_yen", 0) or 0)
+            stats["payout_yen"] += int(ticket_summary.get("payout_yen", 0) or 0)
+            stats["profit_yen"] += int(ticket_summary.get("profit_yen", 0) or 0)
+            if ticket_summary.get("status") == "settled":
+                stats["settled_races"] += 1
+            elif ticket_summary.get("status") == "pending":
+                stats["pending_races"] += 1
+            if int(ticket_summary.get("hit_count", 0) or 0) > 0:
+                stats["hit_races"] += 1
+
+            engine_cards.append(
+                f"""
+                <article class="llm-today-card llm-today-card--{html.escape(status_tone)}">
+                  <div class="llm-today-card-head">
+                    <div>
+                      <div class="llm-today-engine">{html.escape(LLM_BATTLE_LABELS.get(engine, engine))}</div>
+                      <div class="llm-today-decision">决策：{html.escape(decision_text)}</div>
+                    </div>
+                    <span class="llm-today-badge llm-today-badge--{html.escape(status_tone)}">{html.escape(status_label)}</span>
+                  </div>
+                  <div class="llm-today-grid">
+                    <section>
+                      <h4>购买马券</h4>
+                      <p>{ticket_text}</p>
+                    </section>
+                    <section>
+                      <h4>评价</h4>
+                      <p>{html.escape(strategy_text)}</p>
+                      <p class="llm-today-subtext">{html.escape(tendency_text)}</p>
+                    </section>
+                    <section>
+                      <h4>马印</h4>
+                      <p>{html.escape(marks_text)}</p>
+                    </section>
+                    <section>
+                      <h4>结果映射</h4>
+                      <p>{html.escape(result_triplet if any(_safe_text(x) for x in actual_horse_nos) else "待录入")}</p>
+                    </section>
+                  </div>
+                  <div class="llm-today-metrics">
+                    <span>票数 {int(ticket_summary.get("ticket_count", 0) or 0)}</span>
+                    <span>投入 {_format_yen_text(ticket_summary.get("stake_yen", 0))}</span>
+                    <span>回收 {_format_yen_text(ticket_summary.get("payout_yen", 0))}</span>
+                    <span>收支 {_format_yen_text(ticket_summary.get("profit_yen", 0))}</span>
+                    <span>命中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
+                    <span>ROI {_format_percent_text(ticket_summary.get("roi", ""))}</span>
+                  </div>
+                </article>
+                """
+            )
+
+        if not engine_cards:
+            continue
+        race_title = _format_race_label(run_row)
+        scope_label = _scope_display_name(report_scope_key)
+        race_sections.append(
+            f"""
+            <section class="llm-race-section">
+              <div class="llm-race-head">
+                <div>
+                  <div class="llm-race-eyebrow">{html.escape(scope_label)}</div>
+                  <h2>{html.escape(race_title)}</h2>
+                </div>
+                <div class="llm-race-meta">
+                  <span>{html.escape(_format_jp_date_text(run_row) or target_date)}</span>
+                  <span>Run {html.escape(run_id or "-")}</span>
+                </div>
+              </div>
+              <div class="llm-race-result">实际结果：{html.escape(actual_text)}</div>
+              <div class="llm-today-card-grid">
+                {"".join(engine_cards)}
+              </div>
+            </section>
+            """
+        )
+
+    summary_cards = []
+    for engine in LLM_BATTLE_ORDER:
+        stats = summary_by_engine[engine]
+        if int(stats.get("races", 0) or 0) <= 0:
+            continue
+        roi = ""
+        if int(stats.get("stake_yen", 0) or 0) > 0:
+            roi = round(float(stats["payout_yen"]) / float(stats["stake_yen"]), 4)
+        summary_cards.append(
+            f"""
+            <article class="llm-summary-card">
+              <div class="llm-summary-head">
+                <strong>{html.escape(stats['label'])}</strong>
+                <span>{int(stats['races'])} 场</span>
+              </div>
+              <div class="llm-summary-metrics">
+                <span>已结算 {int(stats['settled_races'])}</span>
+                <span>待结算 {int(stats['pending_races'])}</span>
+                <span>命中场次 {int(stats['hit_races'])}</span>
+                <span>总票数 {int(stats['ticket_count'])}</span>
+                <span>投入 {_format_yen_text(stats['stake_yen'])}</span>
+                <span>回收 {_format_yen_text(stats['payout_yen'])}</span>
+                <span>收支 {_format_yen_text(stats['profit_yen'])}</span>
+                <span>ROI {_format_percent_text(roi)}</span>
+              </div>
+            </article>
+            """
+        )
+
+    scope_options = ['<option value="">全部范围</option>']
+    for key in LLM_REPORT_SCOPE_KEYS:
+        selected_attr = " selected" if scope_norm == key else ""
+        scope_options.append(
+            f'<option value="{html.escape(key)}"{selected_attr}>{html.escape(_scope_display_name(key))}</option>'
+        )
+
+    empty_state = ""
+    if not race_sections:
+        empty_state = """
+        <section class="llm-empty">
+          <h2>今天还没有可展示的 LLM 票据</h2>
+          <p>先运行当日的 LLM buy。录入赛果后，这个页面会自动显示已结算结果与收支。</p>
+        </section>
+        """
+
+    summary_html = "".join(summary_cards) if summary_cards else '<p class="llm-empty-inline">今天还没有模型汇总。</p>'
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM 当日看板</title>
+  <style>
+    :root {{
+      --bg: #f6f1e8;
+      --paper: rgba(255, 251, 246, 0.92);
+      --paper-strong: #fffaf3;
+      --ink: #182018;
+      --muted: #5d6a60;
+      --line: rgba(24, 32, 24, 0.1);
+      --accent: #135d48;
+      --accent-soft: rgba(19, 93, 72, 0.12);
+      --settled: #1c6b43;
+      --settled-soft: rgba(28, 107, 67, 0.14);
+      --pending: #a56a16;
+      --pending-soft: rgba(165, 106, 22, 0.14);
+      --planned: #5a6678;
+      --planned-soft: rgba(90, 102, 120, 0.14);
+      --shadow: 0 18px 45px rgba(34, 38, 30, 0.08);
+      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--body-font);
+      background:
+        radial-gradient(circle at top left, rgba(227, 214, 189, 0.65), transparent 28%),
+        radial-gradient(circle at top right, rgba(195, 221, 210, 0.7), transparent 32%),
+        linear-gradient(180deg, #fbf7f1 0%, var(--bg) 100%);
+    }}
+    .llm-page {{
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+      display: grid;
+      gap: 22px;
+    }}
+    .llm-hero, .llm-section, .llm-race-section, .llm-empty {{
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: var(--paper);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }}
+    .llm-hero {{
+      padding: 28px;
+      display: grid;
+      gap: 18px;
+    }}
+    .llm-eyebrow {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }}
+    .llm-hero h1, .llm-race-head h2, .llm-section h2, .llm-empty h2 {{
+      margin: 0;
+      font-family: var(--title-font);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }}
+    .llm-hero h1 {{ font-size: clamp(34px, 5vw, 52px); line-height: 0.95; }}
+    .llm-hero p {{
+      margin: 0;
+      max-width: 70ch;
+      line-height: 1.65;
+      color: var(--muted);
+    }}
+    .llm-filter {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+    }}
+    .llm-filter label {{
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .llm-filter input, .llm-filter select {{
+      min-width: 180px;
+      min-height: 42px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--paper-strong);
+      color: var(--ink);
+      font: inherit;
+    }}
+    .llm-filter button, .llm-hero a {{
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }}
+    .llm-section {{
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-summary-grid, .llm-today-card-grid {{
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }}
+    .llm-summary-card, .llm-today-card {{
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-summary-head, .llm-today-card-head, .llm-race-head {{
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: start;
+    }}
+    .llm-summary-metrics, .llm-today-metrics {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .llm-summary-metrics span, .llm-today-metrics span, .llm-race-meta span {{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(24, 32, 24, 0.06);
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .llm-race-section {{
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-race-eyebrow {{
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+    .llm-race-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: end;
+    }}
+    .llm-race-result {{
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(19, 93, 72, 0.08);
+      color: var(--ink);
+      font-weight: 600;
+    }}
+    .llm-today-card--settled {{ border-color: rgba(28, 107, 67, 0.22); background: linear-gradient(180deg, rgba(28, 107, 67, 0.08), rgba(255,255,255,0.82)); }}
+    .llm-today-card--pending {{ border-color: rgba(165, 106, 22, 0.22); background: linear-gradient(180deg, rgba(165, 106, 22, 0.08), rgba(255,255,255,0.82)); }}
+    .llm-today-card--planned, .llm-today-card--result {{ border-color: rgba(90, 102, 120, 0.18); }}
+    .llm-today-engine {{ font-size: 22px; font-family: var(--title-font); }}
+    .llm-today-decision {{ margin-top: 4px; color: var(--muted); font-size: 13px; }}
+    .llm-today-badge {{
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .llm-today-badge--settled {{ background: var(--settled-soft); color: var(--settled); }}
+    .llm-today-badge--pending {{ background: var(--pending-soft); color: var(--pending); }}
+    .llm-today-badge--planned, .llm-today-badge--result {{ background: var(--planned-soft); color: var(--planned); }}
+    .llm-today-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }}
+    .llm-today-grid section {{
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(24, 32, 24, 0.04);
+      min-height: 128px;
+    }}
+    .llm-today-grid h4 {{
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .llm-today-grid p {{
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }}
+    .llm-today-subtext {{
+      margin-top: 8px !important;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .llm-empty {{
+      padding: 28px;
+      text-align: center;
+    }}
+    .llm-empty p, .llm-empty-inline {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }}
+    @media (max-width: 760px) {{
+      .llm-page {{ padding: 18px 14px 28px; }}
+      .llm-hero, .llm-section, .llm-race-section {{ padding: 18px; }}
+      .llm-filter {{ flex-direction: column; align-items: stretch; }}
+      .llm-filter label, .llm-filter input, .llm-filter select, .llm-filter button {{ width: 100%; }}
+      .llm-race-head, .llm-today-card-head {{ flex-direction: column; }}
+      .llm-race-meta {{ justify-content: start; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="llm-page">
+    <section class="llm-hero">
+      <div class="llm-eyebrow">LLM Daily Board</div>
+      <h1>当日 LLM 购票看板</h1>
+      <p>先看今天每个模型到底买了什么、怎么评价这场比赛；录入赛果后，同一页直接显示结算结果、回收和收支。</p>
+      <form class="llm-filter" method="get" action="/llm_today">
+        <label>日期
+          <input type="date" name="date" value="{html.escape(target_date)}">
+        </label>
+        <label>范围
+          <select name="scope_key">
+            {"".join(scope_options)}
+          </select>
+        </label>
+        <button type="submit">刷新看板</button>
+        <a href="/">回主控制台</a>
+      </form>
+    </section>
+    <section class="llm-section">
+      <div class="llm-eyebrow">Daily Summary</div>
+      <h2>模型总览</h2>
+      <div class="llm-summary-grid">{summary_html}</div>
+    </section>
+    {empty_state}
+    {"".join(race_sections)}
+  </main>
+</body>
+</html>"""
+
+
+def _race_job_status_tone(status):
+    text = str(status or "").strip().lower()
+    if text in ("ready", "settled"):
+        return "good"
+    if text in ("queued_process", "processing", "queued_settle", "settling"):
+        return "active"
+    if text == "failed":
+        return "danger"
+    return "muted"
+
+
+def _race_job_status_label(status):
+    mapping = {
+        "uploaded": "已上传",
+        "scheduled": "等待到点",
+        "queued_process": "已入处理队列",
+        "processing": "处理中",
+        "ready": "预测已生成",
+        "queued_settle": "已入结算队列",
+        "settling": "结算中",
+        "settled": "已结算",
+        "failed": "失败",
+    }
+    text = str(status or "").strip().lower()
+    return mapping.get(text, text or "-")
+
+
+def _race_job_action_buttons(job_id, status, admin_token=""):
+    buttons = []
+    action_specs = []
+    status_text = str(status or "").strip().lower()
+    if status_text in ("scheduled", "queued_process", "failed"):
+        buttons.append(
+            f"""
+            <form method="post" action="/race_jobs/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">立即执行处理</button>
+            </form>
+            """
+        )
+    if status_text in ("scheduled", "queued_process"):
+        action_specs.append(("start_processing", "开始处理"))
+    if status_text in ("processing", "queued_process"):
+        action_specs.append(("mark_ready", "标记已出预测"))
+    if status_text in ("ready", "settled"):
+        action_specs.append(("queue_settle", "加入结算队列"))
+    if status_text in ("queued_settle", "ready"):
+        action_specs.append(("start_settling", "开始结算"))
+    if status_text in ("settling", "queued_settle", "ready"):
+        action_specs.append(("mark_settled", "标记已结算"))
+    if status_text != "failed":
+        action_specs.append(("mark_failed", "标记失败"))
+    action_specs.append(("reset_schedule", "重置为待命"))
+    for action, label in action_specs:
+        buttons.append(
+            f"""
+            <form method="post" action="/race_jobs/update">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="action" value="{html.escape(action)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">{html.escape(label)}</button>
+            </form>
+            """
+        )
+    return "".join(buttons)
+
+
+def _race_job_settle_form(row, admin_token=""):
+    current_run_id = str((row or {}).get("current_run_id", "") or "").strip()
+    if not current_run_id:
+        return ""
+    status_text = str((row or {}).get("status", "") or "").strip().lower()
+    if status_text not in ("ready", "queued_settle", "settling", "settled"):
+        return ""
+    return f"""
+    <section class="job-settle-panel">
+      <div class="job-settle-head">
+        <strong>赛果录入</strong>
+        <span>提交 1-3 着后可直接结算，或先入结算队列。</span>
+      </div>
+      <div class="job-settle-actions">
+        <form method="post" action="/race_jobs/settle_now" class="job-settle-form">
+          <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1着马名">
+          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2着马名">
+          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3着马名">
+          <button type="submit">立即结算</button>
+        </form>
+        <form method="post" action="/race_jobs/queue_settle" class="job-settle-form">
+          <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1着马名">
+          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2着马名">
+          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3着马名">
+          <button type="submit">保存并加入结算队列</button>
+        </form>
+      </div>
+    </section>
+    """
+
+
+def build_race_jobs_page(message_text="", error_text="", admin_token="", authorized=True):
+    if not authorized:
+        error_block = ""
+        if error_text:
+            error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
+        helper_text = "已启用管理口令。输入正确 token 后才能上传文件、扫描到点任务或修改状态。"
+        return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race Job 调度看板</title>
+  <style>
+    :root {{
+      --bg: #f4efe8;
+      --paper: rgba(255, 250, 244, 0.94);
+      --ink: #17201a;
+      --muted: #617064;
+      --accent: #145846;
+      --danger: #ad4d3b;
+      --line: rgba(23,31,26,0.1);
+      --shadow: 0 18px 50px rgba(28,33,29,0.09);
+      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: var(--body-font);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
+        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
+        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
+    }}
+    .gate {{
+      max-width: 760px;
+      margin: 64px auto;
+      padding: 0 18px;
+      display: grid;
+      gap: 18px;
+    }}
+    .panel, .job-flash {{
+      padding: 24px;
+      border-radius: 24px;
+      background: var(--paper);
+      border: 1px solid rgba(255,255,255,0.75);
+      box-shadow: var(--shadow);
+    }}
+    .eyebrow {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }}
+    h1 {{
+      margin: 8px 0 10px;
+      font-family: var(--title-font);
+      font-size: clamp(34px, 5vw, 50px);
+      line-height: 0.96;
+    }}
+    p {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }}
+    form {{
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }}
+    input {{
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      font: inherit;
+    }}
+    button, a {{
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }}
+    .job-flash--error {{
+      color: var(--danger);
+      border-color: rgba(173,77,59,0.24);
+      background: rgba(255, 245, 242, 0.95);
+    }}
+    .actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+  </style>
+</head>
+<body>
+  <main class="gate">
+    {error_block}
+    <section class="panel">
+      <div class="eyebrow">Protected</div>
+      <h1>Race Job 调度看板</h1>
+      <p>{html.escape(helper_text)}</p>
+      <form method="get" action="/race_jobs">
+        <input type="password" name="token" placeholder="ADMIN_TOKEN" value="{html.escape(admin_token)}">
+        <div class="actions">
+          <button type="submit">进入管理页</button>
+          <a href="/llm_today">仅看公开看板</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>"""
+
+    jobs = load_race_jobs(BASE_DIR)
+    summary = {
+        "total": len(jobs),
+        "scheduled": 0,
+        "processing": 0,
+        "ready": 0,
+        "settled": 0,
+    }
+    for job in jobs:
+        status = str(job.get("status", "")).strip().lower()
+        if status == "scheduled":
+            summary["scheduled"] += 1
+        elif status in ("queued_process", "processing", "queued_settle", "settling"):
+            summary["processing"] += 1
+        elif status == "ready":
+            summary["ready"] += 1
+        elif status == "settled":
+            summary["settled"] += 1
+
+    job_cards = []
+    for job in jobs:
+        row = dict(job)
+        job_id = str(row.get("job_id", "") or "").strip()
+        status = str(row.get("status", "") or "").strip()
+        tone = _race_job_status_tone(status)
+        artifacts = list(row.get("artifacts", []) or [])
+        artifact_map = {str(item.get("artifact_type", "")).strip().lower(): dict(item) for item in artifacts}
+        kachiuma = artifact_map.get("kachiuma", {})
+        shutuba = artifact_map.get("shutuba", {})
+        notes = str(row.get("notes", "") or "").strip()
+        current_run_id = str(row.get("current_run_id", "") or "").strip()
+        actual_top1 = str(row.get("actual_top1", "") or "").strip()
+        actual_top2 = str(row.get("actual_top2", "") or "").strip()
+        actual_top3 = str(row.get("actual_top3", "") or "").strip()
+        timing_tags = []
+        for label, key in (
+            ("开赛", "scheduled_off_time"),
+            ("开始处理", "process_after_time"),
+            ("处理队列", "queued_process_at"),
+            ("已就绪", "ready_at"),
+            ("已结算", "settled_at"),
+        ):
+            value = str(row.get(key, "") or "").strip()
+            if value:
+                timing_tags.append(f'<span>{html.escape(label)} {html.escape(value)}</span>')
+        job_cards.append(
+            f"""
+            <article class="job-card job-card--{html.escape(tone)}">
+              <div class="job-card-head">
+                <div>
+                  <div class="job-eyebrow">{html.escape(_scope_display_name(row.get('scope_key', '')))}</div>
+                  <h3>{html.escape(str(row.get('location', '') or '-') + ' ' + str(row.get('race_id', '') or '-'))}</h3>
+                </div>
+                <span class="job-badge job-badge--{html.escape(tone)}">{html.escape(_race_job_status_label(status))}</span>
+              </div>
+              <div class="job-meta-row">
+                <span>比赛日 {html.escape(str(row.get('race_date', '') or '-'))}</span>
+                <span>Job {html.escape(job_id or '-')}</span>
+                <span>提前 {html.escape(str(row.get('lead_minutes', 30) or 30))} 分钟启动</span>
+                <span>Run {html.escape(current_run_id or '-')}</span>
+                <span>赛果 {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
+              </div>
+              <div class="job-file-grid">
+                <section>
+                  <h4>kachiuma.csv</h4>
+                  <p>{html.escape(str(kachiuma.get('original_name', '') or '未上传'))}</p>
+                </section>
+                <section>
+                  <h4>shutuba.csv</h4>
+                  <p>{html.escape(str(shutuba.get('original_name', '') or '未上传'))}</p>
+                </section>
+              </div>
+              <div class="job-meta-row">
+                {''.join(timing_tags) if timing_tags else '<span>还没有时间节点</span>'}
+              </div>
+              <div class="job-notes">{html.escape(notes or '无备注')}</div>
+              {_race_job_settle_form(row, admin_token=admin_token)}
+              <div class="job-actions">
+                {_race_job_action_buttons(job_id, status, admin_token=admin_token)}
+                {
+                    f'''
+                    <form method="post" action="/view_run">
+                      <input type="hidden" name="scope_key" value="{html.escape(str(row.get("scope_key", "") or ""))}">
+                      <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
+                      <button type="submit">打开 Run</button>
+                    </form>
+                    <form method="get" action="/llm_today">
+                      <input type="hidden" name="scope_key" value="{html.escape(str(row.get("scope_key", "") or ""))}">
+                      <input type="hidden" name="date" value="{html.escape(str(row.get("race_date", "") or ""))}">
+                      <button type="submit">打开当日看板</button>
+                    </form>
+                    '''
+                    if current_run_id
+                    else ""
+                }
+              </div>
+            </article>
+            """
+        )
+
+    empty_state = ""
+    if not job_cards:
+        empty_state = """
+        <section class="job-empty">
+          <h2>还没有调度任务</h2>
+          <p>先上传某一场比赛的 kachiuma.csv 和 shutuba.csv，再设置开赛时间。页面会自动计算“开赛前 30 分钟开始处理”。</p>
+        </section>
+        """
+
+    message_block = ""
+    if message_text:
+        message_block = f'<section class="job-flash job-flash--ok">{html.escape(message_text)}</section>'
+    error_block = ""
+    if error_text:
+        error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
+    auth_notice = ""
+    if _admin_token_enabled():
+        auth_notice = '<span>管理口令：已启用</span>'
+    else:
+        auth_notice = '<span>管理口令：未启用</span>'
+
+    default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race Job 调度看板</title>
+  <style>
+    :root {{
+      --bg: #f4efe8;
+      --paper: rgba(255, 250, 244, 0.92);
+      --line: rgba(23, 31, 26, 0.1);
+      --ink: #17201a;
+      --muted: #617064;
+      --accent: #145846;
+      --accent-soft: rgba(20, 88, 70, 0.12);
+      --warn: #a36a18;
+      --warn-soft: rgba(163, 106, 24, 0.12);
+      --danger: #ad4d3b;
+      --danger-soft: rgba(173, 77, 59, 0.12);
+      --shadow: 0 18px 50px rgba(28, 33, 29, 0.09);
+      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--body-font);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
+        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
+        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
+    }}
+    .job-page {{
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+      display: grid;
+      gap: 22px;
+    }}
+    .job-hero, .job-panel, .job-card, .job-empty, .job-flash {{
+      background: var(--paper);
+      border: 1px solid rgba(255,255,255,0.7);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }}
+    .job-hero, .job-panel, .job-empty, .job-flash {{ padding: 24px; }}
+    .job-eyebrow {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }}
+    .job-hero h1, .job-panel h2, .job-card h3, .job-empty h2 {{
+      margin: 0;
+      font-family: var(--title-font);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }}
+    .job-hero h1 {{ font-size: clamp(34px, 5vw, 52px); line-height: 0.96; }}
+    .job-hero p, .job-empty p {{
+      margin: 0;
+      max-width: 72ch;
+      color: var(--muted);
+      line-height: 1.65;
+    }}
+    .job-flash--ok {{ border-color: rgba(20, 88, 70, 0.2); }}
+    .job-flash--error {{ border-color: rgba(173, 77, 59, 0.25); background: rgba(255, 245, 242, 0.95); }}
+    .job-summary-grid, .job-board-grid {{
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }}
+    .job-summary-card, .job-card {{
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.78);
+      border-radius: 20px;
+      display: grid;
+      gap: 12px;
+    }}
+    .job-summary-card strong {{ font-size: 28px; font-family: var(--title-font); }}
+    .job-tools {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }}
+    .job-tools a, .job-tools button, .job-actions button, .job-upload button {{
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+    }}
+    .job-upload {{
+      display: grid;
+      gap: 12px;
+    }}
+    .job-upload-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }}
+    .job-upload label {{
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .job-upload input, .job-upload select, .job-upload textarea {{
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.9);
+      font: inherit;
+      color: var(--ink);
+    }}
+    .job-upload textarea {{ min-height: 90px; resize: vertical; }}
+    .job-card--good {{ border-color: rgba(20, 88, 70, 0.2); }}
+    .job-card--active {{ border-color: rgba(163, 106, 24, 0.22); }}
+    .job-card--danger {{ border-color: rgba(173, 77, 59, 0.24); }}
+    .job-card-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }}
+    .job-badge {{
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }}
+    .job-badge--good {{ background: var(--accent-soft); color: var(--accent); }}
+    .job-badge--active {{ background: var(--warn-soft); color: var(--warn); }}
+    .job-badge--danger {{ background: var(--danger-soft); color: var(--danger); }}
+    .job-badge--muted {{ background: rgba(23,31,26,0.06); color: var(--muted); }}
+    .job-meta-row, .job-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .job-meta-row span {{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(23,31,26,0.06);
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .job-file-grid {{
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }}
+    .job-file-grid section {{
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(23,31,26,0.04);
+    }}
+    .job-file-grid h4 {{
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .job-file-grid p, .job-notes {{
+      margin: 0;
+      line-height: 1.55;
+      word-break: break-word;
+    }}
+    .job-settle-panel {{
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(20, 88, 70, 0.06);
+      display: grid;
+      gap: 10px;
+    }}
+    .job-settle-head {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: space-between;
+      align-items: baseline;
+    }}
+    .job-settle-head span {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .job-settle-actions {{
+      display: grid;
+      gap: 10px;
+    }}
+    .job-settle-form {{
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+    }}
+    .job-settle-form input {{
+      width: 100%;
+      min-height: 40px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.95);
+      color: var(--ink);
+      font: inherit;
+    }}
+    .job-actions form {{ margin: 0; }}
+    @media (max-width: 760px) {{
+      .job-page {{ padding: 18px 14px 30px; }}
+      .job-hero, .job-panel, .job-empty, .job-flash {{ padding: 18px; }}
+      .job-card-head {{ flex-direction: column; }}
+      .job-tools {{ align-items: stretch; }}
+      .job-settle-form {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="job-page">
+    <section class="job-hero">
+      <div class="job-eyebrow">Race Scheduler MVP</div>
+      <h1>赛前排程看板</h1>
+      <p>这里先做本地文件版 MVP。你可以提前上传多场比赛的 `kachiuma.csv` 和 `shutuba.csv`，系统会计算“开赛前 30 分钟开始处理”的时间，并展示当前状态流转。</p>
+      <div class="job-tools">
+        <div class="job-meta-row">
+          <span>总任务 {summary['total']}</span>
+          <span>等待到点 {summary['scheduled']}</span>
+          <span>处理中 {summary['processing']}</span>
+          <span>预测已生成 {summary['ready']}</span>
+          <span>已结算 {summary['settled']}</span>
+          {auth_notice}
+        </div>
+        <div class="job-actions">
+          <form method="post" action="/race_jobs/scan_due">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <button type="submit">扫描到点任务</button>
+          </form>
+          <a href="/llm_today">看 LLM 看板</a>
+          <a href="/">回主控制台</a>
+        </div>
+      </div>
+    </section>
+    {message_block}
+    {error_block}
+    <section class="job-panel">
+      <div class="job-eyebrow">Upload</div>
+      <h2>新建赛程任务</h2>
+      <form class="job-upload" method="post" action="/race_jobs/create" enctype="multipart/form-data">
+        <input type="hidden" name="token" value="{html.escape(admin_token)}">
+        <div class="job-upload-grid">
+          <label>范围
+            <select name="scope_key">
+              <option value="central_dirt">中央 Dirt</option>
+              <option value="central_turf">中央 Turf</option>
+              <option value="local">地方</option>
+            </select>
+          </label>
+          <label>Race ID
+            <input type="text" name="race_id" placeholder="202606010109">
+          </label>
+          <label>场地
+            <input type="text" name="location" placeholder="中山">
+          </label>
+          <label>比赛日期
+            <input type="date" name="race_date">
+          </label>
+          <label>开赛时间
+            <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
+          </label>
+          <label>提前多少分钟启动
+            <input type="number" name="lead_minutes" min="0" value="30">
+          </label>
+          <label>kachiuma.csv
+            <input type="file" name="kachiuma_file" accept=".csv">
+          </label>
+          <label>shutuba.csv
+            <input type="file" name="shutuba_file" accept=".csv">
+          </label>
+        </div>
+        <label>备注
+          <textarea name="notes" placeholder="例如：前一天已准备好，等开赛前 30 分钟再跑 odds -> prediction -> llm"></textarea>
+        </label>
+        <div class="job-actions">
+          <button type="submit">创建任务</button>
+        </div>
+      </form>
+    </section>
+    {empty_state}
+    <section class="job-panel">
+      <div class="job-eyebrow">Board</div>
+      <h2>任务列表</h2>
+      <div class="job-board-grid">
+        {''.join(job_cards)}
+      </div>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def load_ability_marks_table(scope_key, run_id, run_row=None):
     return view_data.load_ability_marks_table(
         get_data_dir,
@@ -3244,6 +4457,10 @@ def page_template(
     summary_table_html="",
     stats_block="",
     default_scope="central_dirt",
+    default_policy_engine="gemini",
+    default_policy_model="",
+    admin_token="",
+    admin_enabled=False,
 ):
     return ui_page_template(
         output_text=output_text,
@@ -3267,12 +4484,10 @@ def page_template(
         summary_table_html=summary_table_html,
         stats_block=stats_block,
         default_scope=default_scope,
-        default_policy_engine=normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
-        default_policy_model=resolve_policy_model(
-            normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
-            os.environ.get("POLICY_MODEL", ""),
-            os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-        ),
+        default_policy_engine=default_policy_engine,
+        default_policy_model=default_policy_model,
+        admin_token=admin_token,
+        admin_enabled=admin_enabled,
     )
 
 
@@ -3283,6 +4498,7 @@ def render_page(
     top5_text="",
     summary_run_id="",
     selected_run_id="",
+    admin_token="",
 ):
     scope_norm = normalize_scope_key(scope_key)
     default_scope = scope_norm or "central_dirt"
@@ -3451,18 +4667,253 @@ def render_page(
         summary_table_html=summary_table_html,
         stats_block=stats_block,
         default_scope=default_scope,
+        default_policy_engine=normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
+        default_policy_model=resolve_policy_model(
+            normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
+            os.environ.get("POLICY_MODEL", ""),
+            os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+        ),
+        admin_token=admin_token,
+        admin_enabled=_admin_token_enabled(),
+    )
+
+
+def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
+    return render_page(
+        scope_key,
+        error_text=str(message or "管理口令错误，不能执行该操作。"),
+        selected_run_id=selected_run_id,
+        summary_run_id=summary_run_id,
+        admin_token=token,
     )
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
-    return render_page("")
+def index(token: str = ""):
+    return render_page("", admin_token=token)
+
+
+@app.get("/llm_today", response_class=HTMLResponse)
+def llm_today(date: str = "", scope_key: str = ""):
+    return build_llm_today_page(date_text=date, scope_key=scope_key)
+
+
+@app.get("/race_jobs", response_class=HTMLResponse)
+def race_jobs_board(token: str = ""):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效。",
+        )
+    return build_race_jobs_page(admin_token=token, authorized=True)
+
+
+@app.post("/race_jobs/create", response_class=HTMLResponse)
+def create_race_job_view(
+    token: str = Form(""),
+    scope_key: str = Form("central_dirt"),
+    race_id: str = Form(""),
+    location: str = Form(""),
+    race_date: str = Form(""),
+    scheduled_off_time: str = Form(""),
+    lead_minutes: str = Form("30"),
+    notes: str = Form(""),
+    kachiuma_file: UploadFile = File(None),
+    shutuba_file: UploadFile = File(None),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法创建任务。",
+        )
+    race_id = normalize_race_id(race_id)
+    scope_norm = normalize_scope_key(scope_key)
+    if not scope_norm:
+        return build_race_jobs_page(admin_token=token, error_text="范围无效。")
+    if not race_id:
+        return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
+    if not scheduled_off_time.strip():
+        return build_race_jobs_page(admin_token=token, error_text="请填写开赛时间。")
+    if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
+        return build_race_jobs_page(admin_token=token, error_text="请上传 kachiuma.csv。")
+    if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
+        return build_race_jobs_page(admin_token=token, error_text="请上传 shutuba.csv。")
+    try:
+        lead_value = int(str(lead_minutes or "30").strip() or "30")
+    except ValueError:
+        lead_value = 30
+    artifact_payloads = []
+    job = create_race_job(
+        BASE_DIR,
+        race_id=race_id,
+        scope_key=scope_norm,
+        location=location,
+        race_date=race_date,
+        scheduled_off_time=scheduled_off_time,
+        lead_minutes=lead_value,
+        notes=notes,
+        artifacts=[],
+    )
+    for artifact_type, upload in (("kachiuma", kachiuma_file), ("shutuba", shutuba_file)):
+        if upload is None:
+            continue
+        payload = upload.file.read()
+        artifact_payloads.append(
+            save_race_job_artifact(
+                BASE_DIR,
+                job["job_id"],
+                artifact_type,
+                upload.filename or f"{artifact_type}.csv",
+                payload,
+            )
+        )
+
+    def _attach_artifacts(row, now_text):
+        row["artifacts"] = artifact_payloads
+        row["status"] = "scheduled"
+        row["updated_at"] = now_text
+
+    update_race_job(BASE_DIR, job["job_id"], _attach_artifacts)
+    return build_race_jobs_page(admin_token=token, message_text=f"已创建任务 {job['job_id']}。")
+
+
+@app.post("/race_jobs/scan_due", response_class=HTMLResponse)
+def scan_race_jobs_due(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法扫描任务。",
+        )
+    changed = scan_due_race_jobs(BASE_DIR)
+    if changed:
+        return build_race_jobs_page(admin_token=token, message_text=f"已将 {len(changed)} 场比赛加入处理队列。")
+    return build_race_jobs_page(admin_token=token, message_text="当前没有到点任务。")
+
+
+@app.post("/race_jobs/update", response_class=HTMLResponse)
+def update_race_job_view(
+    token: str = Form(""),
+    job_id: str = Form(""),
+    action: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法修改任务。",
+        )
+    job = apply_race_job_action(BASE_DIR, job_id, action)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="找不到对应的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已执行动作：{action}。")
+
+
+@app.post("/race_jobs/process_now", response_class=HTMLResponse)
+def process_race_job_now(
+    token: str = Form(""),
+    job_id: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法执行任务。",
+        )
+    try:
+        from race_job_runner import process_race_job
+
+        summary = process_race_job(BASE_DIR, job_id)
+    except Exception as exc:
+        try:
+            from race_job_runner import fail_race_job
+
+            fail_race_job(BASE_DIR, job_id, str(exc))
+        except Exception:
+            pass
+        return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 执行失败：{exc}")
+    run_id = str((summary or {}).get("run_id", "") or "").strip()
+    engine_count = len(list((summary or {}).get("policy_engines", []) or []))
+    return build_race_jobs_page(
+        admin_token=token,
+        message_text=f"{job_id} 已完成处理。run_id={run_id or '-'} engines={engine_count}",
+    )
+
+
+@app.post("/race_jobs/queue_settle", response_class=HTMLResponse)
+def queue_race_job_settle(
+    token: str = Form(""),
+    job_id: str = Form(""),
+    actual_top1: str = Form(""),
+    actual_top2: str = Form(""),
+    actual_top3: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法加入结算队列。",
+        )
+    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
+    if not all(names):
+        return build_race_jobs_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
+
+    def _queue_settle(row, now_text):
+        row["actual_top1"] = names[0]
+        row["actual_top2"] = names[1]
+        row["actual_top3"] = names[2]
+        row["status"] = "queued_settle"
+        row["queued_settle_at"] = now_text
+        row["error_message"] = ""
+
+    job = update_race_job(BASE_DIR, job_id, _queue_settle)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="找不到对应的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存赛果并加入结算队列。")
+
+
+@app.post("/race_jobs/settle_now", response_class=HTMLResponse)
+def settle_race_job_now(
+    token: str = Form(""),
+    job_id: str = Form(""),
+    actual_top1: str = Form(""),
+    actual_top2: str = Form(""),
+    actual_top3: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，无法结算任务。",
+        )
+    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
+    if not all(names):
+        return build_race_jobs_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
+    try:
+        from race_job_runner import settle_race_job
+
+        summary = settle_race_job(BASE_DIR, job_id, names)
+    except Exception as exc:
+        try:
+            from race_job_runner import fail_race_job
+
+            fail_race_job(BASE_DIR, job_id, str(exc))
+        except Exception:
+            pass
+        return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 结算失败：{exc}")
+    return build_race_jobs_page(
+        admin_token=token,
+        message_text=f"{job_id} 已完成结算。run_id={str((summary or {}).get('run_id', '') or '-')}",
+    )
 
 
 @app.post("/view_run", response_class=HTMLResponse)
 def view_run(
     run_id: str = Form(""),
     scope_key: str = Form(""),
+    token: str = Form(""),
 ):
     run_id = run_id.strip()
     scope_key = normalize_scope_key(scope_key)
@@ -3470,7 +4921,7 @@ def view_run(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="Enter Run ID or Race ID to view history.")
+        return render_page("", error_text="Enter Run ID or Race ID to view history.", admin_token=token)
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -3482,6 +4933,7 @@ def view_run(
             scope_key,
             error_text="Run ID / Race ID not found.",
             selected_run_id=run_id,
+            admin_token=token,
         )
     resolved_run_id = str(run_row.get("run_id", "")).strip()
     if not resolved_run_id:
@@ -3494,11 +4946,13 @@ def view_run(
             scope_key,
             error_text="Run exists but run_id is missing; cannot resolve artifacts.",
             selected_run_id=run_id,
+            admin_token=token,
         )
     return render_page(
         scope_key,
         selected_run_id=resolved_run_id,
         summary_run_id=resolved_run_id,
+        admin_token=token,
     )
 
 
@@ -3515,6 +4969,7 @@ def api_runs(scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q:
 
 @app.post("/run_pipeline", response_class=HTMLResponse)
 def run_pipeline(
+    token: str = Form(""),
     race_id: str = Form(""),
     race_url: str = Form(""),
     history_url: str = Form(""),
@@ -3525,9 +4980,11 @@ def run_pipeline(
     distance: str = Form(""),
     track_cond: str = Form(""),
 ):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 Pipeline。", scope_key=scope_key, token=token)
     scope_key = normalize_scope_key(scope_key)
     if not scope_key:
-        return render_page("", error_text="Please select a data scope.")
+        return render_page("", error_text="Please select a data scope.", admin_token=token)
     race_id = normalize_race_id(race_id or race_url)
     history_url = history_url.strip()
     location = str(location or "").strip()
@@ -3536,6 +4993,7 @@ def run_pipeline(
         return render_page(
             scope_key,
             error_text="Race ID, History URL, and Location are required.",
+            admin_token=token,
         )
     if scope_key == "local":
         race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
@@ -3577,17 +5035,26 @@ def run_pipeline(
         output_text=f"{label}\n{output}",
         top5_text=top5_text,
         summary_run_id=parse_run_id(output),
+        admin_token=token,
     )
 
 
 @app.post("/record_predictor", response_class=HTMLResponse)
 def record_predictor(
+    token: str = Form(""),
     scope_key: str = Form(""),
     run_id: str = Form(""),
     top1: str = Form(""),
     top2: str = Form(""),
     top3: str = Form(""),
 ):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied(
+            "管理口令错误，不能录入 Predictor 结果。",
+            scope_key=scope_key,
+            token=token,
+            selected_run_id=str(run_id or "").strip(),
+        )
     scope_norm = normalize_scope_key(scope_key)
     run_id = str(run_id or "").strip()
     run_row = None
@@ -3605,6 +5072,7 @@ def record_predictor(
             scope_norm or scope_key,
             error_text="Top1/Top2/Top3 are required.",
             selected_run_id=resolved_run_id,
+            admin_token=token,
         )
     refresh_ok = False
     refresh_message = "Run row missing for odds update."
@@ -3645,23 +5113,33 @@ def record_predictor(
         scope_norm or scope_key,
         output_text="\n".join(part for part in output_parts if str(part).strip()),
         selected_run_id=resolved_run_id,
+        admin_token=token,
     )
 
 
 @app.post("/run_llm_buy", response_class=HTMLResponse)
 def run_llm_buy(
+    token: str = Form(""),
     scope_key: str = Form(""),
     run_id: str = Form(""),
     policy_engine: str = Form("gemini"),
     policy_model: str = Form(""),
     refresh_odds: str = Form("1"),
 ):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied(
+            "管理口令错误，不能执行 LLM buy。",
+            scope_key=scope_key,
+            token=token,
+            selected_run_id=str(run_id or "").strip(),
+        )
     scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
             error_text="Run ID / Race ID not found for LLM buy.",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
+            admin_token=token,
         )
     refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
@@ -3685,6 +5163,7 @@ def run_llm_buy(
                 policy_engine=normalize_policy_engine(policy_engine),
             ),
             selected_run_id=resolved_run_id,
+            admin_token=token,
         )
     return render_page(
         scope_norm,
@@ -3697,17 +5176,20 @@ def run_llm_buy(
             result["engine"],
         ),
         selected_run_id=resolved_run_id,
+        admin_token=token,
     )
 
 
 @app.post("/run_gemini_buy", response_class=HTMLResponse)
 def run_gemini_buy(
+    token: str = Form(""),
     scope_key: str = Form(""),
     run_id: str = Form(""),
     policy_model: str = Form(""),
     refresh_odds: str = Form("1"),
 ):
     return run_llm_buy(
+        token=token,
         scope_key=scope_key,
         run_id=run_id,
         policy_engine="gemini",
@@ -3718,16 +5200,25 @@ def run_gemini_buy(
 
 @app.post("/run_all_llm_buy", response_class=HTMLResponse)
 def run_all_llm_buy(
+    token: str = Form(""),
     scope_key: str = Form(""),
     run_id: str = Form(""),
     refresh_odds: str = Form("1"),
 ):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied(
+            "管理口令错误，不能执行全部 LLM。",
+            scope_key=scope_key,
+            token=token,
+            selected_run_id=str(run_id or "").strip(),
+        )
     scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
             error_text="Run ID / Race ID not found for LLM buy.",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
+            admin_token=token,
         )
     refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
@@ -3753,6 +5244,7 @@ def run_all_llm_buy(
             scope_norm,
             error_text="\n\n".join(error_blocks),
             selected_run_id=resolved_run_id,
+            admin_token=token,
         )
     output_text = "\n\n".join(block for block in result_blocks if str(block).strip())
     if error_blocks:
@@ -3761,20 +5253,30 @@ def run_all_llm_buy(
         scope_norm,
         output_text=output_text,
         selected_run_id=resolved_run_id,
+        admin_token=token,
     )
 
 
 @app.post("/topup_all_llm_budget", response_class=HTMLResponse)
 def topup_all_llm_budget(
+    token: str = Form(""),
     scope_key: str = Form(""),
     run_id: str = Form(""),
 ):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied(
+            "管理口令错误，不能执行资金充值。",
+            scope_key=scope_key,
+            token=token,
+            selected_run_id=str(run_id or "").strip(),
+        )
     scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
             error_text="Run ID / Race ID not found for LLM bankroll top-up.",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
+            admin_token=token,
         )
     ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
     amount_yen = 10000
@@ -3792,59 +5294,63 @@ def topup_all_llm_budget(
         scope_norm,
         output_text="\n".join(lines),
         selected_run_id=resolved_run_id,
+        admin_token=token,
     )
 
 
 @app.post("/reset_llm_state", response_class=HTMLResponse)
-def reset_llm_state():
+def reset_llm_state(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能重置 LLM 状态。", token=token)
     summary = reset_llm_state_files(BASE_DIR)
     return render_page(
         "",
         output_text=json.dumps(summary, ensure_ascii=False, indent=2),
+        admin_token=token,
     )
 
 
 @app.post("/optimize_params", response_class=HTMLResponse)
-def optimize_params():
+def optimize_params(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 optimize_params。", token=token)
     code, output = run_script(OPTIMIZE_PARAMS, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    return page_template(
-        output_text=f"{label}\n{output}",
-    )
+    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
 
 
 @app.post("/optimize_predictor", response_class=HTMLResponse)
-def optimize_predictor():
+def optimize_predictor(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 optimize_predictor。", token=token)
     code, output = run_script(OPTIMIZE_PREDICTOR, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    return page_template(
-        output_text=f"{label}\n{output}",
-    )
+    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
 
 
 @app.post("/offline_eval", response_class=HTMLResponse)
-def offline_eval(window: str = Form("")):
+def offline_eval(token: str = Form(""), window: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 offline_eval。", token=token)
     inputs = [window, ""]
     code, output = run_script(OFFLINE_EVAL, inputs=inputs, extra_blanks=1)
     label = f"Exit code: {code}"
-    return page_template(
-        output_text=f"{label}\n{output}",
-    )
+    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
 
 
 @app.post("/init_update", response_class=HTMLResponse)
-def init_update():
+def init_update(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 init_update。", token=token)
     code, output = run_script(INIT_UPDATE, inputs=[""], extra_blanks=1)
     label = f"Exit code: {code}"
-    return page_template(
-        output_text=f"{label}\n{output}",
-    )
+    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
 
 
 @app.post("/init_update_reset", response_class=HTMLResponse)
-def init_update_reset():
+def init_update_reset(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return _admin_execution_denied("管理口令错误，不能执行 init_update --reset。", token=token)
     code, output = run_script(INIT_UPDATE, inputs=[""], args=["--reset"], extra_blanks=1)
     label = f"Exit code: {code}"
-    return page_template(
-        output_text=f"{label}\n{output}",
-    )
+    return render_page("", output_text=f"{label}\n{output}", admin_token=token)

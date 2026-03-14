@@ -1,3 +1,4 @@
+import os
 import sys
 
 import web_app
@@ -17,12 +18,32 @@ def pick_latest_run_id():
 
 
 def main():
-    # 1) index page
     body = web_app.index()
     assert_true("Run Pipeline" in body, "index missing Run Pipeline block")
     assert_true('action="/view_run"' in body, "index missing view_run form")
 
-    # 2) view_run route with real run_id
+    llm_today_html = web_app.llm_today()
+    assert_true("LLM" in llm_today_html, "llm_today missing title marker")
+    assert_true('action="/llm_today"' in llm_today_html, "llm_today missing filter form")
+
+    race_jobs_html = web_app.race_jobs_board()
+    assert_true('action="/race_jobs/create"' in race_jobs_html, "race_jobs missing create form")
+
+    prev_admin_token = os.environ.get("ADMIN_TOKEN")
+    os.environ["ADMIN_TOKEN"] = "smoke-token"
+    try:
+        protected_jobs = web_app.race_jobs_board(token="bad-token")
+        assert_true("Protected" in protected_jobs, "race_jobs should be protected with wrong token")
+        unlocked_index = web_app.index(token="smoke-token")
+        assert_true("Management Access" in unlocked_index, "index missing admin access panel")
+        denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
+        assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
+    finally:
+        if prev_admin_token is None:
+            os.environ.pop("ADMIN_TOKEN", None)
+        else:
+            os.environ["ADMIN_TOKEN"] = prev_admin_token
+
     run_id = pick_latest_run_id()
     assert_true(bool(run_id), "no run_id found in any scope")
     view_html = web_app.view_run(run_id=run_id, scope_key="")
