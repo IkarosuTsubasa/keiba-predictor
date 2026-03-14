@@ -1889,7 +1889,7 @@ def build_policy_html(payload):
     engine_label_map = {
         "gemini": "Gemini",
         "siliconflow": "DeepSeek",
-        "openai": "OpenAI GPT-5",
+        "openai": "ChatGPT",
         "grok": "xAI Grok",
     }
     panel_title = engine_label_map.get(policy_engine, policy_engine or "LLM")
@@ -2086,7 +2086,7 @@ def build_policy_workspace_html(payloads):
 
 LLM_BATTLE_ORDER = ("openai", "gemini", "siliconflow", "grok")
 LLM_BATTLE_LABELS = {
-    "openai": "GPT-5",
+    "openai": "ChatGPT",
     "gemini": "Gemini",
     "siliconflow": "DeepSeek",
     "grok": "Grok",
@@ -2098,7 +2098,7 @@ LLM_NOTE_LABELS = {
     "grok": "Grok",
 }
 LLM_BATTLE_SHORT_LABELS = {
-    "openai": "gpt",
+    "openai": "chatgpt",
     "gemini": "gemini",
     "siliconflow": "deepseek",
     "grok": "grok",
@@ -2757,7 +2757,7 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
         for engine in LLM_BATTLE_ORDER
     }
     race_rows = []
-    report_lines = [f"【{target_date} LLM 日報】中央・地方合算", ""]
+    report_lines = [f"{target_date} 第1回 いかいもAI競馬対決杯｜ 日報", ""]
 
     for run_row in runs:
         run_id = _safe_text(run_row.get("run_id"))
@@ -2790,14 +2790,21 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
         for engine in LLM_BATTLE_ORDER:
             payload = payload_map.get(engine)
             triplet_text = "- - -"
+            report_line_text = triplet_text
             if payload:
                 output = _policy_primary_output(payload)
                 marks_map = _policy_marks_map(payload)
                 triplet = _marks_result_triplet(marks_map, actual_horse_nos)
                 triplet_text = _format_triplet_text(triplet)
+                bet_decision = _safe_text(output.get("bet_decision")).lower()
                 ticket_run_id = _payload_run_id(payload, race_run_id)
                 ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine)
                 ticket_summary = _summarize_ticket_rows(ticket_rows)
+                if bet_decision == "no_bet" or int(ticket_summary.get("ticket_count", 0) or 0) <= 0:
+                    report_line_text = "見"
+                else:
+                    recovery_rate_text = _percent_text_from_ratio(ticket_summary.get("roi", ""))
+                    report_line_text = triplet_text if recovery_rate_text == "-" else f"{triplet_text} 回収率：{recovery_rate_text}"
                 stats = metric_rows[engine]
                 stats["runs"] += 1
                 stats["race_hit_count"] += 1 if ticket_summary["hit_count"] > 0 else 0
@@ -2813,7 +2820,7 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
                     stats["mark_hit_count"] += len(set(marks_map.keys()) & actual_set)
                     stats["mark_total_count"] += len(set(marks_map.keys()))
             race_row[LLM_BATTLE_SHORT_LABELS.get(engine, engine)] = triplet_text
-            report_lines.append(f"{LLM_BATTLE_SHORT_LABELS.get(engine, engine)} {triplet_text}")
+            report_lines.append(f"{LLM_BATTLE_SHORT_LABELS.get(engine, engine)} {report_line_text}")
         race_rows.append(race_row)
         report_lines.append("")
 
@@ -2859,10 +2866,11 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
         return {"html": "", "text": ""}
 
     report_lines.append("【当日成績】")
+    report_lines.append("")
     for row in summary_rows:
+        report_lines.append(str(row.get("model", "-") or "-"))
         report_lines.append(
-            "{model} {hit_summary} 的中率 {hit_rate} 投資{stake_yen}円 回収{payout_yen}円 収支{profit_yen}円 回収率 {recovery_rate} 本命命中率 {honmei_hit_rate} 印命中率 {mark_hit_rate}".format(
-                model=row.get("model", "-"),
+            "{hit_summary} 的中率 {hit_rate} 投資{stake_yen}円 回収{payout_yen}円 収支{profit_yen}円 回収率 {recovery_rate} 本命命中率 {honmei_hit_rate} 印命中率 {mark_hit_rate}".format(
                 hit_summary=row.get("的中", "-"),
                 hit_rate=row.get("的中率", "-"),
                 stake_yen=row.get("投資円", 0),
@@ -2873,6 +2881,7 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
                 mark_hit_rate=row.get("印命中率", "-"),
             )
         )
+        report_lines.append("")
 
     def _leader_rows(metric_key, title):
         ordered = sorted(
@@ -2904,7 +2913,7 @@ def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map
 
     race_table_html = build_table_html(
         race_rows,
-        ["race", "gpt", "gemini", "deepseek", "grok"],
+        ["race", "chatgpt", "gemini", "deepseek", "grok"],
         "当日レース別対戦",
     )
     summary_table_html = build_table_html(

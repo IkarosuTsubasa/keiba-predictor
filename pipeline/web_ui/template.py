@@ -1168,7 +1168,7 @@ def page_template(
                 <select name="policy_engine" id="llm_policy_engine">
                   <option value="gemini"{' selected' if default_policy_engine == 'gemini' else ''}>Gemini</option>
                   <option value="siliconflow"{' selected' if default_policy_engine == 'siliconflow' else ''}>DeepSeek</option>
-                  <option value="openai"{' selected' if default_policy_engine == 'openai' else ''}>OpenAI GPT-5</option>
+                  <option value="openai"{' selected' if default_policy_engine == 'openai' else ''}>ChatGPT</option>
                   <option value="grok"{' selected' if default_policy_engine == 'grok' else ''}>xAI Grok</option>
                 </select>
               </div>

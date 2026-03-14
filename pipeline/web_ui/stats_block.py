@@ -14,7 +14,7 @@ def build_llm_compare_block(
     policy_labels = {
         "gemini": "Gemini",
         "siliconflow": "DeepSeek",
-        "openai": "OpenAI GPT-5",
+        "openai": "ChatGPT",
         "grok": "xAI Grok",
     }
     compare_rows = []
@@ -96,7 +96,7 @@ def build_stats_block(
     policy_labels = {
         "gemini": "Gemini",
         "siliconflow": "SiliconFlow",
-        "openai": "OpenAI GPT-5",
+        "openai": "ChatGPT",
         "grok": "xAI Grok",
     }
 

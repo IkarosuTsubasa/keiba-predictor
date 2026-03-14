@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v12"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v16"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v17"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -734,6 +734,9 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
         f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
         "- 購入単位: 100円刻み\n"
+        "- 実運用では同じ時間帯や近い時間帯に 4-5 レース同時に買う必要が生じることがある\n"
+        "- 1レースで資金を使いすぎると、期待値がある後続レースに参加できず機会損失になる\n"
+        "- 単レース最適ではなく、当日全体のレース配分を意識して資金を残すこと\n"
         "- 資金が尽きたら残りのレースに参加不可。一方、全て少額で薄く買うだけでは他AIに勝てない。\n\n"
 
         "== 提供データの概要 ==\n"
@@ -766,6 +769,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- consensus の投票数は参考情報の一つに過ぎない。投票数が多い＝買うべき、ではない\n"
         "- 買い方は完全に自由。特定の馬を中心に組む必要はなく、データから自分なりの根拠で組み立てること\n"
         "- 命中率の高い堅実な馬券と、たまに当たる高配当のバランスが週間収支の鍵\n"
+        "- 今この1レースだけでなく、このあと 4-5 レース続けて買う可能性を前提に資金配分する\n"
+        "- 明確な優位がないのに単レースへ過大投入するのは、後続の高期待値レースを逃すので避ける\n"
         "- 「このレースはデータ的に自信が持てる」時に厚く張り、曖昧な時は薄く張るか見送る\n"
         "- 連敗中の取り返し買い、連勝中の過信買いは典型的な失敗パターン\n"
         "- 見送り（no_bet）も立派な戦略。全レース参加する義務はない\n\n"
