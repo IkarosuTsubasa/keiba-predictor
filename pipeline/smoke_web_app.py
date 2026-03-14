@@ -35,6 +35,8 @@ def main():
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"
     try:
+        locked_console = web_app.console_index()
+        assert_true("Protected" in locked_console and "ADMIN_TOKEN" in locked_console, "console should show gate without token")
         unlocked_console = web_app.console_index(token="smoke-token")
         assert_true("Management Access" in unlocked_console, "console missing admin access panel")
         assert_true("任务后台" in unlocked_console, "console missing merged admin workspace")

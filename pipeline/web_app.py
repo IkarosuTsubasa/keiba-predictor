@@ -170,6 +170,130 @@ def run_due_jobs_once():
     }
 
 
+def build_console_gate_page(admin_token="", error_text=""):
+    error_block = ""
+    if error_text:
+        error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>控制台验证</title>
+  <style>
+    :root {{
+      --bg: #f4efe8;
+      --paper: rgba(255, 250, 244, 0.94);
+      --ink: #17201a;
+      --muted: #617064;
+      --accent: #145846;
+      --danger: #ad4d3b;
+      --line: rgba(23,31,26,0.1);
+      --shadow: 0 18px 50px rgba(28,33,29,0.09);
+      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: var(--body-font);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
+        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
+        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
+    }}
+    .gate {{
+      max-width: 760px;
+      margin: 64px auto;
+      padding: 0 18px;
+      display: grid;
+      gap: 18px;
+    }}
+    .panel, .job-flash {{
+      padding: 24px;
+      border-radius: 24px;
+      background: var(--paper);
+      border: 1px solid rgba(255,255,255,0.75);
+      box-shadow: var(--shadow);
+    }}
+    .eyebrow {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }}
+    h1 {{
+      margin: 8px 0 10px;
+      font-family: var(--title-font);
+      font-size: clamp(34px, 5vw, 50px);
+      line-height: 0.96;
+    }}
+    p {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }}
+    form {{
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }}
+    input {{
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      font: inherit;
+    }}
+    button, a {{
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }}
+    .job-flash--error {{
+      color: var(--danger);
+      border-color: rgba(173,77,59,0.24);
+      background: rgba(255, 245, 242, 0.95);
+    }}
+    .actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+  </style>
+</head>
+<body>
+  <main class="gate">
+    {error_block}
+    <section class="panel">
+      <div class="eyebrow">Protected</div>
+      <h1>控制台验证</h1>
+      <p>这里是你的后台。输入正确的 `ADMIN_TOKEN` 后才能进入 `/console`。</p>
+      <form method="get" action="/console">
+        <input type="password" name="token" placeholder="ADMIN_TOKEN" value="{html.escape(admin_token)}">
+        <div class="actions">
+          <button type="submit">进入控制台</button>
+          <a href="/llm_today">返回前台</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def load_runs(scope_key):
     migrate_legacy_data(BASE_DIR, scope_key)
     runs_path = get_data_dir(BASE_DIR, scope_key) / "runs.csv"
@@ -5060,6 +5184,8 @@ def index(token: str = ""):
 
 @app.get("/console", response_class=HTMLResponse)
 def console_index(token: str = ""):
+    if _admin_token_enabled() and not _admin_token_valid(token):
+        return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
     return render_console_page(admin_token=token)
 
 
