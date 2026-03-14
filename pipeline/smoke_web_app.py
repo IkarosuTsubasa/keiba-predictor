@@ -1,4 +1,5 @@
 import os
+import os
 import sys
 
 import web_app
@@ -19,12 +20,16 @@ def pick_latest_run_id():
 
 def main():
     body = web_app.index()
-    assert_true("Run Pipeline" in body, "index missing Run Pipeline block")
-    assert_true('action="/view_run"' in body, "index missing view_run form")
+    assert_true("LLM" in body, "index should render public LLM page")
+    assert_true('action="/llm_today"' in body, "index missing llm_today filter form")
 
     llm_today_html = web_app.llm_today()
     assert_true("LLM" in llm_today_html, "llm_today missing title marker")
     assert_true('action="/llm_today"' in llm_today_html, "llm_today missing filter form")
+
+    console_html = web_app.console_index()
+    assert_true("Run Pipeline" in console_html, "console missing Run Pipeline block")
+    assert_true('action="/view_run"' in console_html, "console missing view_run form")
 
     race_jobs_html = web_app.race_jobs_board()
     assert_true('action="/race_jobs/create"' in race_jobs_html, "race_jobs missing create form")
@@ -34,8 +39,8 @@ def main():
     try:
         protected_jobs = web_app.race_jobs_board(token="bad-token")
         assert_true("Protected" in protected_jobs, "race_jobs should be protected with wrong token")
-        unlocked_index = web_app.index(token="smoke-token")
-        assert_true("Management Access" in unlocked_index, "index missing admin access panel")
+        unlocked_console = web_app.console_index(token="smoke-token")
+        assert_true("Management Access" in unlocked_console, "console missing admin access panel")
         denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
         assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
     finally:

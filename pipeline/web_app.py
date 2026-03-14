@@ -4690,6 +4690,11 @@ def _admin_execution_denied(message, scope_key="", token="", selected_run_id="",
 
 @app.get("/", response_class=HTMLResponse)
 def index(token: str = ""):
+    return build_llm_today_page()
+
+
+@app.get("/console", response_class=HTMLResponse)
+def console_index(token: str = ""):
     return render_page("", admin_token=token)
 
 

@@ -103,7 +103,7 @@ def page_template(
     admin_token_value = str(admin_token or "").strip()
     encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
     race_jobs_href = f"/race_jobs?token={encoded_admin_token}" if encoded_admin_token else "/race_jobs"
-    home_href = f"/?token={encoded_admin_token}" if encoded_admin_token else "/"
+    console_href = f"/console?token={encoded_admin_token}" if encoded_admin_token else "/console"
 
     output_panel = ""
     if output_text:
@@ -389,7 +389,7 @@ def page_template(
             </div>
             <span class="section-chip">{html.escape(admin_state)}</span>
           </div>
-          <form action="/" method="get" class="stack-form">
+          <form action="/console" method="get" class="stack-form">
             <div>
               <label>ADMIN_TOKEN</label>
               <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="required for execution">
@@ -399,6 +399,7 @@ def page_template(
           </form>
           <div class="copy-row" style="margin-top:12px;">
             <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">Console Home</a>
             <a href="/llm_today" class="secondary-button">Public Board</a>
           </div>
         </section>
@@ -416,6 +417,7 @@ def page_template(
           <p class="helper-text">ADMIN_TOKEN is not set. This console is in local development mode.</p>
           <div class="copy-row" style="margin-top:12px;">
             <a href="{html.escape(race_jobs_href)}" class="secondary-button">Open Race Jobs</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">Console Home</a>
             <a href="/llm_today" class="secondary-button">Public Board</a>
           </div>
         </section>
