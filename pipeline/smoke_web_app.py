@@ -31,6 +31,7 @@ def main():
     assert_true('action="/view_run"' in console_html, "console missing view_run form")
     assert_true('id="admin-zone"' in console_html, "console missing admin workspace")
     assert_true('action="/console/tasks/create"' in console_html, "console missing merged task create form")
+    assert_true('action="/console/tasks/import_archive"' in console_html, "console missing import archive form")
     assert_true("/console/note" in console_html, "console missing note page link")
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")

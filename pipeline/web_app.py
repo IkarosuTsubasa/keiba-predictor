@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
+from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -4834,6 +4836,50 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
+              <div class="eyebrow">Import</div>
+              <h2>导入历史数据 ZIP</h2>
+            </div>
+            <span class="section-chip">disk</span>
+          </div>
+          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <div>
+              <label>历史数据 ZIP</label>
+              <input type="file" name="archive_file" accept=".zip,application/zip">
+            </div>
+            <label class="radio-option">
+              <input type="checkbox" name="overwrite" value="1">
+              <span class="radio-text">覆盖同名文件</span>
+            </label>
+            <p class="helper-text">支持 `pipeline/data/...`、`data/...`，或者直接包含 `central_dirt`、`central_turf`、`local`、`_shared` 的 ZIP。</p>
+            <button type="submit">导入到 Render Disk</button>
+          </form>
+        </section>
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Import</div>
+              <h2>导入历史数据 ZIP</h2>
+            </div>
+            <span class="section-chip">disk</span>
+          </div>
+          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <div>
+              <label>历史数据 ZIP</label>
+              <input type="file" name="archive_file" accept=".zip,application/zip">
+            </div>
+            <label class="radio-option">
+              <input type="checkbox" name="overwrite" value="1">
+              <span class="radio-text">覆盖同名文件</span>
+            </label>
+            <p class="helper-text">支持上传 `pipeline/data/...`、`data/...`，或直接以 `central_dirt`、`central_turf`、`local`、`_shared` 开头的 ZIP。</p>
+            <button type="submit">导入到 Render Disk</button>
+          </form>
+        </section>
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
               <div class="eyebrow">Step 1</div>
               <h2>上传两个 CSV</h2>
             </div>
@@ -5303,11 +5349,14 @@ def render_console_page(message_text="", error_text="", admin_token=""):
     return render_page(
         "",
         admin_token=admin_token,
-        admin_workspace_html=build_admin_workspace_html_clean(
-            message_text=message_text,
-            error_text=error_text,
-            admin_token=admin_token,
-            authorized=_admin_token_valid(admin_token),
+        admin_workspace_html=(
+            build_import_archive_panel(admin_token=admin_token)
+            + build_admin_workspace_html_clean(
+                message_text=message_text,
+                error_text=error_text,
+                admin_token=admin_token,
+                authorized=_admin_token_valid(admin_token),
+            )
         ),
     )
 
@@ -5652,6 +5701,86 @@ def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
 
 def _target_surface_from_scope(scope_key):
     return "turf" if str(scope_key or "").strip() == "central_turf" else "dirt"
+
+
+def _import_history_zip(base_dir, archive_bytes, overwrite=False):
+    data_root = Path(base_dir) / "data"
+    data_root.mkdir(parents=True, exist_ok=True)
+    written = 0
+    skipped = 0
+    imported_paths = []
+    with zipfile.ZipFile(BytesIO(archive_bytes)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            raw_name = str(info.filename or "").replace("\\", "/").strip("/")
+            if not raw_name:
+                continue
+            parts = [part for part in raw_name.split("/") if part and part not in (".", "..")]
+            if not parts:
+                continue
+            rel_parts = None
+            if len(parts) >= 2 and parts[0] == "pipeline" and parts[1] == "data":
+                rel_parts = parts[2:]
+            elif parts[0] == "data":
+                rel_parts = parts[1:]
+            elif parts[0] in ("_shared", "central_dirt", "central_turf", "local"):
+                rel_parts = parts
+            if not rel_parts:
+                skipped += 1
+                continue
+            dest = data_root.joinpath(*rel_parts)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists() and not overwrite:
+                skipped += 1
+                continue
+            file_bytes = zf.read(info)
+            dest.write_bytes(file_bytes)
+            written += 1
+            imported_paths.append(str(dest.relative_to(data_root)).replace("\\", "/"))
+    return {
+        "written": written,
+        "skipped": skipped,
+        "sample_paths": imported_paths[:8],
+    }
+
+
+def build_import_archive_panel(admin_token=""):
+    return f"""
+    <section class="content-cluster" id="import-zone">
+      <div class="cluster-head">
+        <div>
+          <div class="eyebrow">Import</div>
+          <h2>历史数据导入</h2>
+        </div>
+        <p>把你本地 3 月 14 日跑过的数据打成 ZIP，直接导入到 Render 的持久磁盘。</p>
+      </div>
+      <div class="cluster-grid cluster-grid--stack">
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Archive</div>
+              <h2>导入历史数据 ZIP</h2>
+            </div>
+            <span class="section-chip">disk</span>
+          </div>
+          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <div>
+              <label>历史数据 ZIP</label>
+              <input type="file" name="archive_file" accept=".zip,application/zip">
+            </div>
+            <label class="radio-option">
+              <input type="checkbox" name="overwrite" value="1">
+              <span class="radio-text">覆盖同名文件</span>
+            </label>
+            <p class="helper-text">支持 `pipeline/data/...`、`data/...`，或者直接包含 `central_dirt`、`central_turf`、`local`、`_shared` 的 ZIP。</p>
+            <button type="submit">导入到 Render Disk</button>
+          </form>
+        </section>
+      </div>
+    </section>
+    """
 
 
 def build_race_jobs_page(message_text="", error_text="", admin_token="", authorized=True):
@@ -6600,6 +6729,41 @@ def create_race_job_view(
 
     update_race_job(BASE_DIR, job["job_id"], _attach_artifacts)
     return build_race_jobs_page(admin_token=token, message_text=f"已创建任务 {job['job_id']}。")
+
+
+@app.post("/console/tasks/import_archive", response_class=HTMLResponse)
+async def import_history_archive(
+    token: str = Form(""),
+    overwrite: str = Form(""),
+    archive_file: UploadFile = File(None),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，不能导入历史数据。",
+        )
+    if archive_file is None or not str(getattr(archive_file, "filename", "") or "").strip():
+        return build_race_jobs_page(admin_token=token, error_text="请上传 ZIP 文件。")
+    filename = str(archive_file.filename or "").strip()
+    if not filename.lower().endswith(".zip"):
+        return build_race_jobs_page(admin_token=token, error_text="只支持 ZIP 文件。")
+    try:
+        archive_bytes = await archive_file.read()
+        summary = _import_history_zip(
+            BASE_DIR,
+            archive_bytes,
+            overwrite=str(overwrite or "").strip() == "1",
+        )
+    except zipfile.BadZipFile:
+        return build_race_jobs_page(admin_token=token, error_text="ZIP 文件损坏或格式无效。")
+    except Exception as exc:
+        return build_race_jobs_page(admin_token=token, error_text=f"导入失败：{exc}")
+    message = f"已导入 {summary['written']} 个文件，跳过 {summary['skipped']} 个。"
+    sample_paths = list(summary.get("sample_paths", []) or [])
+    if sample_paths:
+        message += " 示例: " + ", ".join(sample_paths)
+    return build_race_jobs_page(admin_token=token, message_text=message)
 
 
 @app.post("/console/tasks/scan_due", response_class=HTMLResponse)
