@@ -42,6 +42,8 @@ def _reset_runs_csv(path: Path):
         "siliconflow_policy_path",
         "openai_policy_path",
         "grok_policy_path",
+        "tickets",
+        "amount_yen",
     ]
     touched = 0
     for row in rows:

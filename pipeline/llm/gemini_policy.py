@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v12"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v12"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v16"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -127,7 +127,8 @@ class PolicyMark(BaseModel):
 
 
 class PolicyTicketPlan(BaseModel):
-    id: str
+    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]
+    legs: List[str]
     stake_yen: int
 
 
@@ -718,207 +719,90 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
 def _make_prompt(input_obj: RacePolicyInput) -> str:
     schema = _model_json_schema(RacePolicyOutput)
     payload = _model_dump(input_obj)
+    payload.pop("candidates", None)
     input_json = _stable_json_dumps(payload)
     schema_json = _stable_json_dumps(schema)
     constraints = input_obj.constraints
-    ticket_cap_text = (
-        "【ローカル制約】\n"
-        f"- max_tickets_per_race: {int(constraints.max_tickets_per_race)}\n"
-        "- あなたが購入方針だけでなく、実際の買い目と金額まで決めてください。\n"
-        "- ローカル側はデータ整形・検証・記録だけを行い、買い目の選定や配分には介入しません。\n"
-        "- bet_decision が bet の場合は、必ず ticket_plan に実際の買い目と stake_yen を入れてください。\n"
-        "- ticket_plan が空なら、ローカル側は購入しません。\n\n"
-    )
-    full_data_text = (
-        "【入力データの読み方】\n"
-        "- predictions は要約版、predictions_full は全馬・全列の予測テーブルです。\n"
-        "- multi_predictor には v1-v5 全 predictor の要約・設計上の特徴・共識表が入っています。\n"
-        "- multi_predictor.profiles は各 predictor の設計上の強みです。絶対評価ではなく、視点の違いとして扱ってください。\n"
-        "- multi_predictor.summaries は predictor ごとの上位馬一覧です。\n"
-        "- multi_predictor.consensus は馬番単位で揃えた共識表です。top1_votes / top3_votes / avg_pred_rank を優先的に見てください。\n"
-        "- multi_predictor.performance には current_context と、現在の分類範囲（central_turf / central_dirt / local）で集計した predictor 別 hit rate が入っています。\n"
-        "- multi_predictor.performance.current_scope_history は、samples の多少にかかわらず、各 predictor の現在分類での信頼度判断に使ってください。\n"
-        "- odds_full には win/place/wide/quinella/exacta/trio/trifecta の全量オッズが入っています。\n"
-        "- prediction_field_guide には predictions_full の各列が何を意味するかの説明があります。\n"
-        "- 要約だけで判断せず、multi_predictor・predictions_full・odds_full・prediction_field_guide を必ず参照して考えてください。\n"
-        "- candidates は実際に ticket_plan へ記入するための ID 一覧です。候補の採否判断そのものは multi_predictor・predictions_full・odds_full を優先してください。\n"
-        "- 特に軸馬・相手・券種構成を決める際は、全馬の予測順位、確率、スコア、オッズのバランスを見てください。\n"
-        "- 入力に含まれる horse_no / pair / candidates の範囲から逸脱してはいけません。\n\n"
-    )
-    multi_predictor_text = (
-        "【5 predictor の使い方】\n"
-        "- v1 は総合バランス型の主軸視点です。まず基準線として参照してください。\n"
-        "- v2 は上位抽出・能力比較寄りの視点です。強い上位候補の濃淡確認に向いています。\n"
-        "- v3 は市場融合・説明性寄りの視点です。値頃感や市場整合性の確認に向いています。\n"
-        "- v4 は文脈適性ハイブリッド型です。Top3確率の分類と順位付けを混合し、コース・距離・馬場条件への適合を強く見ています。\n"
-        "- v5 はスタッキング統合型です。複数 predictor の見解と文脈特徴を再統合した、最終寄りの視点として扱ってください。\n"
-        "- multi_predictor.performance.current_scope_history を使って、現在が中央芝・中央ダート・地方のどれかに応じた predictor の履歴命中率を参照してください。\n"
-        "- ある predictor が現在の分類範囲で弱いなら、その predictor の単独主張は割り引いてください。逆に同分類で hit rate が高い predictor は積極的に重く見て構いません。\n"
-        "- samples の多少だけを理由に重みを下げず、現在の hit rate 指標そのものを信頼して判断してください。\n"
-        "- 5 路の top1/top3 の共識が強い馬は軸候補です。ただし、オッズとのバランスが悪い場合は券種や配分を柔軟に調整してください。\n"
-        "- 5 路の見解差が大きい場合は、単勝・複勝、馬連・ワイド・馬単などの組み合わせ系、三連系、見送りのいずれが最も合理的かを、そのレースの予測とオッズに基づいて中立的に判断してください。\n"
-        "- 1 路だけが強く推す穴馬は、そのまま採用しないでください。オッズの裏付け、他 predictor の否定度、全体の順位・確率の整合を合わせて判断してください。\n"
-        "- 最終判断は『5 predictor の共識/見解差』と『現在のオッズ』の両方が必要です。どちらか片方だけで決めてはいけません。\n\n"
-    )
-    portfolio_history_text = (
-        "【あなた自身の購入履歴と資金推移】\n"
-        "- portfolio_history.today には今日ここまでの開始本金、確定損益、未決済で拘束中の金額、利用可能な本金が入っています。\n"
-        "- portfolio_history.recent_days には直近の日別損益と投資額が入っています。\n"
-        "- portfolio_history.lookback_summary には直近期間の総 stake / payout / profit / hit_rate / roi が入っています。\n"
-        "- portfolio_history.bet_type_breakdown には券種ごとの損益傾向が入っています。\n"
-        "- portfolio_history.recent_tickets には最近の購入・決済の軌跡が入っています。\n"
-        "- 今回の判断では、現在レースの予測とオッズを最優先にしつつ、自分の最近の損益推移と買い方の癖も確認してください。\n"
-        "- 直近で連敗・回撤が大きい、または今日すでに open_stake が重い場合は、無理に取り返しに行かず、より保守的な戦略に寄せてください。\n"
-        "- 逆に直近で勝っていても、過信して点数やリスクを膨らませないでください。履歴は反省材料であり、強気化の免罪符ではありません。\n\n"
-    )
     return (
-        "あなたは中央競馬・地方競馬のデータ分析を行う「馬券戦略アナリスト」です。\n"
-        "入力されたレース情報・予測・オッズ・市場情報をもとに、"
-        "このレースで最も合理的な購入方針を決定してください。\n\n"
-        "あなたはこのレースでどう買うかだけでなく、何をいくら買うかまで決めてください。\n"
-        "ローカル実行側はあなたの出力を検証して記録するだけで、買い目や金額の再構成は行いません。\n\n"
-        "【判断対象】\n"
-        "- レースの難易度\n"
-        "- 予測上位の優位性\n"
-        "- オッズとのバランス（value）\n"
-        "- フィールドの混戦度\n"
-        "- 信頼度 / 安定性\n\n"
-        "これらを総合して、以下を決定してください。\n"
-        "- bet_decision\n"
-        "- participation_level\n"
-        "- buy_style\n"
-        "- strategy_mode\n"
-        "- enabled_bet_types\n"
-        "- key_horses\n"
-        "- secondary_horses\n"
-        "- longshot_horses\n"
-        "- max_ticket_count\n"
-        "- risk_tilt\n"
-        "- strategy_text_ja\n"
-        "- bet_tendency_ja\n"
-        "- reason_codes\n\n"
-        "【判断の優先順位】\n"
-        "- まず multi_predictor / predictions_full を用いて、各馬・各組み合わせの予測上の優位性、安定性、共識度を評価してください。\n"
-        "- 次に、その予測優位が十分に確認できた候補に対してのみ、odds を使って買う価値があるかを判断してください。\n"
-        "- odds は予測優位の確認後に使う補助情報であり、予測優位の弱い候補をオッズの高さだけで採用してはいけません。\n"
-        "- 同程度に合理的な選択肢が複数ある場合は、一撃の高配当よりも、命中確率と再現性が高い構成を優先してください。\n\n"
-        "【value の定義】\n"
-        "- この prompt における value とは、単にオッズが高いことではありません。\n"
-        "- value とは「予測上の勝率・入着率・上位安定性に対して、市場オッズが相対的に過小評価になっている状態」です。\n"
-        "- 予測根拠が弱い高オッズ候補は value と見なしてはいけません。\n\n"
-        "【高オッズに関する絶対ルール】\n"
-        "- 高オッズであること自体は買い理由になりません。\n"
-        "- predictor の支持が弱い候補、または predictions_full の順位・確率・スコアの裏付けが薄い候補は、オッズが高くても主軸にしてはいけません。\n"
-        "- 1つの predictor だけが強く推す穴馬は、他の裏付けが十分でない限り、ticket_plan の中心にしてはいけません。\n\n"
-        "【券種選択の原則】\n"
-        "- predictor の共識が強い場合は、単勝・複勝・ワイド・馬連など、予測優位を素直に反映しやすい券種を優先してください。\n"
-        "- trio / trifecta は、上位構成の確度が十分に高い場合にのみ限定的に使ってください。\n"
-        "- 高配当を理由に三連系を優先してはいけません。\n\n"
-        "【避けるべき失敗パターン】\n"
-        "- predictor の支持が弱いのに、オッズが高いことだけを理由に採用する\n"
-        "- 的中率の低い券種を、回収期待だけで主戦略にする\n"
-        "- 本命の信頼度が高いのに、配当妙味を求めすぎて主軸を崩す\n"
-        "- narrative を優先して、共識や確率の裏付けを軽視する\n\n"
-        "【重要ルール】\n"
-        "1. 見送り・少額参加・通常参加は中立に選ぶ\n"
-        "no_bet / small_bet / normal_bet のどれも選択可能です。\n"
-        "無理に参加する必要も、無理に見送る必要もありません。予測優位性、オッズ妙味、不確実性、券種構成を総合して判断してください。\n\n"
-        "2. 特定の券種を先入観で優先しない\n"
-        "win / place / wide / quinella / exacta / trio / trifecta のうち、odds_full と predictions_full を見て最も合理的なものを選んでください。\n"
-        "単勝系・複勝系・組み合わせ系・三連系のどれにも初期バイアスを持たず、期待値とリスクのバランスで判断してください。\n\n"
-        "3. 高オッズも低オッズも中立に扱う\n"
-        "高オッズだから買う、低オッズだから避ける、のような固定観念は持たず、予測確率と払戻期待のバランスを見てください。\n\n"
-        "4. 混戦レースの扱いも固定化しない\n"
-        "混戦だから必ず保守、という前提は置かず、分散、見送り、組み合わせ重視、単独重視のどれが妥当かをデータから決めてください。\n\n"
-        "5. 券種構成は全量データから決める\n"
-        "enabled_bet_types は、今回の race で優位性があると判断した券種を選んでください。\n"
-        "1種類に絞ってもよく、複数種類を併用しても構いません。\n\n"
-        "6. 点数は必要最小限\n"
-        "max_ticket_count は合理的な範囲で設定し、過剰な多点買いは避けてください。\n\n"
-        "7. 馬の選び方\n"
-        "- key_horses は戦略の中心になる馬\n"
-        "- secondary_horses は相手候補\n"
-        "- longshot_horses は穴として考慮する馬\n"
-        "ただし無理に全カテゴリを埋める必要はありません。\n\n"
-        "8. 資金管理\n"
-        "- constraints.bankroll_yen は今日この時点で残っている共有本金です。\n"
-        "- constraints.race_budget_yen はこのレースで使ってよい上限です。\n"
-        "- 1 日に 5〜6 レース程度買う可能性がある前提で、今回 1 レースに資金を寄せすぎないでください。\n"
-        "- 今日の残り本金を見ながら、後続レースに回す余力を意識して配分してください。\n"
-        "- ticket_plan を使って、残り予算の範囲で今回の買い目と金額を決めてください。\n"
-        "- stake_yen は 100 円単位で、ticket_plan 全体の合計は race_budget_yen を超えないでください。\n\n"
-        "9. 出力形式\n"
-        "必ず指定された JSON schema に従って出力してください。\n"
-        "説明文は strategy_text_ja と bet_tendency_ja に記述してください。\n"
-        "JSON 以外のテキストは出力しないでください。\n\n"
-        "【追加の絶対ルール】\n"
-        "- 入力に存在しない馬・組み合わせ・券種を創作しない\n"
-        "- enabled_bet_types は odds_full に存在する bet_type のみ使用可能\n"
-        "- key_horses / secondary_horses / longshot_horses / marks / focus_points に入れる horse や pair も入力に存在するもののみ使用可能\n"
-        "- pick_ids は補助情報です。実際の購入は ticket_plan を基準にします。\n"
-        "- ticket_plan の id は candidates[].id のみ使用可能です。\n"
-        "- 特定の券種や買い方を機械的に優遇しない\n\n"
-        "【判断の実務ルール】\n"
-        "- participation_level は no_bet / small_bet / normal_bet から選んでください。\n"
-        "- buy_style は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / conservative から選んでください。\n"
-        "- strategy_mode は no_bet / place_only / place_focus / balanced / win_focus / pair_focus / spread / conservative_single / small_probe から選んでください。\n"
-        "- focus_points は horse / pair / bet_type / concept のみ使用可能です。\n"
-        "- marks は ◎ / ○ / ▲ / △ / ☆ を高評価順に必要なものだけ使ってください。\n"
-        "- buy_style / strategy_mode は名前に引きずられず、今回の買い目構成を最も近く表すものを選んでください。\n"
-        "- max_ticket_count は期待値の集中度と分散の必要性に応じて設定してください。\n"
-        "- risk_tilt は券種の種類ではなく、今回の配分と不確実性に応じて low / medium / high を選んでください。\n"
-        "- strategy_text_ja は 2〜4 文の自然な日本語で、レースの見立て、参加レベル、主軸券種、見送りなら理由、small_bet なら軽く参加する理由を含めてください。\n"
-        "- bet_tendency_ja は 1 行のみで書いてください。\n"
-        "- 参加判断が bet のときは、必ず ticket_plan に実際の買い目を入れてください。\n\n"
-        "reason_codes は次から必要なものだけを選んでください。\n"
-        "- MIXED_FIELD\n"
-        "- NORMAL_FIELD\n"
-        "- STRONG_FAVORITE\n"
-        "- LOW_CONFIDENCE\n"
-        "- LOW_STABILITY\n"
-        "- VALUE_PRESENT\n"
-        "- NO_VALUE\n"
-        "- HIGH_ODDS_ONE_SHOT\n"
-        "- PLACE_FOCUS\n"
-        "- PAIR_FOCUS\n"
-        "- WIN_TILT\n"
-        "- CONSERVATIVE\n"
-        "- SMALL_BET\n"
-        "- NO_BET\n\n"
-        f"{ticket_cap_text}"
-        f"{full_data_text}"
-        f"{multi_predictor_text}"
-        f"{portfolio_history_text}"
+        "あなたは馬券購入AIコンペティションの参加者です。\n"
+        "複数のAIが同条件で競い合い、週末終了時の資金残高で順位が決まります。\n"
+        "あなたの出力がそのまま購入指示になります。ローカル側は検証・記録のみで、買い目や配分には一切介入しません。\n\n"
+
+        "== コンペティション条件 ==\n"
+        f"- 週次予算: 10,000円（残高を増やすことが目的）\n"
+        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
+        f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
+        f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
+        "- 購入単位: 100円刻み\n"
+        "- 資金が尽きたら残りのレースに参加不可。一方、全て少額で薄く買うだけでは他AIに勝てない。\n\n"
+
+        "== 提供データの概要 ==\n"
+        "- predictions / predictions_full: 予測モデル出力（要約版・全量版）\n"
+        "- prediction_field_guide: predictions_full の各列の説明\n"
+        "- multi_predictor: 5つの予測モデル（v1-v5）の個別結果・共識表・モデル別命中率履歴\n"
+        "  - profiles: 各モデルの設計思想（v1=総合バランス, v2=能力比較, v3=市場融合, v4=文脈適性, v5=スタッキング統合）\n"
+        "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank\n"
+        "  - performance.current_scope_history: 現在条件（芝/ダート/地方）での各モデルの実績命中率\n"
+        "- odds_full: 全券種の全量オッズ（win/place/wide/quinella/exacta/trio/trifecta）\n"
+        "- portfolio_history: あなた自身の直近購入履歴・損益推移・券種別成績\n"
+        "  - today: 本日の開始本金・確定損益・未決済拘束額・利用可能残高\n"
+        "  - recent_days / lookback_summary / bet_type_breakdown / recent_tickets\n"
+        "- ai: レースの予測信頼度（gap, confidence_score, stability_score, risk_score）\n\n"
+
+        "== あなたの仕事 ==\n"
+        "上記データを全て分析し、このレースで「何を」「いくら」買うか（または買わないか）を自分で判断してください。\n"
+        "券種の選択、馬の選定、金額の配分、参加/見送りの判断、全てあなたに委ねます。\n\n"
+
+        "== 分析の進め方（推奨、強制ではない） ==\n"
+        "1. predictions_full で全馬の予測確率・順位・スコアを俯瞰する\n"
+        "2. multi_predictor の各モデル（v1-v5）の推奨馬と命中率履歴を確認する\n"
+        "3. odds_full と予測を突き合わせ、期待値の高い馬・組み合わせを探す\n"
+        "4. portfolio_history で自分の最近の調子・癖を確認し、資金配分に反映する\n"
+        "5. 以上を踏まえ、券種・買い目・金額を自由に決定する\n\n"
+
+        "== 勝つための視点 ==\n"
+        "- 「予測で優位性があり、かつオッズが過小評価」な組み合わせが本当の value\n"
+        "- 予測モデル間で意見が割れている場合、各モデルの命中率実績を参考に判断する\n"
+        "- consensus の投票数は参考情報の一つに過ぎない。投票数が多い＝買うべき、ではない\n"
+        "- 買い方は完全に自由。特定の馬を中心に組む必要はなく、データから自分なりの根拠で組み立てること\n"
+        "- 命中率の高い堅実な馬券と、たまに当たる高配当のバランスが週間収支の鍵\n"
+        "- 「このレースはデータ的に自信が持てる」時に厚く張り、曖昧な時は薄く張るか見送る\n"
+        "- 連敗中の取り返し買い、連勝中の過信買いは典型的な失敗パターン\n"
+        "- 見送り（no_bet）も立派な戦略。全レース参加する義務はない\n\n"
+
+        "== 出力の制約（厳守） ==\n"
+        "- 入力データに存在する馬番・組み合わせ・券種のみ使用可能（創作禁止）\n"
+        "- ticket_plan の合計金額は race_budget_yen 以下\n"
+        "- stake_yen は 100円単位\n"
+        "- bet_decision が bet なら ticket_plan を必ず記入\n"
+        "- JSON のみ出力。説明は strategy_text_ja / bet_tendency_ja に収める\n\n"
+
+        "== 出力フィールド説明 ==\n"
+        "- bet_decision: bet（購入）/ no_bet（見送り）\n"
+        "- participation_level: no_bet / small_bet / normal_bet\n"
+        "- buy_style: no_bet / place_only / place_focus / balanced / win_focus / pair_focus / conservative\n"
+        "- strategy_mode: no_bet / place_only / place_focus / balanced / win_focus / pair_focus / spread / conservative_single / small_probe\n"
+        "- enabled_bet_types: 今回使う券種リスト（odds_full に存在するもののみ）\n"
+        "- key_horses: 注目馬 / secondary_horses: 次点馬 / longshot_horses: 穴馬（全て任意、無理に埋めなくてよい）\n"
+        "- marks: ◎○▲△☆（必要な分だけ）\n"
+        "- focus_points: type=horse/pair/bet_type/concept, value=内容\n"
+        "- max_ticket_count: 購入点数\n"
+        "- risk_tilt: low / medium / high\n"
+        "- strategy_text_ja: 判断理由（2〜4文、日本語）\n"
+        "- bet_tendency_ja: 買い目傾向を1行で\n"
+        "- reason_codes: MIXED_FIELD / NORMAL_FIELD / STRONG_FAVORITE / LOW_CONFIDENCE / LOW_STABILITY / VALUE_PRESENT / NO_VALUE / HIGH_ODDS_ONE_SHOT / PLACE_FOCUS / PAIR_FOCUS / WIN_TILT / CONSERVATIVE / SMALL_BET / NO_BET から該当するものを選択\n"
+        "- ticket_plan: [{\"bet_type\": \"券種\", \"legs\": [\"馬番\",...], \"stake_yen\": 金額}] ← これが実際の購入指示\n"
+        "- pick_ids: 補助情報（空でも可）\n"
+        "- warnings: 注意事項があれば\n\n"
+
         "--------------------------------\n"
         "【入力JSON】\n"
         "--------------------------------\n"
         "<INPUT_JSON>\n"
         f"{input_json}\n"
         "</INPUT_JSON>\n\n"
-        "--------------------------------\n"
-        "【出力JSON】\n"
-        "--------------------------------\n"
-        "{\n"
-        '  "bet_decision": "bet | no_bet",\n'
-        '  "participation_level": "no_bet | small_bet | normal_bet",\n'
-        '  "buy_style": "no_bet | place_only | place_focus | balanced | win_focus | pair_focus | conservative",\n'
-        '  "strategy_mode": "no_bet | place_only | place_focus | balanced | win_focus | pair_focus | spread | conservative_single | small_probe",\n'
-        '  "enabled_bet_types": [],\n'
-        '  "key_horses": [],\n'
-        '  "secondary_horses": [],\n'
-        '  "longshot_horses": [],\n'
-        '  "marks": [{"symbol": "◎ | ○ | ▲ | △ | ☆", "horse_no": ""}],\n'
-        '  "focus_points": [{"type": "horse | pair | bet_type | concept", "value": ""}],\n'
-        '  "max_ticket_count": 0,\n'
-        '  "risk_tilt": "low | medium | high",\n'
-        '  "strategy_text_ja": "",\n'
-        '  "bet_tendency_ja": "",\n'
-        '  "reason_codes": [],\n'
-        '  "pick_ids": [],\n'
-        '  "ticket_plan": [{"id": "", "stake_yen": 100}],\n'
-        '  "warnings": []\n'
-        "}\n\n"
-        "strict JSON only。response_json_schema は以下です。\n"
+
+        "strict JSON only。response_json_schema:\n"
         f"{schema_json}\n"
     )
 
@@ -1000,44 +884,52 @@ def _sanitize_marks(marks: List[PolicyMark], allowed_horses: List[str]) -> List[
     return out
 
 
-def _sanitize_ticket_plan(ticket_plan: List[PolicyTicketPlan], allowed_ids: set, max_budget: int) -> List[Dict[str, int]]:
+def _sanitize_ticket_plan(
+    ticket_plan: List[PolicyTicketPlan],
+    allowed_types: set,
+    allowed_horses: List[str],
+    max_budget: int,
+) -> List[Dict[str, Any]]:
     budget_cap = max(0, int(max_budget or 0))
-    out = []
-    seen_ids = set()
+    allowed_set = {_normalize_horse_no_text(h) for h in allowed_horses if _normalize_horse_no_text(h)}
+    out: List[Dict[str, Any]] = []
+    seen_keys: set = set()
     used = 0
     for item in list(ticket_plan or []):
-        ticket_id = str(getattr(item, "id", "") or "").strip()
+        bet_type = str(getattr(item, "bet_type", "") or "").strip().lower()
+        raw_legs = list(getattr(item, "legs", []) or [])
+        legs = [_normalize_horse_no_text(x) for x in raw_legs if _normalize_horse_no_text(x)]
         stake_yen = int(getattr(item, "stake_yen", 0) or 0)
-        if (not ticket_id) or (ticket_id in seen_ids) or (ticket_id not in allowed_ids):
+        if not bet_type or not legs or stake_yen <= 0:
             continue
-        if stake_yen <= 0:
+        if allowed_types and bet_type not in allowed_types:
+            continue
+        if not all(h in allowed_set for h in legs):
+            continue
+        expected_leg_count = {"win": 1, "place": 1, "wide": 2, "quinella": 2, "exacta": 2, "trio": 3, "trifecta": 3}
+        if len(legs) != expected_leg_count.get(bet_type, 0):
+            continue
+        # For unordered bet types, sort legs to canonicalize the key
+        canon_legs = sorted(legs, key=lambda x: int(x) if x.isdigit() else x) if bet_type in ("wide", "quinella", "trio") else legs
+        ticket_key = f"{bet_type}:{'-'.join(canon_legs)}"
+        if ticket_key in seen_keys:
             continue
         stake_yen = int(stake_yen // 100) * 100
         if stake_yen <= 0:
             continue
         if budget_cap > 0 and used + stake_yen > budget_cap:
             continue
-        seen_ids.add(ticket_id)
+        seen_keys.add(ticket_key)
         used += stake_yen
-        out.append({"id": ticket_id, "stake_yen": stake_yen})
+        out.append({"bet_type": bet_type, "legs": legs, "stake_yen": stake_yen})
     return out
 
 
 def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> RacePolicyOutput:
-    allowed_ids = {str(c.id) for c in input_obj.candidates}
     allowed_types = {str(x).strip().lower() for x in list(input_obj.constraints.allowed_types or []) if str(x).strip()}
     allowed_horses = _horse_pool(input_obj)
 
-    pick_ids = []
-    seen_ids = set()
-    for pid in list(output.pick_ids or []):
-        sid = str(pid).strip()
-        if (not sid) or (sid in seen_ids):
-            continue
-        if sid not in allowed_ids:
-            continue
-        seen_ids.add(sid)
-        pick_ids.append(sid)
+    pick_ids = [str(x).strip() for x in list(output.pick_ids or []) if str(x).strip()]
 
     enabled_bet_types = []
     seen_types = set()
@@ -1067,7 +959,7 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         max_ticket_count = min(max_ticket_count, hard_cap)
     budget_cap = int(input_obj.constraints.race_budget_yen or 0) or int(input_obj.constraints.bankroll_yen or 0)
     marks = _sanitize_marks(list(output.marks or []), allowed_horses)
-    ticket_plan = _sanitize_ticket_plan(list(output.ticket_plan or []), allowed_ids, budget_cap)
+    ticket_plan = _sanitize_ticket_plan(list(output.ticket_plan or []), allowed_types, allowed_horses, budget_cap)
     warnings = [str(x) for x in list(output.warnings or []) if str(x).strip()] if output.warnings else []
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()

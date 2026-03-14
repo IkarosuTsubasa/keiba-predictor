@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
 from gemini_portfolio import (
+    add_bankroll_topup,
     build_history_context,
     extract_ledger_date,
     load_exacta_odds_map,
@@ -703,7 +704,16 @@ def _pick_first_value(row, keys, default=""):
 
 
 def _prediction_prob_value(row):
-    for key in ("Top3Prob_model", "top3_prob_model", "Top3Prob", "top3_prob"):
+    for key in (
+        "Top3Prob_model",
+        "top3_prob_model",
+        "Top3Prob_est",
+        "top3_prob_est",
+        "Top3Prob",
+        "top3_prob",
+        "agg_score",
+        "score",
+    ):
         if key in row:
             return max(0.0, to_float(row.get(key)))
     return 0.0
@@ -715,7 +725,19 @@ def _prediction_rank_value(row, fallback_rank):
 
 
 def _prediction_score_value(row):
-    for key in ("rank_score_norm", "rank_score", "RankScore", "score"):
+    for key in (
+        "rank_score_norm",
+        "rank_score",
+        "RankScore",
+        "agg_score",
+        "Top3Prob_model",
+        "top3_prob_model",
+        "Top3Prob_est",
+        "top3_prob_est",
+        "Top3Prob",
+        "top3_prob",
+        "score",
+    ):
         if key in row:
             value = to_float(row.get(key))
             if value:
@@ -748,6 +770,7 @@ def _normalize_score_list(items):
 
 def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map):
     items = []
+    has_explicit_rank = False
     for idx, row in enumerate(list(pred_rows or []), start=1):
         horse_name = str(_pick_first_value(row, ("HorseName", "horse_name", "name"), "") or "").strip()
         if not horse_name:
@@ -759,29 +782,44 @@ def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_
             if mapped is not None:
                 horse_no = normalize_horse_no_text(mapped)
         top3_prob = _prediction_prob_value(row)
+        explicit_rank = to_int_or_none(_pick_first_value(row, ("pred_rank", "PredRank", "rank", "Rank"), ""))
+        if explicit_rank is not None and explicit_rank > 0:
+            has_explicit_rank = True
         items.append(
             {
                 "horse_no": horse_no,
                 "horse_name": horse_name,
-                "pred_rank": _prediction_rank_value(row, idx),
+                "pred_rank": explicit_rank if explicit_rank is not None and explicit_rank > 0 else int(idx),
                 "top3_prob_model": top3_prob,
                 "confidence_score": max(0.0, to_float(row.get("confidence_score"))),
                 "stability_score": max(0.0, to_float(row.get("stability_score"))),
                 "risk_score": max(0.0, to_float(row.get("risk_score"))),
                 "_raw_rank_score": _prediction_score_value(row),
+                "_input_order": int(idx),
                 "source_row": dict(row),
             }
         )
     if not items:
         return []
-    items.sort(
-        key=lambda item: (
-            int(item.get("pred_rank", 9999) or 9999),
-            -float(item.get("top3_prob_model", 0.0) or 0.0),
-            str(item.get("horse_no", "")),
-            str(item.get("horse_name", "")),
+    if has_explicit_rank:
+        items.sort(
+            key=lambda item: (
+                int(item.get("pred_rank", 9999) or 9999),
+                -float(item.get("top3_prob_model", 0.0) or 0.0),
+                str(item.get("horse_no", "")),
+                str(item.get("horse_name", "")),
+            )
         )
-    )
+    else:
+        items.sort(
+            key=lambda item: (
+                -float(item.get("top3_prob_model", 0.0) or 0.0),
+                -float(item.get("_raw_rank_score", 0.0) or 0.0),
+                str(item.get("horse_no", "")),
+                str(item.get("horse_name", "")),
+                int(item.get("_input_order", 9999) or 9999),
+            )
+        )
     for idx, item in enumerate(items, start=1):
         item["pred_rank"] = idx
     _normalize_score_list(items)
@@ -1188,7 +1226,7 @@ def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=
 
     return {
         "win": _single_rows(win_rows, "odds"),
-        "place": _single_rows(place_rows, "odds_mid" if place_rows and "odds_mid" in place_rows[0] else "odds_low"),
+        "place": _single_rows(place_rows, "odds_low" if place_rows and "odds_low" in place_rows[0] else "odds_mid"),
         "wide": _pair_rows(wide_rows),
         "quinella": _pair_rows(quinella_rows),
         "exacta": _pair_rows(exacta_rows),
@@ -1364,26 +1402,29 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
     output_dict = dict(policy_output or {})
     tickets = []
     for item in list(output_dict.get("ticket_plan", []) or []):
-        candidate_id = str(item.get("id", "") or "").strip()
+        bet_type = str(item.get("bet_type", "") or "").strip().lower()
+        legs = [str(x or "").strip() for x in list(item.get("legs", []) or []) if str(x or "").strip()]
         stake_yen = max(0, int(item.get("stake_yen", 0) or 0))
-        if not candidate_id or stake_yen <= 0:
+        if not bet_type or not legs or stake_yen <= 0:
             continue
-        candidate = dict(candidate_lookup.get(candidate_id, {}) or {})
+        # Look up odds from candidate_lookup using the canonical key format
+        # For unordered bet types (wide, quinella, trio), sort legs to match lookup key
+        lookup_legs = sorted(legs, key=lambda x: int(x) if x.isdigit() else x) if bet_type in ("wide", "quinella", "trio") else legs
+        ticket_key = f"{bet_type}:{'-'.join(lookup_legs)}"
+        candidate = dict(candidate_lookup.get(ticket_key, {}) or {})
         if not candidate:
             continue
-        legs = [str(x or "").strip() for x in list(candidate.get("legs", []) or []) if str(x or "").strip()]
+        odds_used = round(float(candidate.get("odds_used", 0.0) or 0.0), 6)
+        p_hit = round(float(candidate.get("p_hit", 0.0) or 0.0), 6)
+        ev = round(float(candidate.get("ev", 0.0) or 0.0), 6)
         horse_names = []
         for leg in legs:
             horse = dict(horse_map.get(leg, {}) or {})
             horse_names.append(str(horse.get("horse_name", "") or leg))
-        bet_type = str(candidate.get("bet_type", "") or "")
-        odds_used = round(float(candidate.get("odds_used", 0.0) or 0.0), 6)
-        p_hit = round(float(candidate.get("p_hit", 0.0) or 0.0), 6)
-        ev = round(float(candidate.get("ev", 0.0) or 0.0), 6)
-        expected_return_yen = int(round(stake_yen * max(0.0, p_hit * odds_used)))
+        expected_return_yen = int(round(stake_yen * max(0.0, odds_used))) if odds_used > 0 else 0
         tickets.append(
             {
-                "ticket_id": candidate_id,
+                "ticket_id": ticket_key,
                 "budget_yen": 0,
                 "bet_type": bet_type,
                 "horse_no": "-".join(legs),
@@ -1395,7 +1436,7 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
                 "hit_prob_ci95_low": "",
                 "hit_prob_ci95_high": "",
                 "payout_mult": odds_used,
-                "ev_ratio_est": round(p_hit * odds_used, 6),
+                "ev_ratio_est": round(p_hit * odds_used, 6) if p_hit > 0 else 0.0,
                 "expected_return_yen": expected_return_yen,
                 "odds_used": odds_used,
                 "p_hit": p_hit,
@@ -1418,6 +1459,41 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
             }
         )
     return tickets
+
+
+def _normalize_output_ticket_plan_from_rows(ticket_rows):
+    out = []
+    for ticket in list(ticket_rows or []):
+        bet_type = str(ticket.get("bet_type", "") or "").strip().lower()
+        legs = [str(x).strip() for x in str(ticket.get("horse_no", "") or "").split("-") if str(x).strip()]
+        stake_yen = int(ticket.get("stake_yen", ticket.get("amount_yen", 0)) or 0)
+        if not bet_type or not legs or stake_yen <= 0:
+            continue
+        out.append({"bet_type": bet_type, "legs": legs, "stake_yen": stake_yen})
+    return out
+
+
+def _append_output_warning(output_dict, code):
+    warnings = [str(x).strip() for x in list((output_dict or {}).get("warnings", []) or []) if str(x).strip()]
+    text = str(code or "").strip()
+    if text and text not in warnings:
+        warnings.append(text)
+    output_dict["warnings"] = warnings
+    return output_dict
+
+
+def _set_output_no_bet(output_dict):
+    output_dict["bet_decision"] = "no_bet"
+    output_dict["participation_level"] = "no_bet"
+    output_dict["buy_style"] = "no_bet"
+    output_dict["strategy_mode"] = "no_bet"
+    output_dict["enabled_bet_types"] = []
+    output_dict["key_horses"] = []
+    output_dict["secondary_horses"] = []
+    output_dict["longshot_horses"] = []
+    output_dict["max_ticket_count"] = 0
+    output_dict["ticket_plan"] = []
+    return output_dict
 
 
 def save_policy_payload(scope_key, run_id, race_id, payload, policy_engine):
@@ -1474,7 +1550,14 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
         context["candidate_lookup"],
         context["input"]["constraints"]["race_budget_yen"],
     )
+    requested_ticket_count = len(list(output_dict.get("ticket_plan", []) or []))
     tickets = build_policy_ticket_rows(output_dict, context["candidate_lookup"], context["horse_map"], engine)
+    output_dict["ticket_plan"] = _normalize_output_ticket_plan_from_rows(tickets)
+    if len(tickets) < requested_ticket_count:
+        output_dict = _append_output_warning(output_dict, "INVALID_TICKET_DROPPED")
+    if str(output_dict.get("bet_decision", "") or "").strip().lower() == "bet" and not tickets:
+        output_dict = _append_output_warning(output_dict, "NO_EXECUTABLE_TICKETS")
+        output_dict = _set_output_no_bet(output_dict)
     reserve_run_tickets(
         BASE_DIR,
         run_id=run_id,
@@ -2117,9 +2200,14 @@ def _format_ticket_plan_text(ticket_rows, output):
         ticket_id = _safe_text(row.get("id"))
         amount = to_int_or_none(row.get("stake_yen"))
         amount_text = f"{amount}円" if amount is not None else "-"
-        if not ticket_id:
-            continue
-        bet_type, _, target = ticket_id.partition(":")
+        if ticket_id:
+            bet_type, _, target = ticket_id.partition(":")
+        else:
+            bet_type = _safe_text(row.get("bet_type")).lower()
+            legs = [_safe_text(x) for x in list(row.get("legs", []) or []) if _safe_text(x)]
+            if not bet_type or not legs:
+                continue
+            target = "-".join(legs)
         bet_type_label = _format_bet_type_text(bet_type)
         target_text = _format_ticket_target_text(bet_type, target or "-")
         grouped.setdefault(bet_type_label, []).append(f"{target_text}　{amount_text}")
@@ -3663,6 +3751,37 @@ def run_all_llm_buy(
     return render_page(
         scope_norm,
         output_text=output_text,
+        selected_run_id=resolved_run_id,
+    )
+
+
+@app.post("/topup_all_llm_budget", response_class=HTMLResponse)
+def topup_all_llm_budget(
+    scope_key: str = Form(""),
+    run_id: str = Form(""),
+):
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return render_page(
+            scope_norm or scope_key,
+            error_text="Run ID / Race ID not found for LLM bankroll top-up.",
+            selected_run_id=resolved_run_id or str(run_id or "").strip(),
+        )
+    ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
+    amount_yen = 10000
+    lines = [f"[llm_budget_topup] ledger_date={ledger_date} amount_yen={amount_yen} engines=4"]
+    for engine in ("gemini", "siliconflow", "openai", "grok"):
+        summary = add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
+        lines.append(
+            "[topup][{engine}] available_bankroll_yen={available} topup_yen={topup}".format(
+                engine=engine,
+                available=int(summary.get("available_bankroll_yen", 0) or 0),
+                topup=int(summary.get("topup_yen", 0) or 0),
+            )
+        )
+    return render_page(
+        scope_norm,
+        output_text="\n".join(lines),
         selected_run_id=resolved_run_id,
     )
 

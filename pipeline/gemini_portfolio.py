@@ -135,6 +135,7 @@ def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
     rows = [row for row in load_rows(ledger_path(base_dir, engine)) if str(row.get("ledger_date", "")).strip() == date_key]
     open_stake = 0
     realized_profit = 0
+    topup_yen = 0
     pending_runs = set()
     settled_runs = set()
     for row in rows:
@@ -150,10 +151,13 @@ def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
             realized_profit += profit
             if run_id:
                 settled_runs.add(run_id)
-    available = DAILY_BANKROLL_YEN + realized_profit - open_stake
+        elif status == "topup":
+            topup_yen += profit
+    available = DAILY_BANKROLL_YEN + topup_yen + realized_profit - open_stake
     return {
         "ledger_date": date_key,
         "start_bankroll_yen": DAILY_BANKROLL_YEN,
+        "topup_yen": topup_yen,
         "open_stake_yen": open_stake,
         "realized_profit_yen": realized_profit,
         "available_bankroll_yen": available,
@@ -163,6 +167,42 @@ def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
         "settled_tickets": sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "settled"),
         "policy_engine": engine,
     }
+
+
+def add_bankroll_topup(base_dir, ledger_date, amount_yen, policy_engine="gemini"):
+    engine = normalize_policy_engine(policy_engine)
+    amount = max(0, to_int(amount_yen))
+    date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
+    path = ledger_path(base_dir, engine)
+    rows = load_rows(path)
+    ts = datetime.now().isoformat(timespec="seconds")
+    rows.append(
+        {
+            "ledger_date": date_key,
+            "policy_engine": engine,
+            "run_id": "",
+            "scope_key": "",
+            "race_id": "",
+            "status": "topup",
+            "ticket_id": f"topup_{engine}_{ts.replace(':', '').replace('-', '').replace('T', '_')}",
+            "bet_type": "topup",
+            "horse_nos": "",
+            "horse_names": "",
+            "stake_yen": 0,
+            "odds_used": "",
+            "p_hit": "",
+            "edge": "",
+            "hit": "",
+            "payout_yen": "",
+            "profit_yen": amount,
+            "reserved_at": ts,
+            "settled_at": ts,
+        }
+    )
+    write_rows(path, LEDGER_HEADERS, rows)
+    summary = summarize_bankroll(base_dir, date_key, policy_engine=engine)
+    summary["topup_amount_yen"] = amount
+    return summary
 
 
 def load_run_tickets(base_dir, run_id, policy_engine="gemini"):
@@ -529,6 +569,8 @@ def build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket
         if date_obj < cutoff:
             continue
         status = str(row.get("status", "")).strip().lower()
+        if status == "topup":
+            continue
         stake = to_int(row.get("stake_yen"))
         payout = to_int(row.get("payout_yen"))
         profit = to_int(row.get("profit_yen"))

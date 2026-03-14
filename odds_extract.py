@@ -459,9 +459,15 @@ def fetch_jra_api_payload(race_id, odds_type):
     payload = extract_json_payload(fetch_text_url(build_jra_odds_api_url(race_id, odds_type)))
     if not payload:
         raise RuntimeError(f"Failed to parse JRA odds api payload: type={odds_type}")
-    if payload.get("status") != "result":
+    status = str(payload.get("status") or "").strip().lower()
+    odds_root = (((payload or {}).get("data") or {}).get("odds") or {})
+    if status not in {"result", "middle"}:
         raise RuntimeError(
             f"JRA odds api returned status={payload.get('status')} type={odds_type}"
+        )
+    if not odds_root:
+        raise RuntimeError(
+            f"JRA odds api returned no odds payload: status={payload.get('status')} type={odds_type}"
         )
     return payload
 

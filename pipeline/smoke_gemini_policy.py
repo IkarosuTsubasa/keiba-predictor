@@ -358,8 +358,11 @@ def main():
     )
     assert str(out1.construction_style) in ("single_axis", "pair_spread", "value_hunt", "conservative_single")
     assert isinstance(out1.pick_ids, list), "pick_ids should be list"
-    all_ids = {str(c.id) for c in input_2000.candidates}
-    assert all(pid in all_ids for pid in out1.pick_ids), "pick_ids must exist in candidates"
+    assert isinstance(out1.ticket_plan, list), "ticket_plan should be list"
+    for item in list(out1.ticket_plan or []):
+        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio", "trifecta"), "ticket_plan bet_type should be valid"
+        assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "ticket_plan legs should be non-empty"
+        assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "ticket_plan stake should be positive 100-yen unit"
     assert int(out1.max_ticket_count or 0) >= 0, "max_ticket_count should be non-negative"
     assert str(out1.risk_tilt) in ("low", "medium", "high"), "risk_tilt should be valid"
     assert str(meta1.get("fallback_reason", "")) in ("mock_mode", "cache"), "should run fallback/mock path"
@@ -376,7 +379,11 @@ def main():
     )
     meta2 = get_last_call_meta()
     assert bool(meta2.get("cache_hit", False)), "second run must be cache hit"
-    assert all(pid in all_ids for pid in out2.pick_ids), "second run pick_ids must exist in candidates"
+    assert isinstance(out2.ticket_plan, list), "second run ticket_plan should be list"
+    for item in list(out2.ticket_plan or []):
+        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio", "trifecta"), "cached ticket_plan bet_type should be valid"
+        assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "cached ticket_plan legs should be non-empty"
+        assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "cached ticket_plan stake should be positive 100-yen unit"
     assert int(meta2.get("requested_budget_yen", 0) or 0) == 2000, "cached meta budget should stay 2000"
     assert not bool(meta2.get("reused", False)), "cached independent generation should not be reused"
 
