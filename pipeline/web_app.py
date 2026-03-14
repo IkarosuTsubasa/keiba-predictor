@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
 from gemini_portfolio import (
@@ -90,6 +90,84 @@ def _admin_token_valid(token=""):
         return True
     supplied = str(token or "").strip()
     return bool(supplied) and secrets.compare_digest(supplied, expected)
+
+
+def _pick_next_process_job_id():
+    jobs = load_race_jobs(BASE_DIR)
+    for job in jobs:
+        status = str(job.get("status", "") or "").strip().lower()
+        if status == "queued_process":
+            return str(job.get("job_id", "") or "").strip()
+    return ""
+
+
+def _pick_next_settle_job_id():
+    jobs = load_race_jobs(BASE_DIR)
+    for job in jobs:
+        status = str(job.get("status", "") or "").strip().lower()
+        actual_top1 = str(job.get("actual_top1", "") or "").strip()
+        actual_top2 = str(job.get("actual_top2", "") or "").strip()
+        actual_top3 = str(job.get("actual_top3", "") or "").strip()
+        if status == "queued_settle" and actual_top1 and actual_top2 and actual_top3:
+            return str(job.get("job_id", "") or "").strip()
+    return ""
+
+
+def run_due_jobs_once():
+    changed = scan_due_race_jobs(BASE_DIR)
+    process_results = []
+    settle_results = []
+    errors = []
+
+    while True:
+        job_id = _pick_next_process_job_id()
+        if not job_id:
+            break
+        try:
+            from race_job_runner import process_race_job
+
+            process_results.append(process_race_job(BASE_DIR, job_id))
+        except Exception as exc:
+            try:
+                from race_job_runner import fail_race_job
+
+                fail_race_job(BASE_DIR, job_id, str(exc))
+            except Exception:
+                pass
+            errors.append({"kind": "process", "job_id": job_id, "error": str(exc)})
+
+    while True:
+        job_id = _pick_next_settle_job_id()
+        if not job_id:
+            break
+        job = next((item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "")).strip() == job_id), {})
+        actual_top3 = [
+            str(job.get("actual_top1", "") or "").strip(),
+            str(job.get("actual_top2", "") or "").strip(),
+            str(job.get("actual_top3", "") or "").strip(),
+        ]
+        try:
+            from race_job_runner import settle_race_job
+
+            settle_results.append(settle_race_job(BASE_DIR, job_id, actual_top3))
+        except Exception as exc:
+            try:
+                from race_job_runner import fail_race_job
+
+                fail_race_job(BASE_DIR, job_id, str(exc))
+            except Exception:
+                pass
+            errors.append({"kind": "settle", "job_id": job_id, "error": str(exc)})
+
+    return {
+        "queued_count": len(changed),
+        "queued_job_ids": [str(item.get("job_id", "") or "").strip() for item in changed],
+        "processed_count": len(process_results),
+        "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
+        "settled_count": len(settle_results),
+        "settled_job_ids": [str(item.get("job_id", "") or "").strip() for item in settle_results],
+        "errors": errors,
+    }
 
 
 def load_runs(scope_key):
@@ -3791,7 +3869,6 @@ def _race_job_status_label(status):
 
 def _race_job_action_buttons(job_id, status, admin_token=""):
     buttons = []
-    action_specs = []
     status_text = str(status or "").strip().lower()
     if status_text in ("scheduled", "queued_process", "failed"):
         buttons.append(
@@ -3803,27 +3880,24 @@ def _race_job_action_buttons(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("scheduled", "queued_process"):
-        action_specs.append(("start_processing", "开始处理"))
-    if status_text in ("processing", "queued_process"):
-        action_specs.append(("mark_ready", "标记已出预测"))
-    if status_text in ("ready", "settled"):
-        action_specs.append(("queue_settle", "加入结算队列"))
-    if status_text in ("queued_settle", "ready"):
-        action_specs.append(("start_settling", "开始结算"))
-    if status_text in ("settling", "queued_settle", "ready"):
-        action_specs.append(("mark_settled", "标记已结算"))
-    if status_text != "failed":
-        action_specs.append(("mark_failed", "标记失败"))
-    action_specs.append(("reset_schedule", "重置为待命"))
-    for action, label in action_specs:
+    if status_text in ("ready", "queued_settle", "settling", "settled"):
+        buttons.append(
+            f"""
+            <form method="post" action="/race_jobs/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">重新生成预测</button>
+            </form>
+            """
+        )
+    if status_text in ("failed", "settled", "ready", "queued_settle"):
         buttons.append(
             f"""
             <form method="post" action="/race_jobs/update">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="{html.escape(action)}">
+              <input type="hidden" name="action" value="reset_schedule">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">{html.escape(label)}</button>
+              <button type="submit">重置为待命</button>
             </form>
             """
         )
@@ -4360,8 +4434,12 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
             <input type="hidden" name="token" value="{html.escape(admin_token)}">
             <button type="submit">扫描到点任务</button>
           </form>
+          <form method="post" action="/race_jobs/run_due_now">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <button type="submit">扫描并执行到点任务</button>
+          </form>
           <a href="/llm_today">看 LLM 看板</a>
-          <a href="/">回主控制台</a>
+          <a href="/console">回主控制台</a>
         </div>
       </div>
     </section>
@@ -4796,6 +4874,48 @@ def scan_race_jobs_due(token: str = Form("")):
     if changed:
         return build_race_jobs_page(admin_token=token, message_text=f"已将 {len(changed)} 场比赛加入处理队列。")
     return build_race_jobs_page(admin_token=token, message_text="当前没有到点任务。")
+
+
+@app.post("/race_jobs/run_due_now", response_class=HTMLResponse)
+def run_due_race_jobs_now(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令错误，不能执行到点任务。",
+        )
+    summary = run_due_jobs_once()
+    message_parts = [
+        f"queued={int(summary.get('queued_count', 0) or 0)}",
+        f"processed={int(summary.get('processed_count', 0) or 0)}",
+        f"settled={int(summary.get('settled_count', 0) or 0)}",
+        f"errors={len(list(summary.get('errors', []) or []))}",
+    ]
+    error_items = list(summary.get("errors", []) or [])
+    if error_items:
+        error_text = "\n".join(
+            f"[{item.get('kind', 'job')}] {item.get('job_id', '-')}: {item.get('error', '')}"
+            for item in error_items
+        )
+        return build_race_jobs_page(
+            admin_token=token,
+            message_text="已执行到点任务：" + ", ".join(message_parts),
+            error_text=error_text,
+        )
+    return build_race_jobs_page(
+        admin_token=token,
+        message_text="已执行到点任务：" + ", ".join(message_parts),
+    )
+
+
+@app.get("/internal/run_due")
+@app.post("/internal/run_due")
+def internal_run_due(token: str = ""):
+    if not _admin_token_valid(token):
+        return JSONResponse({"ok": False, "error": "invalid_admin_token"}, status_code=403)
+    summary = run_due_jobs_once()
+    ok = not bool(list(summary.get("errors", []) or []))
+    return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
 
 
 @app.post("/race_jobs/update", response_class=HTMLResponse)

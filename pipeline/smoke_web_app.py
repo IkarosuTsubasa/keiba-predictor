@@ -1,5 +1,4 @@
 import os
-import os
 import sys
 
 import web_app
@@ -33,6 +32,7 @@ def main():
 
     race_jobs_html = web_app.race_jobs_board()
     assert_true('action="/race_jobs/create"' in race_jobs_html, "race_jobs missing create form")
+    assert_true('action="/race_jobs/run_due_now"' in race_jobs_html, "race_jobs missing run_due_now form")
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"
@@ -43,6 +43,10 @@ def main():
         assert_true("Management Access" in unlocked_console, "console missing admin access panel")
         denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
         assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
+        denied_run_due = web_app.internal_run_due(token="bad-token")
+        assert_true(getattr(denied_run_due, "status_code", 0) == 403, "internal_run_due should reject wrong token")
+        ok_run_due = web_app.internal_run_due(token="smoke-token")
+        assert_true(getattr(ok_run_due, "status_code", 0) in (200, 500), "internal_run_due should return JSON response")
     finally:
         if prev_admin_token is None:
             os.environ.pop("ADMIN_TOKEN", None)
