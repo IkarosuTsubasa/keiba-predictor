@@ -103,6 +103,31 @@ function Topbar({ data, search }) {
   );
 }
 
+function OverallRoiBar({ data }) {
+  const summaryCards = (data?.summary_cards || []).filter((item) => item?.roi_text);
+  if (!summaryCards.length && !data?.totals?.roi_text) {
+    return null;
+  }
+
+  return (
+    <section className="overall-roi-bar">
+      <span className="overall-roi-bar__label">回収率</span>
+      {data?.totals?.roi_text ? (
+        <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
+          <strong>全体</strong>
+          <em>{data.totals.roi_text}</em>
+        </span>
+      ) : null}
+      {summaryCards.map((item) => (
+        <span key={item.engine} className="overall-roi-bar__chip">
+          <strong>{item.label}</strong>
+          <em>{item.roi_text}</em>
+        </span>
+      ))}
+    </section>
+  );
+}
+
 function ModelRow({ card }) {
   return (
     <article className="model-row">
@@ -117,6 +142,7 @@ function ModelRow({ card }) {
       </section>
       <div className="model-row__result">
         <span>{card.result_triplet_text || "-"}</span>
+        {card.roi_text ? <small>回収率 {card.roi_text}</small> : null}
       </div>
     </article>
   );
@@ -209,6 +235,7 @@ export default function App() {
   return (
     <main className="page">
       <Topbar data={data} search={search} />
+      <OverallRoiBar data={data} />
       {data.fallback_notice ? <section className="notice-banner">{data.fallback_notice}</section> : null}
       <RaceBoards races={races} />
     </main>

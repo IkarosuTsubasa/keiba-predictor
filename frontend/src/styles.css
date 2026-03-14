@@ -168,6 +168,50 @@ select {
   line-height: 1.5;
 }
 
+.overall-roi-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 2px 0;
+  align-items: center;
+}
+
+.overall-roi-bar__label {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.overall-roi-bar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 253, 250, 0.95);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.overall-roi-bar__chip strong {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.overall-roi-bar__chip em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.overall-roi-bar__chip--total {
+  border-color: var(--line-strong);
+  background: var(--paper);
+}
+
 .race-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -306,6 +350,12 @@ select {
   padding: 3px 5px;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.model-row__result small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .empty-panel {
