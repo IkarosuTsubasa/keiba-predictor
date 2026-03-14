@@ -3964,6 +3964,535 @@ def build_llm_today_page(date_text="", scope_key=""):
 </html>"""
 
 
+def _llm_today_scope_label_ja(scope_key):
+    mapping = {
+        "central_dirt": "中央ダート",
+        "central_turf": "中央芝",
+        "local": "地方",
+    }
+    return mapping.get(str(scope_key or "").strip(), str(scope_key or "").strip() or "-")
+
+
+def _llm_today_status_meta_ja(ticket_summary, actual_names):
+    status = _safe_text((ticket_summary or {}).get("status", "")).lower()
+    actual_ready = any(_safe_text(name) for name in list(actual_names or []))
+    if status == "settled":
+        return "確定", "settled"
+    if status == "pending":
+        return "発売中", "pending"
+    if actual_ready:
+        return "結果あり", "result"
+    return "公開中", "planned"
+
+
+def _format_yen_text_ja(value):
+    try:
+        amount = int(value or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    sign = "-" if amount < 0 else ""
+    return f"{sign}¥{abs(amount):,}"
+
+
+def _format_ticket_plan_text_ja(ticket_rows):
+    bet_type_map = {
+        "win": "単勝",
+        "place": "複勝",
+        "wide": "ワイド",
+        "quinella": "馬連",
+        "exacta": "馬単",
+        "trio": "三連複",
+        "trifecta": "三連単",
+    }
+    rows = list(ticket_rows or [])
+    if not rows:
+        return "買い目なし"
+    lines = []
+    for row in rows:
+        bet_type = bet_type_map.get(_safe_text(row.get("bet_type")).lower(), _safe_text(row.get("bet_type")) or "-")
+        horse_no = _safe_text(row.get("horse_no")) or "-"
+        amount = _format_yen_text_ja(row.get("amount_yen") or row.get("stake_yen") or 0)
+        horse_name = _safe_text(row.get("horse_name"))
+        line = f"{bet_type} {horse_no} {amount}"
+        if horse_name:
+            line += f"  {horse_name}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_result_triplet_text_ja(actual_names):
+    names = [_safe_text(name) for name in list(actual_names or [])[:3] if _safe_text(name)]
+    if not names:
+        return "結果未登録"
+    return " / ".join(f"{idx + 1}着 {name}" for idx, name in enumerate(names))
+
+
+def build_llm_today_page_clean(date_text="", scope_key=""):
+    target_date = _normalize_report_date_text(date_text)
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    actual_result_maps = {
+        report_scope_key: _load_actual_result_map(report_scope_key)
+        for report_scope_key in scope_keys
+    }
+    runs = []
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        runs.append(row)
+    runs.sort(
+        key=lambda row: (
+            _safe_text(row.get("race_date")),
+            _safe_text(row.get("location")),
+            _safe_text(row.get("race_id")),
+            _safe_text(row.get("timestamp")),
+            _safe_text(row.get("run_id")),
+        )
+    )
+
+    summary_by_engine = {
+        engine: {
+            "label": LLM_BATTLE_LABELS.get(engine, engine),
+            "races": 0,
+            "settled_races": 0,
+            "pending_races": 0,
+            "hit_races": 0,
+            "ticket_count": 0,
+            "stake_yen": 0,
+            "payout_yen": 0,
+            "profit_yen": 0,
+        }
+        for engine in LLM_BATTLE_ORDER
+    }
+    race_sections = []
+
+    for run_row in runs:
+        run_id = _safe_text(run_row.get("run_id"))
+        report_scope_key = _report_scope_key_for_row(run_row, scope_norm)
+        payload_map = {}
+        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
+            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
+            if engine:
+                payload_map[engine] = payload
+        if not payload_map:
+            continue
+
+        actual_snapshot = _actual_result_snapshot(
+            report_scope_key,
+            run_id,
+            run_row,
+            actual_result_maps.get(report_scope_key, {}),
+        )
+        actual_names = list(actual_snapshot.get("actual_names", []) or [])
+        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
+        actual_text = _format_result_triplet_text_ja(actual_names)
+
+        engine_cards = []
+        for engine in LLM_BATTLE_ORDER:
+            payload = payload_map.get(engine)
+            if not payload:
+                continue
+            output = _policy_primary_output(payload)
+            marks_map = _policy_marks_map(payload)
+            ticket_run_id = _payload_run_id(payload, run_id)
+            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
+                _policy_primary_budget(payload).get("tickets", []) or []
+            )
+            ticket_summary = _summarize_ticket_rows(ticket_rows)
+            status_label, status_tone = _llm_today_status_meta_ja(ticket_summary, actual_names)
+            ticket_text = html.escape(_format_ticket_plan_text_ja(ticket_rows)).replace("\n", "<br>")
+            marks_text = html.escape(_format_marks_text(marks_map))
+            result_triplet = _format_triplet_text(_marks_result_triplet(marks_map, actual_horse_nos))
+            result_triplet_text = html.escape(result_triplet if any(_safe_text(x) for x in actual_horse_nos) else "結果未登録")
+            strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "記載なし"
+            tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "記載なし"
+            decision_text = _safe_text(output.get("bet_decision")) or "-"
+            stats = summary_by_engine[engine]
+            stats["races"] += 1
+            stats["ticket_count"] += int(ticket_summary.get("ticket_count", 0) or 0)
+            stats["stake_yen"] += int(ticket_summary.get("stake_yen", 0) or 0)
+            stats["payout_yen"] += int(ticket_summary.get("payout_yen", 0) or 0)
+            stats["profit_yen"] += int(ticket_summary.get("profit_yen", 0) or 0)
+            if ticket_summary.get("status") == "settled":
+                stats["settled_races"] += 1
+            elif ticket_summary.get("status") == "pending":
+                stats["pending_races"] += 1
+            if int(ticket_summary.get("hit_count", 0) or 0) > 0:
+                stats["hit_races"] += 1
+
+            engine_cards.append(
+                f"""
+                <article class="llm-today-card llm-today-card--{html.escape(status_tone)}">
+                  <div class="llm-today-card-head">
+                    <div>
+                      <div class="llm-today-engine">{html.escape(LLM_BATTLE_LABELS.get(engine, engine))}</div>
+                      <div class="llm-today-decision">判定: {html.escape(decision_text)}</div>
+                    </div>
+                    <span class="llm-today-badge llm-today-badge--{html.escape(status_tone)}">{html.escape(status_label)}</span>
+                  </div>
+                  <div class="llm-today-grid">
+                    <section>
+                      <h4>買い目</h4>
+                      <p>{ticket_text}</p>
+                    </section>
+                    <section>
+                      <h4>戦略</h4>
+                      <p>{html.escape(strategy_text)}</p>
+                      <p class="llm-today-subtext">{html.escape(tendency_text)}</p>
+                    </section>
+                    <section>
+                      <h4>印</h4>
+                      <p>{marks_text}</p>
+                    </section>
+                    <section>
+                      <h4>印の結果</h4>
+                      <p>{result_triplet_text}</p>
+                    </section>
+                  </div>
+                  <div class="llm-today-metrics">
+                    <span>点数 {_safe_text(ticket_summary.get("ticket_count")) or "0"}</span>
+                    <span>投資 {_format_yen_text_ja(ticket_summary.get("stake_yen", 0))}</span>
+                    <span>払戻 {_format_yen_text_ja(ticket_summary.get("payout_yen", 0))}</span>
+                    <span>収支 {_format_yen_text_ja(ticket_summary.get("profit_yen", 0))}</span>
+                    <span>的中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
+                    <span>ROI {_format_percent_text(ticket_summary.get("roi", ""))}</span>
+                  </div>
+                </article>
+                """
+            )
+
+        if not engine_cards:
+            continue
+        race_title = _format_race_label(run_row)
+        scope_label = _llm_today_scope_label_ja(report_scope_key)
+        race_sections.append(
+            f"""
+            <section class="llm-race-section">
+              <div class="llm-race-head">
+                <div>
+                  <div class="llm-race-eyebrow">{html.escape(scope_label)}</div>
+                  <h2>{html.escape(race_title)}</h2>
+                </div>
+                <div class="llm-race-meta">
+                  <span>{html.escape(_format_jp_date_text(run_row) or target_date)}</span>
+                  <span>Run {html.escape(run_id or "-")}</span>
+                </div>
+              </div>
+              <div class="llm-race-result">実際の結果: {html.escape(actual_text)}</div>
+              <div class="llm-today-card-grid">
+                {"".join(engine_cards)}
+              </div>
+            </section>
+            """
+        )
+
+    summary_cards = []
+    for engine in LLM_BATTLE_ORDER:
+        stats = summary_by_engine[engine]
+        if int(stats.get("races", 0) or 0) <= 0:
+            continue
+        roi = ""
+        if int(stats.get("stake_yen", 0) or 0) > 0:
+            roi = round(float(stats["payout_yen"]) / float(stats["stake_yen"]), 4)
+        summary_cards.append(
+            f"""
+            <article class="llm-summary-card">
+              <div class="llm-summary-head">
+                <strong>{html.escape(stats['label'])}</strong>
+                <span>{int(stats['races'])}レース</span>
+              </div>
+              <div class="llm-summary-metrics">
+                <span>確定 {int(stats['settled_races'])}</span>
+                <span>未確定 {int(stats['pending_races'])}</span>
+                <span>的中レース {int(stats['hit_races'])}</span>
+                <span>買い目数 {int(stats['ticket_count'])}</span>
+                <span>投資 {_format_yen_text_ja(stats['stake_yen'])}</span>
+                <span>払戻 {_format_yen_text_ja(stats['payout_yen'])}</span>
+                <span>収支 {_format_yen_text_ja(stats['profit_yen'])}</span>
+                <span>ROI {_format_percent_text(roi)}</span>
+              </div>
+            </article>
+            """
+        )
+
+    scope_options = ['<option value="">すべての範囲</option>']
+    for key in LLM_REPORT_SCOPE_KEYS:
+        selected_attr = " selected" if scope_norm == key else ""
+        scope_options.append(
+            f'<option value="{html.escape(key)}"{selected_attr}>{html.escape(_llm_today_scope_label_ja(key))}</option>'
+        )
+
+    empty_state = ""
+    if not race_sections:
+        empty_state = """
+        <section class="llm-empty">
+          <h2>この日の公開データはまだありません</h2>
+          <p>予測処理が完了すると、各 LLM の買い目、戦略、印、結果がここに表示されます。</p>
+        </section>
+        """
+
+    summary_html = "".join(summary_cards) if summary_cards else '<p class="llm-empty-inline">この日の集計データはまだありません。</p>'
+    return f"""<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM予想ボード</title>
+  <style>
+    :root {{
+      --bg: #f6f1e8;
+      --paper: rgba(255, 251, 246, 0.92);
+      --paper-strong: #fffaf3;
+      --ink: #182018;
+      --muted: #5d6a60;
+      --line: rgba(24, 32, 24, 0.1);
+      --accent: #135d48;
+      --accent-soft: rgba(19, 93, 72, 0.12);
+      --settled: #1c6b43;
+      --settled-soft: rgba(28, 107, 67, 0.14);
+      --pending: #a56a16;
+      --pending-soft: rgba(165, 106, 22, 0.14);
+      --planned: #5a6678;
+      --planned-soft: rgba(90, 102, 120, 0.14);
+      --shadow: 0 18px 45px rgba(34, 38, 30, 0.08);
+      --title-font: "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif;
+      --body-font: "Yu Gothic UI", "Hiragino Sans", "Aptos", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--body-font);
+      background:
+        radial-gradient(circle at top left, rgba(227, 214, 189, 0.65), transparent 28%),
+        radial-gradient(circle at top right, rgba(195, 221, 210, 0.7), transparent 32%),
+        linear-gradient(180deg, #fbf7f1 0%, var(--bg) 100%);
+    }}
+    .llm-page {{
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+      display: grid;
+      gap: 22px;
+    }}
+    .llm-hero, .llm-section, .llm-race-section, .llm-empty {{
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: var(--paper);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }}
+    .llm-hero {{
+      padding: 28px;
+      display: grid;
+      gap: 18px;
+    }}
+    .llm-eyebrow {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }}
+    .llm-hero h1, .llm-race-head h2, .llm-section h2, .llm-empty h2 {{
+      margin: 0;
+      font-family: var(--title-font);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }}
+    .llm-hero h1 {{ font-size: clamp(34px, 5vw, 52px); line-height: 0.95; }}
+    .llm-hero p {{
+      margin: 0;
+      max-width: 70ch;
+      line-height: 1.65;
+      color: var(--muted);
+    }}
+    .llm-filter {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+    }}
+    .llm-filter label {{
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .llm-filter input, .llm-filter select {{
+      min-width: 180px;
+      min-height: 42px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--paper-strong);
+      color: var(--ink);
+      font: inherit;
+    }}
+    .llm-filter button {{
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .llm-section {{
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-summary-grid, .llm-today-card-grid {{
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }}
+    .llm-summary-card, .llm-today-card {{
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-summary-head, .llm-today-card-head, .llm-race-head {{
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: start;
+    }}
+    .llm-summary-metrics, .llm-today-metrics {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .llm-summary-metrics span, .llm-today-metrics span, .llm-race-meta span {{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(24, 32, 24, 0.06);
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .llm-race-section {{
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }}
+    .llm-race-eyebrow {{
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+    .llm-race-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: end;
+    }}
+    .llm-race-result {{
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(19, 93, 72, 0.08);
+      color: var(--ink);
+      font-weight: 600;
+    }}
+    .llm-today-card--settled {{ border-color: rgba(28, 107, 67, 0.22); background: linear-gradient(180deg, rgba(28, 107, 67, 0.08), rgba(255,255,255,0.82)); }}
+    .llm-today-card--pending {{ border-color: rgba(165, 106, 22, 0.22); background: linear-gradient(180deg, rgba(165, 106, 22, 0.08), rgba(255,255,255,0.82)); }}
+    .llm-today-card--planned, .llm-today-card--result {{ border-color: rgba(90, 102, 120, 0.18); }}
+    .llm-today-engine {{ font-size: 22px; font-family: var(--title-font); }}
+    .llm-today-decision {{ margin-top: 4px; color: var(--muted); font-size: 13px; }}
+    .llm-today-badge {{
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .llm-today-badge--settled {{ background: var(--settled-soft); color: var(--settled); }}
+    .llm-today-badge--pending {{ background: var(--pending-soft); color: var(--pending); }}
+    .llm-today-badge--planned, .llm-today-badge--result {{ background: var(--planned-soft); color: var(--planned); }}
+    .llm-today-grid {{
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }}
+    .llm-today-grid section {{
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(24, 32, 24, 0.04);
+      min-height: 128px;
+    }}
+    .llm-today-grid h4 {{
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .llm-today-grid p {{
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }}
+    .llm-today-subtext {{
+      margin-top: 8px !important;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .llm-empty {{
+      padding: 28px;
+      text-align: center;
+    }}
+    .llm-empty p, .llm-empty-inline {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }}
+    @media (max-width: 760px) {{
+      .llm-page {{ padding: 18px 14px 28px; }}
+      .llm-hero, .llm-section, .llm-race-section {{ padding: 18px; }}
+      .llm-filter {{ flex-direction: column; align-items: stretch; }}
+      .llm-filter label, .llm-filter input, .llm-filter select, .llm-filter button {{ width: 100%; }}
+      .llm-race-head, .llm-today-card-head {{ flex-direction: column; }}
+      .llm-race-meta {{ justify-content: start; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="llm-page">
+    <section class="llm-hero">
+      <div class="llm-eyebrow">LLM Daily Board</div>
+      <h1>本日の LLM 予想ボード</h1>
+      <p>当日公開されている各 LLM の買い目、戦略、印、回収状況をまとめて確認できます。レース終了後は結果と収支も反映されます。</p>
+      <form class="llm-filter" method="get" action="/llm_today">
+        <label>日付
+          <input type="date" name="date" value="{html.escape(target_date)}">
+        </label>
+        <label>範囲
+          <select name="scope_key">
+            {"".join(scope_options)}
+          </select>
+        </label>
+        <button type="submit">表示を更新</button>
+      </form>
+    </section>
+    <section class="llm-section">
+      <div class="llm-eyebrow">Daily Summary</div>
+      <h2>日次サマリー</h2>
+      <div class="llm-summary-grid">{summary_html}</div>
+    </section>
+    {empty_state}
+    {"".join(race_sections)}
+  </main>
+</body>
+</html>"""
+
+
 def _race_job_status_tone(status):
     text = str(status or "").strip().lower()
     if text in ("ready", "settled"):
@@ -5583,7 +6112,7 @@ def _admin_execution_denied(message, scope_key="", token="", selected_run_id="",
 
 @app.get("/", response_class=HTMLResponse)
 def index(token: str = ""):
-    return build_llm_today_page()
+    return build_llm_today_page_clean()
 
 
 @app.get("/console", response_class=HTMLResponse)
@@ -5595,7 +6124,7 @@ def console_index(token: str = ""):
 
 @app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
-    return build_llm_today_page(date_text=date, scope_key=scope_key)
+    return build_llm_today_page_clean(date_text=date, scope_key=scope_key)
 
 
 @app.post("/console/tasks/create", response_class=HTMLResponse)
