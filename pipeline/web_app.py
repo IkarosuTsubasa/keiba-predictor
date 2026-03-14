@@ -4349,11 +4349,394 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
     """
 
 
+def _race_job_status_label_clean(status):
+    mapping = {
+        "uploaded": "已上传",
+        "scheduled": "待处理",
+        "queued_process": "待执行",
+        "processing": "处理中",
+        "ready": "预测已生成",
+        "queued_settle": "待结算",
+        "settling": "结算中",
+        "settled": "已结算",
+        "failed": "失败",
+    }
+    text = str(status or "").strip().lower()
+    return mapping.get(text, text or "-")
+
+
+def _race_job_action_buttons_clean(job_id, status, admin_token=""):
+    buttons = []
+    status_text = str(status or "").strip().lower()
+    if status_text in ("scheduled", "queued_process", "failed"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">立即执行预测</button>
+            </form>
+            """
+        )
+    if status_text in ("ready", "queued_settle", "settling", "settled"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">重新生成预测</button>
+            </form>
+            """
+        )
+    if status_text in ("failed", "settled", "ready", "queued_settle"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/update">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="action" value="reset_schedule">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">重置为待处理</button>
+            </form>
+            """
+        )
+    return "".join(buttons)
+
+
+def _race_job_settle_form_clean(row, admin_token=""):
+    current_run_id = str((row or {}).get("current_run_id", "") or "").strip()
+    if not current_run_id:
+        return ""
+    status_text = str((row or {}).get("status", "") or "").strip().lower()
+    if status_text not in ("ready", "queued_settle", "settling", "settled"):
+        return ""
+    job_id = str((row or {}).get("job_id", "") or "").strip()
+    top1 = str((row or {}).get("actual_top1", "") or "").strip()
+    top2 = str((row or {}).get("actual_top2", "") or "").strip()
+    top3 = str((row or {}).get("actual_top3", "") or "").strip()
+    return f"""
+    <section class="job-settle-panel">
+      <div class="job-settle-head">
+        <strong>Step 3: 录入赛果并结算</strong>
+        <span>填写 1-3 着马名后，可以直接结算，也可以先加入结算队列。</span>
+      </div>
+      <div class="job-settle-actions">
+        <form method="post" action="/console/tasks/settle_now" class="job-settle-form">
+          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <input type="text" name="actual_top1" value="{html.escape(top1)}" placeholder="1着马名">
+          <input type="text" name="actual_top2" value="{html.escape(top2)}" placeholder="2着马名">
+          <input type="text" name="actual_top3" value="{html.escape(top3)}" placeholder="3着马名">
+          <button type="submit">立即结算</button>
+        </form>
+        <form method="post" action="/console/tasks/queue_settle" class="job-settle-form">
+          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <input type="text" name="actual_top1" value="{html.escape(top1)}" placeholder="1着马名">
+          <input type="text" name="actual_top2" value="{html.escape(top2)}" placeholder="2着马名">
+          <input type="text" name="actual_top3" value="{html.escape(top3)}" placeholder="3着马名">
+          <button type="submit">加入结算队列</button>
+        </form>
+      </div>
+    </section>
+    """
+
+
+def _admin_job_card_html_clean(row, admin_token=""):
+    row = dict(row or {})
+    job_id = str(row.get("job_id", "") or "").strip()
+    status = str(row.get("status", "") or "").strip()
+    current_run_id = str(row.get("current_run_id", "") or "").strip()
+    scope_key = str(row.get("scope_key", "") or "").strip()
+    race_date = str(row.get("race_date", "") or "").strip()
+    location = str(row.get("location", "") or "").strip()
+    race_id = str(row.get("race_id", "") or "").strip()
+    notes = str(row.get("notes", "") or "").strip()
+    actual_top1 = str(row.get("actual_top1", "") or "").strip()
+    actual_top2 = str(row.get("actual_top2", "") or "").strip()
+    actual_top3 = str(row.get("actual_top3", "") or "").strip()
+    artifacts = list(row.get("artifacts", []) or [])
+    artifact_map = {
+        str(item.get("artifact_type", "")).strip().lower(): dict(item)
+        for item in artifacts
+        if isinstance(item, dict)
+    }
+    kachiuma_name = str((artifact_map.get("kachiuma") or {}).get("original_name", "") or "未上传")
+    shutuba_name = str((artifact_map.get("shutuba") or {}).get("original_name", "") or "未上传")
+    timing_items = []
+    for label, key in (
+        ("开赛", "scheduled_off_time"),
+        ("预计开始处理", "process_after_time"),
+        ("入处理队列", "queued_process_at"),
+        ("预测完成", "ready_at"),
+        ("结算完成", "settled_at"),
+    ):
+        value = str(row.get(key, "") or "").strip()
+        if value:
+            timing_items.append(f"<span>{html.escape(label)} {html.escape(value)}</span>")
+    open_links = ""
+    if current_run_id:
+        open_links = f"""
+        <form method="post" action="/view_run" class="stack-form">
+          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
+          <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <button type="submit" class="secondary-button">打开 Run</button>
+        </form>
+        <form method="get" action="/llm_today" class="stack-form">
+          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
+          <input type="hidden" name="date" value="{html.escape(race_date)}">
+          <button type="submit" class="secondary-button">查看当日看板</button>
+        </form>
+        """
+    return f"""
+    <section class="panel panel--tight">
+      <div class="section-title">
+        <div>
+          <div class="eyebrow">Task</div>
+          <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '未命名任务')}</h2>
+        </div>
+        <span class="section-chip">{html.escape(_race_job_status_label_clean(status))}</span>
+      </div>
+      <div class="copy-row">
+        <span class="hero-pill">范围 {html.escape(_scope_display_name(scope_key))}</span>
+        <span class="hero-pill">日期 {html.escape(race_date or '-')}</span>
+        <span class="hero-pill">条件 {html.escape(str(row.get('target_surface', '') or '-'))} / {html.escape(str(row.get('target_distance', '') or '-'))}m / {html.escape(str(row.get('target_track_condition', '') or '-'))}</span>
+        <span class="hero-pill">Run {html.escape(current_run_id or '-')}</span>
+        <span class="hero-pill">赛果 {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
+      </div>
+      <div class="copy-row">
+        <span class="hero-pill">kachiuma: {html.escape(kachiuma_name)}</span>
+        <span class="hero-pill">shutuba: {html.escape(shutuba_name)}</span>
+        {''.join(timing_items)}
+      </div>
+      <p class="helper-text">{html.escape(notes or '无备注')}</p>
+      <div class="copy-row">
+        {_race_job_action_buttons_clean(job_id, status, admin_token=admin_token)}
+        {open_links}
+      </div>
+      {_race_job_settle_form_clean(row, admin_token=admin_token)}
+    </section>
+    """
+
+
+def build_admin_workspace_html_clean(message_text="", error_text="", admin_token="", authorized=True):
+    if not authorized:
+        return f"""
+        <section class="content-cluster" id="admin-zone">
+          <section class="panel panel-error">
+            <div class="section-title">
+              <div>
+                <div class="eyebrow">Admin</div>
+                <h2>任务后台</h2>
+              </div>
+              <span class="section-chip">locked</span>
+            </div>
+            <p class="helper-text">{html.escape(error_text or "管理口令无效。")}</p>
+          </section>
+        </section>
+        """
+
+    jobs = load_race_jobs(BASE_DIR)
+    summary = {
+        "total": len(jobs),
+        "scheduled": 0,
+        "processing": 0,
+        "ready": 0,
+        "settled": 0,
+    }
+    for job in jobs:
+        status = str(job.get("status", "") or "").strip().lower()
+        if status == "scheduled":
+            summary["scheduled"] += 1
+        elif status in ("queued_process", "processing", "queued_settle", "settling"):
+            summary["processing"] += 1
+        elif status == "ready":
+            summary["ready"] += 1
+        elif status == "settled":
+            summary["settled"] += 1
+
+    cards_html = "".join(_admin_job_card_html_clean(job, admin_token=admin_token) for job in jobs)
+    if not cards_html:
+        cards_html = """
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Tasks</div>
+              <h2>暂无任务</h2>
+            </div>
+            <span class="section-chip">empty</span>
+          </div>
+          <p class="helper-text">先上传一场比赛的 `kachiuma.csv` 和 `shutuba.csv`，再执行预测流程。</p>
+        </section>
+        """
+
+    message_panel = ""
+    if message_text:
+        message_panel = f"""
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Result</div>
+              <h2>操作结果</h2>
+            </div>
+            <span class="section-chip">ok</span>
+          </div>
+          <p class="helper-text">{html.escape(message_text)}</p>
+        </section>
+        """
+    error_panel = ""
+    if error_text:
+        error_panel = f"""
+        <section class="panel panel-error">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Error</div>
+              <h2>错误信息</h2>
+            </div>
+            <span class="section-chip">error</span>
+          </div>
+          <pre>{html.escape(error_text)}</pre>
+        </section>
+        """
+
+    default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
+    return f"""
+    <section class="content-cluster" id="admin-zone">
+      <div class="cluster-head">
+        <div>
+          <div class="eyebrow">Admin Workspace</div>
+          <h2>任务后台</h2>
+        </div>
+        <p>当前后台只做三件事：上传输入、执行预测、录入赛果并结算。流程已经跑通，这里主要服务日常运营。</p>
+      </div>
+      <div class="cluster-grid cluster-grid--stack">
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Overview</div>
+              <h2>任务概览</h2>
+            </div>
+            <span class="section-chip">manual</span>
+          </div>
+          <div class="copy-row">
+            <span class="hero-pill">总任务 {summary['total']}</span>
+            <span class="hero-pill">待处理 {summary['scheduled']}</span>
+            <span class="hero-pill">处理中 {summary['processing']}</span>
+            <span class="hero-pill">预测已生成 {summary['ready']}</span>
+            <span class="hero-pill">已结算 {summary['settled']}</span>
+          </div>
+          <div class="copy-row">
+            <form method="post" action="/console/tasks/scan_due" class="stack-form">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit" class="secondary-button">扫描到点任务</button>
+            </form>
+            <form method="post" action="/console/tasks/run_due_now" class="stack-form">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit" class="secondary-button">执行已入队任务</button>
+            </form>
+            <a href="/llm_today" class="secondary-button">查看前台看板</a>
+          </div>
+          <p class="helper-text">如果暂时不做自动调度，就按这个节奏操作：上传两份 CSV，手动执行，赛后录入前三名并结算。</p>
+        </section>
+        {message_panel}
+        {error_panel}
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Step 1</div>
+              <h2>上传输入文件</h2>
+            </div>
+            <span class="section-chip">upload</span>
+          </div>
+          <form class="stack-form" method="post" action="/console/tasks/create" enctype="multipart/form-data">
+            <input type="hidden" name="token" value="{html.escape(admin_token)}">
+            <div class="field-grid">
+              <div>
+                <label>赛道范围</label>
+                <select name="scope_key">
+                  <option value="central_dirt">中央 Dirt</option>
+                  <option value="central_turf">中央 Turf</option>
+                  <option value="local">地方</option>
+                </select>
+              </div>
+              <div>
+                <label>Race ID</label>
+                <input type="text" name="race_id" placeholder="202606010109">
+              </div>
+              <div>
+                <label>比赛地点</label>
+                <input type="text" name="location" placeholder="中山">
+              </div>
+              <div>
+                <label>比赛日期</label>
+                <input type="date" name="race_date">
+              </div>
+              <div>
+                <label>开赛时间</label>
+                <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
+              </div>
+              <div>
+                <label>提前执行分钟数</label>
+                <input type="number" name="lead_minutes" min="0" value="30">
+              </div>
+              <div>
+                <label>本场场地</label>
+                <select name="target_surface">
+                  <option value="dirt">dirt</option>
+                  <option value="turf">turf</option>
+                </select>
+              </div>
+              <div>
+                <label>本场距离</label>
+                <input type="number" name="target_distance" min="100" step="100" value="1600" placeholder="1600">
+              </div>
+              <div>
+                <label>本场马场状态</label>
+                <select name="target_track_condition">
+                  <option value="良">良</option>
+                  <option value="稍重">稍重</option>
+                  <option value="重">重</option>
+                  <option value="不良">不良</option>
+                </select>
+              </div>
+              <div>
+                <label>kachiuma.csv</label>
+                <input type="file" name="kachiuma_file" accept=".csv">
+              </div>
+              <div>
+                <label>shutuba.csv</label>
+                <input type="file" name="shutuba_file" accept=".csv">
+              </div>
+            </div>
+            <div>
+              <label>备注</label>
+              <textarea name="notes" placeholder="可记录这场比赛的说明、上传来源或临时备注。"></textarea>
+            </div>
+            <button type="submit">创建任务</button>
+          </form>
+        </section>
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Step 2 / Step 3</div>
+              <h2>预测与结算任务</h2>
+            </div>
+            <span class="section-chip">jobs</span>
+          </div>
+          <div class="cluster-grid cluster-grid--stack">
+            {cards_html}
+          </div>
+        </section>
+      </div>
+    </section>
+    """
+
+
 def render_console_page(message_text="", error_text="", admin_token=""):
     return render_page(
         "",
         admin_token=admin_token,
-        admin_workspace_html=build_admin_workspace_html(
+        admin_workspace_html=build_admin_workspace_html_clean(
             message_text=message_text,
             error_text=error_text,
             admin_token=admin_token,

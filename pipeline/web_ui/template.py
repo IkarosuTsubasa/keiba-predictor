@@ -328,7 +328,7 @@ def page_template(
     if analysis_cluster:
         jump_links.append(_section_link("analysis-zone", "Analysis"))
     if admin_workspace_html:
-        jump_links.append(_section_link("admin-zone", "Tasks"))
+        jump_links.append(_section_link("admin-zone", "任务后台"))
     if battle_cluster:
         jump_links.append(_section_link("battle-zone", "Battle"))
     if compare_cluster:
@@ -342,14 +342,14 @@ def page_template(
     if stats_cluster:
         jump_links.append(_section_link("stats-zone", "Stats"))
     if console_cluster:
-        jump_links.append(_section_link("console-zone", "Log"))
+        jump_links.append(_section_link("console-zone", "运行日志"))
 
     hero_metrics = "".join(
         [
-            _metric_card("Scope", scope_label),
-            _metric_card("Active Run", current_run or "Not Selected"),
-            _metric_card("Panels", str(len(jump_links)) if jump_links else "Controls Only"),
-            _metric_card("State", "Error" if error_text else ("Live Output" if output_text else "Ready")),
+            _metric_card("范围", scope_label),
+            _metric_card("当前 Run", current_run or "未选择"),
+            _metric_card("面板数", str(len(jump_links)) if jump_links else "仅控制区"),
+            _metric_card("状态", "错误" if error_text else ("有输出" if output_text else "就绪")),
         ]
     )
 
@@ -360,18 +360,18 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Quick Access</div>
-              <h2>Recent Runs</h2>
+              <h2>最近 Runs</h2>
             </div>
-            <span class="section-chip" id="recent-run-status">scope: {html.escape(scope_label)}</span>
+            <span class="section-chip" id="recent-run-status">范围: {html.escape(scope_label)}</span>
           </div>
           <form action="/view_run" method="post" class="stack-form">
             <input type="hidden" name="scope_key" id="recent_scope_key" value="{html.escape(scope_value)}">
             <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
-            <label>Latest Run Snapshot</label>
+            <label>最近运行快照</label>
             <select name="run_id" id="recent_run_select">
               {recent_options}
             </select>
-            <button type="submit">Open Selected Run</button>
+            <button type="submit">打开所选 Run</button>
           </form>
         </section>
         """
@@ -388,14 +388,14 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Admin</div>
-              <h2>Management Access</h2>
+                <h2>后台访问</h2>
             </div>
             <span class="section-chip">{html.escape(admin_state)}</span>
           </div>
           <form action="/console" method="get" class="stack-form">
             <div>
               <label>ADMIN_TOKEN</label>
-              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="required for execution">
+              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="执行操作时必填">
             </div>
             <p class="helper-text">{html.escape(admin_note)}</p>
             <button type="submit">进入控制台</button>
@@ -417,7 +417,7 @@ def page_template(
             </div>
             <span class="section-chip">local</span>
           </div>
-          <p class="helper-text">ADMIN_TOKEN is not set. This console is in local development mode.</p>
+          <p class="helper-text">未设置 ADMIN_TOKEN，当前是本地开发模式。</p>
           <div class="copy-row" style="margin-top:12px;">
             <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
             <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
@@ -449,7 +449,7 @@ def page_template(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Keiba Local Console</title>
+  <title>Keiba 控制台</title>
   <style>
     :root {{
       --bg: #f3efe7;
