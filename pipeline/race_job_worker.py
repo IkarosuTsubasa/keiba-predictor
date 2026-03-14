@@ -1,6 +1,8 @@
 import argparse
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 from race_job_runner import fail_race_job, process_race_job, settle_race_job
@@ -8,6 +10,14 @@ from race_job_store import get_job, load_jobs, scan_due_jobs
 
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _poll_seconds():
+    raw = str(os.environ.get("WORKER_POLL_SECONDS", "30") or "30").strip()
+    try:
+        return max(5, int(raw))
+    except ValueError:
+        return 30
 
 
 def pick_next_queued_job():
@@ -31,14 +41,77 @@ def pick_next_settle_job():
     return ""
 
 
+def _run_next_job():
+    job_id = pick_next_queued_job()
+    if not job_id:
+        return None
+    summary = process_race_job(BASE_DIR, job_id)
+    return {"kind": "process", "job_id": job_id, "summary": summary}
+
+
+def _run_next_settlement():
+    job_id = pick_next_settle_job()
+    if not job_id:
+        return None
+    job = get_job(BASE_DIR, job_id) or {}
+    actual_top3 = [
+        str(job.get("actual_top1", "") or "").strip(),
+        str(job.get("actual_top2", "") or "").strip(),
+        str(job.get("actual_top3", "") or "").strip(),
+    ]
+    summary = settle_race_job(BASE_DIR, job_id, actual_top3)
+    return {"kind": "settle", "job_id": job_id, "summary": summary}
+
+
+def run_loop(once=False):
+    poll_seconds = _poll_seconds()
+    while True:
+        changed = scan_due_jobs(BASE_DIR)
+        process_result = None
+        settle_result = None
+        try:
+            process_result = _run_next_job()
+        except Exception as exc:
+            failed_job_id = pick_next_queued_job()
+            if failed_job_id:
+                fail_race_job(BASE_DIR, failed_job_id, str(exc))
+            print(json.dumps({"kind": "process_error", "error": str(exc)}, ensure_ascii=False))
+        try:
+            settle_result = _run_next_settlement()
+        except Exception as exc:
+            failed_job_id = pick_next_settle_job()
+            if failed_job_id:
+                fail_race_job(BASE_DIR, failed_job_id, str(exc))
+            print(json.dumps({"kind": "settle_error", "error": str(exc)}, ensure_ascii=False))
+
+        if changed:
+            print(json.dumps({"kind": "scan", "queued": len(changed), "job_ids": [item.get("job_id", "") for item in changed]}, ensure_ascii=False))
+        if process_result:
+            print(json.dumps(process_result, ensure_ascii=False))
+        if settle_result:
+            print(json.dumps(settle_result, ensure_ascii=False))
+        if not changed and not process_result and not settle_result:
+            print(json.dumps({"kind": "idle", "poll_seconds": poll_seconds}, ensure_ascii=False))
+        if once:
+            return
+        time.sleep(poll_seconds)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Local race job worker")
-    parser.add_argument("command", choices=["scan", "process", "process-next", "settle", "settle-next"])
+    parser.add_argument("command", choices=["scan", "process", "process-next", "settle", "settle-next", "loop", "loop-once"])
     parser.add_argument("--job-id", default="")
     parser.add_argument("--actual-top1", default="")
     parser.add_argument("--actual-top2", default="")
     parser.add_argument("--actual-top3", default="")
     args = parser.parse_args()
+
+    if args.command == "loop":
+        run_loop(once=False)
+        return
+    if args.command == "loop-once":
+        run_loop(once=True)
+        return
 
     if args.command == "scan":
         changed = scan_due_jobs(BASE_DIR)
