@@ -21,6 +21,33 @@ def _race_url(scope_key, race_id):
     return f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id_text}"
 
 
+def _default_predictor_surface(scope_key):
+    return "turf" if str(scope_key or "").strip() == "central_turf" else "dirt"
+
+
+def _job_predictor_surface(job):
+    raw = str((job or {}).get("target_surface", "") or "").strip().lower()
+    if raw in ("t", "turf", "grass", "shiba", "芝"):
+        return "turf"
+    if raw in ("d", "dirt", "sand", "ダ"):
+        return "dirt"
+    return _default_predictor_surface((job or {}).get("scope_key", ""))
+
+
+def _job_predictor_distance(job):
+    raw = str((job or {}).get("target_distance", "") or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 1600
+    return str(value)
+
+
+def _job_predictor_track(job):
+    raw = str((job or {}).get("target_track_condition", "") or "").strip()
+    return raw or "良"
+
+
 def _shared_workspace_dir(base_dir):
     path = Path(base_dir) / "data" / "_shared" / "job_workspaces"
     path.mkdir(parents=True, exist_ok=True)
@@ -218,7 +245,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         pred_code, pred_output = _run_subprocess(
             base_path.parent / "predictor.py",
             cwd=workspace,
-            env={"SCOPE_KEY": scope_key},
+            env={
+                "SCOPE_KEY": scope_key,
+                "PREDICTOR_NO_PROMPT": "1",
+                "PREDICTOR_TARGET_SURFACE": _job_predictor_surface(job),
+                "PREDICTOR_TARGET_DISTANCE": _job_predictor_distance(job),
+                "PREDICTOR_TARGET_CONDITION": _job_predictor_track(job),
+            },
         )
         summary["process_log"].append({"step": "predictor", "code": pred_code, "output": pred_output})
         if pred_code != 0 or not (workspace / "predictions.csv").exists():

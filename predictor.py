@@ -796,11 +796,55 @@ def get_default_race_surface():
     return "芝" if SCOPE_KEY == "central_turf" else "ダ"
 
 
+def _env_flag(name):
+    raw = os.environ.get(name, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _env_surface(default_surface):
+    raw = os.environ.get("PREDICTOR_TARGET_SURFACE", "").strip().lower()
+    if raw in ("t", "turf", "grass", "shiba", "芝"):
+        return "芝"
+    if raw in ("d", "dirt", "sand", "ダ"):
+        return "ダ"
+    return default_surface
+
+
+def _env_distance(default_distance):
+    raw = os.environ.get("PREDICTOR_TARGET_DISTANCE", "").strip()
+    if not raw:
+        return default_distance
+    try:
+        return int(raw)
+    except Exception:
+        return default_distance
+
+
+def _env_track(default_track):
+    raw = os.environ.get("PREDICTOR_TARGET_CONDITION", "").strip()
+    if not raw:
+        return parse_track_condition(default_track)
+    track_code = parse_track_condition(raw)
+    if not np.isfinite(track_code):
+        print(f"[WARN] Unknown env track condition: {raw}. Fallback to {default_track}.")
+        return parse_track_condition(default_track)
+    return track_code
+
+
 def prompt_race_condition(default_surface=None, default_distance=1600, default_track="良"):
     if default_surface is None:
         default_surface = get_default_race_surface()
+    if _env_flag("PREDICTOR_NO_PROMPT"):
+        return (
+            _env_surface(default_surface),
+            _env_distance(default_distance),
+            _env_track(default_track),
+        )
     default_label = "turf" if default_surface == "芝" else "dirt"
-    surf_raw = input(f"Race surface (turf/dirt) [default {default_label}]: ").strip().lower()
+    try:
+        surf_raw = input(f"Race surface (turf/dirt) [default {default_label}]: ").strip().lower()
+    except EOFError:
+        surf_raw = ""
     if not surf_raw:
         surf_in = default_surface
     elif surf_raw in ("t", "turf", "grass", "shiba", "芝"):
@@ -809,12 +853,18 @@ def prompt_race_condition(default_surface=None, default_distance=1600, default_t
         surf_in = "ダ"
     else:
         surf_in = default_surface
-    dist_in = input(f"Distance meters [default {default_distance}]: ").strip()
+    try:
+        dist_in = input(f"Distance meters [default {default_distance}]: ").strip()
+    except EOFError:
+        dist_in = ""
     try:
         dist_val = int(dist_in)
     except Exception:
         dist_val = default_distance
-    track_raw = input(f"Track condition (良/稍重/重/不良) [default {default_track}]: ").strip()
+    try:
+        track_raw = input(f"Track condition (良/稍重/重/不良) [default {default_track}]: ").strip()
+    except EOFError:
+        track_raw = ""
     track_in = track_raw or default_track
     track_code = parse_track_condition(track_in)
     if not np.isfinite(track_code):

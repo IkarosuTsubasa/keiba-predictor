@@ -4297,6 +4297,26 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
                 <input type="number" name="lead_minutes" min="0" value="30">
               </div>
               <div>
+                <label>本场场地</label>
+                <select name="target_surface">
+                  <option value="dirt">dirt</option>
+                  <option value="turf">turf</option>
+                </select>
+              </div>
+              <div>
+                <label>本场距离</label>
+                <input type="number" name="target_distance" min="100" step="100" value="1600" placeholder="1600">
+              </div>
+              <div>
+                <label>本场马场状态</label>
+                <select name="target_track_condition">
+                  <option value="良">良</option>
+                  <option value="稍重">稍重</option>
+                  <option value="重">重</option>
+                  <option value="不良">不良</option>
+                </select>
+              </div>
+              <div>
                 <label>kachiuma.csv</label>
                 <input type="file" name="kachiuma_file" accept=".csv">
               </div>
@@ -4530,6 +4550,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
                 <span>比赛日 {html.escape(str(row.get('race_date', '') or '-'))}</span>
                 <span>Job {html.escape(job_id or '-')}</span>
                 <span>提前 {html.escape(str(row.get('lead_minutes', 30) or 30))} 分钟启动</span>
+                <span>条件 {html.escape(str(row.get('target_surface', '') or '-'))} / {html.escape(str(row.get('target_distance', '') or '-'))}m / {html.escape(str(row.get('target_track_condition', '') or '-'))}</span>
                 <span>Run {html.escape(current_run_id or '-')}</span>
                 <span>赛果 {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
               </div>
@@ -5202,6 +5223,9 @@ def create_race_job_view(
     location: str = Form(""),
     race_date: str = Form(""),
     scheduled_off_time: str = Form(""),
+    target_surface: str = Form(""),
+    target_distance: str = Form(""),
+    target_track_condition: str = Form(""),
     lead_minutes: str = Form("30"),
     notes: str = Form(""),
     kachiuma_file: UploadFile = File(None),
@@ -5221,6 +5245,19 @@ def create_race_job_view(
         return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
     if not scheduled_off_time.strip():
         return build_race_jobs_page(admin_token=token, error_text="请填写开赛时间。")
+    target_surface = str(target_surface or "").strip().lower()
+    if target_surface not in ("turf", "dirt"):
+        return build_race_jobs_page(admin_token=token, error_text="请填写本场场地：turf 或 dirt。")
+    target_distance = str(target_distance or "").strip()
+    try:
+        target_distance_value = int(target_distance)
+    except ValueError:
+        return build_race_jobs_page(admin_token=token, error_text="请填写本场距离，例如 1200 或 1800。")
+    if target_distance_value <= 0:
+        return build_race_jobs_page(admin_token=token, error_text="距离必须大于 0。")
+    target_track_condition = str(target_track_condition or "").strip()
+    if target_track_condition not in ("良", "稍重", "重", "不良"):
+        return build_race_jobs_page(admin_token=token, error_text="请填写本场马场状态：良 / 稍重 / 重 / 不良。")
     if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
         return build_race_jobs_page(admin_token=token, error_text="请上传 kachiuma.csv。")
     if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
@@ -5237,6 +5274,9 @@ def create_race_job_view(
         location=location,
         race_date=race_date,
         scheduled_off_time=scheduled_off_time,
+        target_surface=target_surface,
+        target_distance=str(target_distance_value),
+        target_track_condition=target_track_condition,
         lead_minutes=lead_value,
         notes=notes,
         artifacts=[],
