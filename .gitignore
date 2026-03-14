@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 tmp_*.html
 tmp_*.log
+frontend/node_modules/

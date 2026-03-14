@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 import web_app
 
@@ -19,12 +20,14 @@ def pick_latest_run_id():
 
 def main():
     body = web_app.index()
-    assert_true("LLM" in body, "index should render public LLM page")
-    assert_true('action="/llm_today"' in body, "index missing llm_today filter form")
+    assert_true(str(getattr(body, "path", "")).endswith("index.html"), "index should return public frontend file")
+    expected_root = "public_frontend_dist" if (Path(web_app.BASE_DIR) / "public_frontend_dist" / "index.html").exists() else "public_frontend"
+    assert_true(expected_root in str(getattr(body, "path", "")), "index should return active public frontend")
 
     llm_today_html = web_app.llm_today()
-    assert_true("LLM" in llm_today_html, "llm_today missing title marker")
-    assert_true('action="/llm_today"' in llm_today_html, "llm_today missing filter form")
+    assert_true(str(getattr(llm_today_html, "path", "")).endswith("index.html"), "llm_today should return public frontend file")
+    board_payload = web_app.public_board_api()
+    assert_true(getattr(board_payload, "status_code", 200) == 200, "public board api should return JSON")
 
     console_html = web_app.console_index()
     assert_true("Run Pipeline" in console_html, "console missing Run Pipeline block")
