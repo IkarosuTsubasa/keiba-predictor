@@ -6,17 +6,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: cd pipeline && python web_server.py
     healthCheckPath: /
-  - type: worker
-    name: keiba-worker
-    runtime: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: cd pipeline && python race_job_worker.py loop
-    envVars:
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: WORKER_POLL_SECONDS
-        value: "30"
     disk:
       name: pipeline-data
       mountPath: /opt/render/project/src/pipeline/data
