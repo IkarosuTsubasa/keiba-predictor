@@ -95,6 +95,7 @@ def page_template(
     admin_token="",
     admin_enabled=False,
     admin_workspace_html="",
+    show_note_panel=False,
 ):
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
@@ -105,6 +106,14 @@ def page_template(
     encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
     console_href = f"/console?token={encoded_admin_token}" if encoded_admin_token else "/console"
     admin_zone_href = f"{console_href}#admin-zone"
+    note_query = [f"scope_key={quote_plus(scope_value)}"]
+    if current_run:
+        note_query.append(f"run_id={quote_plus(current_run)}")
+    elif current_race:
+        note_query.append(f"run_id={quote_plus(current_race)}")
+    if encoded_admin_token:
+        note_query.append(f"token={encoded_admin_token}")
+    note_page_href = f"/console/note?{'&'.join(note_query)}"
 
     output_panel = ""
     if output_text:
@@ -376,6 +385,66 @@ def page_template(
         </section>
         """
 
+    open_run_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Inspection</div>
+              <h2>Run / Race を開く</h2>
+            </div>
+            <span class="section-chip">view</span>
+          </div>
+          <form id="single-action-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
+            <div>
+              <label>Run ID / Race ID</label>
+              <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="例: 202501010101 または 20250101_123456">
+              <input type="hidden" id="action_run_id" name="run_id">
+            </div>
+            <p class="helper-text">`race_id` でも `run_id` でも入力できます。該当する最新の run を開きます。</p>
+            <button type="submit" id="action-submit">開く</button>
+          </form>
+        </section>
+        """
+
+    console_open_run_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Inspection</div>
+              <h2>Open Run / Race</h2>
+            </div>
+            <span class="section-chip">view</span>
+          </div>
+          <form id="main-open-run-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
+            <div>
+              <label>Run ID / Race ID</label>
+              <input id="main-action-id-input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
+              <input type="hidden" id="main-action-run-id" name="run_id">
+            </div>
+            <p class="helper-text">You can enter either a race_id or a run_id. For race_id, the latest matching run will be opened.</p>
+            <button type="submit" id="main-action-submit">Open</button>
+          </form>
+        </section>
+        """
+
+    note_nav_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Note</div>
+              <h2>Open Note Page</h2>
+            </div>
+            <span class="section-chip">copy</span>
+          </div>
+          <p class="helper-text">Open a dedicated page for note copy and preview. The current scope and run will be carried over automatically.</p>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(note_page_href)}" class="secondary-button">Go To Note Page</a>
+          </div>
+        </section>
+        """
+
     if admin_enabled:
         admin_state = "Unlocked" if admin_token_value else "Locked"
         admin_note = (
@@ -558,7 +627,7 @@ def page_template(
       color: var(--muted);
     }}
     .hero-metric strong {{ font-size: 20px; line-height: 1.18; word-break: break-word; }}
-    .jump-links {{ display: flex; flex-wrap: wrap; gap: 10px; margin: -6px 4px 0; }}
+    .jump-links {{ display: none; }}
     .jump-link {{
       display: inline-flex;
       align-items: center;
@@ -575,7 +644,7 @@ def page_template(
     }}
     .app-shell {{
       display: grid;
-      grid-template-columns: 360px minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 22px;
       min-height: 0;
       align-items: stretch;
@@ -588,7 +657,7 @@ def page_template(
       scrollbar-gutter: stable;
       padding-right: 6px;
     }}
-    .control-rail {{ display: grid; gap: 16px; align-content: start; }}
+    .control-rail {{ display: none; }}
     .content-stage {{ display: grid; gap: 18px; align-content: start; }}
     .panel, .fold-panel {{
       background: var(--surface);
@@ -1123,9 +1192,9 @@ def page_template(
   <div class="page-shell">
     <header class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">Keiba Workstation</div>
-        <h1>Keiba Local Console</h1>
-        <p>One focused workspace for launching runs, reviewing predictions, inspecting marks, and running the current LLM purchase flow without bringing back the old bet engine stack.</p>
+        <div class="eyebrow">Keiba Console</div>
+        <h1>Keiba 管理控制台</h1>
+        <p>这里只保留当前还在使用的后台能力：任务管理、Run 查看、结果页面与日志。历史遗留的左侧操作栏已收起。</p>
         <div class="hero-subline">
           <span class="hero-pill" id="scope-pill">Current scope: {html.escape(scope_label)}</span>
           <span class="hero-pill">{html.escape("Recent runs ready" if recent_options else "Open a scope to load run history")}</span>
@@ -1289,10 +1358,15 @@ def page_template(
             <button type="submit">Record Predictor</button>
           </form>
         </section>
-        {note_copy_panel}
+        {note_copy_panel if show_note_panel else ""}
         {recent_runs_panel}
       </aside>
       <main class="content-stage">
+        {admin_panel}
+        {console_open_run_panel}
+        {note_nav_panel}
+        {recent_runs_panel}
+        {note_copy_panel if show_note_panel else ""}
         {admin_workspace_html}
         {analysis_cluster}
         {battle_cluster}
@@ -1310,10 +1384,10 @@ def page_template(
     const defaultScope = "{html.escape(scope_value)}";
     const currentRaceId = "{html.escape(current_race)}";
     const scopeLabels = {{ central_dirt: "Central Dirt", central_turf: "Central Turf", local: "Local" }};
-    const actionForm = document.getElementById("single-action-form");
-    const actionInput = document.getElementById("action_id_input");
-    const actionRunId = document.getElementById("action_run_id");
-    const actionSubmit = document.getElementById("action-submit");
+    const actionForm = document.getElementById("main-open-run-form");
+    const actionInput = document.getElementById("main-action-id-input");
+    const actionRunId = document.getElementById("main-action-run-id");
+    const actionSubmit = document.getElementById("main-action-submit");
     const llmScopeInput = document.getElementById("llm_scope_key");
     const llmRunInput = document.getElementById("llm_run_id");
     const recordScopeInput = document.getElementById("record_scope_key");

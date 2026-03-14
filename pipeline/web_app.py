@@ -11,6 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -3460,6 +3461,34 @@ def _llm_today_scope_keys(scope_key=""):
     return list(LLM_REPORT_SCOPE_KEYS)
 
 
+def _resolve_llm_today_target_date(target_date="", scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    scoped_rows = []
+    available_dates = []
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        scoped_rows.append(row)
+        date_key = _run_date_key(row)
+        if date_key:
+            available_dates.append(date_key)
+    available_dates = sorted(set(available_dates), reverse=True)
+    if target_date and target_date in available_dates:
+        return target_date, "", scoped_rows
+    if available_dates:
+        fallback_date = available_dates[0]
+        if target_date and target_date != fallback_date:
+            return (
+                fallback_date,
+                f"{target_date} のデータがないため、直近の {fallback_date} を表示しています。",
+                scoped_rows,
+            )
+        return fallback_date, "", scoped_rows
+    return target_date, "", scoped_rows
+
+
 def _llm_today_status_meta(ticket_summary, actual_names):
     status = _safe_text((ticket_summary or {}).get("status", "")).lower()
     actual_ready = any(_safe_text(name) for name in list(actual_names or []))
@@ -3701,6 +3730,7 @@ def build_llm_today_page(date_text="", scope_key=""):
         """
 
     summary_html = "".join(summary_cards) if summary_cards else '<p class="llm-empty-inline">今天还没有模型汇总。</p>'
+    fallback_notice_html = ""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -3817,6 +3847,15 @@ def build_llm_today_page(date_text="", scope_key=""):
       padding: 22px;
       display: grid;
       gap: 14px;
+    }}
+    .llm-notice {{
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(19, 93, 72, 0.14);
+      background: rgba(19, 93, 72, 0.08);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.6;
     }}
     .llm-summary-grid, .llm-today-card-grid {{
       display: grid;
@@ -3952,6 +3991,7 @@ def build_llm_today_page(date_text="", scope_key=""):
         <a href="/">回主控制台</a>
       </form>
     </section>
+    {fallback_notice_html}
     <section class="llm-section">
       <div class="llm-eyebrow">Daily Summary</div>
       <h2>模型总览</h2>
@@ -4028,15 +4068,16 @@ def _format_result_triplet_text_ja(actual_names):
 
 
 def build_llm_today_page_clean(date_text="", scope_key=""):
-    target_date = _normalize_report_date_text(date_text)
+    requested_date = _normalize_report_date_text(date_text)
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = _llm_today_scope_keys(scope_norm)
+    target_date, fallback_notice, combined_rows = _resolve_llm_today_target_date(requested_date, scope_norm)
     actual_result_maps = {
         report_scope_key: _load_actual_result_map(report_scope_key)
         for report_scope_key in scope_keys
     }
     runs = []
-    for row in _load_combined_llm_report_runs():
+    for row in combined_rows:
         report_scope_key = _report_scope_key_for_row(row, scope_norm)
         if report_scope_key not in scope_keys:
             continue
@@ -4235,6 +4276,9 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
         """
 
     summary_html = "".join(summary_cards) if summary_cards else '<p class="llm-empty-inline">この日の集計データはまだありません。</p>'
+    fallback_notice_html = ""
+    if fallback_notice:
+        fallback_notice_html = f'<section class="llm-notice">{html.escape(fallback_notice)}</section>'
     return f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -4481,6 +4525,7 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
         <button type="submit">表示を更新</button>
       </form>
     </section>
+    {fallback_notice_html}
     <section class="llm-section">
       <div class="llm-eyebrow">Daily Summary</div>
       <h2>日次サマリー</h2>
@@ -4824,13 +4869,6 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
               <div>
                 <label>提前多少分钟（手动筛选参考）</label>
                 <input type="number" name="lead_minutes" min="0" value="30">
-              </div>
-              <div>
-                <label>本场场地</label>
-                <select name="target_surface">
-                  <option value="dirt">dirt</option>
-                  <option value="turf">turf</option>
-                </select>
               </div>
               <div>
                 <label>本场距离</label>
@@ -5272,6 +5310,348 @@ def render_console_page(message_text="", error_text="", admin_token=""):
             authorized=_admin_token_valid(admin_token),
         ),
     )
+
+
+def _resolve_console_run_state(scope_key="", selected_run_id="", summary_run_id="", output_text=""):
+    scope_norm = normalize_scope_key(scope_key)
+    run_id = ""
+    run_row = None
+    if scope_norm:
+        if selected_run_id:
+            run_row = resolve_run(selected_run_id, scope_norm)
+            if run_row:
+                run_id = run_row.get("run_id", selected_run_id)
+            else:
+                run_id = selected_run_id
+        else:
+            run_id = parse_run_id(output_text)
+            if run_id:
+                run_row = resolve_run(run_id, scope_norm)
+            else:
+                run_row = resolve_run("", scope_norm)
+                if run_row:
+                    run_id = run_row.get("run_id", "")
+    view_selected_run_id = selected_run_id or run_id or summary_run_id
+    current_race_id = ""
+    if run_row:
+        current_race_id = normalize_race_id(run_row.get("race_id", ""))
+    if not current_race_id:
+        race_candidate = re.sub(r"\D", "", selected_run_id or summary_run_id or "")
+        if re.fullmatch(r"\d{12}", race_candidate):
+            current_race_id = race_candidate
+    return {
+        "scope_key": scope_norm or scope_key or "central_dirt",
+        "run_id": str(run_id or "").strip(),
+        "run_row": dict(run_row or {}),
+        "current_race_id": str(current_race_id or "").strip(),
+        "selected_run_id": str(view_selected_run_id or "").strip(),
+    }
+
+
+def _load_note_workspace(scope_key="", run_id="", run_row=None):
+    mark_note_text = ""
+    llm_note_text = ""
+    daily_report_text = ""
+    weekly_report_text = ""
+    if not run_id:
+        return {
+            "mark_note_text": "",
+            "llm_note_text": "",
+            "daily_report_text": "",
+            "weekly_report_text": "",
+        }
+
+    scope_norm = normalize_scope_key(scope_key)
+    run_row = dict(run_row or {})
+    bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm, run_id)
+    policy_payloads = []
+    actual_result_map = _load_actual_result_map(scope_norm)
+    for payload in load_policy_payloads(scope_norm, run_id, run_row):
+        payload = dict(payload)
+        budget_items = [dict(item) for item in list(payload.get("budgets", []) or [])]
+        live_policy_engine = normalize_policy_engine(payload.get("policy_engine", "gemini"))
+        live_summary = load_policy_bankroll_summary(
+            run_id,
+            (run_row or {}).get("timestamp", ""),
+            policy_engine=live_policy_engine,
+        )
+        live_tickets = load_policy_run_ticket_rows(run_id, policy_engine=live_policy_engine)
+        if budget_items:
+            first = dict(budget_items[0])
+            portfolio = dict(first.get("portfolio", {}) or {})
+            portfolio.setdefault("before", dict(live_summary))
+            portfolio["after"] = dict(live_summary)
+            first["portfolio"] = portfolio
+            if live_tickets:
+                first["tickets"] = live_tickets
+            budget_items[0] = first
+        payload["budgets"] = budget_items
+        policy_payloads.append(payload)
+
+    primary_policy_payload = dict(policy_payloads[0]) if policy_payloads else {}
+    battle_bundle = _build_llm_battle_bundle(
+        scope_norm,
+        run_id,
+        run_row,
+        policy_payloads,
+        actual_result_map,
+    )
+    llm_note_text = str(battle_bundle.get("note_text", "") or "").strip()
+    daily_report_text = str(_build_llm_daily_report_bundle(scope_norm, run_row, actual_result_map).get("text", "") or "").strip()
+    weekly_report_text = str(_build_llm_weekly_report_bundle(scope_norm, run_row, actual_result_map).get("text", "") or "").strip()
+
+    predictor_note_texts = []
+    for spec, pred_path in resolve_predictor_paths(scope_norm, run_id, run_row):
+        if not pred_path or not pred_path.exists():
+            continue
+        predictor_run_row = dict(run_row or {})
+        predictor_run_row["predictions_path"] = str(pred_path)
+        ability_rows, _ability_cols = load_ability_marks_table(scope_norm, run_id, predictor_run_row)
+        if not ability_rows:
+            ability_rows, _mark_cols = load_mark_recommendation_table(scope_norm, run_id, predictor_run_row)
+        pred_csv_text = load_text_file(pred_path)
+        note_text = build_mark_note_text(
+            ability_rows if ability_rows else [],
+            pred_path.name if pred_path else "",
+            pred_csv_text,
+            bet_engine_v3_summary=bet_engine_v3_summary,
+            gemini_policy_payload=primary_policy_payload,
+        ).strip()
+        if note_text:
+            predictor_note_texts.append(f"[{spec['label']}]\n{note_text}")
+    if predictor_note_texts:
+        mark_note_text = "\n\n".join(predictor_note_texts)
+
+    return {
+        "mark_note_text": mark_note_text,
+        "llm_note_text": llm_note_text,
+        "daily_report_text": daily_report_text,
+        "weekly_report_text": weekly_report_text,
+    }
+
+
+def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
+    state = _resolve_console_run_state(scope_key=scope_key, selected_run_id=run_id)
+    scope_norm = normalize_scope_key(state["scope_key"]) or "central_dirt"
+    note_bundle = _load_note_workspace(scope_norm, state["run_id"], state["run_row"])
+    encoded_token = quote_plus(str(admin_token or "").strip()) if admin_token else ""
+    back_href = f"/console?token={encoded_token}" if encoded_token else "/console"
+    encoded_scope = quote_plus(scope_norm)
+    run_value = state["selected_run_id"] or state["current_race_id"]
+    note_href = f"/console/note?scope_key={encoded_scope}"
+    if run_value:
+        note_href += f"&run_id={quote_plus(run_value)}"
+    if encoded_token:
+        note_href += f"&token={encoded_token}"
+
+    def _note_block(title, text_value, dom_id, tone=""):
+        text_value = str(text_value or "").strip()
+        tone_class = f" note-card--{tone}" if tone else ""
+        if not text_value:
+            return f"""
+            <section class="note-card{tone_class}">
+              <div class="note-card-head">
+                <div>
+                  <div class="note-eyebrow">Note</div>
+                  <h2>{html.escape(title)}</h2>
+                </div>
+                <span class="note-chip">empty</span>
+              </div>
+              <p class="note-empty">当前没有可复制的内容。</p>
+            </section>
+            """
+        return f"""
+        <section class="note-card{tone_class}">
+          <div class="note-card-head">
+            <div>
+              <div class="note-eyebrow">Note</div>
+              <h2>{html.escape(title)}</h2>
+            </div>
+            <span class="note-chip">ready</span>
+          </div>
+          <div class="note-actions">
+            <button type="button" class="note-copy-button" data-copy-target="{html.escape(dom_id)}" data-copy-status="{html.escape(dom_id)}-status">复制</button>
+            <span id="{html.escape(dom_id)}-status" class="note-copy-status"></span>
+          </div>
+          <details class="note-preview" open>
+            <summary>预览</summary>
+            <pre>{html.escape(text_value)}</pre>
+          </details>
+          <textarea id="{html.escape(dom_id)}" class="note-source" readonly>{html.escape(text_value)}</textarea>
+        </section>
+        """
+
+    blocks_html = "".join(
+        [
+            _note_block("单场 LLM Note", note_bundle["llm_note_text"], "note-llm", tone="accent"),
+            _note_block("Predictor Note", note_bundle["mark_note_text"], "note-predictor"),
+            _note_block("Daily Report", note_bundle["daily_report_text"], "note-daily"),
+            _note_block("Weekly Report", note_bundle["weekly_report_text"], "note-weekly"),
+        ]
+    )
+
+    run_label = state["run_id"] or "未指定"
+    race_label = state["current_race_id"] or "-"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Note Workspace</title>
+  <style>
+    :root {{
+      --bg: #f3efe7;
+      --paper: rgba(255, 251, 246, 0.95);
+      --ink: #17201a;
+      --muted: #607063;
+      --accent: #145846;
+      --line: rgba(23,31,26,0.1);
+      --shadow: 0 18px 50px rgba(28,33,29,0.08);
+      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--body-font);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
+        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.6), transparent 30%),
+        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
+    }}
+    .note-page {{ max-width: 1320px; margin: 0 auto; padding: 28px 20px 40px; display: grid; gap: 20px; }}
+    .note-hero, .note-tools, .note-card {{
+      background: var(--paper);
+      border: 1px solid rgba(255,255,255,0.75);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }}
+    .note-eyebrow {{ font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }}
+    .note-hero h1, .note-card h2 {{ margin: 6px 0 0; font-family: var(--title-font); }}
+    .note-meta, .note-actions, .note-links {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
+    .note-pill {{
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(23,31,26,0.06);
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .note-links a, .note-links button {{
+      min-height: 40px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .note-tools form {{ display: grid; gap: 12px; }}
+    .note-form-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
+    .note-tools label {{ display: grid; gap: 6px; color: var(--muted); font-size: 13px; }}
+    .note-tools input, .note-tools select {{
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.95);
+      font: inherit;
+      color: var(--ink);
+    }}
+    .note-grid {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }}
+    .note-card-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: start; }}
+    .note-chip {{ padding: 7px 12px; border-radius: 999px; background: rgba(20,88,70,0.1); color: var(--accent); font-size: 12px; font-weight: 700; }}
+    .note-copy-button {{ min-height: 38px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }}
+    .note-copy-status {{ color: var(--muted); font-size: 12px; }}
+    .note-preview summary {{ cursor: pointer; font-weight: 700; }}
+    .note-preview pre {{
+      margin: 12px 0 0;
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(23,31,26,0.05);
+      overflow: auto;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }}
+    .note-source {{ position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }}
+    .note-empty {{ margin: 10px 0 0; color: var(--muted); }}
+    @media (max-width: 760px) {{
+      .note-page {{ padding: 18px 14px 30px; }}
+      .note-hero, .note-tools, .note-card {{ padding: 18px; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="note-page">
+    <section class="note-hero">
+      <div class="note-eyebrow">Console</div>
+      <h1>Note Workspace</h1>
+      <div class="note-meta" style="margin-top:12px;">
+        <span class="note-pill">Scope: {html.escape(scope_norm)}</span>
+        <span class="note-pill">Run: {html.escape(run_label)}</span>
+        <span class="note-pill">Race: {html.escape(race_label)}</span>
+      </div>
+      <div class="note-links" style="margin-top:14px;">
+        <a href="{html.escape(back_href)}">返回控制台</a>
+      </div>
+    </section>
+    <section class="note-tools">
+      <form method="get" action="/console/note">
+        <input type="hidden" name="token" value="{html.escape(admin_token)}">
+        <div class="note-form-grid">
+          <label>范围
+            <select name="scope_key">
+              <option value="central_dirt"{' selected' if scope_norm == 'central_dirt' else ''}>central_dirt</option>
+              <option value="central_turf"{' selected' if scope_norm == 'central_turf' else ''}>central_turf</option>
+              <option value="local"{' selected' if scope_norm == 'local' else ''}>local</option>
+            </select>
+          </label>
+          <label>Run ID / Race ID
+            <input type="text" name="run_id" value="{html.escape(run_value)}" placeholder="202501010101 或 20250101_123456">
+          </label>
+        </div>
+        <div class="note-links">
+          <button type="submit">打开这场 Note</button>
+          <a href="{html.escape(note_href)}">刷新当前页面</a>
+        </div>
+      </form>
+    </section>
+    <section class="note-grid">
+      {blocks_html}
+    </section>
+  </main>
+  <script>
+    const copyButtons = document.querySelectorAll(".note-copy-button");
+    copyButtons.forEach((button) => {{
+      button.addEventListener("click", async () => {{
+        const targetId = button.getAttribute("data-copy-target");
+        const statusId = button.getAttribute("data-copy-status");
+        const target = document.getElementById(targetId);
+        const status = document.getElementById(statusId);
+        if (!target) return;
+        try {{
+          await navigator.clipboard.writeText(target.value || "");
+          if (status) status.textContent = "已复制";
+        }} catch (error) {{
+          target.focus();
+          target.select();
+          document.execCommand("copy");
+          if (status) status.textContent = "已复制";
+        }}
+      }});
+    }});
+  </script>
+</body>
+</html>"""
+
+
+def _target_surface_from_scope(scope_key):
+    return "turf" if str(scope_key or "").strip() == "central_turf" else "dirt"
 
 
 def build_race_jobs_page(message_text="", error_text="", admin_token="", authorized=True):
@@ -6122,6 +6502,13 @@ def console_index(token: str = ""):
     return render_console_page(admin_token=token)
 
 
+@app.get("/console/note", response_class=HTMLResponse)
+def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str = ""):
+    if _admin_token_enabled() and not _admin_token_valid(token):
+        return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
+    return build_note_workspace_page(scope_key=scope_key, run_id=run_id, admin_token=token)
+
+
 @app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
     return build_llm_today_page_clean(date_text=date, scope_key=scope_key)
@@ -6135,7 +6522,6 @@ def create_race_job_view(
     location: str = Form(""),
     race_date: str = Form(""),
     scheduled_off_time: str = Form(""),
-    target_surface: str = Form(""),
     target_distance: str = Form(""),
     target_track_condition: str = Form(""),
     lead_minutes: str = Form("30"),
@@ -6157,8 +6543,8 @@ def create_race_job_view(
         return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
     if not scheduled_off_time.strip():
         return build_race_jobs_page(admin_token=token, error_text="请填写开赛时间。")
-    target_surface = str(target_surface or "").strip().lower()
-    if target_surface not in ("turf", "dirt"):
+    target_surface = _target_surface_from_scope(scope_norm)
+    if False:
         return build_race_jobs_page(admin_token=token, error_text="请填写本场场地：turf 或 dirt。")
     target_distance = str(target_distance or "").strip()
     try:
