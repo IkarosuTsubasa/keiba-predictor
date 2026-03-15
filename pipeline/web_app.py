@@ -2655,7 +2655,57 @@ def _load_actual_result_map(scope_key):
         }
         if current is None or predictor_id == "main":
             result_map[run_id] = item
+    scope_norm = normalize_scope_key(scope_key)
+    for job in load_race_jobs(BASE_DIR):
+        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
+            continue
+        run_id = _safe_text(job.get("current_run_id"))
+        if not run_id:
+            continue
+        item = {
+            "actual_top1": _safe_text(job.get("actual_top1")),
+            "actual_top2": _safe_text(job.get("actual_top2")),
+            "actual_top3": _safe_text(job.get("actual_top3")),
+        }
+        if not any(item.values()):
+            continue
+        current = dict(result_map.get(run_id, {}) or {})
+        if not any(_safe_text(current.get(key)) for key in ("actual_top1", "actual_top2", "actual_top3")):
+            result_map[run_id] = item
     return result_map
+
+
+def _find_actual_result_from_jobs(scope_key, run_id, run_row=None):
+    scope_norm = normalize_scope_key(scope_key)
+    run_id_text = _safe_text(run_id)
+    race_id_text = _safe_text((run_row or {}).get("race_id"))
+    best = {}
+    best_time = ""
+    for job in load_race_jobs(BASE_DIR):
+        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
+            continue
+        job_run_id = _safe_text(job.get("current_run_id"))
+        job_race_id = _safe_text(job.get("race_id"))
+        if run_id_text and job_run_id == run_id_text:
+            matched = True
+        elif race_id_text and job_race_id == race_id_text:
+            matched = True
+        else:
+            matched = False
+        if not matched:
+            continue
+        item = {
+            "actual_top1": _safe_text(job.get("actual_top1")),
+            "actual_top2": _safe_text(job.get("actual_top2")),
+            "actual_top3": _safe_text(job.get("actual_top3")),
+        }
+        if not any(item.values()):
+            continue
+        settled_at = _safe_text(job.get("settled_at")) or _safe_text(job.get("updated_at")) or _safe_text(job.get("created_at"))
+        if not best or settled_at >= best_time:
+            best = item
+            best_time = settled_at
+    return best
 
 
 def _load_name_to_no_map_for_run(scope_key, run_id, run_row):
@@ -2674,6 +2724,8 @@ def _load_name_to_no_map_for_run(scope_key, run_id, run_row):
 
 def _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map):
     actual = dict((actual_result_map or {}).get(run_id, {}) or {})
+    if not any(_safe_text(actual.get(key)) for key in ("actual_top1", "actual_top2", "actual_top3")):
+        actual = _find_actual_result_from_jobs(scope_key, run_id, run_row)
     actual_names = [
         _safe_text(actual.get("actual_top1")),
         _safe_text(actual.get("actual_top2")),
