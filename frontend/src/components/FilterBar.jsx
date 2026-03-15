@@ -17,7 +17,14 @@ export default function FilterBar({ data, search, onApply }) {
     >
       <label className="app-filter-bar__field">
         <span>日付</span>
-        <input type="date" name="date" defaultValue={params.get("date") || data?.target_date || ""} />
+        <div className="app-filter-bar__date-shell">
+          <input
+            type="date"
+            name="date"
+            className="app-filter-bar__date-input"
+            defaultValue={params.get("date") || data?.target_date || ""}
+          />
+        </div>
       </label>
 
       <button type="submit" className="app-filter-bar__submit">
