@@ -3740,6 +3740,12 @@ def build_llm_today_page(date_text="", scope_key=""):
           <h2>今天还没有可展示的 LLM 票据</h2>
           <p>先运行当日的 LLM buy。录入赛果后，这个页面会自动显示已结算结果与收支。</p>
         </section>
+        <form method="post" action="/topup_all_llm_budget" class="stack-form">
+          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
+          <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <button type="submit" class="secondary-button">所有LLM +10000</button>
+        </form>
         """
 
     summary_html = "".join(summary_cards) if summary_cards else '<p class="llm-empty-inline">今天还没有模型汇总。</p>'
