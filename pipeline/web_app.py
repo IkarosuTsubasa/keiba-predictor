@@ -7890,7 +7890,7 @@ def topup_today_all_llm_budget(token: str = Form("")):
             admin_token=token,
             error_text="管理口令无效，不能追加资金。",
         )
-    ledger_date = _default_job_race_date_text()
+    ledger_date = _default_job_race_date_text().replace("-", "")
     amount_yen = 10000
     for engine in ("gemini", "siliconflow", "openai", "grok"):
         add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
