@@ -8010,6 +8010,16 @@ def edit_race_job_details(
     )
     if current is None:
         return build_race_jobs_page(admin_token=token, error_text="找不到要修改的任务。")
+    current_run_id = str(current.get("current_run_id", "") or "").strip()
+    current_race_date = str(current.get("race_date", "") or "").strip()
+    if current_run_id and race_date != current_race_date:
+        locked_date = current_race_date
+        if (not locked_date) and len(current_run_id) >= 8 and current_run_id[:8].isdigit():
+            locked_date = f"{current_run_id[:4]}-{current_run_id[4:6]}-{current_run_id[6:8]}"
+        return render_console_page(
+            admin_token=token,
+            error_text=f"这条任务已经生成 Run，比赛日期不能再修改。请恢复为 {locked_date or '原日期'}。",
+        )
 
     target_surface = _target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
     off_dt = _parse_job_dt_text(scheduled_off_time)

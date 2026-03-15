@@ -296,8 +296,8 @@ def main():
             if norm and norm not in pred_name_set
         ]
         if missing:
-            print(f"[ERROR] {spec['label']} missing actual horses in predictions: {', '.join(missing)}")
-            sys.exit(1)
+            print(f"[WARN] {spec['label']} missing actual horses in predictions: {', '.join(missing)}")
+            continue
 
         pred_top = df.sort_values(score_key, ascending=False).head(3)
         pred_names_raw = pred_top["HorseName"].tolist()
@@ -367,11 +367,11 @@ def main():
                 "risk_score": "",
             }
         )
-    if not predictor_rows:
-        print("No predictor outputs found for this run.")
-        sys.exit(1)
-    replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
-    print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
+    if predictor_rows:
+        replace_rows_for_run(PRED_RESULTS_PATH, list(predictor_rows[0].keys()), run_id, predictor_rows)
+        print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
+    else:
+        print("[WARN] No predictor outputs were recorded for this run; continue with ticket settlement only.")
     for policy_engine in ("gemini", "siliconflow", "openai", "grok"):
         settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw, policy_engine=policy_engine)
         if settlement:
