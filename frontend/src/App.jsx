@@ -129,8 +129,9 @@ export default function App() {
           {races.length ? <RaceGrid races={races} /> : <EmptyRaceState />}
         </section>
 
-        <SecondaryStatsPanel data={data} />
       </div>
+
+      <SecondaryStatsPanel data={data} />
     </main>
   );
 }
