@@ -46,6 +46,7 @@ from llm_state import reset_llm_state as reset_llm_state_files
 from local_env import load_local_env
 from race_job_store import (
     apply_job_action as apply_race_job_action,
+    compute_initial_status as compute_race_job_initial_status,
     create_job as create_race_job,
     load_jobs as load_race_jobs,
     save_artifact as save_race_job_artifact,
@@ -5690,6 +5691,8 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
         """
 
     default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
+    default_date = _default_job_race_date_text()
+    default_date = _default_job_race_date_text()
     return f"""
     <section class="content-cluster" id="admin-zone">
       <div class="cluster-head">
@@ -5782,9 +5785,12 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
             </div>
             <span class="section-chip">upload</span>
           </div>
+          <style>
+            .admin-upload-grid > div:nth-child(7) {{ display: none; }}
+          </style>
           <form class="stack-form" method="post" action="/console/tasks/create" enctype="multipart/form-data">
             <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div class="field-grid">
+            <div class="field-grid admin-upload-grid">
               <div>
                 <label>范围</label>
                 <select name="scope_key">
@@ -5803,7 +5809,7 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
               </div>
               <div>
                 <label>比赛日期（展示用）</label>
-                <input type="date" name="race_date">
+                <input type="date" name="race_date" value="{html.escape(default_date)}">
               </div>
               <div>
                 <label>开赛时间（记录用）</label>
@@ -5951,6 +5957,68 @@ def _race_job_settle_form_clean(row, admin_token=""):
     """
 
 
+def _race_job_edit_form_clean(row, admin_token=""):
+    row = dict(row or {})
+    job_id = str(row.get("job_id", "") or "").strip()
+    race_id = str(row.get("race_id", "") or "").strip()
+    location = str(row.get("location", "") or "").strip()
+    race_date = str(row.get("race_date", "") or "").strip() or _default_job_race_date_text()
+    scheduled_off_time = str(row.get("scheduled_off_time", "") or "").strip()
+    lead_minutes = str(row.get("lead_minutes", 30) or 30).strip() or "30"
+    target_distance = str(row.get("target_distance", "") or "").strip()
+    target_track_condition = str(row.get("target_track_condition", "") or "").strip()
+    notes = str(row.get("notes", "") or "").strip()
+    return f"""
+    <details class="panel-subtle" style="margin-top:12px;">
+      <summary style="cursor:pointer;font-weight:700;">编辑任务信息</summary>
+      <form method="post" action="/console/tasks/edit" class="stack-form" style="margin-top:12px;">
+        <input type="hidden" name="token" value="{html.escape(admin_token)}">
+        <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+        <div class="field-grid">
+          <div>
+            <label>Race ID</label>
+            <input type="text" name="race_id" value="{html.escape(race_id)}">
+          </div>
+          <div>
+            <label>比赛地点</label>
+            <input type="text" name="location" value="{html.escape(location)}">
+          </div>
+          <div>
+            <label>比赛日期</label>
+            <input type="date" name="race_date" value="{html.escape(race_date)}">
+          </div>
+          <div>
+            <label>开赛时间</label>
+            <input type="datetime-local" name="scheduled_off_time" value="{html.escape(scheduled_off_time[:16])}">
+          </div>
+          <div>
+            <label>提前分钟</label>
+            <input type="number" name="lead_minutes" min="0" value="{html.escape(lead_minutes)}">
+          </div>
+          <div>
+            <label>比赛距离</label>
+            <input type="number" name="target_distance" min="100" step="100" value="{html.escape(target_distance)}">
+          </div>
+          <div>
+            <label>场地状态</label>
+            <select name="target_track_condition">
+              <option value="良"{' selected' if target_track_condition == '良' else ''}>良</option>
+              <option value="稍重"{' selected' if target_track_condition == '稍重' else ''}>稍重</option>
+              <option value="重"{' selected' if target_track_condition == '重' else ''}>重</option>
+              <option value="不良"{' selected' if target_track_condition == '不良' else ''}>不良</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label>备注</label>
+          <textarea name="notes">{html.escape(notes)}</textarea>
+        </div>
+        <button type="submit" class="secondary-button">保存修改</button>
+      </form>
+    </details>
+    """
+
+
 def _admin_job_card_html_clean(row, admin_token=""):
     row = dict(row or {})
     job_id = str(row.get("job_id", "") or "").strip()
@@ -6024,6 +6092,7 @@ def _admin_job_card_html_clean(row, admin_token=""):
         {_race_job_action_buttons_clean(job_id, status, admin_token=admin_token)}
         {open_links}
       </div>
+      {_race_job_edit_form_clean(row, admin_token=admin_token)}
       {_race_job_settle_form_clean(row, admin_token=admin_token)}
     </section>
     """
@@ -6110,6 +6179,7 @@ def build_admin_workspace_html_clean(message_text="", error_text="", admin_token
         """
 
     default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
+    default_date = _default_job_race_date_text()
     return f"""
     <section class="content-cluster" id="admin-zone">
       <div class="cluster-head">
@@ -6179,7 +6249,7 @@ def build_admin_workspace_html_clean(message_text="", error_text="", admin_token
               </div>
               <div>
                 <label>比赛日期</label>
-                <input type="date" name="race_date">
+	                <input type="date" name="race_date" value="{html.escape(default_date)}">
               </div>
               <div>
                 <label>开赛时间</label>
@@ -6191,10 +6261,6 @@ def build_admin_workspace_html_clean(message_text="", error_text="", admin_token
               </div>
               <div>
                 <label>本场场地</label>
-                <select name="target_surface">
-                  <option value="dirt">dirt</option>
-                  <option value="turf">turf</option>
-                </select>
               </div>
               <div>
                 <label>本场距离</label>
@@ -6600,6 +6666,28 @@ def _target_surface_from_scope(scope_key):
     return "turf" if str(scope_key or "").strip() == "central_turf" else "dirt"
 
 
+def _parse_job_dt_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _format_job_dt_text(value):
+    if not value:
+        return ""
+    return value.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _default_job_race_date_text():
+    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
 def _import_history_zip(base_dir, archive_bytes, overwrite=False):
     data_root = Path(base_dir) / "data"
     data_root.mkdir(parents=True, exist_ok=True)
@@ -6932,6 +7020,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
         auth_notice = '<span>管理口令：未启用</span>'
 
     default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
+    default_date = _default_job_race_date_text()
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -7578,6 +7667,7 @@ def create_race_job_view(
         )
     race_id = normalize_race_id(race_id)
     scope_norm = normalize_scope_key(scope_key)
+    race_date = str(race_date or "").strip() or _default_job_race_date_text()
     if not scope_norm:
         return build_race_jobs_page(admin_token=token, error_text="范围无效。")
     if not race_id:
@@ -7732,6 +7822,151 @@ def internal_run_due(token: str = ""):
     summary = run_due_jobs_once()
     ok = not bool(list(summary.get("errors", []) or []))
     return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+
+
+"""
+@app.post("/console/tasks/edit", response_class=HTMLResponse)
+def edit_race_job_details(
+    token: str = Form(""),
+    job_id: str = Form(""),
+    race_id: str = Form(""),
+    location: str = Form(""),
+    race_date: str = Form(""),
+    scheduled_off_time: str = Form(""),
+    target_distance: str = Form(""),
+    target_track_condition: str = Form(""),
+    lead_minutes: str = Form("30"),
+    notes: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="邂｡逅・哨莉､譌謨茨ｼ梧裏豕穂ｿｮ謾ｹ莉ｻ蜉｡縲・,
+        )
+    race_id = normalize_race_id(race_id)
+    if not race_id:
+        return build_race_jobs_page(admin_token=token, error_text="Race ID 荳崎・荳ｺ遨ｺ縲・)
+    race_date = str(race_date or "").strip() or _default_job_race_date_text()
+    scheduled_off_time = str(scheduled_off_time or "").strip()
+    if not scheduled_off_time:
+        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀吝ｼ襍帶慮髣ｴ縲・)
+    try:
+        target_distance_value = int(str(target_distance or "").strip())
+    except ValueError:
+        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀呎悽蝨ｺ霍晉ｦｻ・御ｾ句ｦ・1200 謌・1800縲・)
+    if target_distance_value <= 0:
+        return build_race_jobs_page(admin_token=token, error_text="霍晉ｦｻ蠢・｡ｻ螟ｧ莠・0縲・)
+    target_track_condition = str(target_track_condition or "").strip()
+    if target_track_condition not in ("良", "稍重", "重", "不良"):
+        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀呎悽蝨ｺ鬩ｬ蝨ｺ迥ｶ諤・ｼ壻良 / 稍重 / 重 / 不良縲・)
+    try:
+        lead_value = max(0, int(str(lead_minutes or "30").strip() or "30"))
+    except ValueError:
+        lead_value = 30
+
+    current = next((item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "") or "").strip() == str(job_id or "").strip()), None)
+    if current is None:
+        return build_race_jobs_page(admin_token=token, error_text="謇ｾ荳榊芦蟇ｹ蠎皮噪莉ｻ蜉｡縲・)
+
+    target_surface = _target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
+    off_dt = _parse_job_dt_text(scheduled_off_time)
+    process_after_dt = off_dt - timedelta(minutes=lead_value) if off_dt else None
+
+    def _edit_job(row, now_text):
+        row["race_id"] = race_id
+        row["location"] = str(location or "").strip()
+        row["race_date"] = race_date
+        row["scheduled_off_time"] = _format_job_dt_text(off_dt) or scheduled_off_time
+        row["process_after_time"] = _format_job_dt_text(process_after_dt)
+        row["target_surface"] = target_surface
+        row["target_distance"] = str(target_distance_value)
+        row["target_track_condition"] = target_track_condition
+        row["lead_minutes"] = lead_value
+        row["notes"] = str(notes or "").strip()
+        if str(row.get("status", "") or "").strip() in ("uploaded", "scheduled"):
+            row["status"] = compute_race_job_initial_status(row)
+
+    job = update_race_job(BASE_DIR, job_id, _edit_job)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="謇ｾ荳榊芦蟇ｹ蠎皮噪莉ｻ蜉｡縲・)
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 蟾ｲ菫晏ｭ倥せ莉ｻ蜉｡蝗樊焚")
+
+
+"""
+
+
+@app.post("/console/tasks/edit", response_class=HTMLResponse)
+def edit_race_job_details(
+    token: str = Form(""),
+    job_id: str = Form(""),
+    race_id: str = Form(""),
+    location: str = Form(""),
+    race_date: str = Form(""),
+    scheduled_off_time: str = Form(""),
+    target_distance: str = Form(""),
+    target_track_condition: str = Form(""),
+    lead_minutes: str = Form("30"),
+    notes: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，不能修改任务。",
+        )
+    race_id = normalize_race_id(race_id)
+    if not race_id:
+        return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
+    race_date = str(race_date or "").strip() or _default_job_race_date_text()
+    scheduled_off_time = str(scheduled_off_time or "").strip()
+    if not scheduled_off_time:
+        return build_race_jobs_page(admin_token=token, error_text="开赛时间不能为空。")
+    try:
+        target_distance_value = int(str(target_distance or "").strip())
+    except ValueError:
+        return build_race_jobs_page(admin_token=token, error_text="比赛距离必须是数字，例如 1200 或 1800。")
+    if target_distance_value <= 0:
+        return build_race_jobs_page(admin_token=token, error_text="比赛距离必须大于 0。")
+    target_track_condition = str(target_track_condition or "").strip()
+    if target_track_condition not in ("良", "稍重", "重", "不良"):
+        return build_race_jobs_page(admin_token=token, error_text="场地状态只能是 良 / 稍重 / 重 / 不良。")
+    try:
+        lead_value = max(0, int(str(lead_minutes or "30").strip() or "30"))
+    except ValueError:
+        lead_value = 30
+
+    current = next(
+        (item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "") or "").strip() == str(job_id or "").strip()),
+        None,
+    )
+    if current is None:
+        return build_race_jobs_page(admin_token=token, error_text="找不到要修改的任务。")
+
+    target_surface = _target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
+    off_dt = _parse_job_dt_text(scheduled_off_time)
+    if off_dt is None:
+        return build_race_jobs_page(admin_token=token, error_text="开赛时间格式不正确。")
+    process_after_dt = off_dt - timedelta(minutes=lead_value) if off_dt else None
+
+    def _edit_job(row, now_text):
+        row["race_id"] = race_id
+        row["location"] = str(location or "").strip()
+        row["race_date"] = race_date
+        row["scheduled_off_time"] = _format_job_dt_text(off_dt) or scheduled_off_time
+        row["process_after_time"] = _format_job_dt_text(process_after_dt)
+        row["target_surface"] = target_surface
+        row["target_distance"] = str(target_distance_value)
+        row["target_track_condition"] = target_track_condition
+        row["lead_minutes"] = lead_value
+        row["notes"] = str(notes or "").strip()
+        if str(row.get("status", "") or "").strip() in ("uploaded", "scheduled"):
+            row["status"] = compute_race_job_initial_status(row)
+
+    job = update_race_job(BASE_DIR, job_id, _edit_job)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="找不到要修改的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存修改。")
 
 
 @app.post("/console/tasks/update", response_class=HTMLResponse)
