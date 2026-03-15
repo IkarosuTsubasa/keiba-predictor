@@ -1,4 +1,6 @@
 const app = document.getElementById("app");
+const APP_BASE_PATH = "/keiba";
+const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
 
 function formatYen(value) {
   const amount = Number(value || 0);
@@ -307,7 +309,7 @@ function renderBoard(data) {
   document.getElementById("board-filters")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const params = buildQueryFromForm(event.currentTarget);
-    const nextUrl = params.toString() ? `/llm_today?${params.toString()}` : "/llm_today";
+    const nextUrl = params.toString() ? `${APP_BASE_PATH}?${params.toString()}` : APP_BASE_PATH;
     window.history.pushState({}, "", nextUrl);
     loadBoard();
   });
@@ -325,7 +327,7 @@ async function loadBoard() {
   if (scopeKey) {
     query.set("scope_key", scopeKey);
   }
-  const url = query.toString() ? `/api/public/board?${query.toString()}` : "/api/public/board";
+  const url = query.toString() ? `${PUBLIC_BOARD_API_PATH}?${query.toString()}` : PUBLIC_BOARD_API_PATH;
   try {
     const response = await fetch(url, { headers: { Accept: "application/json" } });
     if (!response.ok) {

@@ -5,12 +5,15 @@ import PageSectionHeader from "./components/PageSectionHeader";
 import RaceGrid, { sortRacesForDisplay } from "./components/RaceGrid";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 
+const APP_BASE_PATH = "/keiba";
+const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
+
 function buildQuery(search) {
   return search ? `?${search}` : "";
 }
 
 function navigateWithSearch(nextSearch) {
-  const url = nextSearch ? `/llm_today?${nextSearch}` : "/llm_today";
+  const url = nextSearch ? `${APP_BASE_PATH}?${nextSearch}` : APP_BASE_PATH;
   window.history.pushState({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
@@ -26,7 +29,7 @@ function useBoardData(search) {
     let alive = true;
     setState({ loading: true, error: "", data: null });
 
-    fetch(`/api/public/board${buildQuery(search)}`, {
+    fetch(`${PUBLIC_BOARD_API_PATH}${buildQuery(search)}`, {
       headers: { Accept: "application/json" },
     })
       .then((response) => {

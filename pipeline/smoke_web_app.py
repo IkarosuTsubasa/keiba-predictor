@@ -20,9 +20,13 @@ def pick_latest_run_id():
 
 def main():
     body = web_app.index()
-    assert_true(str(getattr(body, "path", "")).endswith("index.html"), "index should return public frontend file")
+    assert_true(getattr(body, "status_code", 0) in (302, 307), "index should redirect to /keiba")
+    assert_true(getattr(body, "headers", {}).get("location") == web_app.PUBLIC_BASE_PATH, "index should redirect to /keiba")
+
+    keiba_home = web_app.llm_today()
+    assert_true(str(getattr(keiba_home, "path", "")).endswith("index.html"), "keiba home should return public frontend file")
     expected_root = "public_frontend_dist" if (Path(web_app.BASE_DIR) / "public_frontend_dist" / "index.html").exists() else "public_frontend"
-    assert_true(expected_root in str(getattr(body, "path", "")), "index should return active public frontend")
+    assert_true(expected_root in str(getattr(keiba_home, "path", "")), "keiba home should return active public frontend")
 
     llm_today_html = web_app.llm_today()
     assert_true(str(getattr(llm_today_html, "path", "")).endswith("index.html"), "llm_today should return public frontend file")
@@ -33,9 +37,9 @@ def main():
     assert_true("Run Pipeline" in console_html, "console missing Run Pipeline block")
     assert_true('action="/view_run"' in console_html, "console missing view_run form")
     assert_true('id="admin-zone"' in console_html, "console missing admin workspace")
-    assert_true('action="/console/tasks/create"' in console_html, "console missing merged task create form")
-    assert_true('action="/console/tasks/import_archive"' in console_html, "console missing import archive form")
-    assert_true("/console/note" in console_html, "console missing note page link")
+    assert_true(f'action="{web_app.CONSOLE_BASE_PATH}/tasks/create"' in console_html, "console missing merged task create form")
+    assert_true(f'action="{web_app.CONSOLE_BASE_PATH}/tasks/import_archive"' in console_html, "console missing import archive form")
+    assert_true(f"{web_app.CONSOLE_BASE_PATH}/note" in console_html, "console missing note page link")
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"

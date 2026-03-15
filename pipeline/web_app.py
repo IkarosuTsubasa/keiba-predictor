@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
@@ -81,9 +81,16 @@ OFFLINE_EVAL = BASE_DIR / "offline_eval.py"
 INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
+PUBLIC_BASE_PATH = "/keiba"
+CONSOLE_BASE_PATH = f"{PUBLIC_BASE_PATH}/console"
+PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
+PUBLIC_LEGACY_ASSET_BASE_PATH = f"{PUBLIC_BASE_PATH}/public"
+PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
+PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
 app = FastAPI()
 load_local_env(BASE_DIR, override=False)
 app.mount("/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="public-assets")
+app.mount(f"{PUBLIC_BASE_PATH}/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="keiba-public-assets")
 
 
 def _active_public_frontend_dir():
@@ -92,6 +99,24 @@ def _active_public_frontend_dir():
     return PUBLIC_FRONTEND_LEGACY_DIR
 
 
+def _prefix_public_html_routes(content=""):
+    html_text = str(content or "")
+    replacements = (
+        ('href="/console', f'href="{CONSOLE_BASE_PATH}'),
+        ('action="/console', f'action="{CONSOLE_BASE_PATH}'),
+        ('href="/llm_today"', f'href="{PUBLIC_BASE_PATH}"'),
+        ('action="/llm_today"', f'action="{PUBLIC_BASE_PATH}"'),
+        ('href="/site-icon.png"', f'href="{PUBLIC_SITE_ICON_PATH}"'),
+        ('href="/favicon.ico"', f'href="{PUBLIC_FAVICON_PATH}"'),
+        ('src="/public/', f'src="{PUBLIC_LEGACY_ASSET_BASE_PATH}/'),
+        ('href="/public/', f'href="{PUBLIC_LEGACY_ASSET_BASE_PATH}/'),
+    )
+    for source, target in replacements:
+        html_text = html_text.replace(source, target)
+    return html_text
+
+
+@app.get(PUBLIC_SITE_ICON_PATH)
 @app.get("/site-icon.png")
 def public_site_icon():
     icon_path = _active_public_frontend_dir() / "site-icon.png"
@@ -100,6 +125,7 @@ def public_site_icon():
     raise HTTPException(status_code=404, detail="site icon not found")
 
 
+@app.get(PUBLIC_FAVICON_PATH)
 @app.get("/favicon.ico")
 def public_favicon():
     icon_path = _active_public_frontend_dir() / "site-icon.png"
@@ -206,7 +232,7 @@ def build_console_gate_page(admin_token="", error_text=""):
     error_block = ""
     if error_text:
         error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
-    return f"""<!doctype html>
+    return _prefix_public_html_routes(f"""<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -323,7 +349,7 @@ def build_console_gate_page(admin_token="", error_text=""):
     </section>
   </main>
 </body>
-</html>"""
+</html>""")
 
 
 def load_runs(scope_key):
@@ -6811,7 +6837,7 @@ def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
 
     run_label = state["run_id"] or "未指定"
     race_label = state["current_race_id"] or "-"
-    return f"""<!doctype html>
+    return _prefix_public_html_routes(f"""<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -6966,7 +6992,7 @@ def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
     }});
   </script>
 </body>
-</html>"""
+</html>""")
 
 
 def _target_surface_from_scope(scope_key):
@@ -7868,7 +7894,7 @@ def render_page(
             mark_note_text = "\n\n".join(predictor_note_texts)
         if predictor_summary_sections:
             summary_table_html = "".join(predictor_summary_sections)
-    return page_template(
+    return _prefix_public_html_routes(page_template(
         output_text=output_text,
         error_text=error_text,
         run_options=run_options,
@@ -7899,7 +7925,7 @@ def render_page(
         admin_token=admin_token,
         admin_enabled=_admin_token_enabled(),
         admin_workspace_html=admin_workspace_html,
-    )
+    ))
 
 
 def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
@@ -7912,11 +7938,12 @@ def _admin_execution_denied(message, scope_key="", token="", selected_run_id="",
     )
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(token: str = ""):
-    return FileResponse(_active_public_frontend_dir() / "index.html")
+@app.get("/", include_in_schema=False)
+def index():
+    return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
 
 
+@app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
 @app.get("/console", response_class=HTMLResponse)
 def console_index(token: str = "", show_settled: str = ""):
     if _admin_token_enabled() and not _admin_token_valid(token):
@@ -7925,6 +7952,7 @@ def console_index(token: str = "", show_settled: str = ""):
     return render_console_page(admin_token=token, show_settled=show_settled_flag)
 
 
+@app.get(f"{CONSOLE_BASE_PATH}/note", response_class=HTMLResponse)
 @app.get("/console/note", response_class=HTMLResponse)
 def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str = ""):
     if _admin_token_enabled() and not _admin_token_valid(token):
@@ -7932,26 +7960,31 @@ def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str =
     return build_note_workspace_page(scope_key=scope_key, run_id=run_id, admin_token=token)
 
 
+@app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 @app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
     return FileResponse(_active_public_frontend_dir() / "index.html")
 
 
+@app.get(f"{PUBLIC_API_BASE_PATH}/board")
 @app.get("/api/public/board")
 def public_board_api(date: str = "", scope_key: str = ""):
     return JSONResponse(build_public_board_payload(date_text=date, scope_key=scope_key))
 
 
+@app.get(f"{PUBLIC_LEGACY_ASSET_BASE_PATH}/app.js")
 @app.get("/public/app.js")
 def public_frontend_app_js():
     return FileResponse(PUBLIC_FRONTEND_LEGACY_DIR / "app.js", media_type="application/javascript")
 
 
+@app.get(f"{PUBLIC_LEGACY_ASSET_BASE_PATH}/styles.css")
 @app.get("/public/styles.css")
 def public_frontend_styles():
     return FileResponse(PUBLIC_FRONTEND_LEGACY_DIR / "styles.css", media_type="text/css")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/create", response_class=HTMLResponse)
 @app.post("/console/tasks/create", response_class=HTMLResponse)
 def create_race_job_view(
     token: str = Form(""),
@@ -8041,6 +8074,7 @@ def create_race_job_view(
     return build_race_jobs_page(admin_token=token, message_text=f"已创建任务 {job['job_id']}。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/import_archive", response_class=HTMLResponse)
 @app.post("/console/tasks/import_archive", response_class=HTMLResponse)
 async def import_history_archive(
     token: str = Form(""),
@@ -8076,6 +8110,7 @@ async def import_history_archive(
     return build_race_jobs_page(admin_token=token, message_text=message)
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/scan_due", response_class=HTMLResponse)
 @app.post("/console/tasks/scan_due", response_class=HTMLResponse)
 def scan_race_jobs_due(token: str = Form("")):
     if not _admin_token_valid(token):
@@ -8090,6 +8125,7 @@ def scan_race_jobs_due(token: str = Form("")):
     return build_race_jobs_page(admin_token=token, message_text="当前没有到点任务。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/run_due_now", response_class=HTMLResponse)
 @app.post("/console/tasks/run_due_now", response_class=HTMLResponse)
 def run_due_race_jobs_now(token: str = Form("")):
     if not _admin_token_valid(token):
@@ -8132,6 +8168,7 @@ def internal_run_due(token: str = ""):
     return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/topup_today_all_llm", response_class=HTMLResponse)
 @app.post("/console/tasks/topup_today_all_llm", response_class=HTMLResponse)
 def topup_today_all_llm_budget(token: str = Form("")):
     if not _admin_token_valid(token):
@@ -8150,6 +8187,7 @@ def topup_today_all_llm_budget(token: str = Form("")):
 
 
 """
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/edit", response_class=HTMLResponse)
 @app.post("/console/tasks/edit", response_class=HTMLResponse)
 def edit_race_job_details(
     token: str = Form(""),
@@ -8304,6 +8342,7 @@ def edit_race_job_details(
     return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存修改。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/update", response_class=HTMLResponse)
 @app.post("/console/tasks/update", response_class=HTMLResponse)
 def update_race_job_view(
     token: str = Form(""),
@@ -8322,6 +8361,7 @@ def update_race_job_view(
     return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已执行动作：{action}。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/process_now", response_class=HTMLResponse)
 @app.post("/console/tasks/process_now", response_class=HTMLResponse)
 def process_race_job_now(
     token: str = Form(""),
@@ -8353,6 +8393,7 @@ def process_race_job_now(
     )
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/queue_settle", response_class=HTMLResponse)
 @app.post("/console/tasks/queue_settle", response_class=HTMLResponse)
 def queue_race_job_settle(
     token: str = Form(""),
@@ -8385,6 +8426,7 @@ def queue_race_job_settle(
     return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存赛果并加入结算队列。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/settle_now", response_class=HTMLResponse)
 @app.post("/console/tasks/settle_now", response_class=HTMLResponse)
 def settle_race_job_now(
     token: str = Form(""),
