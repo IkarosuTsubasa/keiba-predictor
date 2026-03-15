@@ -6140,6 +6140,10 @@ def build_admin_filter_panel(admin_token="", show_settled=False):
       </div>
       <div class="copy-row">
         <a href="/console?token={html.escape(admin_token)}&show_settled={toggle_value}" class="secondary-button">{toggle_label}</a>
+        <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <button type="submit" class="secondary-button">所有LLM +10000</button>
+        </form>
       </div>
     </section>
     """
@@ -7882,16 +7886,15 @@ def internal_run_due(token: str = ""):
 @app.post("/console/tasks/topup_today_all_llm", response_class=HTMLResponse)
 def topup_today_all_llm_budget(token: str = Form("")):
     if not _admin_token_valid(token):
-        return build_race_jobs_page(
+        return render_console_page(
             admin_token=token,
-            authorized=False,
             error_text="管理口令无效，不能追加资金。",
         )
     ledger_date = _default_job_race_date_text()
     amount_yen = 10000
     for engine in ("gemini", "siliconflow", "openai", "grok"):
         add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
-    return build_race_jobs_page(
+    return render_console_page(
         admin_token=token,
         message_text=f"已按 {ledger_date} 给四个 LLM 各追加 10000。",
     )
