@@ -9,3 +9,4 @@ python-multipart
 scikit-learn
 selenium
 uvicorn
+xai-sdk
