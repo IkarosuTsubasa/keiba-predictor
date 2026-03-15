@@ -5945,19 +5945,19 @@ def _race_job_settle_form_clean(row, admin_token=""):
     if not current_run_id:
         return ""
     status_text = str((row or {}).get("status", "") or "").strip().lower()
-    if status_text not in ("ready", "queued_settle", "settling", "settled"):
+    if status_text not in ("ready", "queued_settle", "settling", "settled", "failed"):
         return ""
     job_id = str((row or {}).get("job_id", "") or "").strip()
     top1 = str((row or {}).get("actual_top1", "") or "").strip()
     top2 = str((row or {}).get("actual_top2", "") or "").strip()
     top3 = str((row or {}).get("actual_top3", "") or "").strip()
-    if top1 and top2 and top3:
+    if status_text == "settled":
         return ""
     return f"""
     <section class="job-settle-panel">
       <div class="job-settle-head">
         <strong>Step 3: 录入赛果并结算</strong>
-        <span>填写 1-3 着马名后，可以直接结算，也可以先加入结算队列。</span>
+        <span>填写 1-3 着马名后直接结算。</span>
       </div>
       <div class="job-settle-actions">
         <form method="post" action="/console/tasks/settle_now" class="job-settle-form">
@@ -5967,14 +5967,6 @@ def _race_job_settle_form_clean(row, admin_token=""):
           <input type="text" name="actual_top2" value="{html.escape(top2)}" placeholder="2着马名">
           <input type="text" name="actual_top3" value="{html.escape(top3)}" placeholder="3着马名">
           <button type="submit">立即结算</button>
-        </form>
-        <form method="post" action="/console/tasks/queue_settle" class="job-settle-form">
-          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(top1)}" placeholder="1着马名">
-          <input type="text" name="actual_top2" value="{html.escape(top2)}" placeholder="2着马名">
-          <input type="text" name="actual_top3" value="{html.escape(top3)}" placeholder="3着马名">
-          <button type="submit">加入结算队列</button>
         </form>
       </div>
     </section>
@@ -8135,27 +8127,29 @@ def settle_race_job_now(
     actual_top3: str = Form(""),
 ):
     if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法结算任务。",
-        )
+        return render_console_page(admin_token=token, error_text="管理口令无效，无法结算任务。")
     names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
     if not all(names):
-        return build_race_jobs_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
+        return render_console_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
     try:
         from race_job_runner import settle_race_job
 
         summary = settle_race_job(BASE_DIR, job_id, names)
     except Exception as exc:
-        try:
-            from race_job_runner import fail_race_job
+        def _restore_settle_retry(row, now_text):
+            row["status"] = "ready"
+            row["actual_top1"] = names[0]
+            row["actual_top2"] = names[1]
+            row["actual_top3"] = names[2]
+            row["error_message"] = str(exc)
+            row["last_settlement_output"] = str(exc)
 
-            fail_race_job(BASE_DIR, job_id, str(exc))
+        try:
+            update_race_job(BASE_DIR, job_id, _restore_settle_retry)
         except Exception:
             pass
-        return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 结算失败：{exc}")
-    return build_race_jobs_page(
+        return render_console_page(admin_token=token, error_text=f"{job_id} 结算失败：{exc}")
+    return render_console_page(
         admin_token=token,
         message_text=f"{job_id} 已完成结算。run_id={str((summary or {}).get('run_id', '') or '-')}",
     )
