@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import AiPickSummary from "./AiPickSummary";
 import ExpandablePredictionPanel from "./ExpandablePredictionPanel";
 import RaceCardHeader from "./RaceCardHeader";
-import RaceInsightBadge from "./RaceInsightBadge";
 
 export default function RaceCard({ race }) {
   const [expanded, setExpanded] = useState(false);
@@ -10,14 +9,14 @@ export default function RaceCard({ race }) {
 
   return (
     <article className={`race-card${expanded ? " race-card--expanded" : ""}`}>
-      <RaceCardHeader race={race} />
-
-      <div className="race-card__insight-row">
-        <RaceInsightBadge cards={cards} />
+      <RaceCardHeader
+        race={race}
+        actions={
         <button type="button" className="race-card__toggle" onClick={() => setExpanded((value) => !value)}>
           {expanded ? "閉じる" : "詳細を見る"}
         </button>
-      </div>
+        }
+      />
 
       <div className="race-card__summary-grid">
         {cards.map((card) => (

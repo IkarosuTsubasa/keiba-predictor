@@ -140,6 +140,16 @@ select {
   background: rgba(17, 25, 37, 0.95);
 }
 
+.app-filter-bar__field input[type="date"] {
+  color-scheme: dark;
+}
+
+.app-filter-bar__field input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.75);
+  opacity: 0.95;
+  cursor: pointer;
+}
+
 .app-filter-bar__submit,
 .race-card__toggle,
 .public-screen-state__panel button {
@@ -328,6 +338,13 @@ select {
   min-height: 46px;
 }
 
+.race-card-header__result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+}
+
 .race-card-header__result-label {
   color: var(--muted);
   font-size: 11px;
@@ -341,11 +358,37 @@ select {
   line-height: 1.55;
 }
 
-.race-card__insight-row {
+.race-card-header__result-body {
+  display: grid;
+  gap: 8px;
+}
+
+.race-card-header__result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.race-card-header__result-list li {
   display: flex;
-  justify-content: space-between;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
+  color: #e7edf6;
+  line-height: 1.45;
+}
+
+.race-card-header__result-medal {
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.race-card-header__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
 }
 
 .race-insight-badge {
@@ -719,7 +762,7 @@ select {
   .page-section-header,
   .secondary-stats-panel__header,
   .race-card-header__main,
-  .race-card__insight-row {
+  .race-card-header__result-row {
     flex-direction: column;
     align-items: start;
   }
