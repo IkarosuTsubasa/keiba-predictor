@@ -92,6 +92,22 @@ def _active_public_frontend_dir():
     return PUBLIC_FRONTEND_LEGACY_DIR
 
 
+@app.get("/site-icon.png")
+def public_site_icon():
+    icon_path = _active_public_frontend_dir() / "site-icon.png"
+    if icon_path.exists():
+        return FileResponse(icon_path)
+    raise HTTPException(status_code=404, detail="site icon not found")
+
+
+@app.get("/favicon.ico")
+def public_favicon():
+    icon_path = _active_public_frontend_dir() / "site-icon.png"
+    if icon_path.exists():
+        return FileResponse(icon_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="favicon not found")
+
+
 def _admin_token_expected():
     return str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
 
@@ -2710,6 +2726,39 @@ def _find_actual_result_from_jobs(scope_key, run_id, run_row=None):
     return best
 
 
+def _find_job_meta_for_run(scope_key, run_id, run_row=None):
+    scope_norm = normalize_scope_key(scope_key)
+    run_id_text = _safe_text(run_id)
+    race_id_text = _safe_text((run_row or {}).get("race_id"))
+    best = {}
+    best_time = ""
+    for job in load_race_jobs(BASE_DIR):
+        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
+            continue
+        job_run_id = _safe_text(job.get("current_run_id"))
+        job_race_id = _safe_text(job.get("race_id"))
+        if run_id_text and job_run_id == run_id_text:
+            matched = True
+        elif race_id_text and job_race_id == race_id_text:
+            matched = True
+        else:
+            matched = False
+        if not matched:
+            continue
+        updated_at = _safe_text(job.get("updated_at")) or _safe_text(job.get("created_at"))
+        if not best or updated_at >= best_time:
+            best = {
+                "job_id": _safe_text(job.get("job_id")),
+                "location": _safe_text(job.get("location")),
+                "scheduled_off_time": _safe_text(job.get("scheduled_off_time")),
+                "target_distance": _safe_text(job.get("target_distance")),
+                "target_track_condition": _safe_text(job.get("target_track_condition")),
+                "race_date": _safe_text(job.get("race_date")),
+            }
+            best_time = updated_at
+    return best
+
+
 def _load_name_to_no_map_for_run(scope_key, run_id, run_row):
     odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "odds_path", "odds")
     if not odds_path or not Path(odds_path).exists():
@@ -2772,6 +2821,74 @@ def _percent_text_from_ratio(value):
         return f"{float(value) * 100:.1f}%"
     except (TypeError, ValueError):
         return "-"
+
+
+def _format_distance_label(value):
+    text = _safe_text(value)
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return f"{digits}m" if digits else text
+
+
+def _format_confidence_text(value):
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    pct = max(0.0, min(100.0, ratio * 100.0))
+    if pct >= 72.0:
+        level = "HIGH"
+    elif pct >= 58.0:
+        level = "MID"
+    else:
+        level = "LOW"
+    return f"{level} {pct:.0f}%"
+
+
+def _public_trend_series(days=10):
+    date_map = {}
+    series = []
+    for engine in LLM_BATTLE_ORDER:
+        rows = load_policy_daily_profit_summary(days=days, policy_engine=engine)
+        per_engine = {}
+        for row in rows:
+            date_text = _safe_text(row.get("date"))
+            if not date_text:
+                continue
+            roi_ratio = row.get("roi", "")
+            try:
+                roi_value = round(float(roi_ratio or 0.0) * 100.0, 1)
+            except (TypeError, ValueError):
+                roi_value = None
+            entry = {
+                "date": date_text,
+                "roi_value": roi_value,
+                "roi_text": _percent_text_from_ratio(roi_ratio),
+                "profit_yen": int(row.get("profit_yen", 0) or 0),
+                "runs": int(row.get("runs", 0) or 0),
+            }
+            per_engine[date_text] = entry
+            date_map[date_text] = True
+        series.append(
+            {
+                "engine": engine,
+                "label": LLM_BATTLE_LABELS.get(engine, engine),
+                "points": per_engine,
+            }
+        )
+    labels = sorted(date_map.keys())
+    return {
+        "labels": labels,
+        "series": [
+            {
+                "engine": item["engine"],
+                "label": item["label"],
+                "points": [item["points"].get(label, {"date": label, "roi_value": None, "roi_text": "-", "profit_yen": 0, "runs": 0}) for label in labels],
+            }
+            for item in series
+        ],
+    }
 
 
 def _public_all_time_roi_summary():
@@ -3704,6 +3821,8 @@ def build_llm_today_page(date_text="", scope_key=""):
             if not payload:
                 continue
             output = _policy_primary_output(payload)
+            payload_input = dict((payload or {}).get("input", {}) or {})
+            ai_summary = dict(payload_input.get("ai", {}) or {})
             marks_map = _policy_marks_map(payload)
             ticket_run_id = _payload_run_id(payload, run_id)
             ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
@@ -4255,6 +4374,8 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
             if not payload:
                 continue
             output = _policy_primary_output(payload)
+            payload_input = dict((payload or {}).get("input", {}) or {})
+            ai_summary = dict(payload_input.get("ai", {}) or {})
             marks_map = _policy_marks_map(payload)
             ticket_run_id = _payload_run_id(payload, run_id)
             ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
@@ -4269,6 +4390,8 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
             strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "記載なし"
             tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "記載なし"
             decision_text = _safe_text(output.get("bet_decision")) or "-"
+            confidence_value = ai_summary.get("confidence_score", "")
+            confidence_text = _format_confidence_text(confidence_value)
             stats = summary_by_engine[engine]
             stats["races"] += 1
             stats["ticket_count"] += int(ticket_summary.get("ticket_count", 0) or 0)
@@ -4792,6 +4915,7 @@ def build_public_board_payload(date_text="", scope_key=""):
     for run_row in runs:
         run_id = _safe_text(run_row.get("run_id"))
         report_scope_key = _report_scope_key_for_row(run_row, scope_norm)
+        job_meta = _find_job_meta_for_run(report_scope_key, run_id, run_row)
         payload_map = {}
         for payload in load_policy_payloads(report_scope_key, run_id, run_row):
             engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
@@ -4816,6 +4940,8 @@ def build_public_board_payload(date_text="", scope_key=""):
             if not payload:
                 continue
             output = _policy_primary_output(payload)
+            payload_input = dict((payload or {}).get("input", {}) or {})
+            ai_summary = dict(payload_input.get("ai", {}) or {})
             marks_map = _policy_marks_map(payload)
             ticket_run_id = _payload_run_id(payload, run_id)
             ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
@@ -4828,6 +4954,8 @@ def build_public_board_payload(date_text="", scope_key=""):
             strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "戦略情報なし"
             tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "傾向情報なし"
             decision_text = _safe_text(output.get("bet_decision")) or "-"
+            confidence_value = ai_summary.get("confidence_score", "")
+            confidence_text = _format_confidence_text(confidence_value)
 
             stats = summary_by_engine[engine]
             stats["races"] += 1
@@ -4860,6 +4988,8 @@ def build_public_board_payload(date_text="", scope_key=""):
                     "profit_yen": int(ticket_summary.get("profit_yen", 0) or 0),
                     "hit_count": int(ticket_summary.get("hit_count", 0) or 0),
                     "roi_text": _format_percent_text(ticket_summary.get("roi", "")),
+                    "confidence_text": confidence_text,
+                    "confidence_value": confidence_value,
                 }
             )
 
@@ -4873,6 +5003,10 @@ def build_public_board_payload(date_text="", scope_key=""):
                 "race_title": _format_race_label(run_row),
                 "date_label": _public_date_label(_safe_text(run_row.get("race_date")) or target_date),
                 "actual_text": actual_text,
+                "location": _safe_text(job_meta.get("location")) or _safe_text(run_row.get("location")),
+                "scheduled_off_time": _safe_text(job_meta.get("scheduled_off_time")),
+                "distance_label": _format_distance_label(job_meta.get("target_distance")),
+                "track_condition": _safe_text(job_meta.get("target_track_condition")) or "良",
                 "run_id": run_id or "-",
                 "cards": cards,
             }
@@ -4917,11 +5051,29 @@ def build_public_board_payload(date_text="", scope_key=""):
     total_roi_value = ""
     if total_stake > 0:
         total_roi_value = round(float(total_payout) / float(total_stake), 4)
+    generated_at_label = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M JST")
+    ranked_summary_cards = sorted(
+        list(summary_cards),
+        key=lambda item: (
+            1 if _safe_text(item.get("roi_text")) in ("", "-") else 0,
+            -(float(str(item.get("roi_text", "0")).replace("%", "") or 0.0) if _safe_text(item.get("roi_text")) not in ("", "-") else -9999.0),
+            -int(item.get("profit_yen", 0) or 0),
+        ),
+    )
+    hero_races = sorted(
+        list(race_items),
+        key=lambda item: (
+            -(int(re.search(r"(\d+)R", _safe_text(item.get("race_title"))).group(1)) if re.search(r"(\d+)R", _safe_text(item.get("race_title"))) else 0),
+            _safe_text(item.get("race_title")),
+        ),
+    )
+    lead_race = dict(hero_races[0]) if hero_races else {}
 
     return {
         "requested_date": requested_date,
         "target_date": target_date,
         "target_date_label": _public_date_label(target_date),
+        "generated_at_label": generated_at_label,
         "scope_key": scope_norm or "",
         "scope_options": [
             {"value": "", "label": "すべての範囲"},
@@ -4932,6 +5084,7 @@ def build_public_board_payload(date_text="", scope_key=""):
         ],
         "fallback_notice": fallback_notice,
         "all_time_roi": _public_all_time_roi_summary(),
+        "trend": _public_trend_series(days=10),
         "totals": {
             "race_count": len(race_items),
             "engine_count": visible_engine_count,
@@ -4943,6 +5096,10 @@ def build_public_board_payload(date_text="", scope_key=""):
             "roi_text": _format_percent_text(total_roi_value),
         },
         "summary_cards": summary_cards,
+        "hero": {
+            "lead_race": lead_race,
+            "leader": ranked_summary_cards[0] if ranked_summary_cards else {},
+        },
         "races": race_items,
     }
 

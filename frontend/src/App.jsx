@@ -1,7 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
+import AppHeader from "./components/AppHeader";
+import EmptyRaceState from "./components/EmptyRaceState";
+import PageSectionHeader from "./components/PageSectionHeader";
+import RaceGrid, { sortRacesForDisplay } from "./components/RaceGrid";
+import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 
 function buildQuery(search) {
   return search ? `?${search}` : "";
+}
+
+function navigateWithSearch(nextSearch) {
+  const url = nextSearch ? `/llm_today?${nextSearch}` : "/llm_today";
+  window.history.pushState({}, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function useBoardData(search) {
@@ -45,171 +56,30 @@ function useBoardData(search) {
   return state;
 }
 
-function sortRaceCards(cards) {
-  return [...(cards || [])].sort((a, b) => Number(b.profit_yen || 0) - Number(a.profit_yen || 0));
-}
-
-function Filters({ data, search, compact = false }) {
-  const params = new URLSearchParams(search);
-
+function LoadingState() {
   return (
-    <form
-      className={`toolbar${compact ? " toolbar--inline" : ""}`}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const formData = new FormData(event.currentTarget);
-        const next = new URLSearchParams();
-        const date = String(formData.get("date") || "").trim();
-        const scopeKey = String(formData.get("scope_key") || "").trim();
-
-        if (date) next.set("date", date);
-        if (scopeKey) next.set("scope_key", scopeKey);
-
-        const url = next.toString() ? `/llm_today?${next.toString()}` : "/llm_today";
-        window.history.pushState({}, "", url);
-        window.dispatchEvent(new PopStateEvent("popstate"));
-      }}
-    >
-      <label className="field">
-        <span>日付</span>
-        <input type="date" name="date" defaultValue={params.get("date") || data.target_date || ""} />
-      </label>
-      <label className="field">
-        <span>範囲</span>
-        <select name="scope_key" defaultValue={params.get("scope_key") || data.scope_key || ""}>
-          {(data.scope_options || []).map((item) => (
-            <option key={item.value || "all"} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="submit">更新</button>
-    </form>
-  );
-}
-
-function Topbar({ data, search }) {
-  return (
-    <header className="topbar">
-      <div className="topbar__brand">
-        <span className="topbar__eyebrow">PUBLIC BOARD</span>
-        <strong>いかいも競馬AI</strong>
-      </div>
-      <div className="topbar__controls">
-        <Filters data={data} search={search} compact />
-      </div>
-    </header>
-  );
-}
-
-function OverallRoiBar({ data }) {
-  const summaryCards = (data?.summary_cards || []).filter((item) => item?.roi_text);
-  const allTimeCards = (data?.all_time_roi?.cards || []).filter((item) => item?.roi_text);
-  const hasCurrent = summaryCards.length || data?.totals?.roi_text;
-  const hasAllTime = allTimeCards.length || data?.all_time_roi?.totals?.roi_text;
-  if (!hasCurrent && !hasAllTime) {
-    return null;
-  }
-
-  return (
-    <section className="overall-roi-bar">
-      {hasAllTime ? (
-        <div className="overall-roi-bar__row">
-          <span className="overall-roi-bar__label">全期間回収率</span>
-          {data?.all_time_roi?.totals?.roi_text ? (
-            <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
-              <strong>全体</strong>
-              <em>{data.all_time_roi.totals.roi_text}</em>
-            </span>
-          ) : null}
-          {allTimeCards.map((item) => (
-            <span key={`all-${item.engine}`} className="overall-roi-bar__chip">
-              <strong>{item.label}</strong>
-              <em>{item.roi_text}</em>
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {hasCurrent ? (
-        <div className="overall-roi-bar__row">
-          <span className="overall-roi-bar__label">当日回収率</span>
-          {data?.totals?.roi_text ? (
-            <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
-              <strong>全体</strong>
-              <em>{data.totals.roi_text}</em>
-            </span>
-          ) : null}
-          {summaryCards.map((item) => (
-            <span key={item.engine} className="overall-roi-bar__chip">
-              <strong>{item.label}</strong>
-              <em>{item.roi_text}</em>
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ModelRow({ card }) {
-  return (
-    <article className="model-row">
-      <div className="model-row__engine">
-        <strong>{card.label}</strong>
-      </div>
-      <section className="model-row__marks">
-        <p>{card.marks_text || "-"}</p>
+    <main className="public-screen-state">
+      <section className="public-screen-state__panel">
+        <span className="public-screen-state__eyebrow">Loading</span>
+        <h1>本日の予想一覧を読み込み中</h1>
+        <p>公開中のレースと AI 予想を取得しています。</p>
       </section>
-      <section className="model-row__tickets">
-        <p>{card.ticket_plan_text || "-"}</p>
-      </section>
-      <div className="model-row__result">
-        <span>{card.result_triplet_text || "-"}</span>
-        {card.roi_text ? <small>回収率 {card.roi_text}</small> : null}
-      </div>
-    </article>
+    </main>
   );
 }
 
-function RaceBoards({ races }) {
-  if (!races.length) {
-    return <div className="empty-panel">この日の公開データはまだありません。</div>;
-  }
-
+function ErrorState({ error, onRetry }) {
   return (
-    <section className="race-list">
-      {races.map((race, index) => {
-        const sortedCards = sortRaceCards(race.cards || []);
-
-        return (
-          <section key={`${race.run_id}-${index}`} className="race-card">
-            <div className="race-card__summary">
-              <div className="race-card__title">
-                <strong>{race.race_title}</strong>
-                <div className="race-card__meta">
-                  <span>{race.actual_text || "結果未登録"}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="race-card__body">
-              <div className="model-table">
-                <div className="model-table__head">
-                  <span>モデル</span>
-                  <span>印</span>
-                  <span>買い目</span>
-                  <span>結果</span>
-                </div>
-                {sortedCards.map((card) => (
-                  <ModelRow key={`${race.run_id}-${card.engine}`} card={card} />
-                ))}
-              </div>
-            </div>
-          </section>
-        );
-      })}
-    </section>
+    <main className="public-screen-state">
+      <section className="public-screen-state__panel public-screen-state__panel--error">
+        <span className="public-screen-state__eyebrow">Error</span>
+        <h1>公開データを表示できませんでした</h1>
+        <p>{error || "時間をおいてから再読み込みしてください。"}</p>
+        <button type="button" onClick={onRetry}>
+          再読み込み
+        </button>
+      </section>
+    </main>
   );
 }
 
@@ -227,41 +97,40 @@ export default function App() {
   }, []);
 
   const { loading, error, data } = useBoardData(search);
-  const races = useMemo(() => data?.races || [], [data]);
+  const races = useMemo(() => sortRacesForDisplay(data?.races || []), [data]);
 
   if (loading) {
-    return (
-      <main className="screen-state">
-        <section className="screen-state__card">
-          <div className="screen-state__badge">Loading</div>
-          <h1>公開ボードを読み込み中です</h1>
-          <p>印と買い目を整理しています。</p>
-        </section>
-      </main>
-    );
+    return <LoadingState />;
   }
 
   if (error || !data) {
-    return (
-      <main className="screen-state">
-        <section className="screen-state__card screen-state__card--error">
-          <div className="screen-state__badge">Error</div>
-          <h1>公開ページを読み込めませんでした</h1>
-          <p>{error || "想定外のエラーが発生しました。"}</p>
-          <button type="button" onClick={() => setSearch(window.location.search.replace(/^\?/, ""))}>
-            再読み込み
-          </button>
-        </section>
-      </main>
-    );
+    return <ErrorState error={error} onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))} />;
   }
 
   return (
-    <main className="page">
-      <Topbar data={data} search={search} />
-      <OverallRoiBar data={data} />
-      {data.fallback_notice ? <section className="notice-banner">{data.fallback_notice}</section> : null}
-      <RaceBoards races={races} />
+    <main className="racing-intel-page">
+      <AppHeader data={data} search={search} onApplyFilters={navigateWithSearch} />
+
+      <div className="racing-intel-page__shell">
+        <section className="today-races-section">
+          <PageSectionHeader
+            kicker="Today Races"
+            title="今日のAI競馬予想"
+            subtitle="複数 AI の本命と買い目を一覧で確認"
+            meta={[
+              data?.target_date_label || "-",
+              `${races.length} レース`,
+              data?.generated_at_label ? `最終更新 ${data.generated_at_label}` : "",
+            ]}
+          />
+
+          {data.fallback_notice ? <section className="notice-strip">{data.fallback_notice}</section> : null}
+
+          {races.length ? <RaceGrid races={races} /> : <EmptyRaceState />}
+        </section>
+
+        <SecondaryStatsPanel data={data} />
+      </div>
     </main>
   );
 }
