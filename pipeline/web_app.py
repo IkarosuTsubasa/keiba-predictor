@@ -5737,6 +5737,22 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
           </div>
           <p class="helper-text">开赛时间和提前分钟只作为记录与筛选参考，不会自动到点运行。</p>
         </section>
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Bankroll</div>
+              <h2>统一追加资金</h2>
+            </div>
+            <span class="section-chip">budget</span>
+          </div>
+          <p class="helper-text">按今天的账本日期，给四个 LLM 同时追加 10000。</p>
+          <div class="copy-row">
+            <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit" class="secondary-button">所有LLM +10000</button>
+            </form>
+          </div>
+        </section>
         {message_panel}
         {error_panel}
         <section class="panel panel--tight">
@@ -5935,6 +5951,8 @@ def _race_job_settle_form_clean(row, admin_token=""):
     top1 = str((row or {}).get("actual_top1", "") or "").strip()
     top2 = str((row or {}).get("actual_top2", "") or "").strip()
     top3 = str((row or {}).get("actual_top3", "") or "").strip()
+    if top1 and top2 and top3:
+        return ""
     return f"""
     <section class="job-settle-panel">
       <div class="job-settle-head">
@@ -6104,7 +6122,30 @@ def _admin_job_card_html_clean(row, admin_token=""):
     """
 
 
-def build_admin_workspace_html_clean(message_text="", error_text="", admin_token="", authorized=True):
+def build_admin_filter_panel(admin_token="", show_settled=False):
+    toggle_value = "0" if show_settled else "1"
+    toggle_label = "隐藏已结算任务" if show_settled else "显示已结算任务"
+    return f"""
+    <section class="panel panel--tight">
+      <div class="section-title">
+        <div>
+          <div class="eyebrow">Filter</div>
+          <h2>任务过滤</h2>
+        </div>
+        <span class="section-chip">view</span>
+      </div>
+      <div class="copy-row">
+        <span class="hero-pill">默认隐藏已结算任务</span>
+        <span class="hero-pill">已录入赛果不显示 Step 3</span>
+      </div>
+      <div class="copy-row">
+        <a href="/console?token={html.escape(admin_token)}&show_settled={toggle_value}" class="secondary-button">{toggle_label}</a>
+      </div>
+    </section>
+    """
+
+
+def build_admin_workspace_html_clean(message_text="", error_text="", admin_token="", authorized=True, show_settled=False):
     if not authorized:
         return f"""
         <section class="content-cluster" id="admin-zone">
@@ -6140,7 +6181,12 @@ def build_admin_workspace_html_clean(message_text="", error_text="", admin_token
         elif status == "settled":
             summary["settled"] += 1
 
-    cards_html = "".join(_admin_job_card_html_clean(job, admin_token=admin_token) for job in jobs)
+    visible_jobs = [
+        job
+        for job in jobs
+        if show_settled or str(job.get("status", "") or "").strip().lower() != "settled"
+    ]
+    cards_html = "".join(_admin_job_card_html_clean(job, admin_token=admin_token) for job in visible_jobs)
     if not cards_html:
         cards_html = """
         <section class="panel panel--tight">
@@ -6314,17 +6360,19 @@ def build_admin_workspace_html_clean(message_text="", error_text="", admin_token
     """
 
 
-def render_console_page(message_text="", error_text="", admin_token=""):
+def render_console_page(message_text="", error_text="", admin_token="", show_settled=False):
     return render_page(
         "",
         admin_token=admin_token,
         admin_workspace_html=(
             build_import_archive_panel(admin_token=admin_token)
+            + build_admin_filter_panel(admin_token=admin_token, show_settled=show_settled)
             + build_admin_workspace_html_clean(
                 message_text=message_text,
                 error_text=error_text,
                 admin_token=admin_token,
                 authorized=_admin_token_valid(admin_token),
+                show_settled=show_settled,
             )
         ),
     )
@@ -7617,10 +7665,11 @@ def index(token: str = ""):
 
 
 @app.get("/console", response_class=HTMLResponse)
-def console_index(token: str = ""):
+def console_index(token: str = "", show_settled: str = ""):
     if _admin_token_enabled() and not _admin_token_valid(token):
         return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
-    return render_console_page(admin_token=token)
+    show_settled_flag = str(show_settled or "").strip() in ("1", "true", "yes", "on")
+    return render_console_page(admin_token=token, show_settled=show_settled_flag)
 
 
 @app.get("/console/note", response_class=HTMLResponse)
@@ -7828,6 +7877,24 @@ def internal_run_due(token: str = ""):
     summary = run_due_jobs_once()
     ok = not bool(list(summary.get("errors", []) or []))
     return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+
+
+@app.post("/console/tasks/topup_today_all_llm", response_class=HTMLResponse)
+def topup_today_all_llm_budget(token: str = Form("")):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，不能追加资金。",
+        )
+    ledger_date = _default_job_race_date_text()
+    amount_yen = 10000
+    for engine in ("gemini", "siliconflow", "openai", "grok"):
+        add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
+    return build_race_jobs_page(
+        admin_token=token,
+        message_text=f"已按 {ledger_date} 给四个 LLM 各追加 10000。",
+    )
 
 
 """
