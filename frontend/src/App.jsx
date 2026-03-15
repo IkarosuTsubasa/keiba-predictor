@@ -105,25 +105,49 @@ function Topbar({ data, search }) {
 
 function OverallRoiBar({ data }) {
   const summaryCards = (data?.summary_cards || []).filter((item) => item?.roi_text);
-  if (!summaryCards.length && !data?.totals?.roi_text) {
+  const allTimeCards = (data?.all_time_roi?.cards || []).filter((item) => item?.roi_text);
+  const hasCurrent = summaryCards.length || data?.totals?.roi_text;
+  const hasAllTime = allTimeCards.length || data?.all_time_roi?.totals?.roi_text;
+  if (!hasCurrent && !hasAllTime) {
     return null;
   }
 
   return (
     <section className="overall-roi-bar">
-      <span className="overall-roi-bar__label">回収率</span>
-      {data?.totals?.roi_text ? (
-        <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
-          <strong>全体</strong>
-          <em>{data.totals.roi_text}</em>
-        </span>
+      {hasAllTime ? (
+        <div className="overall-roi-bar__row">
+          <span className="overall-roi-bar__label">全期間回収率</span>
+          {data?.all_time_roi?.totals?.roi_text ? (
+            <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
+              <strong>全体</strong>
+              <em>{data.all_time_roi.totals.roi_text}</em>
+            </span>
+          ) : null}
+          {allTimeCards.map((item) => (
+            <span key={`all-${item.engine}`} className="overall-roi-bar__chip">
+              <strong>{item.label}</strong>
+              <em>{item.roi_text}</em>
+            </span>
+          ))}
+        </div>
       ) : null}
-      {summaryCards.map((item) => (
-        <span key={item.engine} className="overall-roi-bar__chip">
-          <strong>{item.label}</strong>
-          <em>{item.roi_text}</em>
-        </span>
-      ))}
+      {hasCurrent ? (
+        <div className="overall-roi-bar__row">
+          <span className="overall-roi-bar__label">当日回収率</span>
+          {data?.totals?.roi_text ? (
+            <span className="overall-roi-bar__chip overall-roi-bar__chip--total">
+              <strong>全体</strong>
+              <em>{data.totals.roi_text}</em>
+            </span>
+          ) : null}
+          {summaryCards.map((item) => (
+            <span key={item.engine} className="overall-roi-bar__chip">
+              <strong>{item.label}</strong>
+              <em>{item.roi_text}</em>
+            </span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

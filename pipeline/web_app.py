@@ -24,11 +24,13 @@ from gemini_portfolio import (
     add_bankroll_topup,
     build_history_context,
     extract_ledger_date,
+    ledger_path,
     load_exacta_odds_map,
     load_daily_profit_rows,
     load_name_to_no,
     load_pair_odds_map,
     load_place_odds_map,
+    load_rows,
     load_run_tickets,
     load_triple_odds_map,
     load_win_odds_map,
@@ -2772,6 +2774,51 @@ def _percent_text_from_ratio(value):
         return "-"
 
 
+def _public_all_time_roi_summary():
+    cards = []
+    total_stake = 0
+    total_payout = 0
+    total_profit = 0
+    for engine in LLM_BATTLE_ORDER:
+        rows = load_rows(ledger_path(BASE_DIR, policy_engine=engine))
+        stake_yen = 0
+        payout_yen = 0
+        profit_yen = 0
+        for row in rows:
+            if _safe_text(row.get("status")).lower() != "settled":
+                continue
+            stake_yen += int(row.get("stake_yen", 0) or 0)
+            payout_yen += int(row.get("payout_yen", 0) or 0)
+            profit_yen += int(row.get("profit_yen", 0) or 0)
+        if stake_yen <= 0:
+            continue
+        total_stake += stake_yen
+        total_payout += payout_yen
+        total_profit += profit_yen
+        cards.append(
+            {
+                "engine": engine,
+                "label": LLM_BATTLE_LABELS.get(engine, engine),
+                "stake_yen": stake_yen,
+                "payout_yen": payout_yen,
+                "profit_yen": profit_yen,
+                "roi_text": _format_percent_text(round(float(payout_yen) / float(stake_yen), 4)),
+            }
+        )
+    total_roi_text = ""
+    if total_stake > 0:
+        total_roi_text = _format_percent_text(round(float(total_payout) / float(total_stake), 4))
+    return {
+        "cards": cards,
+        "totals": {
+            "stake_yen": total_stake,
+            "payout_yen": total_payout,
+            "profit_yen": total_profit,
+            "roi_text": total_roi_text,
+        },
+    }
+
+
 def _policy_primary_choice(output):
     marks = list((output or {}).get("marks", []) or [])
     symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
@@ -4884,6 +4931,7 @@ def build_public_board_payload(date_text="", scope_key=""):
             ],
         ],
         "fallback_notice": fallback_notice,
+        "all_time_roi": _public_all_time_roi_summary(),
         "totals": {
             "race_count": len(race_items),
             "engine_count": visible_engine_count,

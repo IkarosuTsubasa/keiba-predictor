@@ -169,10 +169,15 @@ select {
 }
 
 .overall-roi-bar {
+  display: grid;
+  gap: 8px;
+  padding: 2px 2px 0;
+}
+
+.overall-roi-bar__row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 2px 2px 0;
   align-items: center;
 }
 
@@ -181,6 +186,7 @@ select {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.04em;
+  min-width: 88px;
 }
 
 .overall-roi-bar__chip {
