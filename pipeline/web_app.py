@@ -456,6 +456,62 @@ def update_run_row_fields(scope_key, run_row, updates):
     )
 
 
+def strict_llm_odds_gate_enabled():
+    raw = os.environ.get("PIPELINE_BLOCK_LLM_ON_ODDS_WARNING", "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def expected_odds_output_names(scope_key):
+    return [
+        "odds.csv",
+        "fuku_odds.csv",
+        "wide_odds.csv",
+        "quinella_odds.csv",
+        "exacta_odds.csv",
+        "trio_odds.csv",
+        "trifecta_odds.csv",
+    ]
+
+
+def capture_output_mtimes(root_dir, names):
+    mtimes = {}
+    for name in list(names or []):
+        path = Path(root_dir) / name
+        try:
+            mtimes[name] = path.stat().st_mtime
+        except OSError:
+            mtimes[name] = None
+    return mtimes
+
+
+def is_fresh_output(path, previous_mtime, started_at):
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        current_mtime = path.stat().st_mtime
+    except OSError:
+        return False
+    if previous_mtime is None:
+        return current_mtime >= (float(started_at) - 1.0)
+    return current_mtime > float(previous_mtime)
+
+
+def copy_fresh_odds_output(tmp_path, dest_path, before_mtimes, started_at, warnings):
+    tmp_name = Path(tmp_path).name
+    if not dest_path:
+        return True, ""
+    if not is_fresh_output(tmp_path, before_mtimes.get(tmp_name), started_at):
+        warnings.append(f"{tmp_name} not freshly generated.")
+        return True, ""
+    try:
+        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tmp_path, dest_path)
+    except Exception as exc:
+        return False, f"Failed to update {tmp_name}: {exc}"
+    return True, ""
+
+
 def refresh_odds_for_run(
     run_row,
     scope_key,
@@ -483,6 +539,9 @@ def refresh_odds_for_run(
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
     env.setdefault("PIPELINE_HEADLESS", "0")
+    expected_names = expected_odds_output_names(scope_key)
+    before_mtimes = capture_output_mtimes(ROOT_DIR, expected_names)
+    started_at = time.time()
     result = subprocess.run(
         [sys.executable, str(ODDS_EXTRACT)],
         input=f"{race_url}\n",
@@ -500,8 +559,8 @@ def refresh_odds_for_run(
     if "Saved: odds.csv" not in (result.stdout or ""):
         return False, "odds_extract produced no new odds.", []
     tmp_path = ROOT_DIR / "odds.csv"
-    if not tmp_path.exists():
-        return False, "odds.csv not generated.", []
+    if not is_fresh_output(tmp_path, before_mtimes.get("odds.csv"), started_at):
+        return False, "odds.csv not freshly generated.", []
     warnings = []
     try:
         Path(odds_path).parent.mkdir(parents=True, exist_ok=True)
@@ -509,59 +568,35 @@ def refresh_odds_for_run(
     except Exception as exc:
         return False, f"Failed to update odds file: {exc}", []
     wide_tmp = ROOT_DIR / "wide_odds.csv"
-    if wide_odds_path and wide_tmp.exists():
-        try:
-            Path(wide_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(wide_tmp, wide_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update wide odds file: {exc}", []
-    elif wide_odds_path:
-        warnings.append("wide_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(wide_tmp, wide_odds_path, before_mtimes, started_at, warnings)
+    if not ok:
+        return False, message, []
     fuku_tmp = ROOT_DIR / "fuku_odds.csv"
-    if fuku_odds_path and fuku_tmp.exists():
-        try:
-            Path(fuku_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(fuku_tmp, fuku_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update place odds file: {exc}", []
-    elif fuku_odds_path:
-        warnings.append("fuku_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(fuku_tmp, fuku_odds_path, before_mtimes, started_at, warnings)
+    if not ok:
+        return False, message, []
     quinella_tmp = ROOT_DIR / "quinella_odds.csv"
-    if quinella_odds_path and quinella_tmp.exists():
-        try:
-            Path(quinella_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(quinella_tmp, quinella_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update quinella odds file: {exc}", []
-    elif quinella_odds_path:
-        warnings.append("quinella_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(
+        quinella_tmp, quinella_odds_path, before_mtimes, started_at, warnings
+    )
+    if not ok:
+        return False, message, []
     exacta_tmp = ROOT_DIR / "exacta_odds.csv"
-    if exacta_odds_path and exacta_tmp.exists():
-        try:
-            Path(exacta_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(exacta_tmp, exacta_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update exacta odds file: {exc}", []
-    elif exacta_odds_path:
-        warnings.append("exacta_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(exacta_tmp, exacta_odds_path, before_mtimes, started_at, warnings)
+    if not ok:
+        return False, message, []
     trio_tmp = ROOT_DIR / "trio_odds.csv"
-    if trio_odds_path and trio_tmp.exists():
-        try:
-            Path(trio_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(trio_tmp, trio_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update trio odds file: {exc}", []
-    elif trio_odds_path:
-        warnings.append("trio_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(trio_tmp, trio_odds_path, before_mtimes, started_at, warnings)
+    if not ok:
+        return False, message, []
     trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
-    if trifecta_odds_path and trifecta_tmp.exists():
-        try:
-            Path(trifecta_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(trifecta_tmp, trifecta_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update trifecta odds file: {exc}", []
-    elif trifecta_odds_path:
-        warnings.append("trifecta_odds.csv not generated.")
+    ok, message = copy_fresh_odds_output(
+        trifecta_tmp, trifecta_odds_path, before_mtimes, started_at, warnings
+    )
+    if not ok:
+        return False, message, []
+    if strict_llm_odds_gate_enabled() and warnings:
+        return False, "Incomplete odds refresh: " + "; ".join(warnings), warnings
     return True, "", warnings
 
 
@@ -8698,6 +8733,22 @@ def run_llm_buy(
         )
     refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    if not refresh_ok:
+        return render_page(
+            scope_norm,
+            error_text=build_llm_buy_output(
+                load_policy_bankroll_summary(
+                    resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine
+                ),
+                refresh_ok,
+                refresh_message,
+                refresh_warnings,
+                "[llm_buy][blocked] odds refresh failed; skip policy execution.",
+                policy_engine=normalize_policy_engine(policy_engine),
+            ),
+            selected_run_id=resolved_run_id,
+            admin_token=token,
+        )
     try:
         result = execute_policy_buy(
             scope_norm,
@@ -8777,6 +8828,22 @@ def run_all_llm_buy(
         )
     refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    if not refresh_ok:
+        return render_page(
+            scope_norm,
+            error_text=build_llm_buy_output(
+                load_policy_bankroll_summary(
+                    resolved_run_id, run_row.get("timestamp", ""), policy_engine="gemini"
+                ),
+                refresh_ok,
+                refresh_message,
+                refresh_warnings,
+                "[llm_buy][blocked] odds refresh failed; skip all policy engines.",
+                policy_engine="all",
+            ),
+            selected_run_id=resolved_run_id,
+            admin_token=token,
+        )
     result_blocks = []
     error_blocks = []
     for engine in ("gemini", "siliconflow", "openai", "grok"):

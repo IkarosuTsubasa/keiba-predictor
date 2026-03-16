@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
@@ -146,6 +146,10 @@ def should_headless():
     if raw in ("0", "false", "no", "off"):
         return False
     return True
+
+
+def is_linux_container():
+    return os.name != "nt"
 
 
 def get_chrome_profile():
@@ -1150,8 +1154,14 @@ def build_webdriver():
         options.add_experimental_option("debuggerAddress", debugger_address)
     else:
         if should_headless():
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
+        if is_linux_container():
+            # Container runtimes often have tiny /dev/shm and stricter sandboxing.
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--no-sandbox")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--window-size=1440,2400")
         options.add_argument("--lang=ja-JP")
         profile_dir, profile_name = get_chrome_profile()
         if profile_dir:
@@ -1220,7 +1230,12 @@ def fetch_and_save_html_odds(race_url, driver, label, build_url, wait_css, parse
     if not odds_url:
         return []
     sleep_jitter()
-    results = safe_parse(label, parse_func, get_page_source(odds_url, driver, wait_css=wait_css))
+    try:
+        page = get_page_source(odds_url, driver, wait_css=wait_css)
+    except WebDriverException as exc:
+        print(f"[WARN] {label} fetch failed: {exc}")
+        return []
+    results = safe_parse(label, parse_func, page)
     if results:
         save_csv(out_path, fieldnames, results)
     return results

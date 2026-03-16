@@ -12,6 +12,31 @@ from race_job_store import get_job, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 
 
+def strict_llm_odds_gate_enabled():
+    raw = os.environ.get("PIPELINE_BLOCK_LLM_ON_ODDS_WARNING", "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def expected_odds_output_names(scope_key):
+    return [
+        "odds.csv",
+        "fuku_odds.csv",
+        "wide_odds.csv",
+        "quinella_odds.csv",
+        "exacta_odds.csv",
+        "trio_odds.csv",
+        "trifecta_odds.csv",
+    ]
+
+
+def validate_workspace_odds_outputs(workspace_dir, scope_key):
+    workspace = Path(workspace_dir)
+    missing = [name for name in expected_odds_output_names(scope_key) if not (workspace / name).exists()]
+    if missing:
+        return False, f"incomplete odds outputs: {', '.join(missing)}"
+    return True, ""
+
+
 def _race_url(scope_key, race_id):
     race_id_text = "".join(ch for ch in str(race_id or "").strip() if ch.isdigit())
     if not race_id_text:
@@ -241,6 +266,10 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         summary["process_log"].append({"step": "odds_extract", "code": odds_code, "output": odds_output})
         if odds_code != 0 or not (workspace / "odds.csv").exists():
             raise RuntimeError(f"odds extraction failed: {odds_output}")
+        if strict_llm_odds_gate_enabled():
+            odds_ok, odds_error = validate_workspace_odds_outputs(workspace, scope_key)
+            if not odds_ok:
+                raise RuntimeError(f"odds extraction incomplete: {odds_error}\n{odds_output}")
 
         pred_code, pred_output = _run_subprocess(
             base_path.parent / "predictor.py",
