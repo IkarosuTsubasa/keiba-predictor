@@ -122,6 +122,300 @@ def _prefix_public_html_routes(content=""):
     return html_text
 
 
+def _load_public_index_html():
+    index_path = _active_public_frontend_dir() / "index.html"
+    for enc in ("utf-8", "utf-8-sig"):
+        try:
+            with open(index_path, "r", encoding=enc) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    with open(index_path, "r", encoding="cp932") as f:
+        return f.read()
+
+
+def _public_share_runtime_html():
+    return """
+<style>
+.share-title-row,
+.share-title-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.share-title-row {
+  justify-content: space-between;
+}
+.share-inline-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border: 1px solid rgba(15, 18, 24, 0.18);
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.share-inline-button:hover {
+  transform: translateY(-1px);
+  background: #0f172a;
+  border-color: rgba(15, 18, 24, 0.28);
+}
+.share-inline-button img {
+  width: 15px;
+  height: 15px;
+  display: block;
+  object-fit: contain;
+}
+@media (max-width: 760px) {
+  .share-title-row {
+    align-items: flex-start;
+  }
+  .share-title-inline {
+    align-items: flex-start;
+  }
+}
+</style>
+<script>
+(() => {
+  const SHARE_DETAIL_LABEL = "\\u5168\\u8cb7\\u3044\\u76ee\\u306f\\u3053\\u3061\\u3089";
+  const SHARE_URL = "https://www.ikaimo-ai.com/keiba";
+  const SHARE_HASHTAG = "#\\u3044\\u304b\\u3044\\u3082AI\\u7af6\\u99ac";
+  const SHARE_MAX_CHARS = 130;
+
+  const parseRaceHeader = (title) => {
+    const text = String(title || "").trim();
+    const matched = text.match(/^(.*?)(\\d+R)$/i);
+    if (!matched) {
+      return text ? `#${text}` : "#\\u7af6\\u99acAI";
+    }
+    let venue = String(matched[1] || "").replace(/\\s+/g, "");
+    const raceNo = String(matched[2] || "").trim();
+    if (venue && !venue.endsWith("\\u7af6\\u99ac")) {
+      venue += "\\u7af6\\u99ac";
+    }
+    if (venue) {
+      return `#${venue} ${raceNo}`;
+    }
+    return raceNo || "#\\u7af6\\u99acAI";
+  };
+
+  const splitLines = (text) =>
+    String(text || "")
+      .split(/\\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const buildShareText = (raceTitle, card) => {
+    let ticketText = "";
+    let marksText = "\\u5370\\u306a\\u3057";
+    if (card.matches(".model-card")) {
+      const blocks = Array.from(card.querySelectorAll(".model-block"));
+      ticketText = blocks[0]?.querySelector("p")?.innerText || "";
+      marksText = blocks[2]?.querySelector("p")?.innerText || "\\u5370\\u306a\\u3057";
+    } else {
+      const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
+      const subMarks = Array.from(card.querySelectorAll(".ai-pick-summary__submark")).map((item) => {
+        const symbol = item.querySelector("em")?.textContent?.trim() || "";
+        const horseNo = item.querySelector("strong")?.textContent?.trim() || "";
+        return symbol && horseNo ? `${symbol}${horseNo}` : "";
+      }).filter(Boolean);
+      const markParts = [];
+      if (mainHorse) {
+        markParts.push(`\\u25ce${mainHorse}`);
+      }
+      markParts.push(...subMarks);
+      if (markParts.length) {
+        marksText = markParts.join(" ");
+      }
+      ticketText = Array.from(card.querySelectorAll(".bet-preview-list li")).map((item) => item.textContent?.trim() || "").filter(Boolean).join("\\n");
+    }
+    const header = parseRaceHeader(raceTitle);
+    const ticketLines = splitLines(ticketText);
+    const tailLines = [SHARE_DETAIL_LABEL, SHARE_URL, SHARE_HASHTAG];
+    const lines = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", "\\u8cb7\\u3044\\u76ee\\uff08\\u4e00\\u90e8\\uff09"];
+    for (const ticketLine of ticketLines) {
+      const candidate = [...lines, ticketLine, "", ...tailLines].join("\\n");
+      if (candidate.length > SHARE_MAX_CHARS) {
+        break;
+      }
+      lines.push(ticketLine);
+    }
+    if (lines.length === 4) {
+      const fallback = [...lines, "\\u8cb7\\u3044\\u76ee\\u306a\\u3057", "", ...tailLines].join("\\n");
+      if (fallback.length <= SHARE_MAX_CHARS) {
+        lines.push("\\u8cb7\\u3044\\u76ee\\u306a\\u3057");
+      }
+    }
+    let text = [...lines, "", ...tailLines].join("\\n");
+    if (text.length <= SHARE_MAX_CHARS) {
+      return text;
+    }
+    text = [header, "", String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", ...tailLines].join("\\n");
+    if (text.length <= SHARE_MAX_CHARS) {
+      return text;
+    }
+    const tailLength = ["", ...tailLines].join("\\n").length;
+    const remain = Math.max(1, SHARE_MAX_CHARS - header.length - tailLength - 4);
+    return [header, "", String(marksText || "\\u5370\\u306a\\u3057").trim().slice(0, remain), "", ...tailLines].join("\\n");
+  };
+
+  const openShare = (text) => {
+    const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+    const width = 720;
+    const height = 640;
+    const left = Math.max(0, Math.round((window.screen.width - width) / 2));
+    const top = Math.max(0, Math.round((window.screen.height - height) / 2));
+    const popup = window.open(
+      shareUrl,
+      "ikaimo-share",
+      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+    if (popup && !popup.closed) {
+      try {
+        popup.focus();
+      } catch (_error) {
+      }
+      return;
+    }
+    window.location.href = shareUrl;
+  };
+
+  const createShareButton = () => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "share-inline-button";
+    button.setAttribute("aria-label", "\\u30b7\\u30a7\\u30a2");
+    button.setAttribute("title", "\\u30b7\\u30a7\\u30a2");
+    button.innerHTML =
+      '<img src="/keiba/assets/Xlogo-white.png" alt="" aria-hidden="true">';
+    return button;
+  };
+
+  const findCardsForShare = (root) => {
+    const modernCards = Array.from(root.querySelectorAll(".ai-pick-summary"));
+    if (modernCards.length) {
+      return modernCards;
+    }
+    return Array.from(root.querySelectorAll(".model-card"));
+  };
+
+  const mountLegacyShareButton = (summary) => {
+    if (!summary || summary.dataset.shareMounted === "1") {
+      return;
+    }
+    const raceCopy = summary.querySelector(".race-copy");
+    const title = raceCopy?.querySelector("h2");
+    if (!raceCopy || !title) {
+      return;
+    }
+    const row = document.createElement("div");
+    row.className = "share-title-row";
+    title.parentNode.insertBefore(row, title);
+    row.appendChild(title);
+    const button = createShareButton();
+    row.appendChild(button);
+    const handleShare = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const raceBoard = summary.closest(".race-board");
+      const cards = findCardsForShare(raceBoard || document);
+      if (!cards.length) {
+        return;
+      }
+      const selected = cards[Math.floor(Math.random() * cards.length)];
+      const text = buildShareText(title.textContent || "", selected);
+      if (!text) {
+        return;
+      }
+      openShare(text);
+    };
+    button.addEventListener("click", handleShare);
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    summary.dataset.shareMounted = "1";
+  };
+
+  const mountModernShareButton = (header) => {
+    if (!header || header.dataset.shareMounted === "1") {
+      return;
+    }
+    const main = header.querySelector(".race-card-header__main");
+    const titleHost = main?.querySelector("div");
+    const title = titleHost?.querySelector("h3");
+    if (!main || !titleHost || !title) {
+      return;
+    }
+    const row = document.createElement("div");
+    row.className = "share-title-inline";
+    titleHost.insertBefore(row, title);
+    row.appendChild(title);
+    const button = createShareButton();
+    row.appendChild(button);
+    const handleShare = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const raceCard = header.closest(".race-card");
+      const cards = findCardsForShare(raceCard || document);
+      if (!cards.length) {
+        return;
+      }
+      const selected = cards[Math.floor(Math.random() * cards.length)];
+      const text = buildShareText(title.textContent || "", selected);
+      if (!text) {
+        return;
+      }
+      openShare(text);
+    };
+    button.addEventListener("click", handleShare);
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    header.dataset.shareMounted = "1";
+  };
+
+  const refreshShareButtons = () => {
+    document.querySelectorAll(".race-summary").forEach(mountLegacyShareButton);
+    document.querySelectorAll(".race-card-header").forEach(mountModernShareButton);
+  };
+
+  const observer = new MutationObserver(() => {
+    refreshShareButtons();
+  });
+
+  const start = () => {
+    refreshShareButtons();
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+"""
+
+
+def _inject_public_share_runtime(html_text):
+    content = str(html_text or "")
+    runtime = _public_share_runtime_html()
+    if runtime in content:
+        return content
+    if "</body>" in content:
+        return content.replace("</body>", runtime + "\n</body>", 1)
+    return content + runtime
+
+
 @app.get(PUBLIC_SITE_ICON_PATH)
 @app.get("/site-icon.png")
 def public_site_icon():
@@ -2454,6 +2748,10 @@ LLM_BATTLE_SHORT_LABELS = {
     "siliconflow": "deepseek",
     "grok": "grok",
 }
+PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
+PUBLIC_SHARE_DETAIL_LABEL = "全買い目はこちら"
+PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
+PUBLIC_SHARE_MAX_CHARS = 130
 LLM_REPORT_SCOPE_KEYS = ("central_dirt", "central_turf", "local")
 BET_TYPE_TEXT_MAP = {
     "win": "単勝",
@@ -3908,6 +4206,7 @@ def build_llm_today_page(date_text="", scope_key=""):
         ) or "待录入"
 
         engine_cards = []
+        share_options = []
         for engine in LLM_BATTLE_ORDER:
             payload = payload_map.get(engine)
             if not payload:
@@ -3940,6 +4239,10 @@ def build_llm_today_page(date_text="", scope_key=""):
                 stats["pending_races"] += 1
             if int(ticket_summary.get("hit_count", 0) or 0) > 0:
                 stats["hit_races"] += 1
+
+            share_text = _build_public_share_text(run_row, engine, marks_map, ticket_rows)
+            if share_text:
+                share_options.append(share_text)
 
             engine_cards.append(
                 f"""
@@ -4329,6 +4632,45 @@ def build_llm_today_page(date_text="", scope_key=""):
     {empty_state}
     {"".join(race_sections)}
   </main>
+  <script>
+    (() => {{
+      const openShareIntent = (text) => {{
+        const url = `https://x.com/intent/post?text=${{encodeURIComponent(text)}}`;
+        const width = 720;
+        const height = 640;
+        const left = Math.max(0, Math.round((window.screen.width - width) / 2));
+        const top = Math.max(0, Math.round((window.screen.height - height) / 2));
+        const popup = window.open(
+          url,
+          "ikaimo-share",
+          `popup=yes,width=${{width}},height=${{height}},left=${{left}},top=${{top}},resizable=yes,scrollbars=yes`
+        );
+        if (popup && !popup.closed) {{
+          try {{
+            popup.focus();
+          }} catch (_error) {{
+          }}
+          return;
+        }}
+        window.location.href = url;
+      }};
+      document.addEventListener("click", async (event) => {{
+        const button = event.target.closest(".front-share-button");
+        if (!button) return;
+        const raw = button.getAttribute("data-share-options") || "[]";
+        let options = [];
+        try {{
+          options = JSON.parse(raw);
+        }} catch (_error) {{
+          options = [];
+        }}
+        if (!Array.isArray(options) || options.length === 0) return;
+        const text = String(options[Math.floor(Math.random() * options.length)] || "").trim();
+        if (!text) return;
+        openShareIntent(text);
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -4924,6 +5266,85 @@ def _public_ticket_plan_text(ticket_rows):
     return "\n".join(lines)
 
 
+def _share_hashtag_race_label(run_row):
+    venue = _safe_text((run_row or {}).get("location")) or _safe_text((run_row or {}).get("trigger_race"))
+    race_no = _race_no_text((run_row or {}).get("race_id")) or ""
+    venue = re.sub(r"\s+", "", venue)
+    if venue and not venue.endswith("競馬"):
+        venue = f"{venue}競馬"
+    if venue and race_no:
+        return f"#{venue} {race_no}"
+    if venue:
+        return f"#{venue}"
+    if race_no:
+        return race_no
+    return "#競馬AI"
+
+
+def _share_ticket_lines(ticket_rows):
+    bet_type_map = {
+        "win": "単勝",
+        "place": "複勝",
+        "wide": "ワイド",
+        "quinella": "馬連",
+        "exacta": "馬単",
+        "trio": "三連複",
+        "trifecta": "三連単",
+    }
+    lines = []
+    for row in list(ticket_rows or []):
+        bet_type = bet_type_map.get(_safe_text(row.get("bet_type")).lower(), _safe_text(row.get("bet_type")) or "-")
+        horse_no = _safe_text(row.get("horse_no")) or "-"
+        amount = to_int_or_none(row.get("amount_yen"))
+        if amount is None:
+            amount = to_int_or_none(row.get("stake_yen"))
+        amount_text = f"¥{int(amount)}" if amount is not None else "-"
+        lines.append(f"{bet_type} {horse_no} {amount_text}")
+    return lines
+
+
+def _share_marks_text(marks_map):
+    if not marks_map:
+        return "印なし"
+    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
+    ordered = []
+    for horse_no, symbol in dict(marks_map or {}).items():
+        ordered.append((symbol_order.get(_safe_text(symbol), 99), to_int_or_none(horse_no) or 999, _safe_text(horse_no), _safe_text(symbol)))
+    ordered.sort(key=lambda item: (item[0], item[1], item[2]))
+    parts = [f"{symbol}{horse_no}" for _, _, horse_no, symbol in ordered if horse_no and symbol]
+    return " ".join(parts) if parts else "印なし"
+
+
+def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=PUBLIC_SHARE_MAX_CHARS):
+    header = _share_hashtag_race_label(run_row)
+    marks_text = _share_marks_text(marks_map)
+    tail_lines = [PUBLIC_SHARE_DETAIL_LABEL, PUBLIC_SHARE_URL, PUBLIC_SHARE_HASHTAG]
+    base_lines = [header, "", marks_text, "", "買い目（一部）"]
+    ticket_lines = _share_ticket_lines(ticket_rows)
+    lines = list(base_lines)
+    for ticket_line in ticket_lines:
+        candidate = "\n".join(lines + [ticket_line, "", *tail_lines])
+        if len(candidate) > int(max_chars or PUBLIC_SHARE_MAX_CHARS):
+            break
+        lines.append(ticket_line)
+    if len(lines) == len(base_lines):
+        placeholder = "買い目なし"
+        candidate = "\n".join(base_lines + [placeholder, "", *tail_lines])
+        if len(candidate) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
+            lines.append(placeholder)
+    text = "\n".join(lines + ["", *tail_lines])
+    if len(text) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
+        return text
+    fallback_lines = [header, "", marks_text, "", *tail_lines]
+    text = "\n".join(fallback_lines)
+    if len(text) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
+        return text
+    tail_len = len("\n".join(["", *tail_lines]))
+    compact_marks = marks_text[: max(0, int(max_chars or PUBLIC_SHARE_MAX_CHARS) - len(header) - tail_len - 4)]
+    compact_lines = [header, "", compact_marks or "印", "", *tail_lines]
+    return "\n".join(compact_lines)
+
+
 def _public_result_triplet_text(actual_names):
     names = [_safe_text(name) for name in list(actual_names or [])[:3] if _safe_text(name)]
     if not names:
@@ -5339,13 +5760,24 @@ def build_public_llm_page(date_text="", scope_key=""):
         if not engine_cards:
             continue
 
+        share_button_html = ""
+        if share_options:
+            share_options_json = html.escape(json.dumps(share_options, ensure_ascii=False), quote=True)
+            share_button_html = (
+                f'<button type="button" class="front-share-button" '
+                f'data-share-options="{share_options_json}" aria-label="シェア" title="シェア">↗</button>'
+            )
+
         race_sections.append(
             f"""
             <section class="front-race">
               <div class="front-race-head">
                 <div class="front-race-copy">
                   <div class="front-race-eyebrow">{html.escape(_public_scope_label_ja(report_scope_key))}</div>
-                  <h2>{html.escape(_format_race_label(run_row))}</h2>
+                  <div class="front-race-title-row">
+                    <h2>{html.escape(_format_race_label(run_row))}</h2>
+                    {share_button_html}
+                  </div>
                   <p>{html.escape(_public_date_label(_safe_text(run_row.get("race_date")) or target_date))}</p>
                 </div>
                 <div class="front-race-meta">
@@ -5529,6 +5961,12 @@ def build_public_llm_page(date_text="", scope_key=""):
       display: grid;
       gap: 10px;
     }}
+    .front-race-title-row {{
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }}
     .front-hero-copy h1, .front-race-copy h2, .front-section-head h2, .front-empty h2 {{
       margin: 0;
       font-family: var(--title-font);
@@ -5709,6 +6147,29 @@ def build_public_llm_page(date_text="", scope_key=""):
       font-size: 14px;
       color: var(--ink);
     }}
+    .front-share-button {{
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid rgba(15,95,77,0.16);
+      background: rgba(15,95,77,0.08);
+      color: var(--accent-strong);
+      font: inherit;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }}
+    .front-share-button:hover {{
+      transform: translateY(-1px);
+      background: rgba(15,95,77,0.14);
+      border-color: rgba(15,95,77,0.24);
+    }}
     .front-empty {{
       text-align: center;
       display: grid;
@@ -5740,6 +6201,7 @@ def build_public_llm_page(date_text="", scope_key=""):
       .front-filter {{ flex-direction: column; align-items: stretch; }}
       .front-filter label, .front-filter input, .front-filter select, .front-filter button {{ width: 100%; }}
       .front-race-head, .front-card-head, .front-section-head {{ flex-direction: column; }}
+      .front-race-title-row {{ align-items: flex-start; }}
       .front-race-meta {{ justify-content: start; }}
     }}
   </style>
@@ -8155,7 +8617,10 @@ def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str =
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 @app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
-    return FileResponse(_active_public_frontend_dir() / "index.html")
+    html_text = _load_public_index_html()
+    html_text = _prefix_public_html_routes(html_text)
+    html_text = _inject_public_share_runtime(html_text)
+    return HTMLResponse(html_text)
 
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
