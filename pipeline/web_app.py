@@ -78,6 +78,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 PUBLIC_FRONTEND_LEGACY_DIR = BASE_DIR / "public_frontend"
 PUBLIC_FRONTEND_DIST_DIR = BASE_DIR / "public_frontend_dist"
+ADS_TXT_PATH = BASE_DIR / "ads.txt"
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
@@ -8825,6 +8826,11 @@ def llm_today(date: str = "", scope_key: str = ""):
     html_text = _inject_public_meta_tags(html_text)
     html_text = _inject_public_share_runtime(html_text)
     return HTMLResponse(html_text)
+
+
+@app.get("/ads.txt")
+def ads_txt():
+    return FileResponse(ADS_TXT_PATH, media_type="text/plain; charset=utf-8")
 
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
