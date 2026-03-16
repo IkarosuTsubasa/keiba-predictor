@@ -93,6 +93,14 @@ PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
 PUBLIC_LEGACY_ASSET_BASE_PATH = f"{PUBLIC_BASE_PATH}/public"
 PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
+PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
+PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
+PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
+PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
+PUBLIC_META_TITLE = "\u3044\u304b\u3044\u3082AI\u7af6\u99ac"
+PUBLIC_META_DESCRIPTION = (
+    "4\u3064\u306eAI\u304c\u540c\u6642\u306b\u7af6\u99ac\u4e88\u60f3"
+)
 app = FastAPI()
 load_local_env(BASE_DIR, override=False)
 app.mount("/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="public-assets")
@@ -132,6 +140,42 @@ def _load_public_index_html():
             continue
     with open(index_path, "r", encoding="cp932") as f:
         return f.read()
+
+
+def _inject_public_meta_tags(content=""):
+    html_text = str(content or "")
+    if not html_text:
+        return html_text
+
+    title_tag = f"<title>{html.escape(PUBLIC_META_TITLE)}</title>"
+    description_tag = f'<meta name="description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />'
+    html_text = re.sub(r"<title>.*?</title>", title_tag, html_text, count=1, flags=re.IGNORECASE | re.DOTALL)
+    html_text = re.sub(
+        r'<meta\s+name=["\']description["\'][^>]*>',
+        description_tag,
+        html_text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    html_text = re.sub(r'\s*<link\s+rel=["\']canonical["\'][^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'\s*<meta\s+property=["\']og:[^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'\s*<meta\s+name=["\']twitter:[^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
+
+    meta_block = f"""
+    <link rel="canonical" href="{html.escape(PUBLIC_CANONICAL_URL)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="{html.escape(PUBLIC_META_TITLE)}" />
+    <meta property="og:title" content="{html.escape(PUBLIC_META_TITLE)}" />
+    <meta property="og:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
+    <meta property="og:url" content="{html.escape(PUBLIC_CANONICAL_URL)}" />
+    <meta property="og:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
+    <meta property="og:image:alt" content="{html.escape(PUBLIC_META_TITLE)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{html.escape(PUBLIC_META_TITLE)}" />
+    <meta name="twitter:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
+    <meta name="twitter:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
+    """.strip()
+    return re.sub(r"</head>", f"{meta_block}\n  </head>", html_text, count=1, flags=re.IGNORECASE)
 
 
 def _public_share_runtime_html():
@@ -432,6 +476,20 @@ def public_favicon():
     if icon_path.exists():
         return FileResponse(icon_path, media_type="image/png")
     raise HTTPException(status_code=404, detail="favicon not found")
+
+
+@app.get(PUBLIC_OG_IMAGE_PATH)
+@app.get("/og.png")
+def public_og_image():
+    candidates = [
+        PUBLIC_FRONTEND_DIST_DIR / "og.png",
+        PUBLIC_FRONTEND_LEGACY_DIR / "og.png",
+        ROOT_DIR / "og.png",
+    ]
+    for path in candidates:
+        if path.exists():
+            return FileResponse(path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="og image not found")
 
 
 def _admin_token_expected():
@@ -8728,6 +8786,7 @@ def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str =
 def llm_today(date: str = "", scope_key: str = ""):
     html_text = _load_public_index_html()
     html_text = _prefix_public_html_routes(html_text)
+    html_text = _inject_public_meta_tags(html_text)
     html_text = _inject_public_share_runtime(html_text)
     return HTMLResponse(html_text)
 
