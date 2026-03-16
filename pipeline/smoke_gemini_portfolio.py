@@ -4,8 +4,10 @@ from pathlib import Path
 
 from gemini_portfolio import (
     build_history_context,
+    DAILY_BANKROLL_YEN,
     extract_ledger_date,
     load_daily_profit_rows,
+    resolve_daily_bankroll_yen,
     reserve_run_tickets,
     settle_run_tickets,
     summarize_bankroll,
@@ -120,6 +122,11 @@ def main():
         assert_true(daily and int(daily[0]["profit_yen"]) == 1070, "daily profit summary mismatch")
         history = build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket_limit=4)
         assert_true(int(history["today"]["available_bankroll_yen"]) == 11070, "history today bankroll mismatch")
+        assert_true(resolve_daily_bankroll_yen("20260316") == 10000, "pre-switch bankroll should stay 10000")
+        assert_true(resolve_daily_bankroll_yen("20260317") == DAILY_BANKROLL_YEN, "switch-date bankroll should use new budget")
+        future_summary = summarize_bankroll(base_dir, "20260317")
+        assert_true(int(future_summary["start_bankroll_yen"]) == DAILY_BANKROLL_YEN, "future start bankroll mismatch")
+        assert_true(int(future_summary["available_bankroll_yen"]) == DAILY_BANKROLL_YEN, "future available bankroll mismatch")
         assert_true(int(history["lookback_summary"]["profit_yen"]) == 1070, "history lookback profit mismatch")
         assert_true(bool(history["recent_tickets"]), "history recent tickets missing")
         print("smoke_gemini_portfolio: OK")

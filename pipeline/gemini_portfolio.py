@@ -4,7 +4,9 @@ from pathlib import Path
 import re
 
 
-DAILY_BANKROLL_YEN = 10000
+LEGACY_DAILY_BANKROLL_YEN = 10000
+DAILY_BANKROLL_YEN = 50000
+DAILY_BANKROLL_SWITCH_DATE = "20260317"
 DEFAULT_POLICY_ENGINE = "gemini"
 LEDGER_HEADERS = [
     "ledger_date",
@@ -129,6 +131,18 @@ def extract_ledger_date(run_id="", timestamp=""):
     return datetime.now().strftime("%Y%m%d")
 
 
+def resolve_daily_bankroll_yen(ledger_date=""):
+    date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
+    digits = "".join(ch for ch in date_key if ch.isdigit())
+    if len(digits) >= 8:
+        date_key = digits[:8]
+    else:
+        date_key = datetime.now().strftime("%Y%m%d")
+    if date_key >= DAILY_BANKROLL_SWITCH_DATE:
+        return DAILY_BANKROLL_YEN
+    return LEGACY_DAILY_BANKROLL_YEN
+
+
 def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
     date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
     engine = normalize_policy_engine(policy_engine)
@@ -153,10 +167,11 @@ def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
                 settled_runs.add(run_id)
         elif status == "topup":
             topup_yen += profit
-    available = DAILY_BANKROLL_YEN + topup_yen + realized_profit - open_stake
+    start_bankroll_yen = resolve_daily_bankroll_yen(date_key)
+    available = start_bankroll_yen + topup_yen + realized_profit - open_stake
     return {
         "ledger_date": date_key,
-        "start_bankroll_yen": DAILY_BANKROLL_YEN,
+        "start_bankroll_yen": start_bankroll_yen,
         "topup_yen": topup_yen,
         "open_stake_yen": open_stake,
         "realized_profit_yen": realized_profit,

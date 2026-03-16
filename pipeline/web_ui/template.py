@@ -1318,7 +1318,7 @@ def page_template(
             <p class="helper-text">This runs the policy-only LLM buy flow and writes policy JSON plus ledger reservations. It does not restore the old bet engine.</p>
             <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
             <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run All LLMs</button>
-            <button type="submit" formaction="/topup_all_llm_budget" class="secondary-button">Add 10000 JPY To All LLMs</button>
+            <button type="submit" formaction="/topup_all_llm_budget" class="secondary-button">Add Daily Budget To All LLMs</button>
           </form>
           <form action="/reset_llm_state" method="post" class="stack-form" id="reset-llm-form" style="margin-top:12px;">
             <input type="hidden" name="token" value="{html.escape(admin_token_value)}">

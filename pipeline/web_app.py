@@ -35,6 +35,7 @@ from gemini_portfolio import (
     load_triple_odds_map,
     load_win_odds_map,
     reserve_run_tickets,
+    resolve_daily_bankroll_yen,
     summarize_bankroll,
 )
 from llm.policy_runtime import (
@@ -4053,7 +4054,7 @@ def build_llm_today_page(date_text="", scope_key=""):
           <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
           <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">所有LLM +10000</button>
+          <button type="submit" class="secondary-button">所有LLM追加当日预算</button>
         </form>
         """
 
@@ -6217,11 +6218,11 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
             </div>
             <span class="section-chip">budget</span>
           </div>
-          <p class="helper-text">按今天的账本日期，给四个 LLM 同时追加 10000。</p>
+          <p class="helper-text">按账本日期给四个 LLM 同时追加当日预算，2026年3月17日起为 50000，此前为 10000。</p>
           <div class="copy-row">
             <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">所有LLM +10000</button>
+              <button type="submit" class="secondary-button">所有LLM追加当日预算</button>
             </form>
           </div>
         </section>
@@ -6606,7 +6607,7 @@ def build_admin_filter_panel(admin_token="", show_settled=False):
         <a href="/console?token={html.escape(admin_token)}&show_settled={toggle_value}" class="secondary-button">{toggle_label}</a>
         <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">所有LLM +10000</button>
+          <button type="submit" class="secondary-button">所有LLM追加当日预算</button>
         </form>
       </div>
     </section>
@@ -7497,6 +7498,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
                 {''.join(timing_tags) if timing_tags else '<span>还没有时间节点</span>'}
               </div>
               <div class="job-notes">{html.escape(notes or '无备注')}</div>
+              {_race_job_edit_form_clean(row, admin_token=admin_token)}
               {_race_job_settle_form(row, admin_token=admin_token)}
               <div class="job-actions">
                 {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
@@ -8367,12 +8369,12 @@ def topup_today_all_llm_budget(token: str = Form("")):
             error_text="管理口令无效，不能追加资金。",
         )
     ledger_date = _default_job_race_date_text().replace("-", "")
-    amount_yen = 10000
+    amount_yen = resolve_daily_bankroll_yen(ledger_date)
     for engine in ("gemini", "siliconflow", "openai", "grok"):
         add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
     return render_console_page(
         admin_token=token,
-        message_text=f"已按 {ledger_date} 给四个 LLM 各追加 10000。",
+        message_text=f"已按 {ledger_date} 给四个 LLM 各追加 {amount_yen}。",
     )
 
 
@@ -9078,7 +9080,7 @@ def topup_all_llm_budget(
             admin_token=token,
         )
     ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
-    amount_yen = 10000
+    amount_yen = resolve_daily_bankroll_yen(ledger_date)
     lines = [f"[llm_budget_topup] ledger_date={ledger_date} amount_yen={amount_yen} engines=4"]
     for engine in ("gemini", "siliconflow", "openai", "grok"):
         summary = add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)

@@ -32,7 +32,7 @@ def build_llm_compare_block(
                 "profit_30d_yen": profit_30d,
                 "roi_30d": roi_30d,
                 "profit_today_yen": _to_int(bankroll.get("realized_profit_yen")),
-                "available_bankroll_yen": _to_int(bankroll.get("available_bankroll_yen", 10000)),
+                "available_bankroll_yen": _to_int(bankroll.get("available_bankroll_yen", 0)),
                 "open_stake_yen": _to_int(bankroll.get("open_stake_yen")),
                 "pending_tickets": _to_int(bankroll.get("pending_tickets")),
                 "runs_30d": runs_30d,
