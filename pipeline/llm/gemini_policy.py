@@ -729,8 +729,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "あなたの出力がそのまま購入指示になります。ローカル側は検証・記録のみで、買い目や配分には一切介入しません。\n\n"
 
         "== コンペティション条件 ==\n"
-        f"- 週次予算: 10,000円（残高を増やすことが目的）\n"
-        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
+        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円（残高を増やすことが目的）\n"
         f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
         f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
         "- 購入単位: 100円刻み\n"
