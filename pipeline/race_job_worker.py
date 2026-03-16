@@ -5,11 +5,13 @@ import sys
 import time
 from pathlib import Path
 
+from local_env import load_local_env
 from race_job_runner import fail_race_job, process_race_job, settle_race_job
 from race_job_store import get_job, load_jobs, scan_due_jobs
 
 
 BASE_DIR = Path(__file__).resolve().parent
+load_local_env(BASE_DIR, override=False)
 
 
 def _poll_seconds():

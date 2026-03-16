@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import json
 
+from local_env import load_local_env
 from surface_scope import (
     get_config_path,
     get_data_dir,
@@ -26,6 +27,7 @@ from predictor_catalog import latest_prediction_path, list_predictors, snapshot_
 
 
 BASE_DIR = Path(__file__).resolve().parent
+load_local_env(BASE_DIR, override=False)
 ROOT_DIR = BASE_DIR.parent
 DATA_DIR = None
 CONFIG_PATH = None
@@ -683,6 +685,7 @@ def main():
                 {
                     "SCOPE_KEY": scope_key,
                     "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_NO_PROMPT": "1",
                     "PREDICTOR_NO_WAIT": "1",
                 },
                 extra_lines=1,

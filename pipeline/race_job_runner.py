@@ -8,10 +8,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from local_env import load_local_env
 from predictor_catalog import list_predictors, snapshot_prediction_path
 from race_job_store import get_job, initialize_job_step_fields, set_job_step_state, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 
+
+BASE_DIR = Path(__file__).resolve().parent
+load_local_env(BASE_DIR, override=False)
 
 ODDS_EXTRACT_TIMEOUT_SECONDS = 300
 
@@ -515,6 +519,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                     env={
                         "SCOPE_KEY": scope_key,
                         "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                        "PREDICTOR_NO_PROMPT": "1",
                         "PREDICTOR_NO_WAIT": "1",
                         "PREDICTOR_TARGET_SURFACE": surface,
                         "PREDICTOR_TARGET_DISTANCE": distance,
