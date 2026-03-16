@@ -6310,6 +6310,66 @@ def _race_job_display_code(row):
     return str(display.get("code", "") or "").strip().lower()
 
 
+def _race_job_process_log_entries(row):
+    raw = str((row or {}).get("last_process_output", "") or "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    items = list(payload.get("process_log", []) or [])
+    entries = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        step = str(item.get("step", "") or "").strip()
+        if not step:
+            continue
+        code = str(item.get("code", "") or "").strip()
+        output = str(item.get("output", "") or "").strip()
+        preview = ""
+        if output:
+            preview = output.splitlines()[0].strip()
+            if len(preview) > 140:
+                preview = preview[:137] + "..."
+        entries.append({"step": step, "code": code, "preview": preview})
+    return entries
+
+
+def _race_job_process_log_html(row):
+    entries = _race_job_process_log_entries(row)
+    if not entries:
+        return ""
+    items = []
+    for entry in entries:
+        code_text = f"exit {entry['code']}" if entry.get("code", "") != "" else "exit -"
+        preview_html = (
+            f'<div class="job-process-preview">{html.escape(entry["preview"])}</div>'
+            if entry.get("preview")
+            else ""
+        )
+        items.append(
+            f"""
+            <article class="job-process-item">
+              <div class="job-process-head">
+                <strong>{html.escape(entry["step"])}</strong>
+                <span>{html.escape(code_text)}</span>
+              </div>
+              {preview_html}
+            </article>
+            """
+        )
+    return f"""
+    <section class="job-process-log">
+      <div class="job-process-title">Process Log</div>
+      <div class="job-process-list">
+        {"".join(items)}
+      </div>
+    </section>
+    """
+
+
 def _race_job_action_buttons_v2(job_id, status, admin_token=""):
     buttons = []
     status_text = str(status or "").strip().lower()
@@ -6546,6 +6606,7 @@ def _admin_job_card_html(row, admin_token=""):
         {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
         {open_links}
       </div>
+      {_race_job_process_log_html(row)}
       {_race_job_settle_form(row, admin_token=admin_token)}
     </section>
     """
@@ -7960,6 +8021,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
                 {''.join(timing_tags) if timing_tags else '<span>还没有时间节点</span>'}
               </div>
               <div class="job-notes">{html.escape(notes or '无备注')}</div>
+              {_race_job_process_log_html(row)}
               {_race_job_edit_form_clean(row, admin_token=admin_token)}
               {_race_job_settle_form(row, admin_token=admin_token)}
               <div class="job-actions">
@@ -8187,6 +8249,53 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
     .job-file-grid p, .job-notes {{
       margin: 0;
       line-height: 1.55;
+      word-break: break-word;
+    }}
+    .job-process-log {{
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(23,31,26,0.04);
+    }}
+    .job-process-title {{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .job-process-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .job-process-item {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(23,31,26,0.06);
+      display: grid;
+      gap: 6px;
+    }}
+    .job-process-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }}
+    .job-process-head strong {{
+      font-size: 13px;
+      color: var(--ink);
+    }}
+    .job-process-head span {{
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }}
+    .job-process-preview {{
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
       word-break: break-word;
     }}
     .job-settle-panel {{

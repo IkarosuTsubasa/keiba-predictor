@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from predictor_catalog import list_predictors, snapshot_prediction_path
 from race_job_store import get_job, initialize_job_step_fields, set_job_step_state, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 
@@ -171,6 +172,93 @@ def _job_predictor_track(job):
     return raw or "良"
 
 
+def _job_predictor_location(job):
+    return str((job or {}).get("location", "") or "").strip()
+
+
+def _job_race_date(job):
+    return str((job or {}).get("race_date", "") or "").strip()
+
+
+def normalize_track_condition_label(value):
+    raw = str(value or "").strip()
+    raw_lower = raw.lower()
+    mapping = {
+        "good": "\u826f",
+        "firm": "\u826f",
+        "slightly_heavy": "\u7a0d\u91cd",
+        "slightly heavy": "\u7a0d\u91cd",
+        "heavy": "\u91cd",
+        "bad": "\u4e0d\u826f",
+    }
+    return mapping.get(raw_lower, raw or "\u826f")
+
+
+def surface_cli_token(surface_value):
+    return "dirt" if str(surface_value or "").strip().lower() == "dirt" else "turf"
+
+
+def load_name_set(path, field):
+    src = Path(path)
+    if not src.exists():
+        return None, f"{src} not found."
+    with open(src, "r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        if field not in fieldnames:
+            return None, f"{src} missing column: {field}"
+        names = {str(row.get(field, "") or "").strip() for row in reader if str(row.get(field, "") or "").strip()}
+    if not names:
+        return None, f"{src} has no rows for {field}"
+    return names, ""
+
+
+def validate_odds_predictions(odds_path, pred_path):
+    odds_names, err = load_name_set(odds_path, "name")
+    if odds_names is None:
+        return False, err
+    pred_names, err = load_name_set(pred_path, "HorseName")
+    if pred_names is None:
+        return False, err
+    matches = odds_names & pred_names
+    base = min(len(odds_names), len(pred_names))
+    ratio = (len(matches) / base) if base else 0.0
+    if len(matches) < 3 or ratio < 0.6:
+        return False, f"odds/predictions mismatch: matches={len(matches)} ratio={ratio:.2f}"
+    return True, ""
+
+
+def csv_has_rows(path, min_rows=1):
+    src = Path(path)
+    if not src.exists():
+        return False
+    with open(src, "r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        count = 0
+        for _ in reader:
+            count += 1
+            if count >= min_rows:
+                return True
+    return False
+
+
+def validate_prediction_output(start_ts, pred_path, odds_path):
+    pred_file = Path(pred_path)
+    if not pred_file.exists():
+        return False, f"{pred_file.name} not generated."
+    try:
+        if pred_file.stat().st_mtime < start_ts - 1:
+            return False, f"{pred_file.name} not updated."
+    except OSError:
+        return False, f"{pred_file.name} stat unavailable."
+    if not csv_has_rows(pred_file):
+        return False, f"{pred_file.name} has no rows."
+    ok, msg = validate_odds_predictions(odds_path, pred_file)
+    if not ok:
+        return False, msg
+    return True, ""
+
+
 def _shared_workspace_dir(base_dir):
     path = Path(base_dir) / "data" / "_shared" / "job_workspaces"
     path.mkdir(parents=True, exist_ok=True)
@@ -207,7 +295,7 @@ def _copy_if_exists(src, dest):
     return str(dest_path)
 
 
-def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=None):
+def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=None, script_args=None):
     payload = ""
     if inputs is not None:
         payload = "\n".join(str(item) for item in list(inputs or [])) + "\n"
@@ -218,7 +306,7 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
         run_env.update(env)
     try:
         result = subprocess.run(
-            [sys.executable, str(script_path)],
+            [sys.executable, str(script_path), *(list(script_args or []))],
             input=payload,
             text=True,
             encoding="utf-8",
@@ -249,7 +337,6 @@ def _snapshot_outputs(base_dir, scope_key, race_id, run_id, workspace_dir):
     race_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_{race_id}"
     prediction_files = {
-        "predictions_path": ("predictions.csv", f"predictions_{run_id}{suffix}.csv"),
         "odds_path": ("odds.csv", f"odds_{run_id}{suffix}.csv"),
         "fuku_odds_path": ("fuku_odds.csv", f"fuku_odds_{run_id}{suffix}.csv"),
         "wide_odds_path": ("wide_odds.csv", f"wide_odds_{run_id}{suffix}.csv"),
@@ -259,6 +346,13 @@ def _snapshot_outputs(base_dir, scope_key, race_id, run_id, workspace_dir):
         "trifecta_odds_path": ("trifecta_odds.csv", f"trifecta_odds_{run_id}{suffix}.csv"),
     }
     out = {}
+    for spec in list_predictors():
+        field_name = str(spec.get("run_field", "") or "").strip()
+        latest_name = str(spec.get("latest_filename", "") or "").strip()
+        if not field_name or not latest_name:
+            continue
+        dest_path = snapshot_prediction_path(data_dir, race_id, run_id, spec["id"])
+        out[field_name] = _copy_if_exists(Path(workspace_dir) / latest_name, dest_path)
     for field_name, (src_name, dest_name) in prediction_files.items():
         out[field_name] = _copy_if_exists(Path(workspace_dir) / src_name, race_dir / dest_name)
     return out
@@ -278,9 +372,9 @@ def _build_run_row(job, run_id, snapshot_paths):
         "scope": scope_key,
         "location": str(job.get("location", "") or "").strip(),
         "race_date": str(job.get("race_date", "") or "").strip(),
-        "surface": "",
-        "distance": "",
-        "track_condition": "",
+        "surface": _job_predictor_surface(job),
+        "distance": _job_predictor_distance(job),
+        "track_condition": _job_predictor_track(job),
         "budget_yen": "2000,5000,10000,50000",
         "style": "scheduled",
         "strategy": "scheduled",
@@ -289,10 +383,10 @@ def _build_run_row(job, run_id, snapshot_paths):
         "predictor_reason": "race_job_runner",
         "config_version": "",
         "predictions_path": snapshot_paths.get("predictions_path", ""),
-        "predictions_v2_opus_path": "",
-        "predictions_v3_premium_path": "",
-        "predictions_v4_gemini_path": "",
-        "predictions_v5_stacking_path": "",
+        "predictions_v2_opus_path": snapshot_paths.get("predictions_v2_opus_path", ""),
+        "predictions_v3_premium_path": snapshot_paths.get("predictions_v3_premium_path", ""),
+        "predictions_v4_gemini_path": snapshot_paths.get("predictions_v4_gemini_path", ""),
+        "predictions_v5_stacking_path": snapshot_paths.get("predictions_v5_stacking_path", ""),
         "odds_path": snapshot_paths.get("odds_path", ""),
         "wide_odds_path": snapshot_paths.get("wide_odds_path", ""),
         "fuku_odds_path": snapshot_paths.get("fuku_odds_path", ""),
@@ -381,20 +475,119 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             lambda row, now_text: _mark_odds_succeeded_and_predictor_running(row, now_text),
         )
 
-        pred_code, pred_output = _run_subprocess(
-            base_path.parent / "predictor.py",
-            cwd=workspace,
-            env={
-                "SCOPE_KEY": scope_key,
-                "PREDICTOR_NO_PROMPT": "1",
-                "PREDICTOR_TARGET_SURFACE": _job_predictor_surface(job),
-                "PREDICTOR_TARGET_DISTANCE": _job_predictor_distance(job),
-                "PREDICTOR_TARGET_CONDITION": _job_predictor_track(job),
-            },
-        )
-        summary["process_log"].append({"step": "predictor", "code": pred_code, "output": pred_output})
-        if pred_code != 0 or not (workspace / "predictions.csv").exists():
-            raise RuntimeError(f"predictor failed: {pred_output}")
+        surface = _job_predictor_surface(job)
+        distance = _job_predictor_distance(job)
+        track_cond = _job_predictor_track(job)
+        track_cond_label = normalize_track_condition_label(track_cond)
+        surface_token = surface_cli_token(surface)
+        target_location = _job_predictor_location(job)
+        race_date = _job_race_date(job)
+        odds_src = workspace / "odds.csv"
+
+        for spec in list_predictors():
+            script_name = str(spec.get("script_name", "") or "").strip()
+            latest_name = str(spec.get("latest_filename", "") or "").strip()
+            if not script_name or not latest_name:
+                continue
+            pred_latest_path = workspace / latest_name
+            if pred_latest_path.exists():
+                pred_latest_path.unlink()
+            predictor_start = datetime.now().timestamp()
+
+            if spec["id"] == "main":
+                pred_code, pred_output = _run_subprocess(
+                    base_path.parent / script_name,
+                    cwd=workspace,
+                    inputs=[surface, distance, track_cond],
+                    env={
+                        "SCOPE_KEY": scope_key,
+                        "PREDICTOR_NO_PROMPT": "1",
+                        "PREDICTOR_TARGET_SURFACE": surface,
+                        "PREDICTOR_TARGET_DISTANCE": distance,
+                        "PREDICTOR_TARGET_CONDITION": track_cond,
+                    },
+                )
+            elif spec["id"] == "v2_opus":
+                pred_code, pred_output = _run_subprocess(
+                    base_path.parent / script_name,
+                    cwd=workspace,
+                    inputs=[surface_token, distance, track_cond_label],
+                    env={
+                        "SCOPE_KEY": scope_key,
+                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                        "PREDICTOR_NO_WAIT": "1",
+                        "PREDICTOR_TARGET_SURFACE": surface,
+                        "PREDICTOR_TARGET_DISTANCE": distance,
+                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                    },
+                )
+            elif spec["id"] == "v3_premium":
+                pred_code, pred_output = _run_subprocess(
+                    base_path.parent / script_name,
+                    cwd=workspace,
+                    env={"SCOPE_KEY": scope_key},
+                    script_args=[
+                        "--base-dir",
+                        str(workspace),
+                        "--output",
+                        latest_name,
+                        "--race-surface",
+                        surface,
+                        "--race-distance",
+                        distance or "1800",
+                        "--race-going",
+                        track_cond_label,
+                        "--no-prompt",
+                        "--no-wait",
+                    ],
+                )
+            elif spec["id"] == "v4_gemini":
+                pred_code, pred_output = _run_subprocess(
+                    base_path.parent / script_name,
+                    cwd=workspace,
+                    env={
+                        "SCOPE_KEY": scope_key,
+                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                        "PREDICTOR_TARGET_LOCATION": target_location,
+                        "PREDICTOR_TARGET_SURFACE": surface,
+                        "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                    },
+                )
+            elif spec["id"] == "v5_stacking":
+                pred_code, pred_output = _run_subprocess(
+                    base_path.parent / script_name,
+                    cwd=workspace,
+                    env={
+                        "SCOPE_KEY": scope_key,
+                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                        "PREDICTOR_TARGET_LOCATION": target_location,
+                        "PREDICTOR_TARGET_SURFACE": surface,
+                        "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                        "PREDICTOR_TARGET_DATE": race_date,
+                        "PREDICTOR_NO_PROMPT": "1",
+                        "ODDS_PATH": str(workspace / "odds.csv"),
+                        "FUKU_ODDS_PATH": str(workspace / "fuku_odds.csv"),
+                        "WIDE_ODDS_PATH": str(workspace / "wide_odds.csv"),
+                        "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
+                        "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
+                        "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
+                        "TRIFECTA_ODDS_PATH": str(workspace / "trifecta_odds.csv"),
+                    },
+                )
+            else:
+                continue
+
+            summary["process_log"].append(
+                {"step": f"predictor_{spec['id']}", "code": pred_code, "output": pred_output}
+            )
+            if pred_code != 0:
+                raise RuntimeError(f"{spec['label']} failed: {pred_output}")
+            ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
+            if not ok:
+                raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
+
         update_job(
             base_path,
             job_id,
