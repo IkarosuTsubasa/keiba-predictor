@@ -83,6 +83,40 @@ def stop_loading(driver):
         pass
 
 
+def get_driver_title(driver):
+    try:
+        return driver.title or ""
+    except Exception:
+        return ""
+
+
+def read_page_source_with_fallback(driver, url):
+    try:
+        return driver.page_source
+    except TimeoutException:
+        print(f"[WARN] Timed out reading page source; fallback to partial DOM: {url}")
+        stop_loading(driver)
+    except Exception as exc:
+        print(f"[WARN] Failed to read page source; fallback to partial DOM: {url} ({exc})")
+
+    for script in (
+        "return document.documentElement ? document.documentElement.outerHTML : '';",
+        "return document.body ? document.body.outerHTML : '';",
+    ):
+        try:
+            html = driver.execute_script(script)
+        except Exception:
+            continue
+        if isinstance(html, str) and html.strip():
+            return html
+
+    try:
+        html = driver.find_element(By.TAG_NAME, "html").get_attribute("outerHTML")
+    except Exception:
+        html = ""
+    return html or ""
+
+
 def load_cookies_from_json_file(path="cookie.txt"):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -156,8 +190,8 @@ def get_page_source(url, driver, wait_css=None, timeout=10):
             stop_loading(driver)
         except Exception:
             print(f"[WARN] Timeout waiting for odds values: {wait_css}")
-    page_source = driver.page_source
-    assert_not_blocked(page_source, driver.title or "", url)
+    page_source = read_page_source_with_fallback(driver, url)
+    assert_not_blocked(page_source, get_driver_title(driver), url)
     return page_source
 
 
@@ -1137,7 +1171,11 @@ def prepare_driver_session(driver):
     if should_inject_cookies():
         cookies = load_cookies_from_json_file("cookie.txt")
         driver.get("https://db.netkeiba.com")
-        assert_not_blocked(driver.page_source, driver.title or "", "https://db.netkeiba.com")
+        assert_not_blocked(
+            read_page_source_with_fallback(driver, "https://db.netkeiba.com"),
+            get_driver_title(driver),
+            "https://db.netkeiba.com",
+        )
         for cookie in cookies:
             driver.add_cookie(cookie)
         return
@@ -1220,7 +1258,7 @@ def run_browser_odds_flow(race_url, host):
             driver,
             "wide",
             build_wide_odds_url,
-            "span[id^='odds-5-']",
+            "span[id^='odds-5-'], span[id^='oddsmin-5-'], td.Odds",
             parse_wide_odds_from_page,
             "wide_odds.csv",
             ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
@@ -1230,7 +1268,7 @@ def run_browser_odds_flow(race_url, host):
             driver,
             "quinella",
             build_quinella_odds_url,
-            "span[id^='odds-4-']",
+            "span[id^='odds-4-'], td.Odds",
             parse_quinella_odds_from_page,
             "quinella_odds.csv",
             ["horse_no_a", "horse_no_b", "odds"],
