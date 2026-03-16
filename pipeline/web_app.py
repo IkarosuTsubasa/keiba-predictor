@@ -461,6 +461,19 @@ def strict_llm_odds_gate_enabled():
     return raw not in ("0", "false", "no", "off")
 
 
+def get_env_timeout(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return int(default)
+    if value <= 0:
+        return int(default)
+    return value
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -523,6 +536,7 @@ def refresh_odds_for_run(
     trio_odds_path=None,
     trifecta_odds_path=None,
 ):
+    odds_timeout_seconds = get_env_timeout("PIPELINE_ODDS_EXTRACT_TIMEOUT", 300)
     race_url = str(run_row.get("race_url") or "").strip()
     race_id = normalize_race_id(run_row.get("race_id", ""))
     if not race_url and race_id:
@@ -542,17 +556,28 @@ def refresh_odds_for_run(
     expected_names = expected_odds_output_names(scope_key)
     before_mtimes = capture_output_mtimes(ROOT_DIR, expected_names)
     started_at = time.time()
-    result = subprocess.run(
-        [sys.executable, str(ODDS_EXTRACT)],
-        input=f"{race_url}\n",
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        cwd=str(ROOT_DIR),
-        env=env,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ODDS_EXTRACT)],
+            input=f"{race_url}\n",
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            cwd=str(ROOT_DIR),
+            env=env,
+            check=False,
+            timeout=odds_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        detail = f"odds_extract timeout after {odds_timeout_seconds}s"
+        stdout_text = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
+        stderr_text = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+        if stdout_text:
+            detail = f"{detail}\n{stdout_text}"
+        if stderr_text:
+            detail = f"{detail}\n[stderr]\n{stderr_text}"
+        return False, detail, []
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         return False, f"odds_extract failed: {detail}", []

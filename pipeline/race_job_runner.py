@@ -12,6 +12,9 @@ from race_job_store import get_job, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 
 
+ODDS_EXTRACT_TIMEOUT_SECONDS = 300
+
+
 def strict_llm_odds_gate_enabled():
     raw = os.environ.get("PIPELINE_BLOCK_LLM_ON_ODDS_WARNING", "").strip().lower()
     return raw not in ("0", "false", "no", "off")
@@ -35,6 +38,19 @@ def validate_workspace_odds_outputs(workspace_dir, scope_key):
     if missing:
         return False, f"incomplete odds outputs: {', '.join(missing)}"
     return True, ""
+
+
+def get_env_timeout(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return int(default)
+    if value <= 0:
+        return int(default)
+    return value
 
 
 def _race_url(scope_key, race_id):
@@ -109,7 +125,7 @@ def _copy_if_exists(src, dest):
     return str(dest_path)
 
 
-def _run_subprocess(script_path, *, cwd, inputs=None, env=None):
+def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=None):
     payload = ""
     if inputs is not None:
         payload = "\n".join(str(item) for item in list(inputs or [])) + "\n"
@@ -118,16 +134,27 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None):
     run_env.setdefault("PYTHONUTF8", "1")
     if env:
         run_env.update(env)
-    result = subprocess.run(
-        [sys.executable, str(script_path)],
-        input=payload,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        cwd=str(cwd),
-        env=run_env,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            input=payload,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            cwd=str(cwd),
+            env=run_env,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout_text = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
+        stderr_text = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+        output = f"subprocess timeout after {int(timeout_seconds or 0)}s"
+        if stdout_text:
+            output = f"{output}\n{stdout_text}"
+        if stderr_text:
+            output = f"{output}\n[stderr]\n{stderr_text}"
+        return 124, output.strip()
     output = (result.stdout or "").strip()
     if result.stderr:
         output = f"{output}\n[stderr]\n{result.stderr.strip()}".strip()
@@ -262,6 +289,9 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             cwd=workspace,
             inputs=[race_url],
             env={"SCOPE_KEY": scope_key},
+            timeout_seconds=get_env_timeout(
+                "PIPELINE_ODDS_EXTRACT_TIMEOUT", ODDS_EXTRACT_TIMEOUT_SECONDS
+            ),
         )
         summary["process_log"].append({"step": "odds_extract", "code": odds_code, "output": odds_output})
         if odds_code != 0 or not (workspace / "odds.csv").exists():
