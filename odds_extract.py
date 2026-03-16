@@ -152,6 +152,11 @@ def is_linux_container():
     return os.name != "nt"
 
 
+def should_allow_nar_browser_fallback():
+    raw = os.environ.get("PIPELINE_NAR_ALLOW_BROWSER_FALLBACK", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def get_chrome_profile():
     profile_dir = (
         os.environ.get("PIPELINE_CHROME_PROFILE", "").strip()
@@ -1241,6 +1246,91 @@ def fetch_and_save_html_odds(race_url, driver, label, build_url, wait_css, parse
     return results
 
 
+def fetch_html_url(url, label):
+    try:
+        return fetch_text_url(url)
+    except Exception as exc:
+        print(f"[WARN] {label} fetch failed: {exc}")
+        return ""
+
+
+def fetch_and_save_html_odds_via_http(race_url, label, build_url, parse_func, out_path, fieldnames):
+    odds_url = build_url(race_url)
+    if not odds_url:
+        return []
+    sleep_jitter()
+    html = fetch_html_url(odds_url, label)
+    if not html:
+        return []
+    results = safe_parse(label, parse_func, html)
+    if results:
+        save_csv(out_path, fieldnames, results)
+    return results
+
+
+def fetch_primary_odds_via_http(race_url):
+    tan_url = build_tan_odds_url(race_url)
+    fuku_results = []
+    if tan_url:
+        sleep_jitter()
+        page = fetch_html_url(tan_url, "tan")
+        if not page:
+            return [], []
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+        fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+        if not results:
+            results = safe_parse("odds", parse_odds_from_page, page)
+        return results, fuku_results
+
+    sleep_jitter()
+    page = fetch_html_url(race_url, "odds")
+    if not page:
+        return [], []
+    results = safe_parse("odds", parse_odds_from_page, page)
+    if not results:
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+    fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+    return results, fuku_results
+
+
+def run_http_odds_flow(race_url, host):
+    results, fuku_results = fetch_primary_odds_via_http(race_url)
+    if not results:
+        print("No odds found.")
+        return False
+
+    save_primary_odds_results(results, fuku_results)
+
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "wide",
+        build_wide_odds_url,
+        parse_wide_odds_from_page,
+        "wide_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
+    )
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "quinella",
+        build_quinella_odds_url,
+        parse_quinella_odds_from_page,
+        "quinella_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds"],
+    )
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "exacta",
+        build_exacta_odds_url,
+        parse_exacta_odds_from_page,
+        "exacta_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds"],
+    )
+
+    if is_nar_host(host):
+        fetch_and_save_nar_triple_series(race_url)
+    return True
+
+
 def fetch_and_save_nar_triple_series(race_url):
     try:
         fetch_and_save_nar_triple_odds(race_url, "b7", "trio_odds.csv", keep_order=False)
@@ -1319,6 +1409,12 @@ def main():
                 return
         except Exception as exc:
             print(f"[WARN] JRA api odds fetch failed, fallback to browser flow: {exc}")
+    if is_nar_host(host):
+        if run_http_odds_flow(url, host):
+            return
+        if not should_allow_nar_browser_fallback():
+            print("[ERROR] NAR http odds fetch failed and browser fallback is disabled.")
+            raise SystemExit(1)
     run_browser_odds_flow(url, host)
 
 
