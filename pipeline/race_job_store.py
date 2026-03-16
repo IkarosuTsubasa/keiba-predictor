@@ -19,6 +19,161 @@ STATUS_FLOW = (
     "settled",
     "failed",
 )
+JOB_STEP_NAMES = ("odds", "predictor", "policy", "settlement")
+JOB_STEP_STATE_FLOW = ("idle", "queued", "running", "succeeded", "failed")
+
+
+def _job_step_field(step_name, suffix):
+    return f"{step_name}_{suffix}"
+
+
+def initialize_job_step_fields(job):
+    row = job if isinstance(job, dict) else dict(job or {})
+    for step_name in JOB_STEP_NAMES:
+        row.setdefault(_job_step_field(step_name, "status"), "idle")
+        row.setdefault(_job_step_field(step_name, "started_at"), "")
+        row.setdefault(_job_step_field(step_name, "finished_at"), "")
+        row.setdefault(_job_step_field(step_name, "error"), "")
+    return row
+
+
+def set_job_step_state(job, step_name, state, now_text="", error_text=""):
+    row = initialize_job_step_fields(job)
+    if step_name not in JOB_STEP_NAMES:
+        return row
+    state_text = str(state or "").strip().lower() or "idle"
+    if state_text not in JOB_STEP_STATE_FLOW:
+        state_text = "idle"
+    row[_job_step_field(step_name, "status")] = state_text
+    if state_text == "idle":
+        row[_job_step_field(step_name, "started_at")] = ""
+        row[_job_step_field(step_name, "finished_at")] = ""
+        row[_job_step_field(step_name, "error")] = ""
+        return row
+    if state_text == "queued":
+        row[_job_step_field(step_name, "started_at")] = ""
+        row[_job_step_field(step_name, "finished_at")] = ""
+        row[_job_step_field(step_name, "error")] = ""
+        return row
+    if state_text == "running":
+        if now_text:
+            row[_job_step_field(step_name, "started_at")] = (
+                row.get(_job_step_field(step_name, "started_at"), "") or now_text
+            )
+        row[_job_step_field(step_name, "finished_at")] = ""
+        row[_job_step_field(step_name, "error")] = ""
+        return row
+    if now_text:
+        row[_job_step_field(step_name, "started_at")] = (
+            row.get(_job_step_field(step_name, "started_at"), "") or now_text
+        )
+        row[_job_step_field(step_name, "finished_at")] = now_text
+    if state_text == "failed":
+        row[_job_step_field(step_name, "error")] = str(error_text or "").strip()
+    else:
+        row[_job_step_field(step_name, "error")] = ""
+    return row
+
+
+def hydrate_job_step_states(job):
+    raw_row = dict(job or {})
+    explicit = any(
+        str(raw_row.get(_job_step_field(step_name, "status"), "") or "").strip()
+        for step_name in JOB_STEP_NAMES
+    )
+    row = initialize_job_step_fields(raw_row)
+    legacy_status = str(row.get("status", "") or "").strip().lower()
+    current_run_id = str(row.get("current_run_id", "") or "").strip()
+    actual_names_ready = all(str(row.get(name, "") or "").strip() for name in ("actual_top1", "actual_top2", "actual_top3"))
+    if not explicit:
+        if legacy_status == "queued_process":
+            row = set_job_step_state(row, "odds", "queued")
+        elif legacy_status == "processing":
+            row = set_job_step_state(row, "odds", "running", row.get("processing_started_at", ""))
+        elif legacy_status in ("ready", "queued_settle", "settling", "settled"):
+            for step_name in ("odds", "predictor", "policy"):
+                row = set_job_step_state(row, step_name, "succeeded", row.get("ready_at", ""))
+        elif legacy_status == "failed":
+            if str(row.get("settling_started_at", "") or "").strip():
+                for step_name in ("odds", "predictor", "policy"):
+                    if current_run_id:
+                        row = set_job_step_state(step_name=step_name, job=row, state="succeeded", now_text=row.get("ready_at", ""))
+                row = set_job_step_state(
+                    row,
+                    "settlement",
+                    "failed",
+                    row.get("updated_at", "") or row.get("settling_started_at", ""),
+                    row.get("error_message", ""),
+                )
+            elif current_run_id:
+                row = set_job_step_state(row, "odds", "succeeded", row.get("ready_at", ""))
+                row = set_job_step_state(row, "predictor", "succeeded", row.get("ready_at", ""))
+                row = set_job_step_state(
+                    row,
+                    "policy",
+                    "failed",
+                    row.get("updated_at", "") or row.get("ready_at", ""),
+                    row.get("error_message", ""),
+                )
+            elif str(row.get("processing_started_at", "") or "").strip():
+                row = set_job_step_state(
+                    row,
+                    "odds",
+                    "failed",
+                    row.get("updated_at", "") or row.get("processing_started_at", ""),
+                    row.get("error_message", ""),
+                )
+        if legacy_status == "queued_settle":
+            row = set_job_step_state(row, "settlement", "queued")
+        elif legacy_status == "settling":
+            row = set_job_step_state(row, "settlement", "running", row.get("settling_started_at", ""))
+        elif legacy_status == "settled":
+            row = set_job_step_state(row, "settlement", "succeeded", row.get("settled_at", ""))
+        elif legacy_status == "failed" and actual_names_ready and str(row.get("settling_started_at", "") or "").strip():
+            row = set_job_step_state(
+                row,
+                "settlement",
+                "failed",
+                row.get("updated_at", "") or row.get("settling_started_at", ""),
+                row.get("error_message", ""),
+            )
+    return row
+
+
+def derive_job_display_state(job):
+    row = hydrate_job_step_states(job)
+    legacy_status = str(row.get("status", "") or "").strip().lower()
+    if row.get("settlement_status") == "succeeded":
+        return {"code": "settled", "label": "已结算", "tone": "good"}
+    if row.get("settlement_status") == "running":
+        return {"code": "settling", "label": "结算中", "tone": "active"}
+    if row.get("settlement_status") == "queued":
+        return {"code": "queued_settle", "label": "待结算", "tone": "active"}
+    if legacy_status == "failed":
+        for step_name, label in (
+            ("settlement", "结算失败"),
+            ("policy", "LLM失败"),
+            ("predictor", "预测失败"),
+            ("odds", "赔率失败"),
+        ):
+            if row.get(_job_step_field(step_name, "status")) == "failed":
+                return {"code": f"failed_{step_name}", "label": label, "tone": "danger"}
+        return {"code": "failed", "label": "失败", "tone": "danger"}
+    if row.get("policy_status") == "running":
+        return {"code": "policy_running", "label": "LLM处理中", "tone": "active"}
+    if row.get("predictor_status") == "running":
+        return {"code": "predictor_running", "label": "预测中", "tone": "active"}
+    if row.get("odds_status") in ("queued", "running"):
+        return {"code": "odds_running", "label": "赔率处理中", "tone": "active"}
+    if row.get("policy_status") == "succeeded":
+        return {"code": "ready", "label": "处理完成", "tone": "good"}
+    if row.get("predictor_status") == "succeeded":
+        return {"code": "predictor_ready", "label": "预测已生成", "tone": "good"}
+    if legacy_status == "scheduled":
+        return {"code": "scheduled", "label": "已排程", "tone": "muted"}
+    if legacy_status == "uploaded":
+        return {"code": "uploaded", "label": "已上传", "tone": "muted"}
+    return {"code": legacy_status or "unknown", "label": legacy_status or "-", "tone": "muted"}
 
 
 def _shared_dir(base_dir):
@@ -84,7 +239,7 @@ def load_jobs(base_dir):
             str(item.get("created_at", "") or ""),
         )
     )
-    return rows
+    return [hydrate_job_step_states(item) for item in rows]
 
 
 def save_jobs(base_dir, jobs):
@@ -193,6 +348,7 @@ def create_job(
         "last_process_output": "",
         "last_settlement_output": "",
     }
+    job = initialize_job_step_fields(job)
     job["status"] = compute_initial_status(job)
     jobs = load_jobs(base_dir)
     jobs.append(job)
@@ -214,8 +370,9 @@ def update_job(base_dir, job_id, mutate_fn):
     for idx, job in enumerate(jobs):
         if str(job.get("job_id", "")).strip() != str(job_id or "").strip():
             continue
-        current = dict(job)
+        current = initialize_job_step_fields(job)
         mutate_fn(current, now_text)
+        current = hydrate_job_step_states(current)
         current["updated_at"] = now_text
         jobs[idx] = current
         updated = current
@@ -229,14 +386,19 @@ def scan_due_jobs(base_dir, now_text=""):
     now_dt = _parse_dt(now_text) or _jst_now()
     jobs = load_jobs(base_dir)
     changed = []
-    for job in jobs:
+    for idx, job in enumerate(jobs):
+        job = initialize_job_step_fields(job)
         status = str(job.get("status", "")).strip().lower()
         process_dt = _parse_dt(job.get("process_after_time", ""))
         if status != "scheduled" or process_dt is None or process_dt > now_dt:
             continue
         job["status"] = "queued_process"
         job["queued_process_at"] = _dt_text(now_dt)
+        job = set_job_step_state(job, "odds", "queued")
+        job = set_job_step_state(job, "predictor", "idle")
+        job = set_job_step_state(job, "policy", "idle")
         job["updated_at"] = _dt_text(now_dt)
+        jobs[idx] = job
         changed.append(dict(job))
     if changed:
         save_jobs(base_dir, jobs)
@@ -247,29 +409,43 @@ def apply_job_action(base_dir, job_id, action):
     action_key = str(action or "").strip().lower()
 
     def mutate(job, now_text):
+        job.update(initialize_job_step_fields(job))
         current = str(job.get("status", "")).strip().lower()
         if action_key == "start_processing":
             if current in ("queued_process", "scheduled"):
                 job["status"] = "processing"
                 job["processing_started_at"] = now_text
                 job["error_message"] = ""
+                set_job_step_state(job, "odds", "running", now_text)
+                set_job_step_state(job, "predictor", "idle")
+                set_job_step_state(job, "policy", "idle")
         elif action_key == "mark_ready":
             if current in ("processing", "queued_process"):
                 job["status"] = "ready"
                 job["ready_at"] = now_text
+                for step_name in ("odds", "predictor", "policy"):
+                    if str(job.get(_job_step_field(step_name, "status"), "") or "").strip().lower() in (
+                        "queued",
+                        "running",
+                        "idle",
+                    ):
+                        set_job_step_state(job, step_name, "succeeded", now_text)
         elif action_key == "queue_settle":
             if current in ("ready", "settled"):
                 job["status"] = "queued_settle"
                 job["queued_settle_at"] = now_text
+                set_job_step_state(job, "settlement", "queued")
         elif action_key == "start_settling":
             if current in ("queued_settle", "ready"):
                 job["status"] = "settling"
                 job["settling_started_at"] = now_text
+                set_job_step_state(job, "settlement", "running", now_text)
         elif action_key == "mark_settled":
             if current in ("settling", "queued_settle", "ready"):
                 job["status"] = "settled"
                 job["settled_at"] = now_text
-        elif action_key == "reset_schedule":
+                set_job_step_state(job, "settlement", "succeeded", now_text)
+        elif action_key in ("reset_schedule", "force_reset"):
             job["status"] = compute_initial_status(job)
             job["queued_process_at"] = ""
             job["processing_started_at"] = ""
@@ -277,22 +453,60 @@ def apply_job_action(base_dir, job_id, action):
             job["queued_settle_at"] = ""
             job["settling_started_at"] = ""
             job["settled_at"] = ""
+            if action_key == "force_reset":
+                job["current_run_id"] = ""
+                job["actual_top1"] = ""
+                job["actual_top2"] = ""
+                job["actual_top3"] = ""
+                job["last_process_output"] = ""
+                job["last_settlement_output"] = ""
             job["error_message"] = ""
+            for step_name in JOB_STEP_NAMES:
+                set_job_step_state(job, step_name, "idle")
         elif action_key == "mark_failed":
             job["status"] = "failed"
             job["error_message"] = "manually marked as failed"
+            for step_name in ("settlement", "policy", "predictor", "odds"):
+                current_step = str(job.get(_job_step_field(step_name, "status"), "") or "").strip().lower()
+                if current_step in ("queued", "running"):
+                    set_job_step_state(job, step_name, "failed", now_text, job["error_message"])
+                    break
 
     return update_job(base_dir, job_id, mutate)
 
 
+def delete_job(base_dir, job_id):
+    target = str(job_id or "").strip()
+    if not target:
+        return None
+    jobs = load_jobs(base_dir)
+    kept = []
+    deleted = None
+    for job in jobs:
+        if str(job.get("job_id", "") or "").strip() == target and deleted is None:
+            deleted = dict(job)
+            continue
+        kept.append(dict(job))
+    if deleted is None:
+        return None
+    save_jobs(base_dir, kept)
+    return deleted
+
+
 __all__ = [
     "STATUS_FLOW",
+    "JOB_STEP_NAMES",
     "apply_job_action",
     "compute_initial_status",
     "create_job",
+    "derive_job_display_state",
+    "delete_job",
     "get_job",
+    "hydrate_job_step_states",
+    "initialize_job_step_fields",
     "load_jobs",
     "save_artifact",
     "scan_due_jobs",
+    "set_job_step_state",
     "update_job",
 ]

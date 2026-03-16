@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from race_job_store import get_job, update_job
+from race_job_store import get_job, initialize_job_step_fields, set_job_step_state, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 
 
@@ -38,6 +38,88 @@ def validate_workspace_odds_outputs(workspace_dir, scope_key):
     if missing:
         return False, f"incomplete odds outputs: {', '.join(missing)}"
     return True, ""
+
+
+def _mark_job_processing_started(row, now_text):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "processing"
+    row["processing_started_at"] = now_text
+    row["error_message"] = ""
+    row["last_process_output"] = ""
+    row["last_settlement_output"] = str(row.get("last_settlement_output", "") or "")
+    set_job_step_state(row, "odds", "running", now_text)
+    set_job_step_state(row, "predictor", "idle")
+    set_job_step_state(row, "policy", "idle")
+
+
+def _mark_odds_succeeded_and_predictor_running(row, now_text):
+    row.update(initialize_job_step_fields(row))
+    set_job_step_state(row, "odds", "succeeded", now_text)
+    set_job_step_state(row, "predictor", "running", now_text)
+
+
+def _mark_predictor_succeeded_and_policy_running(row, now_text):
+    row.update(initialize_job_step_fields(row))
+    set_job_step_state(row, "predictor", "succeeded", now_text)
+    set_job_step_state(row, "policy", "running", now_text)
+
+
+def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_job):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "ready"
+    row["ready_at"] = now_text
+    row["current_run_id"] = run_id
+    row["error_message"] = ""
+    row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
+    row["queued_process_at"] = str((refreshed_job or {}).get("queued_process_at", "") or "")
+    set_job_step_state(row, "policy", "succeeded", now_text)
+
+
+def _mark_job_failed(row, now_text, message):
+    row.update(initialize_job_step_fields(row))
+    error_text = str(message or "")
+    previous_status = str(row.get("status", "") or "").strip().lower()
+    row["status"] = "failed"
+    row["error_message"] = error_text
+    if previous_status == "settling":
+        row["last_settlement_output"] = error_text
+    else:
+        row["last_process_output"] = error_text
+    for step_name in ("settlement", "policy", "predictor", "odds"):
+        step_status = str(row.get(f"{step_name}_status", "") or "").strip().lower()
+        if step_status in ("queued", "running"):
+            set_job_step_state(row, step_name, "failed", now_text, error_text)
+            break
+    else:
+        if str(row.get("settling_started_at", "") or "").strip():
+            set_job_step_state(row, "settlement", "failed", now_text, error_text)
+        elif str(row.get("current_run_id", "") or "").strip():
+            set_job_step_state(row, "policy", "failed", now_text, error_text)
+        elif str(row.get("processing_started_at", "") or "").strip():
+            set_job_step_state(row, "odds", "failed", now_text, error_text)
+
+
+def _mark_settlement_started(row, now_text, names):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "settling"
+    row["settling_started_at"] = now_text
+    row["actual_top1"] = names[0]
+    row["actual_top2"] = names[1]
+    row["actual_top3"] = names[2]
+    row["error_message"] = ""
+    set_job_step_state(row, "settlement", "running", now_text)
+
+
+def _mark_settlement_succeeded(row, now_text, names, output):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "settled"
+    row["settled_at"] = now_text
+    row["actual_top1"] = names[0]
+    row["actual_top2"] = names[1]
+    row["actual_top3"] = names[2]
+    row["last_settlement_output"] = output
+    row["error_message"] = ""
+    set_job_step_state(row, "settlement", "succeeded", now_text)
 
 
 def get_env_timeout(name, default):
@@ -256,14 +338,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     update_job(
         base_path,
         job_id,
-        lambda row, now_text: row.update(
-            {
-                "status": "processing",
-                "processing_started_at": now_text,
-                "error_message": "",
-                "last_process_output": "",
-            }
-        ),
+        lambda row, now_text: _mark_job_processing_started(row, now_text),
     )
 
     summary = {
@@ -300,6 +375,11 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             odds_ok, odds_error = validate_workspace_odds_outputs(workspace, scope_key)
             if not odds_ok:
                 raise RuntimeError(f"odds extraction incomplete: {odds_error}\n{odds_output}")
+        update_job(
+            base_path,
+            job_id,
+            lambda row, now_text: _mark_odds_succeeded_and_predictor_running(row, now_text),
+        )
 
         pred_code, pred_output = _run_subprocess(
             base_path.parent / "predictor.py",
@@ -315,6 +395,11 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         summary["process_log"].append({"step": "predictor", "code": pred_code, "output": pred_output})
         if pred_code != 0 or not (workspace / "predictions.csv").exists():
             raise RuntimeError(f"predictor failed: {pred_output}")
+        update_job(
+            base_path,
+            job_id,
+            lambda row, now_text: _mark_predictor_succeeded_and_policy_running(row, now_text),
+        )
 
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         summary["run_id"] = run_id
@@ -339,15 +424,8 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         update_job(
             base_path,
             job_id,
-            lambda row, now_text: row.update(
-                {
-                    "status": "ready",
-                    "ready_at": now_text,
-                    "current_run_id": run_id,
-                    "error_message": "",
-                    "last_process_output": json.dumps(summary, ensure_ascii=False, indent=2),
-                    "queued_process_at": str(refreshed_job.get("queued_process_at", "") or ""),
-                }
+            lambda row, now_text: _mark_policy_succeeded_and_ready(
+                row, now_text, run_id, summary, refreshed_job
             ),
         )
         return summary
@@ -357,13 +435,7 @@ def fail_race_job(base_dir, job_id, message):
     update_job(
         base_dir,
         job_id,
-        lambda row, now_text: row.update(
-            {
-                "status": "failed",
-                "error_message": str(message or ""),
-                "last_process_output": str(message or ""),
-            }
-        ),
+        lambda row, now_text: _mark_job_failed(row, now_text, message),
     )
 
 
@@ -385,16 +457,7 @@ def settle_race_job(base_dir, job_id, actual_top3_names):
     update_job(
         base_path,
         job_id,
-        lambda row, now_text: row.update(
-            {
-                "status": "settling",
-                "settling_started_at": now_text,
-                "actual_top1": names[0],
-                "actual_top2": names[1],
-                "actual_top3": names[2],
-                "error_message": "",
-            }
-        ),
+        lambda row, now_text: _mark_settlement_started(row, now_text, names),
     )
 
     code, output = _run_subprocess(
@@ -416,17 +479,7 @@ def settle_race_job(base_dir, job_id, actual_top3_names):
     update_job(
         base_path,
         job_id,
-        lambda row, now_text: row.update(
-            {
-                "status": "settled",
-                "settled_at": now_text,
-                "actual_top1": names[0],
-                "actual_top2": names[1],
-                "actual_top3": names[2],
-                "last_settlement_output": output,
-                "error_message": "",
-            }
-        ),
+        lambda row, now_text: _mark_settlement_succeeded(row, now_text, names, output),
     )
     return summary
 

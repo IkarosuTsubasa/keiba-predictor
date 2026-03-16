@@ -50,9 +50,14 @@ from race_job_store import (
     apply_job_action as apply_race_job_action,
     compute_initial_status as compute_race_job_initial_status,
     create_job as create_race_job,
+    delete_job as delete_race_job,
+    derive_job_display_state as derive_race_job_display_state,
+    hydrate_job_step_states as hydrate_race_job_step_states,
+    initialize_job_step_fields as initialize_race_job_step_fields,
     load_jobs as load_race_jobs,
     save_artifact as save_race_job_artifact,
     scan_due_jobs as scan_due_race_jobs,
+    set_job_step_state as set_race_job_step_state,
     update_job as update_race_job,
 )
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
@@ -5787,6 +5792,129 @@ def build_public_llm_page(date_text="", scope_key=""):
 </html>"""
 
 
+_JOB_STEP_LABELS = {
+    "odds": "赔率",
+    "predictor": "预测",
+    "policy": "LLM",
+    "settlement": "结算",
+}
+_JOB_STEP_STATE_LABELS = {
+    "idle": "未开始",
+    "queued": "排队中",
+    "running": "进行中",
+    "succeeded": "完成",
+    "failed": "失败",
+}
+_JOB_STEP_STATE_TONES = {
+    "idle": "muted",
+    "queued": "active",
+    "running": "active",
+    "succeeded": "good",
+    "failed": "danger",
+}
+
+
+def _race_job_view(row):
+    hydrated = hydrate_race_job_step_states(dict(row or {}))
+    display = derive_race_job_display_state(hydrated)
+    return hydrated, display
+
+
+def _race_job_step_badges_html(row):
+    hydrated, _ = _race_job_view(row)
+    chips = []
+    for step_name in ("odds", "predictor", "policy", "settlement"):
+        state = str(hydrated.get(f"{step_name}_status", "idle") or "idle").strip().lower() or "idle"
+        tone = _JOB_STEP_STATE_TONES.get(state, "muted")
+        chips.append(
+            f'<span class="hero-pill hero-pill--{html.escape(tone)}">{html.escape(_JOB_STEP_LABELS.get(step_name, step_name))}: {html.escape(_JOB_STEP_STATE_LABELS.get(state, state))}</span>'
+        )
+    return "".join(chips)
+
+
+def _race_job_display_tone(row):
+    _, display = _race_job_view(row)
+    return str(display.get("tone", "muted") or "muted")
+
+
+def _race_job_display_label(row):
+    _, display = _race_job_view(row)
+    return str(display.get("label", "-") or "-")
+
+
+def _race_job_display_code(row):
+    _, display = _race_job_view(row)
+    return str(display.get("code", "") or "").strip().lower()
+
+
+def _race_job_action_buttons_v2(job_id, status, admin_token=""):
+    buttons = []
+    status_text = str(status or "").strip().lower()
+    if status_text in ("scheduled", "queued_process", "failed", "processing"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">立即处理</button>
+            </form>
+            """
+        )
+    if status_text in ("ready", "queued_settle", "settling", "settled", "processing"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/process_now">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">重新执行</button>
+            </form>
+            """
+        )
+    if status_text in ("failed", "settled", "ready", "queued_settle", "processing", "settling", "queued_process"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/update">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="action" value="force_reset">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">强制回撤</button>
+            </form>
+            """
+        )
+    if status_text in ("queued_process", "processing", "queued_settle", "settling"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/update">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="action" value="mark_failed">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">标记失败</button>
+            </form>
+            """
+        )
+    if status_text in ("failed", "settled", "ready", "queued_settle"):
+        buttons.append(
+            f"""
+            <form method="post" action="/console/tasks/update">
+              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+              <input type="hidden" name="action" value="reset_schedule">
+              <input type="hidden" name="token" value="{html.escape(admin_token)}">
+              <button type="submit">回到排程</button>
+            </form>
+            """
+        )
+    buttons.append(
+        f"""
+        <form method="post" action="/console/tasks/delete">
+          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
+          <input type="hidden" name="token" value="{html.escape(admin_token)}">
+          <button type="submit">删除任务</button>
+        </form>
+        """
+    )
+    return "".join(buttons)
+
+
 def _race_job_status_tone(status):
     text = str(status or "").strip().lower()
     if text in ("ready", "settled"):
@@ -5888,6 +6016,7 @@ def _race_job_settle_form(row, admin_token=""):
 
 def _admin_job_card_html(row, admin_token=""):
     row = dict(row or {})
+    row, _ = _race_job_view(row)
     job_id = str(row.get("job_id", "") or "").strip()
     status = str(row.get("status", "") or "").strip()
     current_run_id = str(row.get("current_run_id", "") or "").strip()
@@ -5936,7 +6065,7 @@ def _admin_job_card_html(row, admin_token=""):
           <div class="eyebrow">任务</div>
           <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '未命名任务')}</h2>
         </div>
-        <span class="section-chip">{html.escape(_race_job_status_label(status))}</span>
+        <span class="section-chip">{html.escape(_race_job_display_label(row))}</span>
       </div>
       <div class="copy-row">
         <span class="hero-pill">范围: {html.escape(_scope_display_name(scope_key))}</span>
@@ -5951,7 +6080,7 @@ def _admin_job_card_html(row, admin_token=""):
       </div>
       <p class="helper-text">{html.escape(notes or '无备注')}</p>
       <div class="copy-row">
-        {_race_job_action_buttons(job_id, status, admin_token=admin_token)}
+        {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
         {open_links}
       </div>
       {_race_job_settle_form(row, admin_token=admin_token)}
@@ -6448,7 +6577,7 @@ def _admin_job_card_html_clean(row, admin_token=""):
       </div>
       <p class="helper-text">{html.escape(notes or '无备注')}</p>
       <div class="copy-row">
-        {_race_job_action_buttons_clean(job_id, status, admin_token=admin_token)}
+        {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
         {open_links}
       </div>
       {_race_job_edit_form_clean(row, admin_token=admin_token)}
@@ -7299,12 +7428,12 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
         "settled": 0,
     }
     for job in jobs:
-        status = str(job.get("status", "")).strip().lower()
-        if status == "scheduled":
+        status = _race_job_display_code(job)
+        if status in ("scheduled", "uploaded"):
             summary["scheduled"] += 1
-        elif status in ("queued_process", "processing", "queued_settle", "settling"):
+        elif status in ("odds_running", "predictor_running", "policy_running", "queued_settle", "settling"):
             summary["processing"] += 1
-        elif status == "ready":
+        elif status in ("ready", "predictor_ready"):
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
@@ -7312,9 +7441,10 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
     job_cards = []
     for job in jobs:
         row = dict(job)
+        row, _ = _race_job_view(row)
         job_id = str(row.get("job_id", "") or "").strip()
         status = str(row.get("status", "") or "").strip()
-        tone = _race_job_status_tone(status)
+        tone = _race_job_display_tone(row)
         artifacts = list(row.get("artifacts", []) or [])
         artifact_map = {str(item.get("artifact_type", "")).strip().lower(): dict(item) for item in artifacts}
         kachiuma = artifact_map.get("kachiuma", {})
@@ -7343,7 +7473,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
                   <div class="job-eyebrow">{html.escape(_scope_display_name(row.get('scope_key', '')))}</div>
                   <h3>{html.escape(str(row.get('location', '') or '-') + ' ' + str(row.get('race_id', '') or '-'))}</h3>
                 </div>
-                <span class="job-badge job-badge--{html.escape(tone)}">{html.escape(_race_job_status_label(status))}</span>
+                <span class="job-badge job-badge--{html.escape(tone)}">{html.escape(_race_job_display_label(row))}</span>
               </div>
               <div class="job-meta-row">
                 <span>比赛日 {html.escape(str(row.get('race_date', '') or '-'))}</span>
@@ -7369,7 +7499,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
               <div class="job-notes">{html.escape(notes or '无备注')}</div>
               {_race_job_settle_form(row, admin_token=admin_token)}
               <div class="job-actions">
-                {_race_job_action_buttons(job_id, status, admin_token=admin_token)}
+                {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
                 {
                     f'''
                     <form method="post" action="/view_run">
@@ -8421,6 +8551,24 @@ def update_race_job_view(
     return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已执行动作：{action}。")
 
 
+@app.post(f"{CONSOLE_BASE_PATH}/tasks/delete", response_class=HTMLResponse)
+@app.post("/console/tasks/delete", response_class=HTMLResponse)
+def delete_race_job_view(
+    token: str = Form(""),
+    job_id: str = Form(""),
+):
+    if not _admin_token_valid(token):
+        return build_race_jobs_page(
+            admin_token=token,
+            authorized=False,
+            error_text="管理口令无效，不能删除任务。",
+        )
+    deleted = delete_race_job(BASE_DIR, job_id)
+    if deleted is None:
+        return build_race_jobs_page(admin_token=token, error_text="找不到要删除的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已从任务列表删除。")
+
+
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/process_now", response_class=HTMLResponse)
 @app.post("/console/tasks/process_now", response_class=HTMLResponse)
 def process_race_job_now(
@@ -8473,12 +8621,14 @@ def queue_race_job_settle(
         return build_race_jobs_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
 
     def _queue_settle(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
         row["actual_top1"] = names[0]
         row["actual_top2"] = names[1]
         row["actual_top3"] = names[2]
         row["status"] = "queued_settle"
         row["queued_settle_at"] = now_text
         row["error_message"] = ""
+        set_race_job_step_state(row, "settlement", "queued")
 
     job = update_race_job(BASE_DIR, job_id, _queue_settle)
     if job is None:
@@ -8506,12 +8656,14 @@ def settle_race_job_now(
         summary = settle_race_job(BASE_DIR, job_id, names)
     except Exception as exc:
         def _restore_settle_retry(row, now_text):
+            row.update(initialize_race_job_step_fields(row))
             row["status"] = "ready"
             row["actual_top1"] = names[0]
             row["actual_top2"] = names[1]
             row["actual_top3"] = names[2]
             row["error_message"] = str(exc)
             row["last_settlement_output"] = str(exc)
+            set_race_job_step_state(row, "settlement", "failed", now_text, str(exc))
 
         try:
             update_race_job(BASE_DIR, job_id, _restore_settle_retry)
