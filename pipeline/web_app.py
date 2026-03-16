@@ -309,8 +309,26 @@ def _public_share_runtime_html():
     return [header, "", String(marksText || "\\u5370\\u306a\\u3057").trim().slice(0, remain), "", ...tailLines].join("\\n");
   };
 
-  const openShare = (text) => {
+  const openShare = async (text) => {
     const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+    const isMobileShare =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+      (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) ||
+      ("ontouchstart" in window);
+    if (isMobileShare && navigator.share) {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          return;
+        }
+      }
+    }
+    if (isMobileShare) {
+      window.location.href = shareUrl;
+      return;
+    }
     const width = 720;
     const height = 640;
     const left = Math.max(0, Math.round((window.screen.width - width) / 2));
@@ -377,7 +395,7 @@ def _public_share_runtime_html():
       if (!text) {
         return;
       }
-      openShare(text);
+      await openShare(text);
     };
     button.addEventListener("click", handleShare);
     button.addEventListener("pointerdown", (event) => {
@@ -416,7 +434,7 @@ def _public_share_runtime_html():
       if (!text) {
         return;
       }
-      openShare(text);
+      await openShare(text);
     };
     button.addEventListener("click", handleShare);
     button.addEventListener("pointerdown", (event) => {
@@ -4692,8 +4710,26 @@ def build_llm_today_page(date_text="", scope_key=""):
   </main>
   <script>
     (() => {{
-      const openShareIntent = (text) => {{
+      const openShareIntent = async (text) => {{
         const url = `https://x.com/intent/post?text=${{encodeURIComponent(text)}}`;
+        const isMobileShare =
+          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+          (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) ||
+          ("ontouchstart" in window);
+        if (isMobileShare && navigator.share) {{
+          try {{
+            await navigator.share({{ text }});
+            return;
+          }} catch (error) {{
+            if (error && error.name === "AbortError") {{
+              return;
+            }}
+          }}
+        }}
+        if (isMobileShare) {{
+          window.location.href = url;
+          return;
+        }}
         const width = 720;
         const height = 640;
         const left = Math.max(0, Math.round((window.screen.width - width) / 2));
@@ -4725,7 +4761,7 @@ def build_llm_today_page(date_text="", scope_key=""):
         if (!Array.isArray(options) || options.length === 0) return;
         const text = String(options[Math.floor(Math.random() * options.length)] || "").trim();
         if (!text) return;
-        openShareIntent(text);
+        await openShareIntent(text);
       }});
     }})();
   </script>
