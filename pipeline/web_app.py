@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import zipfile
 from io import BytesIO
 from datetime import datetime, timedelta
@@ -558,10 +559,32 @@ def run_due_jobs_once():
         job_id = _pick_next_process_job_id()
         if not job_id:
             break
+        print(
+            "[web_app] "
+            + json.dumps(
+                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "run_due_process_start", "job_id": job_id},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         try:
             from race_job_runner import process_race_job
 
-            process_results.append(process_race_job(BASE_DIR, job_id))
+            summary = process_race_job(BASE_DIR, job_id)
+            process_results.append(summary)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_process_done",
+                        "job_id": job_id,
+                        "run_id": str((summary or {}).get("run_id", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
         except Exception as exc:
             try:
                 from race_job_runner import fail_race_job
@@ -569,6 +592,20 @@ def run_due_jobs_once():
                 fail_race_job(BASE_DIR, job_id, str(exc))
             except Exception:
                 pass
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_process_error",
+                        "job_id": job_id,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             errors.append({"kind": "process", "job_id": job_id, "error": str(exc)})
 
     while True:
@@ -9261,7 +9298,28 @@ def process_race_job_now(
     try:
         from race_job_runner import process_race_job
 
+        print(
+            "[web_app] "
+            + json.dumps(
+                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "process_now_start", "job_id": job_id},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         summary = process_race_job(BASE_DIR, job_id)
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "process_now_done",
+                    "job_id": job_id,
+                    "run_id": str((summary or {}).get("run_id", "") or "").strip(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     except Exception as exc:
         try:
             from race_job_runner import fail_race_job
@@ -9269,6 +9327,20 @@ def process_race_job_now(
             fail_race_job(BASE_DIR, job_id, str(exc))
         except Exception:
             pass
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "process_now_error",
+                    "job_id": job_id,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 执行失败：{exc}")
     run_id = str((summary or {}).get("run_id", "") or "").strip()
     engine_count = len(list((summary or {}).get("policy_engines", []) or []))

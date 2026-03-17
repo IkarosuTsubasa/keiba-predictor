@@ -41,6 +41,18 @@ def configure_utf8_io():
 configure_utf8_io()
 START_TIME = datetime.now()
 OUTPUT_PATH = Path(os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")).expanduser()
+
+
+def resolve_lgbm_n_jobs():
+    raw = str(os.environ.get("PREDICTOR_LGBM_N_JOBS", "1") or "1").strip()
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return 1
+
+
+LGBM_N_JOBS = resolve_lgbm_n_jobs()
+
 NO_WAIT = str(os.environ.get("PREDICTOR_NO_WAIT", "")).strip().lower() in {
     "1",
     "true",
@@ -824,7 +836,7 @@ def build_lgb(variant="A", verbose=-1):
             max_depth=-1, min_child_samples=25, subsample=0.8,
             subsample_freq=1, colsample_bytree=0.7, reg_alpha=0.1,
             reg_lambda=1.0, importance_type="gain", random_state=42,
-            n_jobs=-1, verbose=verbose,
+            n_jobs=LGBM_N_JOBS, verbose=verbose,
         )
     else:  # variant B: shallower, more regularized, different seed
         return LGBMClassifier(
@@ -832,7 +844,7 @@ def build_lgb(variant="A", verbose=-1):
             max_depth=6, min_child_samples=40, subsample=0.7,
             subsample_freq=1, colsample_bytree=0.6, reg_alpha=0.5,
             reg_lambda=2.0, importance_type="gain", random_state=123,
-            n_jobs=-1, verbose=verbose,
+            n_jobs=LGBM_N_JOBS, verbose=verbose,
         )
 
 

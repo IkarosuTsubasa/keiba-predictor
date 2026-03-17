@@ -30,6 +30,17 @@ configure_utf8_io()
 
 PIPELINE_START = datetime.now()
 
+
+def resolve_lgbm_n_jobs():
+    raw = str(os.environ.get("PREDICTOR_LGBM_N_JOBS", "1") or "1").strip()
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return 1
+
+
+LGBM_N_JOBS = resolve_lgbm_n_jobs()
+
 # ====================================================
 # 1. 数据加载
 # ====================================================
@@ -1501,7 +1512,7 @@ def build_lgb_classifier():
         importance_type="gain",
         objective="binary",
         random_state=42,
-        n_jobs=-1,
+        n_jobs=LGBM_N_JOBS,
     )
 
 
@@ -1837,7 +1848,7 @@ if need_ranker:
                                 1.0,
                             ),
                             random_state=42,
-                            n_jobs=-1,
+                            n_jobs=LGBM_N_JOBS,
                         )
                         ranker_model.fit(
                             rank_train[FEATURES],

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,25 @@ BASE_DIR = Path(__file__).resolve().parent
 load_local_env(BASE_DIR, override=False)
 
 ODDS_EXTRACT_TIMEOUT_SECONDS = 300
+
+
+def _log_preview(value, limit=600):
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...(truncated)"
+
+
+def _log_runner_event(event, **fields):
+    payload = {"ts": datetime.now().isoformat(timespec="seconds"), "event": str(event or "").strip()}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if isinstance(value, Path):
+            payload[key] = str(value)
+        else:
+            payload[key] = value
+    print("[race_job_runner] " + json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 def strict_llm_odds_gate_enabled():
@@ -308,9 +328,19 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
     run_env.setdefault("PYTHONUTF8", "1")
     if env:
         run_env.update(env)
+    cmd = [sys.executable, str(script_path), *(list(script_args or []))]
+    started_at = time.monotonic()
+    _log_runner_event(
+        "subprocess_start",
+        script=Path(script_path).name,
+        cwd=str(cwd),
+        timeout_seconds=int(timeout_seconds or 0) if timeout_seconds else 0,
+        args=list(script_args or []),
+        input_lines=len(list(inputs or [])) if inputs is not None else 0,
+    )
     try:
         result = subprocess.run(
-            [sys.executable, str(script_path), *(list(script_args or []))],
+            cmd,
             input=payload,
             text=True,
             encoding="utf-8",
@@ -328,10 +358,25 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
             output = f"{output}\n{stdout_text}"
         if stderr_text:
             output = f"{output}\n[stderr]\n{stderr_text}"
+        _log_runner_event(
+            "subprocess_timeout",
+            script=Path(script_path).name,
+            cwd=str(cwd),
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            output_preview=_log_preview(output),
+        )
         return 124, output.strip()
     output = (result.stdout or "").strip()
     if result.stderr:
         output = f"{output}\n[stderr]\n{result.stderr.strip()}".strip()
+    _log_runner_event(
+        "subprocess_end",
+        script=Path(script_path).name,
+        cwd=str(cwd),
+        code=int(result.returncode),
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+        output_preview=_log_preview(output),
+    )
     return result.returncode, output
 
 
@@ -428,6 +473,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         raise ValueError("kachiuma artifact missing")
     if not shutuba_path or not Path(shutuba_path).exists():
         raise ValueError("shutuba artifact missing")
+    _log_runner_event(
+        "process_job_start",
+        job_id=job_id,
+        race_id=race_id,
+        scope_key=scope_key,
+        policy_engines=list(policy_engines or ("openai", "gemini", "siliconflow", "grok")),
+    )
 
     migrate_legacy_data(base_path, scope_key)
     data_dir = get_data_dir(base_path, scope_key)
@@ -450,12 +502,14 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     workspace_root = _shared_workspace_dir(base_path)
     with tempfile.TemporaryDirectory(prefix=f"{job_id}_", dir=str(workspace_root)) as tmp_dir:
         workspace = Path(tmp_dir)
+        _log_runner_event("workspace_ready", job_id=job_id, workspace=str(workspace))
         shutil.copy2(kachiuma_path, workspace / "kachiuma.csv")
         shutil.copy2(shutuba_path, workspace / "shutuba.csv")
 
         race_url = _race_url(scope_key, race_id)
         if not race_url:
             raise ValueError("failed to build race url")
+        _log_runner_event("odds_stage_start", job_id=job_id, race_url=race_url)
 
         odds_code, odds_output = _run_subprocess(
             base_path.parent / "odds_extract.py",
@@ -473,6 +527,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             odds_ok, odds_error = validate_workspace_odds_outputs(workspace, scope_key)
             if not odds_ok:
                 raise RuntimeError(f"odds extraction incomplete: {odds_error}\n{odds_output}")
+        _log_runner_event("odds_stage_done", job_id=job_id, code=odds_code)
         update_job(
             base_path,
             job_id,
@@ -497,6 +552,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             if pred_latest_path.exists():
                 pred_latest_path.unlink()
             predictor_start = datetime.now().timestamp()
+            _log_runner_event(
+                "predictor_stage_start",
+                job_id=job_id,
+                predictor_id=spec["id"],
+                script_name=script_name,
+                output_name=latest_name,
+            )
 
             if spec["id"] == "main":
                 pred_code, pred_output = _run_subprocess(
@@ -592,6 +654,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
             if not ok:
                 raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
+            _log_runner_event(
+                "predictor_stage_done",
+                job_id=job_id,
+                predictor_id=spec["id"],
+                code=pred_code,
+                prediction_path=str(pred_latest_path),
+            )
 
         update_job(
             base_path,
@@ -604,11 +673,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         snapshot_paths = _snapshot_outputs(base_path, scope_key, race_id, run_id, workspace)
         run_row = _build_run_row(job, run_id, snapshot_paths)
         _append_csv(data_dir / "runs.csv", run_row)
+        _log_runner_event("run_row_saved", job_id=job_id, run_id=run_id, runs_csv=str(data_dir / "runs.csv"))
 
         engines = list(policy_engines or ("openai", "gemini", "siliconflow", "grok"))
         import web_app  # local import to avoid circular import during app bootstrap
 
         for engine in engines:
+            _log_runner_event("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
             result = web_app.execute_policy_buy(scope_key, dict(run_row), run_id, policy_engine=engine, policy_model="")
             summary["policy_engines"].append(
                 {
@@ -618,6 +689,14 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                     "ticket_count": len(list(result.get("tickets", []) or [])),
                 }
             )
+            _log_runner_event(
+                "policy_stage_done",
+                job_id=job_id,
+                run_id=run_id,
+                engine=engine,
+                ticket_count=len(list(result.get("tickets", []) or [])),
+                payload_path=str(result.get("payload_path", "") or ""),
+            )
         refreshed_job = get_job(base_path, job_id) or {}
         update_job(
             base_path,
@@ -626,6 +705,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 row, now_text, run_id, summary, refreshed_job
             ),
         )
+        _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, engine_count=len(engines))
         return summary
 
 

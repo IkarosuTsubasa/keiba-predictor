@@ -61,6 +61,17 @@ def configure_utf8_io():
 
 configure_utf8_io()
 
+
+def resolve_lgbm_n_jobs() -> int:
+    raw = str(os.environ.get("PREDICTOR_LGBM_N_JOBS", "1") or "1").strip()
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return 1
+
+
+LGBM_N_JOBS = resolve_lgbm_n_jobs()
+
 # ---------------------------------------------------------------------------
 # Scope / Config
 # ---------------------------------------------------------------------------
@@ -1407,7 +1418,7 @@ class StackingEnsemble:
             num_leaves=24, min_child_samples=25,
             subsample=0.8, colsample_bytree=0.7,
             reg_alpha=0.1, reg_lambda=1.0,
-            random_state=42, n_jobs=-1, verbose=-1,
+            random_state=42, n_jobs=LGBM_N_JOBS, verbose=-1,
         )
 
     @staticmethod
@@ -1419,7 +1430,7 @@ class StackingEnsemble:
             num_leaves=16, max_depth=6, min_child_samples=40,
             subsample=0.7, colsample_bytree=0.6,
             reg_alpha=0.5, reg_lambda=2.0,
-            random_state=123, n_jobs=-1, verbose=-1,
+            random_state=123, n_jobs=LGBM_N_JOBS, verbose=-1,
         )
 
     @staticmethod
@@ -1432,7 +1443,7 @@ class StackingEnsemble:
             subsample=0.75, colsample_bytree=0.65,
             reg_alpha=0.3, reg_lambda=1.5,
             boosting_type="dart", drop_rate=0.1,
-            random_state=7, n_jobs=-1, verbose=-1,
+            random_state=7, n_jobs=LGBM_N_JOBS, verbose=-1,
         )
 
     @staticmethod
@@ -1442,7 +1453,7 @@ class StackingEnsemble:
             n_estimators=500, learning_rate=0.05,
             num_leaves=31, min_child_samples=20,
             subsample=0.8, colsample_bytree=0.8,
-            random_state=42, n_jobs=-1, verbose=-1,
+            random_state=42, n_jobs=LGBM_N_JOBS, verbose=-1,
         )
 
     @staticmethod
