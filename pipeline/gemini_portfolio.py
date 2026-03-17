@@ -4,7 +4,9 @@ from pathlib import Path
 import re
 
 
-DAILY_BANKROLL_YEN = 10000
+LEGACY_DAILY_BANKROLL_YEN = 10000
+DAILY_BANKROLL_YEN = 50000
+DAILY_BANKROLL_SWITCH_DATE = "20260317"
 DEFAULT_POLICY_ENGINE = "gemini"
 LEDGER_HEADERS = [
     "ledger_date",
@@ -129,6 +131,18 @@ def extract_ledger_date(run_id="", timestamp=""):
     return datetime.now().strftime("%Y%m%d")
 
 
+def resolve_daily_bankroll_yen(ledger_date=""):
+    date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
+    digits = "".join(ch for ch in date_key if ch.isdigit())
+    if len(digits) >= 8:
+        date_key = digits[:8]
+    else:
+        date_key = datetime.now().strftime("%Y%m%d")
+    if date_key >= DAILY_BANKROLL_SWITCH_DATE:
+        return DAILY_BANKROLL_YEN
+    return LEGACY_DAILY_BANKROLL_YEN
+
+
 def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
     date_key = str(ledger_date or "").strip() or datetime.now().strftime("%Y%m%d")
     engine = normalize_policy_engine(policy_engine)
@@ -153,10 +167,11 @@ def summarize_bankroll(base_dir, ledger_date, policy_engine="gemini"):
                 settled_runs.add(run_id)
         elif status == "topup":
             topup_yen += profit
-    available = DAILY_BANKROLL_YEN + topup_yen + realized_profit - open_stake
+    start_bankroll_yen = resolve_daily_bankroll_yen(date_key)
+    available = start_bankroll_yen + topup_yen + realized_profit - open_stake
     return {
         "ledger_date": date_key,
-        "start_bankroll_yen": DAILY_BANKROLL_YEN,
+        "start_bankroll_yen": start_bankroll_yen,
         "topup_yen": topup_yen,
         "open_stake_yen": open_stake,
         "realized_profit_yen": realized_profit,
@@ -409,11 +424,17 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     fuku_path = (run_row or {}).get("fuku_odds_path", "")
     wide_path = (run_row or {}).get("wide_odds_path", "")
     quinella_path = (run_row or {}).get("quinella_odds_path", "")
+    exacta_path = (run_row or {}).get("exacta_odds_path", "")
+    trio_path = (run_row or {}).get("trio_odds_path", "")
+    trifecta_path = (run_row or {}).get("trifecta_odds_path", "")
     name_to_no = load_name_to_no(odds_path)
     win_odds_map = load_win_odds_map(odds_path)
     place_odds_map = load_place_odds_map(fuku_path)
     wide_odds_map = load_pair_odds_map(wide_path)
     quinella_odds_map = load_pair_odds_map(quinella_path)
+    exacta_odds_map = load_exacta_odds_map(exacta_path)
+    trio_odds_map = load_triple_odds_map(trio_path, ordered=False)
+    trifecta_odds_map = load_triple_odds_map(trifecta_path, ordered=True)
     settled_at = datetime.now().isoformat(timespec="seconds")
     total_stake = 0
     total_payout = 0
@@ -444,6 +465,14 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
             elif bet_type == "quinella" and len(nos) >= 2:
                 a, b = sorted(nos[:2])
                 payout = int(round(stake * float(quinella_odds_map.get((a, b), 0) or 0)))
+            elif bet_type == "exacta" and len(nos) >= 2:
+                payout = int(round(stake * float(exacta_odds_map.get((nos[0], nos[1]), 0) or 0)))
+            elif bet_type == "trio" and len(nos) >= 3:
+                key = tuple(sorted(nos[:3]))
+                payout = int(round(stake * float(trio_odds_map.get(key, 0) or 0)))
+            elif bet_type == "trifecta" and len(nos) >= 3:
+                key = tuple(nos[:3])
+                payout = int(round(stake * float(trifecta_odds_map.get(key, 0) or 0)))
         profit = int(payout - stake)
         settled_count += 1
         total_stake += stake

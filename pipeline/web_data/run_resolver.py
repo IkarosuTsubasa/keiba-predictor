@@ -1,5 +1,40 @@
 import re
+import re
 from pathlib import Path
+
+
+KNOWN_DATA_DIRS = {"_shared", "central_dirt", "central_turf", "local"}
+
+
+def _remap_imported_path(get_data_dir, base_dir, scope_key, path_text):
+    text = str(path_text or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    if path.exists():
+        return path
+    normalized = text.replace("\\", "/").strip("/")
+    parts = [part for part in normalized.split("/") if part and part not in (".", "..")]
+    rel_parts = None
+    if len(parts) >= 2 and parts[0] == "pipeline" and parts[1] == "data":
+        rel_parts = parts[2:]
+    elif parts and parts[0] == "data":
+        rel_parts = parts[1:]
+    else:
+        for index, part in enumerate(parts):
+            if part in KNOWN_DATA_DIRS:
+                rel_parts = parts[index:]
+                break
+    if rel_parts:
+        candidate = Path(base_dir) / "data" / Path(*rel_parts)
+        if candidate.exists():
+            return candidate
+        return candidate
+    if scope_key:
+        fallback = get_data_dir(base_dir, scope_key) / path.name
+        if fallback.exists():
+            return fallback
+    return path
 
 
 def resolve_run(load_runs, run_id, scope_key):
@@ -89,13 +124,13 @@ def resolve_pred_path(get_data_dir, base_dir, scope_key, run_id, run_row):
     path = run_row.get("predictions_path", "") if run_row else ""
     if not path:
         path = str(get_data_dir(base_dir, scope_key) / f"predictions_{run_id}.csv")
-    return Path(path)
+    return _remap_imported_path(get_data_dir, base_dir, scope_key, path)
 
 
 def resolve_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row):
     path = run_row.get("odds_path", "") if run_row else ""
     if path:
-        return Path(path)
+        return _remap_imported_path(get_data_dir, base_dir, scope_key, path)
     race_id = str(run_row.get("race_id", "") or "") if run_row else ""
     if race_id:
         race_dir = get_data_dir(base_dir, scope_key) / race_id
@@ -106,7 +141,7 @@ def resolve_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row):
 def resolve_wide_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row):
     path = run_row.get("wide_odds_path", "") if run_row else ""
     if path:
-        return Path(path)
+        return _remap_imported_path(get_data_dir, base_dir, scope_key, path)
     race_id = str(run_row.get("race_id", "") or "") if run_row else ""
     if race_id:
         race_dir = get_data_dir(base_dir, scope_key) / race_id
@@ -117,7 +152,7 @@ def resolve_wide_odds_path(get_data_dir, base_dir, scope_key, run_id, run_row):
 def resolve_run_asset_path(get_data_dir, base_dir, scope_key, run_id, run_row, field_name, prefix, ext=".csv"):
     path = str(run_row.get(field_name, "")).strip() if run_row else ""
     if path:
-        return Path(path)
+        return _remap_imported_path(get_data_dir, base_dir, scope_key, path)
     race_id = str(run_row.get("race_id", "") or "") if run_row else ""
     if race_id:
         race_dir = get_data_dir(base_dir, scope_key) / race_id

@@ -1,0 +1,12 @@
+beautifulsoup4
+fastapi
+google-genai
+lightgbm
+numpy
+pandas
+pydantic
+python-multipart
+scikit-learn
+selenium
+uvicorn
+xai-sdk

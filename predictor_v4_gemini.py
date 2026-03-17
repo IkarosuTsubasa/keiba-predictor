@@ -46,6 +46,17 @@ configure_utf8_io()
 OUTPUT_PATH = Path(os.environ.get("PREDICTIONS_OUTPUT", "predictions.csv")).expanduser()
 
 
+def resolve_lgbm_n_jobs():
+    raw = str(os.environ.get("PREDICTOR_LGBM_N_JOBS", "1") or "1").strip()
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return 1
+
+
+LGBM_N_JOBS = resolve_lgbm_n_jobs()
+
+
 def resolve_scope_key():
     raw = str(os.environ.get("SCOPE_KEY", "") or "").strip().lower()
     raw = raw.replace(" ", "_").replace("-", "_").replace("/", "_")
@@ -481,7 +492,7 @@ class SupremePredictor:
             learning_rate=0.05,
             num_leaves=31,
             random_state=42,
-            n_jobs=-1
+            n_jobs=LGBM_N_JOBS
         )
         # Label relevance: 1st=10, 2nd=5, 3rd=3, Others=0
         y_rel = y_rank.apply(lambda r: 10 if r==1 else (5 if r==2 else (3 if r==3 else 0)))
@@ -496,7 +507,7 @@ class SupremePredictor:
             learning_rate=0.05,
             num_leaves=31,
             random_state=42,
-            n_jobs=-1
+            n_jobs=LGBM_N_JOBS
         )
         self.classifier.fit(X, y_top3)
         

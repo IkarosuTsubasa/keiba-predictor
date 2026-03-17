@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: keiba-web
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd pipeline && python web_server.py
+    healthCheckPath: /
+    disk:
+      name: pipeline-data
+      mountPath: /opt/render/project/src/pipeline/data
+      sizeGB: 10

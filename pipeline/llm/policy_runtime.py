@@ -33,7 +33,7 @@ POLICY_CACHE_VERSION_MAP = {
 }
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
-load_local_env(_PIPELINE_DIR, override=True)
+load_local_env(_PIPELINE_DIR, override=False)
 _CACHE_DIRS = {
     "gemini": _gemini.DEFAULT_CACHE_DIR,
     "siliconflow": _PIPELINE_DIR / "data" / "policy_cache_siliconflow",

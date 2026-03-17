@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
@@ -83,6 +83,40 @@ def stop_loading(driver):
         pass
 
 
+def get_driver_title(driver):
+    try:
+        return driver.title or ""
+    except Exception:
+        return ""
+
+
+def read_page_source_with_fallback(driver, url):
+    try:
+        return driver.page_source
+    except TimeoutException:
+        print(f"[WARN] Timed out reading page source; fallback to partial DOM: {url}")
+        stop_loading(driver)
+    except Exception as exc:
+        print(f"[WARN] Failed to read page source; fallback to partial DOM: {url} ({exc})")
+
+    for script in (
+        "return document.documentElement ? document.documentElement.outerHTML : '';",
+        "return document.body ? document.body.outerHTML : '';",
+    ):
+        try:
+            html = driver.execute_script(script)
+        except Exception:
+            continue
+        if isinstance(html, str) and html.strip():
+            return html
+
+    try:
+        html = driver.find_element(By.TAG_NAME, "html").get_attribute("outerHTML")
+    except Exception:
+        html = ""
+    return html or ""
+
+
 def load_cookies_from_json_file(path="cookie.txt"):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -112,6 +146,15 @@ def should_headless():
     if raw in ("0", "false", "no", "off"):
         return False
     return True
+
+
+def is_linux_container():
+    return os.name != "nt"
+
+
+def should_allow_nar_browser_fallback():
+    raw = os.environ.get("PIPELINE_NAR_ALLOW_BROWSER_FALLBACK", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def get_chrome_profile():
@@ -156,8 +199,8 @@ def get_page_source(url, driver, wait_css=None, timeout=10):
             stop_loading(driver)
         except Exception:
             print(f"[WARN] Timeout waiting for odds values: {wait_css}")
-    page_source = driver.page_source
-    assert_not_blocked(page_source, driver.title or "", url)
+    page_source = read_page_source_with_fallback(driver, url)
+    assert_not_blocked(page_source, get_driver_title(driver), url)
     return page_source
 
 
@@ -1116,8 +1159,14 @@ def build_webdriver():
         options.add_experimental_option("debuggerAddress", debugger_address)
     else:
         if should_headless():
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
+        if is_linux_container():
+            # Container runtimes often have tiny /dev/shm and stricter sandboxing.
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--no-sandbox")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--window-size=1440,2400")
         options.add_argument("--lang=ja-JP")
         profile_dir, profile_name = get_chrome_profile()
         if profile_dir:
@@ -1137,7 +1186,11 @@ def prepare_driver_session(driver):
     if should_inject_cookies():
         cookies = load_cookies_from_json_file("cookie.txt")
         driver.get("https://db.netkeiba.com")
-        assert_not_blocked(driver.page_source, driver.title or "", "https://db.netkeiba.com")
+        assert_not_blocked(
+            read_page_source_with_fallback(driver, "https://db.netkeiba.com"),
+            get_driver_title(driver),
+            "https://db.netkeiba.com",
+        )
         for cookie in cookies:
             driver.add_cookie(cookie)
         return
@@ -1182,10 +1235,100 @@ def fetch_and_save_html_odds(race_url, driver, label, build_url, wait_css, parse
     if not odds_url:
         return []
     sleep_jitter()
-    results = safe_parse(label, parse_func, get_page_source(odds_url, driver, wait_css=wait_css))
+    try:
+        page = get_page_source(odds_url, driver, wait_css=wait_css)
+    except WebDriverException as exc:
+        print(f"[WARN] {label} fetch failed: {exc}")
+        return []
+    results = safe_parse(label, parse_func, page)
     if results:
         save_csv(out_path, fieldnames, results)
     return results
+
+
+def fetch_html_url(url, label):
+    try:
+        return fetch_text_url(url)
+    except Exception as exc:
+        print(f"[WARN] {label} fetch failed: {exc}")
+        return ""
+
+
+def fetch_and_save_html_odds_via_http(race_url, label, build_url, parse_func, out_path, fieldnames):
+    odds_url = build_url(race_url)
+    if not odds_url:
+        return []
+    sleep_jitter()
+    html = fetch_html_url(odds_url, label)
+    if not html:
+        return []
+    results = safe_parse(label, parse_func, html)
+    if results:
+        save_csv(out_path, fieldnames, results)
+    return results
+
+
+def fetch_primary_odds_via_http(race_url):
+    tan_url = build_tan_odds_url(race_url)
+    fuku_results = []
+    if tan_url:
+        sleep_jitter()
+        page = fetch_html_url(tan_url, "tan")
+        if not page:
+            return [], []
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+        fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+        if not results:
+            results = safe_parse("odds", parse_odds_from_page, page)
+        return results, fuku_results
+
+    sleep_jitter()
+    page = fetch_html_url(race_url, "odds")
+    if not page:
+        return [], []
+    results = safe_parse("odds", parse_odds_from_page, page)
+    if not results:
+        results = safe_parse("tan", parse_tan_odds_from_page, page)
+    fuku_results = safe_parse("fuku", parse_fuku_odds_from_page, page)
+    return results, fuku_results
+
+
+def run_http_odds_flow(race_url, host):
+    results, fuku_results = fetch_primary_odds_via_http(race_url)
+    if not results:
+        print("No odds found.")
+        return False
+
+    save_primary_odds_results(results, fuku_results)
+
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "wide",
+        build_wide_odds_url,
+        parse_wide_odds_from_page,
+        "wide_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
+    )
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "quinella",
+        build_quinella_odds_url,
+        parse_quinella_odds_from_page,
+        "quinella_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds"],
+    )
+    fetch_and_save_html_odds_via_http(
+        race_url,
+        "exacta",
+        build_exacta_odds_url,
+        parse_exacta_odds_from_page,
+        "exacta_odds.csv",
+        ["horse_no_a", "horse_no_b", "odds"],
+    )
+
+    if is_nar_host(host):
+        fetch_and_save_nar_triple_series(race_url)
+    return True
 
 
 def fetch_and_save_nar_triple_series(race_url):
@@ -1220,7 +1363,7 @@ def run_browser_odds_flow(race_url, host):
             driver,
             "wide",
             build_wide_odds_url,
-            "span[id^='odds-5-']",
+            "span[id^='odds-5-'], span[id^='oddsmin-5-'], td.Odds",
             parse_wide_odds_from_page,
             "wide_odds.csv",
             ["horse_no_a", "horse_no_b", "odds_low", "odds_high", "odds_mid"],
@@ -1230,7 +1373,7 @@ def run_browser_odds_flow(race_url, host):
             driver,
             "quinella",
             build_quinella_odds_url,
-            "span[id^='odds-4-']",
+            "span[id^='odds-4-'], td.Odds",
             parse_quinella_odds_from_page,
             "quinella_odds.csv",
             ["horse_no_a", "horse_no_b", "odds"],
@@ -1266,6 +1409,12 @@ def main():
                 return
         except Exception as exc:
             print(f"[WARN] JRA api odds fetch failed, fallback to browser flow: {exc}")
+    if is_nar_host(host):
+        if run_http_odds_flow(url, host):
+            return
+        if not should_allow_nar_browser_fallback():
+            print("[ERROR] NAR http odds fetch failed and browser fallback is disabled.")
+            raise SystemExit(1)
     run_browser_odds_flow(url, host)
 
 

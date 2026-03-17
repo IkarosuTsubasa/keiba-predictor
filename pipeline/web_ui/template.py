@@ -1,4 +1,5 @@
 import html
+from urllib.parse import quote_plus
 
 
 def _scope_label(scope_key):
@@ -91,12 +92,28 @@ def page_template(
     default_scope="central_dirt",
     default_policy_engine="gemini",
     default_policy_model="",
+    admin_token="",
+    admin_enabled=False,
+    admin_workspace_html="",
+    show_note_panel=False,
 ):
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
     current_run = str(view_selected_run_id or "").strip()
     current_race = str(current_race_id or "").strip()
     recent_options = view_run_options or run_options or ""
+    admin_token_value = str(admin_token or "").strip()
+    encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
+    console_href = f"/console?token={encoded_admin_token}" if encoded_admin_token else "/console"
+    admin_zone_href = f"{console_href}#admin-zone"
+    note_query = [f"scope_key={quote_plus(scope_value)}"]
+    if current_run:
+        note_query.append(f"run_id={quote_plus(current_run)}")
+    elif current_race:
+        note_query.append(f"run_id={quote_plus(current_race)}")
+    if encoded_admin_token:
+        note_query.append(f"token={encoded_admin_token}")
+    note_page_href = f"/console/note?{'&'.join(note_query)}"
 
     output_panel = ""
     if output_text:
@@ -319,6 +336,8 @@ def page_template(
     jump_links = []
     if analysis_cluster:
         jump_links.append(_section_link("analysis-zone", "Analysis"))
+    if admin_workspace_html:
+        jump_links.append(_section_link("admin-zone", "任务后台"))
     if battle_cluster:
         jump_links.append(_section_link("battle-zone", "Battle"))
     if compare_cluster:
@@ -332,14 +351,14 @@ def page_template(
     if stats_cluster:
         jump_links.append(_section_link("stats-zone", "Stats"))
     if console_cluster:
-        jump_links.append(_section_link("console-zone", "Log"))
+        jump_links.append(_section_link("console-zone", "运行日志"))
 
     hero_metrics = "".join(
         [
-            _metric_card("Scope", scope_label),
-            _metric_card("Active Run", current_run or "Not Selected"),
-            _metric_card("Panels", str(len(jump_links)) if jump_links else "Controls Only"),
-            _metric_card("State", "Error" if error_text else ("Live Output" if output_text else "Ready")),
+            _metric_card("范围", scope_label),
+            _metric_card("当前 Run", current_run or "未选择"),
+            _metric_card("面板数", str(len(jump_links)) if jump_links else "仅控制区"),
+            _metric_card("状态", "错误" if error_text else ("有输出" if output_text else "就绪")),
         ]
     )
 
@@ -350,18 +369,129 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Quick Access</div>
-              <h2>Recent Runs</h2>
+              <h2>最近 Runs</h2>
             </div>
-            <span class="section-chip" id="recent-run-status">scope: {html.escape(scope_label)}</span>
+            <span class="section-chip" id="recent-run-status">范围: {html.escape(scope_label)}</span>
           </div>
           <form action="/view_run" method="post" class="stack-form">
             <input type="hidden" name="scope_key" id="recent_scope_key" value="{html.escape(scope_value)}">
-            <label>Latest Run Snapshot</label>
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
+            <label>最近运行快照</label>
             <select name="run_id" id="recent_run_select">
               {recent_options}
             </select>
-            <button type="submit">Open Selected Run</button>
+            <button type="submit">打开所选 Run</button>
           </form>
+        </section>
+        """
+
+    open_run_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Inspection</div>
+              <h2>Run / Race を開く</h2>
+            </div>
+            <span class="section-chip">view</span>
+          </div>
+          <form id="single-action-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
+            <div>
+              <label>Run ID / Race ID</label>
+              <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="例: 202501010101 または 20250101_123456">
+              <input type="hidden" id="action_run_id" name="run_id">
+            </div>
+            <p class="helper-text">`race_id` でも `run_id` でも入力できます。該当する最新の run を開きます。</p>
+            <button type="submit" id="action-submit">開く</button>
+          </form>
+        </section>
+        """
+
+    console_open_run_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Inspection</div>
+              <h2>Open Run / Race</h2>
+            </div>
+            <span class="section-chip">view</span>
+          </div>
+          <form id="main-open-run-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
+            <div>
+              <label>Run ID / Race ID</label>
+              <input id="main-action-id-input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
+              <input type="hidden" id="main-action-run-id" name="run_id">
+            </div>
+            <p class="helper-text">You can enter either a race_id or a run_id. For race_id, the latest matching run will be opened.</p>
+            <button type="submit" id="main-action-submit">Open</button>
+          </form>
+        </section>
+        """
+
+    note_nav_panel = f"""
+        <section class="panel panel-compact">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Note</div>
+              <h2>Open Note Page</h2>
+            </div>
+            <span class="section-chip">copy</span>
+          </div>
+          <p class="helper-text">Open a dedicated page for note copy and preview. The current scope and run will be carried over automatically.</p>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(note_page_href)}" class="secondary-button">Go To Note Page</a>
+          </div>
+        </section>
+        """
+
+    if admin_enabled:
+        admin_state = "Unlocked" if admin_token_value else "Locked"
+        admin_note = (
+            "Execution routes are unlocked for this page. The current token will be forwarded to management forms."
+            if admin_token_value
+            else "Execution routes are locked until you provide ADMIN_TOKEN. Read-only panels remain available."
+        )
+        admin_panel = f"""
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Admin</div>
+                <h2>后台访问</h2>
+            </div>
+            <span class="section-chip">{html.escape(admin_state)}</span>
+          </div>
+          <form action="/console" method="get" class="stack-form">
+            <div>
+              <label>ADMIN_TOKEN</label>
+              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="执行操作时必填">
+            </div>
+            <p class="helper-text">{html.escape(admin_note)}</p>
+            <button type="submit">进入控制台</button>
+          </form>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
+            <a href="/llm_today" class="secondary-button">用户前台</a>
+          </div>
+        </section>
+        """
+    else:
+        admin_panel = f"""
+        <section class="panel panel--tight">
+          <div class="section-title">
+            <div>
+              <div class="eyebrow">Admin</div>
+              <h2>Management Links</h2>
+            </div>
+            <span class="section-chip">local</span>
+          </div>
+          <p class="helper-text">未设置 ADMIN_TOKEN，当前是本地开发模式。</p>
+          <div class="copy-row" style="margin-top:12px;">
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
+            <a href="/llm_today" class="secondary-button">用户前台</a>
+          </div>
         </section>
         """
 
@@ -388,7 +518,7 @@ def page_template(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Keiba Local Console</title>
+  <title>Keiba 控制台</title>
   <style>
     :root {{
       --bg: #f3efe7;
@@ -497,7 +627,7 @@ def page_template(
       color: var(--muted);
     }}
     .hero-metric strong {{ font-size: 20px; line-height: 1.18; word-break: break-word; }}
-    .jump-links {{ display: flex; flex-wrap: wrap; gap: 10px; margin: -6px 4px 0; }}
+    .jump-links {{ display: none; }}
     .jump-link {{
       display: inline-flex;
       align-items: center;
@@ -514,7 +644,7 @@ def page_template(
     }}
     .app-shell {{
       display: grid;
-      grid-template-columns: 360px minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 22px;
       min-height: 0;
       align-items: stretch;
@@ -527,7 +657,7 @@ def page_template(
       scrollbar-gutter: stable;
       padding-right: 6px;
     }}
-    .control-rail {{ display: grid; gap: 16px; align-content: start; }}
+    .control-rail {{ display: none; }}
     .content-stage {{ display: grid; gap: 18px; align-content: start; }}
     .panel, .fold-panel {{
       background: var(--surface);
@@ -1062,9 +1192,9 @@ def page_template(
   <div class="page-shell">
     <header class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">Keiba Workstation</div>
-        <h1>Keiba Local Console</h1>
-        <p>One focused workspace for launching runs, reviewing predictions, inspecting marks, and running the current LLM purchase flow without bringing back the old bet engine stack.</p>
+        <div class="eyebrow">Keiba Console</div>
+        <h1>Keiba 管理控制台</h1>
+        <p>这里只保留当前还在使用的后台能力：任务管理、Run 查看、结果页面与日志。历史遗留的左侧操作栏已收起。</p>
         <div class="hero-subline">
           <span class="hero-pill" id="scope-pill">Current scope: {html.escape(scope_label)}</span>
           <span class="hero-pill">{html.escape("Recent runs ready" if recent_options else "Open a scope to load run history")}</span>
@@ -1076,6 +1206,7 @@ def page_template(
     <nav class="jump-links" aria-label="Page sections">{''.join(jump_links)}</nav>
     <div class="app-shell">
       <aside class="control-rail">
+        {admin_panel}
         <section class="panel panel-hero">
           <div class="section-title">
             <div>
@@ -1085,6 +1216,7 @@ def page_template(
             <span class="section-chip">new run</span>
           </div>
           <form action="/run_pipeline" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <div>
               <label>Race ID</label>
               <input name="race_id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 202501010101">
@@ -1139,6 +1271,7 @@ def page_template(
             <span class="section-chip">view</span>
           </div>
           <form id="single-action-form" action="/view_run" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <div>
               <label>Run ID / Race ID</label>
               <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="e.g. 202501010101 or 20250101_123456">
@@ -1157,6 +1290,7 @@ def page_template(
             <span class="section-chip">policy</span>
           </div>
           <form action="/run_llm_buy" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <input type="hidden" name="scope_key" id="llm_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>
@@ -1184,9 +1318,10 @@ def page_template(
             <p class="helper-text">This runs the policy-only LLM buy flow and writes policy JSON plus ledger reservations. It does not restore the old bet engine.</p>
             <button type="submit" formaction="/run_llm_buy">Run Selected Engine</button>
             <button type="submit" formaction="/run_all_llm_buy" class="secondary-button">Run All LLMs</button>
-            <button type="submit" formaction="/topup_all_llm_budget" class="secondary-button">Add 10000 JPY To All LLMs</button>
+            <button type="submit" formaction="/topup_all_llm_budget" class="secondary-button">Add Daily Budget To All LLMs</button>
           </form>
           <form action="/reset_llm_state" method="post" class="stack-form" id="reset-llm-form" style="margin-top:12px;">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <button type="submit" class="secondary-button">Reset LLM State</button>
           </form>
         </section>
@@ -1199,6 +1334,7 @@ def page_template(
             <span class="section-chip">stats</span>
           </div>
           <form action="/record_predictor" method="post" class="stack-form">
+            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <input type="hidden" name="scope_key" id="record_scope_key" value="{html.escape(scope_value)}">
             <div>
               <label>Run ID / Race ID</label>
@@ -1222,10 +1358,16 @@ def page_template(
             <button type="submit">Record Predictor</button>
           </form>
         </section>
-        {note_copy_panel}
+        {note_copy_panel if show_note_panel else ""}
         {recent_runs_panel}
       </aside>
       <main class="content-stage">
+        {admin_panel}
+        {console_open_run_panel}
+        {note_nav_panel}
+        {recent_runs_panel}
+        {note_copy_panel if show_note_panel else ""}
+        {admin_workspace_html}
         {analysis_cluster}
         {battle_cluster}
         {compare_cluster}
@@ -1242,10 +1384,10 @@ def page_template(
     const defaultScope = "{html.escape(scope_value)}";
     const currentRaceId = "{html.escape(current_race)}";
     const scopeLabels = {{ central_dirt: "Central Dirt", central_turf: "Central Turf", local: "Local" }};
-    const actionForm = document.getElementById("single-action-form");
-    const actionInput = document.getElementById("action_id_input");
-    const actionRunId = document.getElementById("action_run_id");
-    const actionSubmit = document.getElementById("action-submit");
+    const actionForm = document.getElementById("main-open-run-form");
+    const actionInput = document.getElementById("main-action-id-input");
+    const actionRunId = document.getElementById("main-action-run-id");
+    const actionSubmit = document.getElementById("main-action-submit");
     const llmScopeInput = document.getElementById("llm_scope_key");
     const llmRunInput = document.getElementById("llm_run_id");
     const recordScopeInput = document.getElementById("record_scope_key");
