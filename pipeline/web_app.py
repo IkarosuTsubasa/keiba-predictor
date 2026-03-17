@@ -385,18 +385,11 @@ def _public_share_runtime_html():
   };
 
   const compareRaceCardsByTime = (left, right) => {
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const leftMinutes = parseRaceCardMinutes(left);
     const rightMinutes = parseRaceCardMinutes(right);
     if (leftMinutes !== null && rightMinutes !== null) {
-      const leftDelta = Math.abs(leftMinutes - nowMinutes);
-      const rightDelta = Math.abs(rightMinutes - nowMinutes);
-      if (leftDelta !== rightDelta) {
-        return leftDelta - rightDelta;
-      }
       if (leftMinutes !== rightMinutes) {
-        return leftMinutes - rightMinutes;
+        return rightMinutes - leftMinutes;
       }
     } else if (leftMinutes !== null || rightMinutes !== null) {
       return leftMinutes !== null ? -1 : 1;
