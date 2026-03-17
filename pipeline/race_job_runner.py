@@ -6,13 +6,18 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from local_env import load_local_env
 from predictor_catalog import list_predictors, snapshot_prediction_path
 from race_job_store import get_job, initialize_job_step_fields, set_job_step_state, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
+from v5_remote_tasks import create_task as create_v5_remote_task
+from v5_remote_tasks import update_task as update_v5_remote_task
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,6 +55,11 @@ def v5_predictor_enabled():
     return raw in ("1", "true", "yes", "on")
 
 
+def remote_v5_enabled():
+    raw = os.environ.get("PIPELINE_REMOTE_V5_ENABLED", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -74,6 +84,7 @@ def _mark_job_processing_started(row, now_text):
     row.update(initialize_job_step_fields(row))
     row["status"] = "processing"
     row["processing_started_at"] = now_text
+    row["current_v5_task_id"] = ""
     row["error_message"] = ""
     row["last_process_output"] = ""
     row["last_settlement_output"] = str(row.get("last_settlement_output", "") or "")
@@ -94,11 +105,30 @@ def _mark_predictor_succeeded_and_policy_running(row, now_text):
     set_job_step_state(row, "policy", "running", now_text)
 
 
+def _mark_waiting_v5(row, now_text, run_id, summary, task_id):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "waiting_v5"
+    row["current_run_id"] = run_id
+    row["current_v5_task_id"] = str(task_id or "").strip()
+    row["error_message"] = ""
+    row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
+    set_job_step_state(row, "predictor", "running", now_text)
+    set_job_step_state(row, "policy", "idle")
+
+
+def _mark_policy_processing_started(row, now_text):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "processing_policy"
+    row["error_message"] = ""
+    set_job_step_state(row, "policy", "running", now_text)
+
+
 def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_job):
     row.update(initialize_job_step_fields(row))
     row["status"] = "ready"
     row["ready_at"] = now_text
     row["current_run_id"] = run_id
+    row["current_v5_task_id"] = ""
     row["error_message"] = ""
     row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
     row["queued_process_at"] = str((refreshed_job or {}).get("queued_process_at", "") or "")
@@ -163,6 +193,126 @@ def get_env_timeout(name, default):
     if value <= 0:
         return int(default)
     return value
+
+
+def _public_site_url():
+    value = str(os.environ.get("PIPELINE_PUBLIC_SITE_URL", "https://www.ikaimo-ai.com") or "").strip()
+    return (value or "https://www.ikaimo-ai.com").rstrip("/")
+
+
+def _public_base_path():
+    value = str(os.environ.get("PIPELINE_PUBLIC_BASE_PATH", "/keiba") or "").strip()
+    if not value:
+        return "/keiba"
+    if not value.startswith("/"):
+        value = "/" + value
+    return value.rstrip("/") or "/keiba"
+
+
+def _remote_v5_bundle_url(task):
+    return (
+        f"{_public_site_url()}{_public_base_path()}/internal/v5_tasks/"
+        f"{quote(str((task or {}).get('task_id', '') or '').strip(), safe='')}"
+        f"/bundle?token={quote(str((task or {}).get('bundle_token', '') or '').strip(), safe='')}"
+    )
+
+
+def _remote_v5_callback_url(task):
+    return (
+        f"{_public_site_url()}{_public_base_path()}/internal/v5_tasks/"
+        f"{quote(str((task or {}).get('task_id', '') or '').strip(), safe='')}/callback"
+    )
+
+
+def _dispatch_remote_v5_task(base_dir, task):
+    task_id = str((task or {}).get("task_id", "") or "").strip()
+    owner = str(os.environ.get("GITHUB_ACTIONS_OWNER", "") or "").strip()
+    repo = str(os.environ.get("GITHUB_ACTIONS_REPO", "") or "").strip()
+    workflow = str(
+        os.environ.get("GITHUB_ACTIONS_WORKFLOW", "predictor-v5-remote.yml") or ""
+    ).strip()
+    ref = str(os.environ.get("GITHUB_ACTIONS_REF", "main") or "").strip() or "main"
+    token = str(os.environ.get("GITHUB_ACTIONS_TOKEN", "") or "").strip()
+    if not task_id:
+        raise RuntimeError("remote v5 task id missing")
+    if not owner or not repo or not workflow or not token:
+        raise RuntimeError("remote v5 dispatch config missing")
+    update_v5_remote_task(
+        base_dir,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "dispatching",
+                "attempt": int(row.get("attempt", 0) or 0) + 1,
+                "started_at": str(row.get("started_at", "") or now_text),
+                "workflow_dispatch_ref": ref,
+                "error_message": "",
+            }
+        ),
+    )
+    payload = {
+        "ref": ref,
+        "inputs": {
+            "task_id": task_id,
+            "bundle_url": _remote_v5_bundle_url(task),
+            "callback_url": _remote_v5_callback_url(task),
+            "callback_token": str((task or {}).get("callback_token", "") or "").strip(),
+        },
+    }
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "keiba-render-remote-v5",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            response_body = resp.read().decode("utf-8", errors="replace")
+            status_code = getattr(resp, "status", 0) or 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        update_v5_remote_task(
+            base_dir,
+            task_id,
+            lambda row, now_text: row.update(
+                {"status": "failed", "finished_at": now_text, "error_message": detail or str(exc)}
+            ),
+        )
+        raise RuntimeError(f"remote v5 dispatch failed: http {exc.code} {detail}".strip())
+    except Exception as exc:
+        update_v5_remote_task(
+            base_dir,
+            task_id,
+            lambda row, now_text: row.update(
+                {"status": "failed", "finished_at": now_text, "error_message": str(exc)}
+            ),
+        )
+        raise RuntimeError(f"remote v5 dispatch failed: {exc}")
+    update_v5_remote_task(
+        base_dir,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "dispatched",
+                "workflow_dispatch_ref": ref,
+                "error_message": "",
+                "result_summary": {"dispatch_http_status": int(status_code)},
+            }
+        ),
+    )
+    return {
+        "task_id": task_id,
+        "workflow": workflow,
+        "ref": ref,
+        "status_code": int(status_code),
+        "response_preview": _log_preview(response_body),
+    }
 
 
 def _race_url(scope_key, race_id):
@@ -458,6 +608,49 @@ def _build_run_row(job, run_id, snapshot_paths):
     }
 
 
+def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=None):
+    import web_app  # local import to avoid circular import during app bootstrap
+
+    run_row = web_app.resolve_run(run_id, scope_key)
+    if run_row is None:
+        raise RuntimeError(f"run row not found for run_id={run_id}")
+    engines = list(policy_engines or ("openai", "gemini", "siliconflow", "grok"))
+    update_job(
+        base_path,
+        job_id,
+        lambda row, now_text: _mark_policy_processing_started(row, now_text),
+    )
+    for engine in engines:
+        _log_runner_event("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
+        result = web_app.execute_policy_buy(scope_key, dict(run_row), run_id, policy_engine=engine, policy_model="")
+        summary["policy_engines"].append(
+            {
+                "engine": engine,
+                "output_text": str(result.get("output_text", "") or ""),
+                "payload_path": str(result.get("payload_path", "") or ""),
+                "ticket_count": len(list(result.get("tickets", []) or [])),
+            }
+        )
+        _log_runner_event(
+            "policy_stage_done",
+            job_id=job_id,
+            run_id=run_id,
+            engine=engine,
+            ticket_count=len(list(result.get("tickets", []) or [])),
+            payload_path=str(result.get("payload_path", "") or ""),
+        )
+    refreshed_job = get_job(base_path, job_id) or {}
+    update_job(
+        base_path,
+        job_id,
+        lambda row, now_text: _mark_policy_succeeded_and_ready(
+            row, now_text, run_id, summary, refreshed_job
+        ),
+    )
+    _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, engine_count=len(engines))
+    return summary
+
+
 def process_race_job(base_dir, job_id, policy_engines=None):
     base_path = Path(base_dir)
     job = get_job(base_path, job_id)
@@ -467,6 +660,28 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     scope_key = str(job.get("scope_key", "") or "").strip()
     if not race_id or not scope_key:
         raise ValueError("race job missing race_id or scope_key")
+    status_text = str(job.get("status", "") or "").strip().lower()
+    if status_text == "queued_policy":
+        run_id = str(job.get("current_run_id", "") or "").strip()
+        if not run_id:
+            raise ValueError("race job has no current_run_id for queued_policy")
+        _log_runner_event(
+            "process_job_start",
+            job_id=job_id,
+            race_id=race_id,
+            scope_key=scope_key,
+            mode="policy_only",
+            policy_engines=list(policy_engines or ("openai", "gemini", "siliconflow", "grok")),
+        )
+        summary = {
+            "job_id": job_id,
+            "race_id": race_id,
+            "scope_key": scope_key,
+            "process_log": [{"step": "resume_policy_after_v5", "code": 0, "output": f"run_id={run_id}"}],
+            "run_id": run_id,
+            "policy_engines": [],
+        }
+        return _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines)
     artifact_map = {
         str(item.get("artifact_type", "")).strip().lower(): dict(item)
         for item in list(job.get("artifacts", []) or [])
@@ -549,18 +764,21 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         odds_src = workspace / "odds.csv"
 
         for spec in list_predictors():
-            if spec["id"] == "v5_stacking" and not v5_predictor_enabled():
-                skip_message = "Predictor V5 skipped by default on deployment. Set PIPELINE_ENABLE_V5_PREDICTOR=1 to enable."
-                summary["process_log"].append(
-                    {"step": f"predictor_{spec['id']}", "code": -1, "output": skip_message}
-                )
-                _log_runner_event(
-                    "predictor_stage_skipped",
-                    job_id=job_id,
-                    predictor_id=spec["id"],
-                    reason=skip_message,
-                )
-                continue
+            if spec["id"] == "v5_stacking":
+                if remote_v5_enabled():
+                    continue
+                if not v5_predictor_enabled():
+                    skip_message = "Predictor V5 skipped by default on deployment. Set PIPELINE_ENABLE_V5_PREDICTOR=1 to enable."
+                    summary["process_log"].append(
+                        {"step": f"predictor_{spec['id']}", "code": -1, "output": skip_message}
+                    )
+                    _log_runner_event(
+                        "predictor_stage_skipped",
+                        job_id=job_id,
+                        predictor_id=spec["id"],
+                        reason=skip_message,
+                    )
+                    continue
             script_name = str(spec.get("script_name", "") or "").strip()
             latest_name = str(spec.get("latest_filename", "") or "").strip()
             if not script_name or not latest_name:
@@ -692,38 +910,70 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         _append_csv(data_dir / "runs.csv", run_row)
         _log_runner_event("run_row_saved", job_id=job_id, run_id=run_id, runs_csv=str(data_dir / "runs.csv"))
 
-        engines = list(policy_engines or ("openai", "gemini", "siliconflow", "grok"))
-        import web_app  # local import to avoid circular import during app bootstrap
-
-        for engine in engines:
-            _log_runner_event("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
-            result = web_app.execute_policy_buy(scope_key, dict(run_row), run_id, policy_engine=engine, policy_model="")
-            summary["policy_engines"].append(
-                {
-                    "engine": engine,
-                    "output_text": str(result.get("output_text", "") or ""),
-                    "payload_path": str(result.get("payload_path", "") or ""),
-                    "ticket_count": len(list(result.get("tickets", []) or [])),
-                }
-            )
-            _log_runner_event(
-                "policy_stage_done",
+        if remote_v5_enabled():
+            bundle_files = {
+                "kachiuma.csv": kachiuma_path,
+                "shutuba.csv": shutuba_path,
+                "odds.csv": snapshot_paths.get("odds_path", ""),
+                "fuku_odds.csv": snapshot_paths.get("fuku_odds_path", ""),
+                "wide_odds.csv": snapshot_paths.get("wide_odds_path", ""),
+                "quinella_odds.csv": snapshot_paths.get("quinella_odds_path", ""),
+                "exacta_odds.csv": snapshot_paths.get("exacta_odds_path", ""),
+                "trio_odds.csv": snapshot_paths.get("trio_odds_path", ""),
+                "trifecta_odds.csv": snapshot_paths.get("trifecta_odds_path", ""),
+            }
+            bundle_files = {
+                str(name or "").strip(): str(path or "").strip()
+                for name, path in bundle_files.items()
+                if str(path or "").strip()
+            }
+            task = create_v5_remote_task(
+                base_path,
                 job_id=job_id,
                 run_id=run_id,
-                engine=engine,
-                ticket_count=len(list(result.get("tickets", []) or [])),
-                payload_path=str(result.get("payload_path", "") or ""),
+                race_id=race_id,
+                scope_key=scope_key,
+                bundle_files=bundle_files,
+                bundle_meta={
+                    "race_id": race_id,
+                    "run_id": run_id,
+                    "scope_key": scope_key,
+                    "location": target_location,
+                    "race_date": race_date,
+                    "surface": surface,
+                    "distance": distance,
+                    "track_condition": track_cond_label,
+                },
             )
-        refreshed_job = get_job(base_path, job_id) or {}
-        update_job(
-            base_path,
-            job_id,
-            lambda row, now_text: _mark_policy_succeeded_and_ready(
-                row, now_text, run_id, summary, refreshed_job
-            ),
-        )
-        _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, engine_count=len(engines))
-        return summary
+            dispatch_info = _dispatch_remote_v5_task(base_path, task)
+            summary["v5_remote_task_id"] = str(task.get("task_id", "") or "").strip()
+            summary["process_log"].append(
+                {
+                    "step": "predictor_v5_remote_dispatch",
+                    "code": 0,
+                    "output": json.dumps(dispatch_info, ensure_ascii=False),
+                }
+            )
+            update_job(
+                base_path,
+                job_id,
+                lambda row, now_text: _mark_waiting_v5(
+                    row,
+                    now_text,
+                    run_id,
+                    summary,
+                    task.get("task_id", ""),
+                ),
+            )
+            _log_runner_event(
+                "predictor_stage_waiting_remote_v5",
+                job_id=job_id,
+                run_id=run_id,
+                task_id=str(task.get("task_id", "") or "").strip(),
+            )
+            return summary
+
+        return _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines)
 
 
 def fail_race_job(base_dir, job_id, message):

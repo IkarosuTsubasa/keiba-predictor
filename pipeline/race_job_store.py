@@ -13,6 +13,9 @@ STATUS_FLOW = (
     "scheduled",
     "queued_process",
     "processing",
+    "waiting_v5",
+    "queued_policy",
+    "processing_policy",
     "ready",
     "queued_settle",
     "settling",
@@ -93,6 +96,18 @@ def hydrate_job_step_states(job):
         elif legacy_status in ("ready", "queued_settle", "settling", "settled"):
             for step_name in ("odds", "predictor", "policy"):
                 row = set_job_step_state(row, step_name, "succeeded", row.get("ready_at", ""))
+        elif legacy_status == "waiting_v5":
+            row = set_job_step_state(row, "odds", "succeeded", row.get("processing_started_at", "") or row.get("updated_at", ""))
+            row = set_job_step_state(row, "predictor", "running", row.get("updated_at", "") or row.get("processing_started_at", ""))
+            row = set_job_step_state(row, "policy", "idle")
+        elif legacy_status == "queued_policy":
+            row = set_job_step_state(row, "odds", "succeeded", row.get("processing_started_at", "") or row.get("updated_at", ""))
+            row = set_job_step_state(row, "predictor", "succeeded", row.get("updated_at", "") or row.get("processing_started_at", ""))
+            row = set_job_step_state(row, "policy", "queued")
+        elif legacy_status == "processing_policy":
+            row = set_job_step_state(row, "odds", "succeeded", row.get("processing_started_at", "") or row.get("updated_at", ""))
+            row = set_job_step_state(row, "predictor", "succeeded", row.get("updated_at", "") or row.get("processing_started_at", ""))
+            row = set_job_step_state(row, "policy", "running", row.get("updated_at", "") or row.get("processing_started_at", ""))
         elif legacy_status == "failed":
             if str(row.get("settling_started_at", "") or "").strip():
                 for step_name in ("odds", "predictor", "policy"):
@@ -143,6 +158,12 @@ def hydrate_job_step_states(job):
 def derive_job_display_state(job):
     row = hydrate_job_step_states(job)
     legacy_status = str(row.get("status", "") or "").strip().lower()
+    if legacy_status == "waiting_v5":
+        return {"code": "waiting_v5", "label": "等待 V5", "tone": "active"}
+    if legacy_status == "queued_policy":
+        return {"code": "queued_policy", "label": "等待 LLM", "tone": "active"}
+    if legacy_status == "processing_policy":
+        return {"code": "processing_policy", "label": "LLM 处理中", "tone": "active"}
     if row.get("settlement_status") == "succeeded":
         return {"code": "settled", "label": "已结算", "tone": "good"}
     if row.get("settlement_status") == "running":
@@ -341,6 +362,7 @@ def create_job(
         "settling_started_at": "",
         "settled_at": "",
         "current_run_id": "",
+        "current_v5_task_id": "",
         "actual_top1": "",
         "actual_top2": "",
         "actual_top3": "",
@@ -419,8 +441,12 @@ def apply_job_action(base_dir, job_id, action):
                 set_job_step_state(job, "odds", "running", now_text)
                 set_job_step_state(job, "predictor", "idle")
                 set_job_step_state(job, "policy", "idle")
+            elif current == "queued_policy":
+                job["status"] = "processing_policy"
+                job["error_message"] = ""
+                set_job_step_state(job, "policy", "running", now_text)
         elif action_key == "mark_ready":
-            if current in ("processing", "queued_process"):
+            if current in ("processing", "queued_process", "processing_policy", "queued_policy"):
                 job["status"] = "ready"
                 job["ready_at"] = now_text
                 for step_name in ("odds", "predictor", "policy"):
@@ -453,6 +479,7 @@ def apply_job_action(base_dir, job_id, action):
             job["queued_settle_at"] = ""
             job["settling_started_at"] = ""
             job["settled_at"] = ""
+            job["current_v5_task_id"] = ""
             if action_key == "force_reset":
                 job["current_run_id"] = ""
                 job["actual_top1"] = ""

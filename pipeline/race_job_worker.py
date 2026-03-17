@@ -26,7 +26,7 @@ def pick_next_queued_job():
     jobs = load_jobs(BASE_DIR)
     for job in jobs:
         status = str(job.get("status", "")).strip().lower()
-        if status == "queued_process":
+        if status in ("queued_process", "queued_policy"):
             return str(job.get("job_id", "") or "").strip()
     return ""
 

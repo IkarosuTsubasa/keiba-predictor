@@ -11,16 +11,17 @@ import sys
 import time
 import traceback
 import zipfile
+import base64
 from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path
+from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path, snapshot_prediction_path
 from gemini_portfolio import (
     add_bankroll_topup,
     build_history_context,
@@ -63,6 +64,7 @@ from race_job_store import (
     update_job as update_race_job,
 )
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
+from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, update_task as update_v5_remote_task
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
 from web_ui.components import (
@@ -532,7 +534,7 @@ def _pick_next_process_job_id():
     jobs = load_race_jobs(BASE_DIR)
     for job in jobs:
         status = str(job.get("status", "") or "").strip().lower()
-        if status == "queued_process":
+        if status in ("queued_process", "queued_policy"):
             return str(job.get("job_id", "") or "").strip()
     return ""
 
@@ -868,6 +870,73 @@ def update_run_row_fields(scope_key, run_row, updates):
         run_row,
         updates,
     )
+
+
+def remote_v5_enabled():
+    raw = os.environ.get("PIPELINE_REMOTE_V5_ENABLED", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _append_job_process_log_entry(row, step, code, output):
+    payload = {}
+    raw = str((row or {}).get("last_process_output", "") or "").strip()
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    process_log = list(payload.get("process_log", []) or [])
+    process_log.append(
+        {
+            "step": str(step or "").strip(),
+            "code": int(code) if str(code).strip("-").isdigit() else code,
+            "output": str(output or "").strip(),
+        }
+    )
+    payload["process_log"] = process_log
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _remote_v5_bundle_zip_bytes(task):
+    task_row = dict(task or {})
+    bundle = BytesIO()
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for archive_name, src_path in dict(task_row.get("bundle_files", {}) or {}).items():
+            path = Path(str(src_path or "").strip())
+            if not archive_name or not path.exists():
+                continue
+            zf.write(path, arcname=str(archive_name))
+        meta_bytes = json.dumps(dict(task_row.get("bundle_meta", {}) or {}), ensure_ascii=False, indent=2).encode("utf-8")
+        zf.writestr("task_meta.json", meta_bytes)
+    bundle.seek(0)
+    return bundle.getvalue()
+
+
+def _promote_job_after_remote_v5(job_id, run_id, task_id, log_output):
+    def mutate(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
+        current_status = str(row.get("status", "") or "").strip().lower()
+        current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
+        if current_status not in ("waiting_v5", "queued_policy", "processing_policy"):
+            return
+        if current_task_id and current_task_id != str(task_id or "").strip():
+            return
+        row["status"] = "queued_policy"
+        row["current_run_id"] = str(run_id or "").strip()
+        row["current_v5_task_id"] = str(task_id or "").strip()
+        row["error_message"] = ""
+        row["last_process_output"] = _append_job_process_log_entry(
+            row,
+            "predictor_v5_remote_callback",
+            0,
+            log_output,
+        )
+        set_race_job_step_state(row, "predictor", "succeeded", now_text)
+        set_race_job_step_state(row, "policy", "queued")
+
+    return update_race_job(BASE_DIR, job_id, mutate)
 
 
 def strict_llm_odds_gate_enabled():
@@ -6505,7 +6574,7 @@ def _race_job_process_log_html(row):
 def _race_job_action_buttons_v2(job_id, status, admin_token=""):
     buttons = []
     status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "failed", "processing"):
+    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing", "processing_policy"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -6515,7 +6584,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("ready", "queued_settle", "settling", "settled", "processing"):
+    if status_text in ("ready", "queued_settle", "settling", "settled", "processing", "waiting_v5"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -6525,7 +6594,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("failed", "settled", "ready", "queued_settle", "processing", "settling", "queued_process"):
+    if status_text in ("failed", "settled", "ready", "queued_settle", "processing", "processing_policy", "settling", "queued_process", "queued_policy", "waiting_v5"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/update">
@@ -6536,7 +6605,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("queued_process", "processing", "queued_settle", "settling"):
+    if status_text in ("queued_process", "queued_policy", "processing", "processing_policy", "queued_settle", "settling", "waiting_v5"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/update">
@@ -6574,7 +6643,7 @@ def _race_job_status_tone(status):
     text = str(status or "").strip().lower()
     if text in ("ready", "settled"):
         return "good"
-    if text in ("queued_process", "processing", "queued_settle", "settling"):
+    if text in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
         return "active"
     if text == "failed":
         return "danger"
@@ -6587,6 +6656,9 @@ def _race_job_status_label(status):
         "scheduled": "待处理",
         "queued_process": "待执行",
         "processing": "处理中",
+        "waiting_v5": "等待 V5",
+        "queued_policy": "等待 LLM",
+        "processing_policy": "LLM 处理中",
         "ready": "预测已生成",
         "queued_settle": "已入结算队列",
         "settling": "结算中",
@@ -6600,7 +6672,7 @@ def _race_job_status_label(status):
 def _race_job_action_buttons(job_id, status, admin_token=""):
     buttons = []
     status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "failed"):
+    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing_policy"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -6610,7 +6682,7 @@ def _race_job_action_buttons(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("ready", "queued_settle", "settling", "settled"):
+    if status_text in ("ready", "queued_settle", "settling", "settled", "waiting_v5"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -7021,6 +7093,9 @@ def _race_job_status_label_clean(status):
         "scheduled": "待处理",
         "queued_process": "待执行",
         "processing": "处理中",
+        "waiting_v5": "等待 V5",
+        "queued_policy": "等待 LLM",
+        "processing_policy": "LLM 处理中",
         "ready": "预测已生成",
         "queued_settle": "待结算",
         "settling": "结算中",
@@ -7034,7 +7109,7 @@ def _race_job_status_label_clean(status):
 def _race_job_action_buttons_clean(job_id, status, admin_token=""):
     buttons = []
     status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "failed"):
+    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing_policy"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -7044,7 +7119,7 @@ def _race_job_action_buttons_clean(job_id, status, admin_token=""):
             </form>
             """
         )
-    if status_text in ("ready", "queued_settle", "settling", "settled"):
+    if status_text in ("ready", "queued_settle", "settling", "settled", "waiting_v5"):
         buttons.append(
             f"""
             <form method="post" action="/console/tasks/process_now">
@@ -8087,7 +8162,7 @@ def build_race_jobs_page(message_text="", error_text="", admin_token="", authori
         status = _race_job_display_code(job)
         if status in ("scheduled", "uploaded"):
             summary["scheduled"] += 1
-        elif status in ("odds_running", "predictor_running", "policy_running", "queued_settle", "settling"):
+        elif status in ("odds_running", "predictor_running", "policy_running", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
             summary["processing"] += 1
         elif status in ("ready", "predictor_ready"):
             summary["ready"] += 1
@@ -8838,6 +8913,175 @@ def index():
     return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/bundle")
+@app.get("/internal/v5_tasks/{task_id}/bundle")
+def get_remote_v5_bundle(task_id: str, token: str = ""):
+    task = get_v5_remote_task(BASE_DIR, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="v5 task not found")
+    expected = str(task.get("bundle_token", "") or "").strip()
+    supplied = str(token or "").strip()
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="invalid bundle token")
+    status_text = str(task.get("status", "") or "").strip().lower()
+    if status_text in ("queued", "dispatching", "dispatched"):
+        update_v5_remote_task(
+            BASE_DIR,
+            task_id,
+            lambda row, now_text: row.update(
+                {
+                    "status": "running",
+                    "started_at": str(row.get("started_at", "") or now_text),
+                }
+            ),
+        )
+    print(
+        "[web_app] "
+        + json.dumps(
+            {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "event": "remote_v5_bundle_download",
+                "task_id": task_id,
+                "job_id": str(task.get("job_id", "") or "").strip(),
+                "run_id": str(task.get("run_id", "") or "").strip(),
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    body = _remote_v5_bundle_zip_bytes(task)
+    return Response(
+        content=body,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{task_id}_bundle.zip"'},
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/callback")
+@app.post("/internal/v5_tasks/{task_id}/callback")
+async def remote_v5_callback(task_id: str, request: Request):
+    task = get_v5_remote_task(BASE_DIR, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="v5 task not found")
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid callback payload")
+    expected = str(task.get("callback_token", "") or "").strip()
+    supplied = str(payload.get("callback_token", "") or "").strip()
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="invalid callback token")
+    status_text = str(payload.get("status", "") or "").strip().lower()
+    if status_text not in ("succeeded", "failed"):
+        raise HTTPException(status_code=400, detail="invalid callback status")
+    current_status = str(task.get("status", "") or "").strip().lower()
+    if current_status == "succeeded" and status_text == "succeeded":
+        return JSONResponse({"ok": True, "ignored": True, "reason": "already_succeeded"})
+
+    job_id = str(task.get("job_id", "") or "").strip()
+    run_id = str(task.get("run_id", "") or "").strip()
+    race_id = str(task.get("race_id", "") or "").strip()
+    scope_key = str(task.get("scope_key", "") or "").strip()
+    log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
+    print(
+        "[web_app] "
+        + json.dumps(
+            {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "event": "remote_v5_callback",
+                "task_id": task_id,
+                "job_id": job_id,
+                "run_id": run_id,
+                "status": status_text,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+    if status_text == "failed":
+        error_message = str(payload.get("error_message", "") or log_excerpt or "remote v5 failed").strip()
+        update_v5_remote_task(
+            BASE_DIR,
+            task_id,
+            lambda row, now_text: row.update(
+                {
+                    "status": "failed",
+                    "finished_at": now_text,
+                    "error_message": error_message,
+                    "result_summary": dict(payload.get("summary", {}) or {}),
+                }
+            ),
+        )
+
+        def _fail_remote_job(row, now_text):
+            row.update(initialize_race_job_step_fields(row))
+            current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
+            if current_task_id and current_task_id != task_id:
+                return
+            row["status"] = "failed"
+            row["error_message"] = error_message
+            row["last_process_output"] = _append_job_process_log_entry(
+                row,
+                "predictor_v5_remote_callback",
+                1,
+                error_message,
+            )
+            set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
+
+        update_race_job(BASE_DIR, job_id, _fail_remote_job)
+        return JSONResponse({"ok": True, "task_id": task_id, "status": "failed"})
+
+    result = dict(payload.get("result", {}) or {})
+    content_base64 = str(result.get("content_base64", "") or payload.get("content_base64", "") or "").strip()
+    if not content_base64:
+        raise HTTPException(status_code=400, detail="missing result content_base64")
+    try:
+        csv_bytes = base64.b64decode(content_base64.encode("utf-8"), validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid result content_base64: {exc}")
+
+    run_row = resolve_run(run_id, scope_key)
+    if run_row is None:
+        raise HTTPException(status_code=400, detail=f"run not found for run_id={run_id}")
+    data_dir = get_data_dir(BASE_DIR, scope_key)
+    dest_path = snapshot_prediction_path(data_dir, race_id, run_id, "v5_stacking")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_bytes(csv_bytes)
+    update_ok = update_run_row_fields(scope_key, run_row, {"predictions_v5_stacking_path": str(dest_path)})
+    if not update_ok:
+        raise HTTPException(status_code=500, detail="failed to update runs.csv for v5 result")
+
+    summary_payload = dict(payload.get("summary", {}) or {})
+    summary_payload.setdefault("bytes", len(csv_bytes))
+    summary_payload.setdefault("path", str(dest_path))
+    update_v5_remote_task(
+        BASE_DIR,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "succeeded",
+                "finished_at": now_text,
+                "error_message": "",
+                "result_path": str(dest_path),
+                "result_summary": summary_payload,
+            }
+        ),
+    )
+    _promote_job_after_remote_v5(job_id, run_id, task_id, log_excerpt or f"saved={dest_path.name}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "task_id": task_id,
+            "status": "succeeded",
+            "run_id": run_id,
+            "predictions_v5_stacking_path": str(dest_path),
+        }
+    )
+
+
 @app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
 @app.get("/console", response_class=HTMLResponse)
 def console_index(token: str = "", show_settled: str = ""):
@@ -9344,9 +9588,14 @@ def process_race_job_now(
         return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 执行失败：{exc}")
     run_id = str((summary or {}).get("run_id", "") or "").strip()
     engine_count = len(list((summary or {}).get("policy_engines", []) or []))
+    task_id = str((summary or {}).get("v5_remote_task_id", "") or "").strip()
+    if task_id:
+        message_text = f"{job_id} 已进入等待 V5。run_id={run_id or '-'} task_id={task_id}"
+    else:
+        message_text = f"{job_id} 已完成处理。run_id={run_id or '-'} engines={engine_count}"
     return build_race_jobs_page(
         admin_token=token,
-        message_text=f"{job_id} 已完成处理。run_id={run_id or '-'} engines={engine_count}",
+        message_text=message_text,
     )
 
 
