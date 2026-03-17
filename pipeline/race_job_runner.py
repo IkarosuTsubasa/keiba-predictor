@@ -120,6 +120,7 @@ def _mark_policy_processing_started(row, now_text):
     row.update(initialize_job_step_fields(row))
     row["status"] = "processing_policy"
     row["error_message"] = ""
+    set_job_step_state(row, "predictor", "succeeded", now_text)
     set_job_step_state(row, "policy", "running", now_text)
 
 
@@ -132,6 +133,7 @@ def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_j
     row["error_message"] = ""
     row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
     row["queued_process_at"] = str((refreshed_job or {}).get("queued_process_at", "") or "")
+    set_job_step_state(row, "predictor", "succeeded", now_text)
     set_job_step_state(row, "policy", "succeeded", now_text)
 
 
