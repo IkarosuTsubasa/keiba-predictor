@@ -637,6 +637,31 @@ def fail_race_job(base_dir, job_id, message):
     )
 
 
+def _refresh_settlement_odds(scope_key, run_id):
+    import web_app  # local import to avoid circular import during app bootstrap
+
+    run_row = web_app.resolve_run(run_id, scope_key)
+    if run_row is None:
+        raise RuntimeError(f"settlement odds refresh failed: run not found for run_id={run_id}")
+    refresh_ok, refresh_message, refresh_warnings = web_app.maybe_refresh_run_odds(
+        scope_key,
+        run_row,
+        run_id,
+        True,
+    )
+    detail_parts = [
+        f"[odds_refresh] status={'ok' if refresh_ok else 'fail'} message={str(refresh_message or '').strip()}".strip()
+    ]
+    if refresh_warnings:
+        detail_parts.append(
+            "[odds_refresh][warnings] " + "; ".join(str(item or "").strip() for item in refresh_warnings if str(item or "").strip())
+        )
+    detail_text = "\n".join(part for part in detail_parts if part)
+    if not refresh_ok:
+        raise RuntimeError(detail_text or "settlement odds refresh failed")
+    return detail_text
+
+
 def settle_race_job(base_dir, job_id, actual_top3_names):
     base_path = Path(base_dir)
     job = get_job(base_path, job_id)
@@ -658,6 +683,8 @@ def settle_race_job(base_dir, job_id, actual_top3_names):
         lambda row, now_text: _mark_settlement_started(row, now_text, names),
     )
 
+    refresh_output = _refresh_settlement_odds(scope_key, run_id)
+
     code, output = _run_subprocess(
         base_path / "record_predictor_result.py",
         cwd=base_path,
@@ -666,6 +693,7 @@ def settle_race_job(base_dir, job_id, actual_top3_names):
     )
     if code != 0:
         raise RuntimeError(f"settlement failed: {output}")
+    output = "\n".join(part for part in (refresh_output, output) if str(part or "").strip())
 
     summary = {
         "job_id": job_id,

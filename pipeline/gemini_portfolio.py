@@ -424,11 +424,17 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     fuku_path = (run_row or {}).get("fuku_odds_path", "")
     wide_path = (run_row or {}).get("wide_odds_path", "")
     quinella_path = (run_row or {}).get("quinella_odds_path", "")
+    exacta_path = (run_row or {}).get("exacta_odds_path", "")
+    trio_path = (run_row or {}).get("trio_odds_path", "")
+    trifecta_path = (run_row or {}).get("trifecta_odds_path", "")
     name_to_no = load_name_to_no(odds_path)
     win_odds_map = load_win_odds_map(odds_path)
     place_odds_map = load_place_odds_map(fuku_path)
     wide_odds_map = load_pair_odds_map(wide_path)
     quinella_odds_map = load_pair_odds_map(quinella_path)
+    exacta_odds_map = load_exacta_odds_map(exacta_path)
+    trio_odds_map = load_triple_odds_map(trio_path, ordered=False)
+    trifecta_odds_map = load_triple_odds_map(trifecta_path, ordered=True)
     settled_at = datetime.now().isoformat(timespec="seconds")
     total_stake = 0
     total_payout = 0
@@ -459,6 +465,14 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
             elif bet_type == "quinella" and len(nos) >= 2:
                 a, b = sorted(nos[:2])
                 payout = int(round(stake * float(quinella_odds_map.get((a, b), 0) or 0)))
+            elif bet_type == "exacta" and len(nos) >= 2:
+                payout = int(round(stake * float(exacta_odds_map.get((nos[0], nos[1]), 0) or 0)))
+            elif bet_type == "trio" and len(nos) >= 3:
+                key = tuple(sorted(nos[:3]))
+                payout = int(round(stake * float(trio_odds_map.get(key, 0) or 0)))
+            elif bet_type == "trifecta" and len(nos) >= 3:
+                key = tuple(nos[:3])
+                payout = int(round(stake * float(trifecta_odds_map.get(key, 0) or 0)))
         profit = int(payout - stake)
         settled_count += 1
         total_stake += stake
