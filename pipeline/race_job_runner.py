@@ -45,6 +45,11 @@ def strict_llm_odds_gate_enabled():
     return raw not in ("0", "false", "no", "off")
 
 
+def v5_predictor_enabled():
+    raw = os.environ.get("PIPELINE_ENABLE_V5_PREDICTOR", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -544,6 +549,18 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         odds_src = workspace / "odds.csv"
 
         for spec in list_predictors():
+            if spec["id"] == "v5_stacking" and not v5_predictor_enabled():
+                skip_message = "Predictor V5 skipped by default on deployment. Set PIPELINE_ENABLE_V5_PREDICTOR=1 to enable."
+                summary["process_log"].append(
+                    {"step": f"predictor_{spec['id']}", "code": -1, "output": skip_message}
+                )
+                _log_runner_event(
+                    "predictor_stage_skipped",
+                    job_id=job_id,
+                    predictor_id=spec["id"],
+                    reason=skip_message,
+                )
+                continue
             script_name = str(spec.get("script_name", "") or "").strip()
             latest_name = str(spec.get("latest_filename", "") or "").strip()
             if not script_name or not latest_name:
