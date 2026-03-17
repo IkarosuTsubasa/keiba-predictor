@@ -363,6 +363,64 @@ def _public_share_runtime_html():
     return button;
   };
 
+  const parseRaceCardMinutes = (raceCard) => {
+    if (!raceCard) {
+      return null;
+    }
+    const badges = Array.from(raceCard.querySelectorAll(".race-card-header__badges span"));
+    for (const badge of badges) {
+      const text = String(badge.textContent || "").trim();
+      const matched = text.match(/^(\d{1,2}):(\d{2})$/);
+      if (!matched) {
+        continue;
+      }
+      const hour = Number(matched[1]);
+      const minute = Number(matched[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+        continue;
+      }
+      return hour * 60 + minute;
+    }
+    return null;
+  };
+
+  const compareRaceCardsByTime = (left, right) => {
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const leftMinutes = parseRaceCardMinutes(left);
+    const rightMinutes = parseRaceCardMinutes(right);
+    if (leftMinutes !== null && rightMinutes !== null) {
+      const leftDelta = Math.abs(leftMinutes - nowMinutes);
+      const rightDelta = Math.abs(rightMinutes - nowMinutes);
+      if (leftDelta !== rightDelta) {
+        return leftDelta - rightDelta;
+      }
+      if (leftMinutes !== rightMinutes) {
+        return leftMinutes - rightMinutes;
+      }
+    } else if (leftMinutes !== null || rightMinutes !== null) {
+      return leftMinutes !== null ? -1 : 1;
+    }
+    const leftTitle = String(left?.querySelector(".race-card-header h3")?.textContent || "").trim();
+    const rightTitle = String(right?.querySelector(".race-card-header h3")?.textContent || "").trim();
+    return leftTitle.localeCompare(rightTitle, "ja");
+  };
+
+  const sortRaceGrids = () => {
+    document.querySelectorAll(".race-grid").forEach((grid) => {
+      const cards = Array.from(grid.querySelectorAll(":scope > .race-card"));
+      if (cards.length < 2) {
+        return;
+      }
+      const sorted = [...cards].sort(compareRaceCardsByTime);
+      const changed = sorted.some((card, index) => card !== cards[index]);
+      if (!changed) {
+        return;
+      }
+      sorted.forEach((card) => grid.appendChild(card));
+    });
+  };
+
   const findCardsForShare = (root) => {
     const modernCards = Array.from(root.querySelectorAll(".ai-pick-summary"));
     if (modernCards.length) {
@@ -451,6 +509,7 @@ def _public_share_runtime_html():
   const refreshShareButtons = () => {
     document.querySelectorAll(".race-summary").forEach(mountLegacyShareButton);
     document.querySelectorAll(".race-card-header").forEach(mountModernShareButton);
+    sortRaceGrids();
   };
 
   const observer = new MutationObserver(() => {
