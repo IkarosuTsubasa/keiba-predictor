@@ -605,7 +605,7 @@ def _build_run_row(job, run_id, snapshot_paths):
         "trifecta_odds_path": snapshot_paths.get("trifecta_odds_path", ""),
         "plan_path": "",
         "gemini_policy_path": "",
-        "siliconflow_policy_path": "",
+        "deepseek_policy_path": "",
         "openai_policy_path": "",
         "grok_policy_path": "",
         "tickets": "",
@@ -619,7 +619,7 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
     run_row = web_app.resolve_run(run_id, scope_key)
     if run_row is None:
         raise RuntimeError(f"run row not found for run_id={run_id}")
-    engines = list(policy_engines or ("openai", "gemini", "siliconflow", "grok"))
+    engines = list(policy_engines or ("openai", "gemini", "deepseek", "grok"))
     update_job(
         base_path,
         job_id,
@@ -676,7 +676,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             race_id=race_id,
             scope_key=scope_key,
             mode="policy_only",
-            policy_engines=list(policy_engines or ("openai", "gemini", "siliconflow", "grok")),
+            policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")),
         )
         summary = {
             "job_id": job_id,
@@ -703,7 +703,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         job_id=job_id,
         race_id=race_id,
         scope_key=scope_key,
-        policy_engines=list(policy_engines or ("openai", "gemini", "siliconflow", "grok")),
+            policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")),
     )
 
     migrate_legacy_data(base_path, scope_key)

@@ -39,6 +39,7 @@ def _reset_runs_csv(path: Path):
     reset_fields = [
         "policy_path",
         "gemini_policy_path",
+        "deepseek_policy_path",
         "siliconflow_policy_path",
         "openai_policy_path",
         "grok_policy_path",
@@ -76,6 +77,7 @@ def reset_llm_state(base_dir):
         removed["ledger_files"] = _remove_files(shared_dir.glob("*_ticket_ledger.csv"))
 
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_gemini").glob("*.json")))
+    removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_deepseek").glob("*.json")))
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_siliconflow").glob("*.json")))
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_openai").glob("*.json")))
     removed["cache_files"].extend(_remove_files((data_dir / "policy_cache_grok").glob("*.json")))

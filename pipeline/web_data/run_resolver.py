@@ -82,6 +82,7 @@ def infer_run_id_from_row(run_row):
         "trifecta_odds_path",
         "plan_path",
         "gemini_policy_path",
+        "deepseek_policy_path",
         "siliconflow_policy_path",
         "openai_policy_path",
         "grok_policy_path",

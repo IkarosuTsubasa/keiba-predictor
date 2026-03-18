@@ -201,6 +201,7 @@ def infer_run_id_from_row(run_row):
         "trifecta_odds_path",
         "plan_path",
         "gemini_policy_path",
+        "deepseek_policy_path",
         "siliconflow_policy_path",
         "openai_policy_path",
         "grok_policy_path",
@@ -372,7 +373,7 @@ def main():
         print(f"Recorded predictor results for {run_id}: {len(predictor_rows)} predictors")
     else:
         print("[WARN] No predictor outputs were recorded for this run; continue with ticket settlement only.")
-    for policy_engine in ("gemini", "siliconflow", "openai", "grok"):
+    for policy_engine in ("gemini", "deepseek", "openai", "grok"):
         settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw, policy_engine=policy_engine)
         if settlement:
             print(

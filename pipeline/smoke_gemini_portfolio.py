@@ -56,7 +56,7 @@ def main():
         )
         summary = summarize_bankroll(base_dir, ledger_date)
         assert_true(summary["available_bankroll_yen"] == 9300, "reserve did not reduce bankroll")
-        other_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
+        other_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="deepseek")
         assert_true(other_summary["available_bankroll_yen"] == 10000, "other provider bankroll should stay isolated")
 
         odds_dir = base_dir / "data" / "central_dirt" / "202603090101"
@@ -93,7 +93,7 @@ def main():
 
         summary_after = summarize_bankroll(base_dir, ledger_date)
         assert_true(summary_after["available_bankroll_yen"] == 11070, "settlement did not restore bankroll")
-        other_summary_after = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
+        other_summary_after = summarize_bankroll(base_dir, ledger_date, policy_engine="deepseek")
         assert_true(other_summary_after["available_bankroll_yen"] == 10000, "other provider bankroll changed unexpectedly")
         reserve_run_tickets(
             base_dir,
@@ -111,12 +111,12 @@ def main():
                     "odds_used": 2.4,
                 }
             ],
-            policy_engine="siliconflow",
+            policy_engine="deepseek",
         )
-        siliconflow_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="siliconflow")
-        assert_true(siliconflow_summary["available_bankroll_yen"] == 9500, "siliconflow reserve should use its own bankroll")
+        deepseek_summary = summarize_bankroll(base_dir, ledger_date, policy_engine="deepseek")
+        assert_true(deepseek_summary["available_bankroll_yen"] == 9500, "deepseek reserve should use its own bankroll")
         gemini_summary_final = summarize_bankroll(base_dir, ledger_date)
-        assert_true(gemini_summary_final["available_bankroll_yen"] == 11070, "gemini bankroll changed after siliconflow reserve")
+        assert_true(gemini_summary_final["available_bankroll_yen"] == 11070, "gemini bankroll changed after deepseek reserve")
 
         daily = load_daily_profit_rows(base_dir, days=30)
         assert_true(daily and int(daily[0]["profit_yen"]) == 1070, "daily profit summary mismatch")

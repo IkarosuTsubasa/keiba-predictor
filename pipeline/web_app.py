@@ -2653,8 +2653,8 @@ def resolve_policy_timeout(policy_engine):
     engine = normalize_policy_engine(policy_engine)
     env_keys = []
     default_timeout = 20
-    if engine == "siliconflow":
-        env_keys = ["SILICONFLOW_POLICY_TIMEOUT", "POLICY_TIMEOUT_SILICONFLOW", "POLICY_TIMEOUT"]
+    if engine == "deepseek":
+        env_keys = ["DEEPSEEK_POLICY_TIMEOUT", "POLICY_TIMEOUT_DEEPSEEK", "POLICY_TIMEOUT"]
         default_timeout = 75
     elif engine == "openai":
         env_keys = ["OPENAI_POLICY_TIMEOUT", "POLICY_TIMEOUT_OPENAI", "POLICY_TIMEOUT"]
@@ -2703,6 +2703,7 @@ def load_policy_payload(scope_key, run_id, run_row=None):
     candidates = [
         ("policy_path", "policy"),
         ("gemini_policy_path", "gemini_policy"),
+        ("deepseek_policy_path", "deepseek_policy"),
         ("siliconflow_policy_path", "siliconflow_policy"),
         ("openai_policy_path", "openai_policy"),
         ("grok_policy_path", "grok_policy"),
@@ -2727,7 +2728,8 @@ def load_policy_payloads(scope_key, run_id, run_row=None):
     seen = set()
     candidates = [
         ("gemini", "gemini_policy_path", "gemini_policy"),
-        ("siliconflow", "siliconflow_policy_path", "siliconflow_policy"),
+        ("deepseek", "deepseek_policy_path", "deepseek_policy"),
+        ("deepseek", "siliconflow_policy_path", "siliconflow_policy"),
         ("openai", "openai_policy_path", "openai_policy"),
         ("grok", "grok_policy_path", "grok_policy"),
         ("", "policy_path", "policy"),
@@ -2850,7 +2852,7 @@ def build_policy_html(payload):
     policy_engine = str(payload.get("policy_engine", "") or "")
     engine_label_map = {
         "gemini": "Gemini",
-        "siliconflow": "DeepSeek",
+        "deepseek": "DeepSeek",
         "openai": "ChatGPT",
         "grok": "xAI Grok",
     }
@@ -3046,23 +3048,23 @@ def build_policy_workspace_html(payloads):
     return "".join(blocks)
 
 
-LLM_BATTLE_ORDER = ("openai", "gemini", "siliconflow", "grok")
+LLM_BATTLE_ORDER = ("openai", "gemini", "deepseek", "grok")
 LLM_BATTLE_LABELS = {
     "openai": "ChatGPT",
     "gemini": "Gemini",
-    "siliconflow": "DeepSeek",
+    "deepseek": "DeepSeek",
     "grok": "Grok",
 }
 LLM_NOTE_LABELS = {
     "openai": "ChatGPT",
     "gemini": "Gemini",
-    "siliconflow": "DeepSeek",
+    "deepseek": "DeepSeek",
     "grok": "Grok",
 }
 LLM_BATTLE_SHORT_LABELS = {
     "openai": "chatgpt",
     "gemini": "gemini",
-    "siliconflow": "deepseek",
+    "deepseek": "deepseek",
     "grok": "grok",
 }
 PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
@@ -3285,6 +3287,7 @@ def _has_llm_policy_assets(run_row):
     row = dict(run_row or {})
     return bool(
         _safe_text(row.get("gemini_policy_path"))
+        or _safe_text(row.get("deepseek_policy_path"))
         or _safe_text(row.get("siliconflow_policy_path"))
         or _safe_text(row.get("openai_policy_path"))
         or _safe_text(row.get("grok_policy_path"))
@@ -9490,7 +9493,7 @@ def topup_today_all_llm_budget(token: str = Form("")):
         )
     ledger_date = _default_job_race_date_text().replace("-", "")
     amount_yen = resolve_daily_bankroll_yen(ledger_date)
-    for engine in ("gemini", "siliconflow", "openai", "grok"):
+    for engine in ("gemini", "deepseek", "openai", "grok"):
         add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
     return render_console_page(
         admin_token=token,
@@ -10185,7 +10188,7 @@ def run_all_llm_buy(
         )
     result_blocks = []
     error_blocks = []
-    for engine in ("gemini", "siliconflow", "openai", "grok"):
+    for engine in ("gemini", "deepseek", "openai", "grok"):
         try:
             result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=engine, policy_model="")
             result_blocks.append(
@@ -10242,7 +10245,7 @@ def topup_all_llm_budget(
     ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
     amount_yen = resolve_daily_bankroll_yen(ledger_date)
     lines = [f"[llm_budget_topup] ledger_date={ledger_date} amount_yen={amount_yen} engines=4"]
-    for engine in ("gemini", "siliconflow", "openai", "grok"):
+    for engine in ("gemini", "deepseek", "openai", "grok"):
         summary = add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
         lines.append(
             "[topup][{engine}] available_bankroll_yen={available} topup_yen={topup}".format(

@@ -16,18 +16,18 @@ from . import gemini_policy as _gemini
 from .gemini_policy import RacePolicyInput, RacePolicyOutput, deterministic_policy, fallback_no_bet_policy
 
 DEFAULT_GEMINI_MODEL = _gemini.DEFAULT_GEMINI_MODEL
-DEFAULT_SILICONFLOW_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-reasoner"
 DEFAULT_OPENAI_MODEL = "gpt-5-mini-2025-08-07"
 DEFAULT_GROK_MODEL = "grok-4-1-fast-reasoning"
 POLICY_ENGINE_DEFAULTS = {
     "gemini": DEFAULT_GEMINI_MODEL,
-    "siliconflow": DEFAULT_SILICONFLOW_MODEL,
+    "deepseek": DEFAULT_DEEPSEEK_MODEL,
     "openai": DEFAULT_OPENAI_MODEL,
     "grok": DEFAULT_GROK_MODEL,
 }
 POLICY_CACHE_VERSION_MAP = {
     "gemini": _gemini.POLICY_CACHE_VERSION,
-    "siliconflow": "siliconflow_policy_v1",
+    "deepseek": "deepseek_policy_v1",
     "openai": "openai_policy_v3",
     "grok": "grok_policy_v1",
 }
@@ -36,7 +36,7 @@ _PIPELINE_DIR = _MODULE_DIR.parent
 load_local_env(_PIPELINE_DIR, override=False)
 _CACHE_DIRS = {
     "gemini": _gemini.DEFAULT_CACHE_DIR,
-    "siliconflow": _PIPELINE_DIR / "data" / "policy_cache_siliconflow",
+    "deepseek": _PIPELINE_DIR / "data" / "policy_cache_deepseek",
     "openai": _PIPELINE_DIR / "data" / "policy_cache_openai",
     "grok": _PIPELINE_DIR / "data" / "policy_cache_grok",
 }
@@ -55,14 +55,16 @@ _LAST_CALL_META = {
     "policy_engine": "none",
     "policy_model": "",
 }
-_SILICONFLOW_BUCKET = _gemini._TokenBucket(rpm=int(os.environ.get("SILICONFLOW_POLICY_RPM", "10") or "10"))
+_DEEPSEEK_BUCKET = _gemini._TokenBucket(rpm=int(os.environ.get("DEEPSEEK_POLICY_RPM", "10") or "10"))
 _OPENAI_BUCKET = _gemini._TokenBucket(rpm=int(os.environ.get("OPENAI_POLICY_RPM", "10") or "10"))
 _GROK_BUCKET = _gemini._TokenBucket(rpm=int(os.environ.get("GROK_POLICY_RPM", "10") or "10"))
 
 
 def normalize_policy_engine(value: str) -> str:
     engine = str(value or "").strip().lower()
-    if engine in ("gemini", "siliconflow", "openai", "grok"):
+    if engine == "siliconflow":
+        return "deepseek"
+    if engine in ("gemini", "deepseek", "openai", "grok"):
         return engine
     return "none"
 
@@ -77,7 +79,7 @@ def resolve_policy_model(policy_engine: str, model: str = "", gemini_model_compa
         return compat
     env_model_map = {
         "gemini": ["GEMINI_MODEL", "GEMINI_POLICY_MODEL"],
-        "siliconflow": ["SILICONFLOW_POLICY_MODEL"],
+        "deepseek": ["DEEPSEEK_POLICY_MODEL", "DEEPSEEK_MODEL", "SILICONFLOW_POLICY_MODEL"],
         "openai": ["OPENAI_POLICY_MODEL", "OPENAI_MODEL"],
         "grok": ["GROK_POLICY_MODEL", "XAI_MODEL"],
     }
@@ -144,7 +146,7 @@ def get_last_call_meta() -> Dict[str, Any]:
     return dict(_LAST_CALL_META)
 
 
-def _extract_siliconflow_text(response_payload: Dict[str, Any]) -> str:
+def _extract_chat_completions_text(response_payload: Dict[str, Any]) -> str:
     if not isinstance(response_payload, dict):
         return ""
     choices = list(response_payload.get("choices", []) or [])
@@ -273,32 +275,44 @@ def _extract_http_error_detail(exc: urllib.error.HTTPError) -> str:
     return detail[:500]
 
 
-def _call_siliconflow_once(prompt: str, model: str, api_key: str, timeout_s: int) -> str:
+def _build_deepseek_endpoint() -> str:
+    explicit = str(os.environ.get("DEEPSEEK_CHAT_COMPLETIONS_URL", "") or "").strip()
+    if explicit:
+        return explicit
+    base_url = _normalize_base_url(
+        str(
+            os.environ.get("DEEPSEEK_BASE_URL", "")
+            or os.environ.get("DEEPSEEK_API_BASE", "")
+            or os.environ.get("DEEPSEEK_BASE", "")
+            or "https://api.deepseek.com"
+        )
+    )
+    if re.search(r"/chat/completions$", base_url, flags=re.IGNORECASE):
+        return base_url
+    return urllib.parse.urljoin(f"{base_url}/", "chat/completions")
+
+
+def _call_deepseek_once(prompt: str, model: str, api_key: str, timeout_s: int) -> str:
     body = {
-        "model": str(model or DEFAULT_SILICONFLOW_MODEL),
+        "model": str(model or DEFAULT_DEEPSEEK_MODEL),
         "messages": [
             {"role": "system", "content": "你是一个严格输出JSON的赛马策略助手。"},
             {"role": "user", "content": prompt},
         ],
         "stream": False,
-        "temperature": 0.2,
-        "top_p": 0.7,
-        "max_tokens": int(os.environ.get("SILICONFLOW_MAX_TOKENS", "2048") or "2048"),
-        "enable_thinking": False,
+        "response_format": {"type": "json_object"},
+        "max_tokens": int(os.environ.get("DEEPSEEK_MAX_TOKENS", "4096") or "4096"),
     }
-    thinking_raw = str(os.environ.get("SILICONFLOW_ENABLE_THINKING", "") or "").strip().lower()
-    if thinking_raw in ("0", "1", "true", "false", "yes", "no", "on", "off"):
-        body["enable_thinking"] = thinking_raw in ("1", "true", "yes", "on")
-    thinking_budget = str(os.environ.get("SILICONFLOW_THINKING_BUDGET", "") or "").strip()
-    if thinking_budget:
+    temperature_raw = str(os.environ.get("DEEPSEEK_POLICY_TEMPERATURE", "") or "").strip()
+    if temperature_raw:
         try:
-            body["thinking_budget"] = int(thinking_budget)
+            body["temperature"] = float(temperature_raw)
         except ValueError:
             pass
 
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
-        "https://api.siliconflow.cn/v1/chat/completions",
+        _build_deepseek_endpoint(),
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -308,7 +322,7 @@ def _call_siliconflow_once(prompt: str, model: str, api_key: str, timeout_s: int
     )
     with urllib.request.urlopen(request, timeout=max(1, int(timeout_s or 1))) as response:
         raw = response.read().decode("utf-8")
-    text = _extract_siliconflow_text(json.loads(raw))
+    text = _extract_chat_completions_text(json.loads(raw))
     if not text:
         raise ValueError("empty_response_content")
     return text
@@ -372,7 +386,7 @@ def _call_openai_once(prompt: str, model: str, api_key: str, timeout_s: int) -> 
         raw = response.read().decode("utf-8")
     payload = json.loads(raw)
     if style == "chat_completions":
-        text = _extract_siliconflow_text(payload)
+        text = _extract_chat_completions_text(payload)
     else:
         text = _extract_openai_text(payload)
     if not text:
@@ -418,19 +432,19 @@ def _call_grok_once(prompt: str, model: str, api_key: str, timeout_s: int) -> st
     return text
 
 
-def call_siliconflow_policy(
+def call_deepseek_policy(
     input: RacePolicyInput,
-    model: str = DEFAULT_SILICONFLOW_MODEL,
+    model: str = DEFAULT_DEEPSEEK_MODEL,
     timeout_s: int = 75,
     cache_enable: bool = True,
 ) -> RacePolicyOutput:
     input_obj = _gemini._model_validate(RacePolicyInput, input)
-    resolved_model = resolve_policy_model("siliconflow", model)
+    resolved_model = resolve_policy_model("deepseek", model)
     request_meta = _gemini._build_request_meta(input_obj)
-    request_meta["policy_version"] = POLICY_CACHE_VERSION_MAP["siliconflow"]
-    cache_dir = _CACHE_DIRS["siliconflow"]
+    request_meta["policy_version"] = POLICY_CACHE_VERSION_MAP["deepseek"]
+    cache_dir = _CACHE_DIRS["deepseek"]
     _gemini._ensure_cache_dir(cache_dir)
-    cache_path = cache_dir / f"{_build_cache_key(input_obj, 'siliconflow', resolved_model)}.json"
+    cache_path = cache_dir / f"{_build_cache_key(input_obj, 'deepseek', resolved_model)}.json"
 
     if bool(cache_enable):
         cached = _gemini._read_cache(cache_path)
@@ -443,7 +457,7 @@ def call_siliconflow_policy(
                     "fallback_reason": "cache",
                 },
                 cached,
-                "siliconflow",
+                "deepseek",
                 resolved_model,
             )
             return cached
@@ -452,21 +466,21 @@ def call_siliconflow_policy(
     error_detail = ""
     llm_latency_ms = 0
     output: Optional[RacePolicyOutput] = None
-    mock_enabled = str(os.environ.get("SILICONFLOW_POLICY_MOCK", "") or "").strip() == "1"
+    mock_enabled = str(os.environ.get("DEEPSEEK_POLICY_MOCK", "") or "").strip() == "1"
     if mock_enabled:
         fallback_reason = "mock_mode"
         output = deterministic_policy(input_obj, fallback_reason=fallback_reason)
     else:
-        api_key = str(os.environ.get("SILICONFLOW_API_KEY", "") or "").strip()
+        api_key = str(os.environ.get("DEEPSEEK_API_KEY", "") or "").strip()
         if not api_key:
             fallback_reason = "missing_api_key"
             output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
-        elif not _SILICONFLOW_BUCKET.consume(1.0):
+        elif not _DEEPSEEK_BUCKET.consume(1.0):
             fallback_reason = "rate_limited_local"
             output = fallback_no_bet_policy(input_obj, fallback_reason=fallback_reason)
         else:
             prompt = _gemini._make_prompt(input_obj)
-            retry_count_raw = str(os.environ.get("SILICONFLOW_POLICY_RETRIES", "2") or "2").strip()
+            retry_count_raw = str(os.environ.get("DEEPSEEK_POLICY_RETRIES", "2") or "2").strip()
             try:
                 max_attempts = max(1, int(retry_count_raw))
             except ValueError:
@@ -475,7 +489,7 @@ def call_siliconflow_policy(
                 start = time.perf_counter()
                 try:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(_call_siliconflow_once, prompt, resolved_model, api_key, timeout_s)
+                        future = executor.submit(_call_deepseek_once, prompt, resolved_model, api_key, timeout_s)
                         raw_text = future.result(timeout=max(1, int(timeout_s or 1)))
                     llm_latency_ms = int((time.perf_counter() - start) * 1000)
                     payload = _gemini._parse_json_payload(raw_text)
@@ -538,7 +552,7 @@ def call_siliconflow_policy(
     }
     if bool(cache_enable):
         _gemini._write_cache(cache_path, final_output, meta)
-    _update_last_meta(meta, final_output, "siliconflow", resolved_model)
+    _update_last_meta(meta, final_output, "deepseek", resolved_model)
     return final_output
 
 
@@ -801,10 +815,10 @@ def call_policy(
         meta = _gemini.get_last_call_meta()
         _update_last_meta(meta, output, "gemini", resolved_model or DEFAULT_GEMINI_MODEL)
         return output
-    if engine == "siliconflow":
-        return call_siliconflow_policy(
+    if engine == "deepseek":
+        return call_deepseek_policy(
             input=input_obj,
-            model=resolved_model or DEFAULT_SILICONFLOW_MODEL,
+            model=resolved_model or DEFAULT_DEEPSEEK_MODEL,
             timeout_s=timeout_s,
             cache_enable=cache_enable,
         )
@@ -836,17 +850,17 @@ def call_policy(
 
 
 __all__ = [
+    "DEFAULT_DEEPSEEK_MODEL",
     "DEFAULT_GEMINI_MODEL",
     "DEFAULT_GROK_MODEL",
     "DEFAULT_OPENAI_MODEL",
-    "DEFAULT_SILICONFLOW_MODEL",
     "POLICY_ENGINE_DEFAULTS",
+    "call_deepseek_policy",
     "call_grok_policy",
     "RacePolicyInput",
     "RacePolicyOutput",
     "call_openai_policy",
     "call_policy",
-    "call_siliconflow_policy",
     "deterministic_policy",
     "get_last_call_meta",
     "get_policy_cache_key",

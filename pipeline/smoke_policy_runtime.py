@@ -2,9 +2,9 @@ import os
 import time
 
 from llm.policy_runtime import (
+    DEFAULT_DEEPSEEK_MODEL,
     DEFAULT_GEMINI_MODEL,
     DEFAULT_GROK_MODEL,
-    DEFAULT_SILICONFLOW_MODEL,
     RacePolicyInput,
     call_policy,
     get_last_call_meta,
@@ -95,25 +95,25 @@ def main():
     policy_input = _build_input()
 
     os.environ["GEMINI_POLICY_MOCK"] = "1"
-    os.environ["SILICONFLOW_POLICY_MOCK"] = "1"
+    os.environ["DEEPSEEK_POLICY_MOCK"] = "1"
     os.environ["GROK_POLICY_MOCK"] = "1"
     os.environ.pop("GEMINI_API_KEY", None)
-    os.environ.pop("SILICONFLOW_API_KEY", None)
+    os.environ.pop("DEEPSEEK_API_KEY", None)
     os.environ.pop("XAI_API_KEY", None)
 
     gemini_key = get_policy_cache_key(policy_input, policy_engine="gemini", model=DEFAULT_GEMINI_MODEL)
-    siliconflow_key = get_policy_cache_key(
+    deepseek_key = get_policy_cache_key(
         policy_input,
-        policy_engine="siliconflow",
-        model=DEFAULT_SILICONFLOW_MODEL,
+        policy_engine="deepseek",
+        model=DEFAULT_DEEPSEEK_MODEL,
     )
     grok_key = get_policy_cache_key(
         policy_input,
         policy_engine="grok",
         model=DEFAULT_GROK_MODEL,
     )
-    assert gemini_key != siliconflow_key
-    assert grok_key != siliconflow_key
+    assert gemini_key != deepseek_key
+    assert grok_key != deepseek_key
 
     gemini_output = call_policy(
         input=policy_input,
@@ -125,15 +125,15 @@ def main():
     gemini_meta = get_last_call_meta()
     _assert_output(gemini_output, gemini_meta, "gemini")
 
-    siliconflow_output = call_policy(
+    deepseek_output = call_policy(
         input=policy_input,
-        policy_engine="siliconflow",
-        model=DEFAULT_SILICONFLOW_MODEL,
+        policy_engine="deepseek",
+        model=DEFAULT_DEEPSEEK_MODEL,
         timeout_s=5,
         cache_enable=True,
     )
-    siliconflow_meta = get_last_call_meta()
-    _assert_output(siliconflow_output, siliconflow_meta, "siliconflow")
+    deepseek_meta = get_last_call_meta()
+    _assert_output(deepseek_output, deepseek_meta, "deepseek")
 
     grok_output = call_policy(
         input=policy_input,
@@ -147,12 +147,12 @@ def main():
 
     print("OK: smoke_policy_runtime passed")
     print(
-        "gemini_cache={g} siliconflow_cache={s} grok_cache={k} gemini_style={gs} siliconflow_style={ss} grok_style={ks}".format(
+        "gemini_cache={g} deepseek_cache={s} grok_cache={k} gemini_style={gs} deepseek_style={ss} grok_style={ks}".format(
             g=gemini_key[:12],
-            s=siliconflow_key[:12],
+            s=deepseek_key[:12],
             k=grok_key[:12],
             gs=str(gemini_output.buy_style),
-            ss=str(siliconflow_output.buy_style),
+            ss=str(deepseek_output.buy_style),
             ks=str(grok_output.buy_style),
         )
     )
