@@ -1,4 +1,6 @@
 import csv
+import hashlib
+import hmac as hmac_mod
 import html
 import json
 import math
@@ -574,6 +576,14 @@ def public_og_image():
 
 def _admin_token_expected():
     return str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
+
+
+def _verify_callback_hmac(body: bytes, sig_header: str) -> bool:
+    secret = str(os.environ.get("PIPELINE_CALLBACK_SECRET", "") or "").strip()
+    if not secret or not sig_header:
+        return False
+    expected = "sha256=" + hmac_mod.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return secrets.compare_digest(sig_header, expected)
 
 
 def _admin_token_enabled():
@@ -9021,16 +9031,16 @@ async def remote_v5_callback(task_id: str, request: Request):
     task = get_v5_remote_task(BASE_DIR, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="v5 task not found")
+    body = await request.body()
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    if not _verify_callback_hmac(body, sig_header):
+        raise HTTPException(status_code=403, detail="invalid callback signature")
     try:
-        payload = await request.json()
+        payload = json.loads(body)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid json: {exc}")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="invalid callback payload")
-    expected = str(task.get("callback_token", "") or "").strip()
-    supplied = str(payload.get("callback_token", "") or "").strip()
-    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
-        raise HTTPException(status_code=403, detail="invalid callback token")
     status_text = str(payload.get("status", "") or "").strip().lower()
     if status_text not in ("succeeded", "failed"):
         raise HTTPException(status_code=400, detail="invalid callback status")

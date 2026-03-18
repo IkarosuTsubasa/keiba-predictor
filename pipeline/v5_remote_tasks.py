@@ -96,7 +96,6 @@ def create_task(
         "workflow_run_id": "",
         "workflow_dispatch_ref": "",
         "bundle_token": secrets.token_urlsafe(24),
-        "callback_token": secrets.token_urlsafe(24),
         "bundle_files": dict(bundle_files or {}),
         "bundle_meta": dict(bundle_meta or {}),
         "result_path": "",

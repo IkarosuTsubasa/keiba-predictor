@@ -15,10 +15,6 @@ on:
         description: Render callback URL
         required: true
         type: string
-      callback_token:
-        description: Render callback token
-        required: true
-        type: string
 
 jobs:
   predictor_v5:
@@ -103,7 +99,6 @@ jobs:
         shell: bash
         env:
           RUN_EXIT_CODE: ${{ steps.run_v5.outputs.exit_code }}
-          CALLBACK_TOKEN: ${{ inputs.callback_token }}
         run: |
           python - <<'PY'
           import base64
@@ -126,7 +121,6 @@ jobs:
                   rows = list(csv.DictReader(fh))
               payload = {
                   "status": "succeeded",
-                  "callback_token": os.environ["CALLBACK_TOKEN"],
                   "summary": {
                       "row_count": len(rows),
                       "top1_horse_no": str(rows[0].get("HorseNo", "") or "").strip() if rows else "",
@@ -141,7 +135,6 @@ jobs:
           else:
               payload = {
                   "status": "failed",
-                  "callback_token": os.environ["CALLBACK_TOKEN"],
                   "error_message": f"predictor_v5_omc.py failed with exit_code={exit_code}",
                   "log_excerpt": log_excerpt,
               }
@@ -156,18 +149,25 @@ jobs:
         shell: bash
         env:
           CALLBACK_URL: ${{ inputs.callback_url }}
+          PIPELINE_CALLBACK_SECRET: ${{ secrets.PIPELINE_CALLBACK_SECRET }}
         run: |
           python - <<'PY'
-          import json
+          import hashlib
+          import hmac
           import os
           import urllib.request
           from pathlib import Path
 
-          payload = Path("callback_payload.json").read_text(encoding="utf-8")
+          payload_bytes = Path("callback_payload.json").read_bytes()
+          secret = os.environ.get("PIPELINE_CALLBACK_SECRET", "").encode("utf-8")
+          sig = "sha256=" + hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
           req = urllib.request.Request(
               os.environ["CALLBACK_URL"],
-              data=payload.encode("utf-8"),
-              headers={"Content-Type": "application/json; charset=utf-8"},
+              data=payload_bytes,
+              headers={
+                  "Content-Type": "application/json; charset=utf-8",
+                  "X-Hub-Signature-256": sig,
+              },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=60) as resp:

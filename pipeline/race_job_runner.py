@@ -258,7 +258,6 @@ def _dispatch_remote_v5_task(base_dir, task):
             "task_id": task_id,
             "bundle_url": _remote_v5_bundle_url(task),
             "callback_url": _remote_v5_callback_url(task),
-            "callback_token": str((task or {}).get("callback_token", "") or "").strip(),
         },
     }
     req = urllib.request.Request(
