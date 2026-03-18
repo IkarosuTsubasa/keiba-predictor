@@ -10,6 +10,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import zipfile
@@ -945,6 +946,11 @@ def remote_v5_enabled():
     return raw in ("1", "true", "yes", "on")
 
 
+def remote_predictor_auto_continue_enabled():
+    raw = os.environ.get("PIPELINE_REMOTE_PREDICTORS_AUTO_CONTINUE", "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
 def _append_job_process_log_entry(row, step, code, output):
     payload = {}
     raw = str((row or {}).get("last_process_output", "") or "").strip()
@@ -997,7 +1003,7 @@ def _promote_job_after_remote_v5(job_id, run_id, task_id, log_output):
         row["error_message"] = ""
         row["last_process_output"] = _append_job_process_log_entry(
             row,
-            "predictor_v5_remote_callback",
+            "predictors_remote_callback",
             0,
             log_output,
         )
@@ -1005,6 +1011,66 @@ def _promote_job_after_remote_v5(job_id, run_id, task_id, log_output):
         set_race_job_step_state(row, "policy", "queued")
 
     return update_race_job(BASE_DIR, job_id, mutate)
+
+
+def _auto_continue_remote_policy(job_id):
+    target_job_id = str(job_id or "").strip()
+    if not target_job_id:
+        return
+
+    def _runner():
+        try:
+            from race_job_runner import process_race_job
+
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "remote_predictors_auto_continue_start",
+                        "job_id": target_job_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            summary = process_race_job(BASE_DIR, target_job_id)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "remote_predictors_auto_continue_done",
+                        "job_id": target_job_id,
+                        "run_id": str((summary or {}).get("run_id", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        except Exception as exc:
+            try:
+                from race_job_runner import fail_race_job
+
+                fail_race_job(BASE_DIR, target_job_id, str(exc))
+            except Exception:
+                pass
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "remote_predictors_auto_continue_error",
+                        "job_id": target_job_id,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+    threading.Thread(target=_runner, name=f"remote-policy-{target_job_id}", daemon=True).start()
 
 
 def strict_llm_odds_gate_enabled():
@@ -6724,7 +6790,7 @@ def _race_job_status_label(status):
         "scheduled": "待处理",
         "queued_process": "待执行",
         "processing": "处理中",
-        "waiting_v5": "等待 V5",
+        "waiting_v5": "等待远程预测",
         "queued_policy": "等待 LLM",
         "processing_policy": "LLM 处理中",
         "ready": "预测已生成",
@@ -7161,7 +7227,7 @@ def _race_job_status_label_clean(status):
         "scheduled": "待处理",
         "queued_process": "待执行",
         "processing": "处理中",
-        "waiting_v5": "等待 V5",
+        "waiting_v5": "等待远程预测",
         "queued_policy": "等待 LLM",
         "processing_policy": "LLM 处理中",
         "ready": "预测已生成",
@@ -9093,7 +9159,7 @@ async def remote_v5_callback(task_id: str, request: Request):
             row["error_message"] = error_message
             row["last_process_output"] = _append_job_process_log_entry(
                 row,
-                "predictor_v5_remote_callback",
+                "predictors_remote_callback",
                 1,
                 error_message,
             )
@@ -9107,7 +9173,7 @@ async def remote_v5_callback(task_id: str, request: Request):
     if not content_base64:
         raise HTTPException(status_code=400, detail="missing result content_base64")
     try:
-        csv_bytes = base64.b64decode(content_base64.encode("utf-8"), validate=True)
+        zip_bytes = base64.b64decode(content_base64.encode("utf-8"), validate=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid result content_base64: {exc}")
 
@@ -9115,16 +9181,38 @@ async def remote_v5_callback(task_id: str, request: Request):
     if run_row is None:
         raise HTTPException(status_code=400, detail=f"run not found for run_id={run_id}")
     data_dir = get_data_dir(BASE_DIR, scope_key)
-    dest_path = snapshot_prediction_path(data_dir, race_id, run_id, "v5_stacking")
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    dest_path.write_bytes(csv_bytes)
-    update_ok = update_run_row_fields(scope_key, run_row, {"predictions_v5_stacking_path": str(dest_path)})
+    try:
+        archive = zipfile.ZipFile(BytesIO(zip_bytes), "r")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid predictor result zip: {exc}")
+    saved_paths = {}
+    missing_files = []
+    with archive:
+        names = set(archive.namelist())
+        for spec in list_predictors():
+            latest_name = str(spec.get("latest_filename", "") or "").strip()
+            run_field = str(spec.get("run_field", "") or "").strip()
+            predictor_id = str(spec.get("id", "") or "").strip()
+            if not latest_name or not run_field or not predictor_id:
+                continue
+            if latest_name not in names:
+                missing_files.append(latest_name)
+                continue
+            dest_path = snapshot_prediction_path(data_dir, race_id, run_id, predictor_id)
+            if dest_path is None:
+                raise HTTPException(status_code=500, detail=f"snapshot path unavailable for {predictor_id}")
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            dest_path.write_bytes(archive.read(latest_name))
+            saved_paths[run_field] = str(dest_path)
+    if missing_files:
+        raise HTTPException(status_code=400, detail="missing predictor outputs: " + ", ".join(missing_files))
+    update_ok = update_run_row_fields(scope_key, run_row, saved_paths)
     if not update_ok:
-        raise HTTPException(status_code=500, detail="failed to update runs.csv for v5 result")
+        raise HTTPException(status_code=500, detail="failed to update runs.csv for predictor results")
 
     summary_payload = dict(payload.get("summary", {}) or {})
-    summary_payload.setdefault("bytes", len(csv_bytes))
-    summary_payload.setdefault("path", str(dest_path))
+    summary_payload.setdefault("bytes", len(zip_bytes))
+    summary_payload.setdefault("saved_paths", dict(saved_paths))
     update_v5_remote_task(
         BASE_DIR,
         task_id,
@@ -9133,19 +9221,27 @@ async def remote_v5_callback(task_id: str, request: Request):
                 "status": "succeeded",
                 "finished_at": now_text,
                 "error_message": "",
-                "result_path": str(dest_path),
+                "result_path": json.dumps(saved_paths, ensure_ascii=False),
                 "result_summary": summary_payload,
             }
         ),
     )
-    _promote_job_after_remote_v5(job_id, run_id, task_id, log_excerpt or f"saved={dest_path.name}")
+    _promote_job_after_remote_v5(
+        job_id,
+        run_id,
+        task_id,
+        log_excerpt or ("saved=" + ", ".join(Path(path).name for path in saved_paths.values())),
+    )
+    if remote_predictor_auto_continue_enabled():
+        _auto_continue_remote_policy(job_id)
     return JSONResponse(
         {
             "ok": True,
             "task_id": task_id,
             "status": "succeeded",
             "run_id": run_id,
-            "predictions_v5_stacking_path": str(dest_path),
+            "saved_paths": saved_paths,
+            "auto_continue": remote_predictor_auto_continue_enabled(),
         }
     )
 
@@ -9656,9 +9752,9 @@ def process_race_job_now(
         return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 执行失败：{exc}")
     run_id = str((summary or {}).get("run_id", "") or "").strip()
     engine_count = len(list((summary or {}).get("policy_engines", []) or []))
-    task_id = str((summary or {}).get("v5_remote_task_id", "") or "").strip()
+    task_id = str((summary or {}).get("remote_predictor_task_id", "") or (summary or {}).get("v5_remote_task_id", "") or "").strip()
     if task_id:
-        message_text = f"{job_id} 已进入等待 V5。run_id={run_id or '-'} task_id={task_id}"
+        message_text = f"{job_id} 已进入远程预测。run_id={run_id or '-'} task_id={task_id}"
     else:
         message_text = f"{job_id} 已完成处理。run_id={run_id or '-'} engines={engine_count}"
     return build_race_jobs_page(

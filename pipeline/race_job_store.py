@@ -159,7 +159,7 @@ def derive_job_display_state(job):
     row = hydrate_job_step_states(job)
     legacy_status = str(row.get("status", "") or "").strip().lower()
     if legacy_status == "waiting_v5":
-        return {"code": "waiting_v5", "label": "等待 V5", "tone": "active"}
+        return {"code": "waiting_v5", "label": "等待远程预测", "tone": "active"}
     if legacy_status == "queued_policy":
         return {"code": "queued_policy", "label": "等待 LLM", "tone": "active"}
     if legacy_status == "processing_policy":

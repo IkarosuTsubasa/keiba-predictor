@@ -1,10 +1,10 @@
-name: predictor-v5-remote
+name: predictor-remote-batch
 
 on:
   workflow_dispatch:
     inputs:
       task_id:
-        description: V5 remote task id
+        description: Remote predictor task id
         required: true
         type: string
       bundle_url:
@@ -17,9 +17,9 @@ on:
         type: string
 
 jobs:
-  predictor_v5:
+  predictor_batch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download V5 bundle
+      - name: Download predictor bundle
         shell: bash
         run: |
           mkdir -p remote_v5_bundle
@@ -49,48 +49,12 @@ jobs:
               zf.extractall(bundle_dir)
           PY
 
-      - name: Prepare predictor environment
+      - name: Run predictor batch
+        id: run_batch
         shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          bundle_dir = Path("remote_v5_bundle")
-          meta = json.loads((bundle_dir / "task_meta.json").read_text(encoding="utf-8"))
-          work_dir = bundle_dir.resolve()
-          env_lines = {
-              "WORK_DIR": str(work_dir),
-              "SCOPE_KEY": str(meta.get("scope_key", "") or "").strip(),
-              "PREDICTIONS_OUTPUT": str(work_dir / "predictions_v5_stacking.csv"),
-              "PREDICTOR_TARGET_LOCATION": str(meta.get("location", "") or "").strip(),
-              "PREDICTOR_TARGET_SURFACE": str(meta.get("surface", "") or "").strip(),
-              "PREDICTOR_TARGET_DISTANCE": str(meta.get("distance", "") or "").strip(),
-              "PREDICTOR_TARGET_CONDITION": str(meta.get("track_condition", "") or "").strip(),
-              "PREDICTOR_TARGET_DATE": str(meta.get("race_date", "") or "").strip(),
-              "PREDICTOR_NO_PROMPT": "1",
-              "ODDS_PATH": str(work_dir / "odds.csv"),
-              "FUKU_ODDS_PATH": str(work_dir / "fuku_odds.csv"),
-              "WIDE_ODDS_PATH": str(work_dir / "wide_odds.csv"),
-              "QUINELLA_ODDS_PATH": str(work_dir / "quinella_odds.csv"),
-              "EXACTA_ODDS_PATH": str(work_dir / "exacta_odds.csv"),
-              "TRIO_ODDS_PATH": str(work_dir / "trio_odds.csv"),
-              "TRIFECTA_ODDS_PATH": str(work_dir / "trifecta_odds.csv"),
-              "PREDICTOR_LGBM_N_JOBS": "1",
-          }
-          github_env = Path(__import__("os").environ["GITHUB_ENV"])
-          with github_env.open("a", encoding="utf-8") as fh:
-              for key, value in env_lines.items():
-                  fh.write(f"{key}={value}\n")
-          PY
-
-      - name: Run predictor V5
-        id: run_v5
-        shell: bash
-        working-directory: remote_v5_bundle
         run: |
           set +e
-          python "$GITHUB_WORKSPACE/predictor_v5_omc.py" > remote_v5_output.log 2>&1
+          python pipeline/run_remote_predictors_batch.py --workspace remote_v5_bundle > remote_predictor_output.log 2>&1
           status=$?
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -98,44 +62,64 @@ jobs:
       - name: Build callback payload
         shell: bash
         env:
-          RUN_EXIT_CODE: ${{ steps.run_v5.outputs.exit_code }}
+          RUN_EXIT_CODE: ${{ steps.run_batch.outputs.exit_code }}
         run: |
           python - <<'PY'
           import base64
-          import csv
           import json
           import os
+          import zipfile
           from pathlib import Path
 
-          work_dir = Path(os.environ["WORK_DIR"])
-          output_path = Path(os.environ["PREDICTIONS_OUTPUT"])
-          log_path = work_dir / "remote_v5_output.log"
+          work_dir = Path("remote_v5_bundle")
+          log_path = Path("remote_predictor_output.log")
+          summary_path = work_dir / "remote_predictor_summary.json"
+          output_zip = Path("predictor_outputs.zip")
           exit_code = int(str(os.environ.get("RUN_EXIT_CODE", "1") or "1"))
 
           log_excerpt = ""
           if log_path.exists():
-              log_excerpt = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+              log_excerpt = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
 
-          if exit_code == 0 and output_path.exists():
-              with output_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as fh:
-                  rows = list(csv.DictReader(fh))
+          summary = {}
+          if summary_path.exists():
+              try:
+                  summary = json.loads(summary_path.read_text(encoding="utf-8"))
+              except Exception:
+                  summary = {}
+
+          required_files = [
+              "predictions.csv",
+              "predictions_v2_opus.csv",
+              "predictions_v3_premium.csv",
+              "predictions_v4_gemini.csv",
+              "predictions_v5_stacking.csv",
+          ]
+          missing_files = [name for name in required_files if not (work_dir / name).exists()]
+
+          if exit_code == 0 and not missing_files:
+              with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                  for name in required_files:
+                      zf.write(work_dir / name, arcname=name)
+                  if summary_path.exists():
+                      zf.write(summary_path, arcname="remote_predictor_summary.json")
               payload = {
                   "status": "succeeded",
-                  "summary": {
-                      "row_count": len(rows),
-                      "top1_horse_no": str(rows[0].get("HorseNo", "") or "").strip() if rows else "",
-                      "top1_horse_name": str(rows[0].get("HorseName", "") or "").strip() if rows else "",
-                  },
+                  "summary": summary,
                   "result": {
-                      "filename": output_path.name,
-                      "content_base64": base64.b64encode(output_path.read_bytes()).decode("ascii"),
+                      "filename": output_zip.name,
+                      "content_base64": base64.b64encode(output_zip.read_bytes()).decode("ascii"),
                   },
                   "log_excerpt": log_excerpt,
               }
           else:
+              error_message = f"remote predictor batch failed with exit_code={exit_code}"
+              if missing_files:
+                  error_message += " missing_files=" + ",".join(missing_files)
               payload = {
                   "status": "failed",
-                  "error_message": f"predictor_v5_omc.py failed with exit_code={exit_code}",
+                  "summary": summary,
+                  "error_message": error_message,
                   "log_excerpt": log_excerpt,
               }
 
@@ -170,7 +154,7 @@ jobs:
               },
               method="POST",
           )
-          with urllib.request.urlopen(req, timeout=60) as resp:
+          with urllib.request.urlopen(req, timeout=120) as resp:
               print(resp.read().decode("utf-8", errors="replace"))
           PY
 

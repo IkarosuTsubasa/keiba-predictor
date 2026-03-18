@@ -60,6 +60,10 @@ def remote_v5_enabled():
     return raw in ("1", "true", "yes", "on")
 
 
+def remote_predictor_batch_enabled():
+    return remote_v5_enabled()
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -764,11 +768,9 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         race_date = _job_race_date(job)
         odds_src = workspace / "odds.csv"
 
-        for spec in list_predictors():
-            if spec["id"] == "v5_stacking":
-                if remote_v5_enabled():
-                    continue
-                if not v5_predictor_enabled():
+        if not remote_predictor_batch_enabled():
+            for spec in list_predictors():
+                if spec["id"] == "v5_stacking" and not v5_predictor_enabled():
                     skip_message = "Predictor V5 skipped by default on deployment. Set PIPELINE_ENABLE_V5_PREDICTOR=1 to enable."
                     summary["process_log"].append(
                         {"step": f"predictor_{spec['id']}", "code": -1, "output": skip_message}
@@ -780,129 +782,130 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                         reason=skip_message,
                     )
                     continue
-            script_name = str(spec.get("script_name", "") or "").strip()
-            latest_name = str(spec.get("latest_filename", "") or "").strip()
-            if not script_name or not latest_name:
-                continue
-            pred_latest_path = workspace / latest_name
-            if pred_latest_path.exists():
-                pred_latest_path.unlink()
-            predictor_start = datetime.now().timestamp()
-            _log_runner_event(
-                "predictor_stage_start",
-                job_id=job_id,
-                predictor_id=spec["id"],
-                script_name=script_name,
-                output_name=latest_name,
-            )
+                script_name = str(spec.get("script_name", "") or "").strip()
+                latest_name = str(spec.get("latest_filename", "") or "").strip()
+                if not script_name or not latest_name:
+                    continue
+                pred_latest_path = workspace / latest_name
+                if pred_latest_path.exists():
+                    pred_latest_path.unlink()
+                predictor_start = datetime.now().timestamp()
+                _log_runner_event(
+                    "predictor_stage_start",
+                    job_id=job_id,
+                    predictor_id=spec["id"],
+                    script_name=script_name,
+                    output_name=latest_name,
+                )
 
-            if spec["id"] == "main":
-                pred_code, pred_output = _run_subprocess(
-                    base_path.parent / script_name,
-                    cwd=workspace,
-                    inputs=[surface, distance, track_cond],
-                    env={
-                        "SCOPE_KEY": scope_key,
-                        "PREDICTOR_NO_PROMPT": "1",
-                        "PREDICTOR_TARGET_SURFACE": surface,
-                        "PREDICTOR_TARGET_DISTANCE": distance,
-                        "PREDICTOR_TARGET_CONDITION": track_cond,
-                    },
-                )
-            elif spec["id"] == "v2_opus":
-                pred_code, pred_output = _run_subprocess(
-                    base_path.parent / script_name,
-                    cwd=workspace,
-                    inputs=[surface_token, distance, track_cond_label],
-                    env={
-                        "SCOPE_KEY": scope_key,
-                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
-                        "PREDICTOR_NO_PROMPT": "1",
-                        "PREDICTOR_NO_WAIT": "1",
-                        "PREDICTOR_TARGET_SURFACE": surface,
-                        "PREDICTOR_TARGET_DISTANCE": distance,
-                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
-                    },
-                )
-            elif spec["id"] == "v3_premium":
-                pred_code, pred_output = _run_subprocess(
-                    base_path.parent / script_name,
-                    cwd=workspace,
-                    env={"SCOPE_KEY": scope_key},
-                    script_args=[
-                        "--base-dir",
-                        str(workspace),
-                        "--output",
-                        latest_name,
-                        "--race-surface",
-                        surface,
-                        "--race-distance",
-                        distance or "1800",
-                        "--race-going",
-                        track_cond_label,
-                        "--no-prompt",
-                        "--no-wait",
-                    ],
-                )
-            elif spec["id"] == "v4_gemini":
-                pred_code, pred_output = _run_subprocess(
-                    base_path.parent / script_name,
-                    cwd=workspace,
-                    env={
-                        "SCOPE_KEY": scope_key,
-                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
-                        "PREDICTOR_TARGET_LOCATION": target_location,
-                        "PREDICTOR_TARGET_SURFACE": surface,
-                        "PREDICTOR_TARGET_DISTANCE": distance or "1800",
-                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
-                    },
-                )
-            elif spec["id"] == "v5_stacking":
-                pred_code, pred_output = _run_subprocess(
-                    base_path.parent / script_name,
-                    cwd=workspace,
-                    env={
-                        "SCOPE_KEY": scope_key,
-                        "PREDICTIONS_OUTPUT": str(pred_latest_path),
-                        "PREDICTOR_TARGET_LOCATION": target_location,
-                        "PREDICTOR_TARGET_SURFACE": surface,
-                        "PREDICTOR_TARGET_DISTANCE": distance or "1800",
-                        "PREDICTOR_TARGET_CONDITION": track_cond_label,
-                        "PREDICTOR_TARGET_DATE": race_date,
-                        "PREDICTOR_NO_PROMPT": "1",
-                        "ODDS_PATH": str(workspace / "odds.csv"),
-                        "FUKU_ODDS_PATH": str(workspace / "fuku_odds.csv"),
-                        "WIDE_ODDS_PATH": str(workspace / "wide_odds.csv"),
-                        "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
-                        "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
-                        "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
-                        "TRIFECTA_ODDS_PATH": str(workspace / "trifecta_odds.csv"),
-                    },
-                )
-            else:
-                continue
+                if spec["id"] == "main":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        inputs=[surface, distance, track_cond],
+                        env={
+                            "SCOPE_KEY": scope_key,
+                            "PREDICTOR_NO_PROMPT": "1",
+                            "PREDICTOR_TARGET_SURFACE": surface,
+                            "PREDICTOR_TARGET_DISTANCE": distance,
+                            "PREDICTOR_TARGET_CONDITION": track_cond,
+                        },
+                    )
+                elif spec["id"] == "v2_opus":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        inputs=[surface_token, distance, track_cond_label],
+                        env={
+                            "SCOPE_KEY": scope_key,
+                            "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                            "PREDICTOR_NO_PROMPT": "1",
+                            "PREDICTOR_NO_WAIT": "1",
+                            "PREDICTOR_TARGET_SURFACE": surface,
+                            "PREDICTOR_TARGET_DISTANCE": distance,
+                            "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                        },
+                    )
+                elif spec["id"] == "v3_premium":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        env={"SCOPE_KEY": scope_key},
+                        script_args=[
+                            "--base-dir",
+                            str(workspace),
+                            "--output",
+                            latest_name,
+                            "--race-surface",
+                            surface,
+                            "--race-distance",
+                            distance or "1800",
+                            "--race-going",
+                            track_cond_label,
+                            "--no-prompt",
+                            "--no-wait",
+                        ],
+                    )
+                elif spec["id"] == "v4_gemini":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        env={
+                            "SCOPE_KEY": scope_key,
+                            "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                            "PREDICTOR_TARGET_LOCATION": target_location,
+                            "PREDICTOR_TARGET_SURFACE": surface,
+                            "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                            "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                        },
+                    )
+                elif spec["id"] == "v5_stacking":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        env={
+                            "SCOPE_KEY": scope_key,
+                            "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                            "PREDICTOR_TARGET_LOCATION": target_location,
+                            "PREDICTOR_TARGET_SURFACE": surface,
+                            "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                            "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                            "PREDICTOR_TARGET_DATE": race_date,
+                            "PREDICTOR_NO_PROMPT": "1",
+                            "ODDS_PATH": str(workspace / "odds.csv"),
+                            "FUKU_ODDS_PATH": str(workspace / "fuku_odds.csv"),
+                            "WIDE_ODDS_PATH": str(workspace / "wide_odds.csv"),
+                            "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
+                            "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
+                            "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
+                            "TRIFECTA_ODDS_PATH": str(workspace / "trifecta_odds.csv"),
+                        },
+                    )
+                else:
+                    continue
 
-            summary["process_log"].append(
-                {"step": f"predictor_{spec['id']}", "code": pred_code, "output": pred_output}
-            )
-            if pred_code != 0:
-                raise RuntimeError(f"{spec['label']} failed: {pred_output}")
-            ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
-            if not ok:
-                raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
-            _log_runner_event(
-                "predictor_stage_done",
-                job_id=job_id,
-                predictor_id=spec["id"],
-                code=pred_code,
-                prediction_path=str(pred_latest_path),
-            )
+                summary["process_log"].append(
+                    {"step": f"predictor_{spec['id']}", "code": pred_code, "output": pred_output}
+                )
+                if pred_code != 0:
+                    raise RuntimeError(f"{spec['label']} failed: {pred_output}")
+                ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
+                if not ok:
+                    raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
+                _log_runner_event(
+                    "predictor_stage_done",
+                    job_id=job_id,
+                    predictor_id=spec["id"],
+                    code=pred_code,
+                    prediction_path=str(pred_latest_path),
+                )
 
-        update_job(
-            base_path,
-            job_id,
-            lambda row, now_text: _mark_predictor_succeeded_and_policy_running(row, now_text),
-        )
+        if not remote_predictor_batch_enabled():
+            update_job(
+                base_path,
+                job_id,
+                lambda row, now_text: _mark_predictor_succeeded_and_policy_running(row, now_text),
+            )
 
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         summary["run_id"] = run_id
@@ -911,7 +914,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         _append_csv(data_dir / "runs.csv", run_row)
         _log_runner_event("run_row_saved", job_id=job_id, run_id=run_id, runs_csv=str(data_dir / "runs.csv"))
 
-        if remote_v5_enabled():
+        if remote_predictor_batch_enabled():
             bundle_files = {
                 "kachiuma.csv": kachiuma_path,
                 "shutuba.csv": shutuba_path,
@@ -934,6 +937,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 run_id=run_id,
                 race_id=race_id,
                 scope_key=scope_key,
+                task_type="predictor_batch",
                 bundle_files=bundle_files,
                 bundle_meta={
                     "race_id": race_id,
@@ -948,9 +952,10 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             )
             dispatch_info = _dispatch_remote_v5_task(base_path, task)
             summary["v5_remote_task_id"] = str(task.get("task_id", "") or "").strip()
+            summary["remote_predictor_task_id"] = str(task.get("task_id", "") or "").strip()
             summary["process_log"].append(
                 {
-                    "step": "predictor_v5_remote_dispatch",
+                    "step": "predictors_remote_dispatch",
                     "code": 0,
                     "output": json.dumps(dispatch_info, ensure_ascii=False),
                 }
@@ -967,7 +972,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 ),
             )
             _log_runner_event(
-                "predictor_stage_waiting_remote_v5",
+                "predictor_stage_waiting_remote_batch",
                 job_id=job_id,
                 run_id=run_id,
                 task_id=str(task.get("task_id", "") or "").strip(),
