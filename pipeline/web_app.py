@@ -2984,7 +2984,7 @@ LLM_BATTLE_SHORT_LABELS = {
     "grok": "grok",
 }
 PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
-PUBLIC_SHARE_DETAIL_LABEL = "全買い目はこちら"
+PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
 PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
 PUBLIC_SHARE_MAX_CHARS = 130
 LLM_REPORT_SCOPE_KEYS = ("central_dirt", "central_turf", "local")
