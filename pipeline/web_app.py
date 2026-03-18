@@ -183,7 +183,7 @@ def _inject_public_meta_tags(content=""):
 
 
 def _public_share_runtime_html():
-    return """
+    runtime = """
 <style>
 .share-title-row,
 .share-title-inline {
@@ -231,9 +231,9 @@ def _public_share_runtime_html():
 </style>
 <script>
 (() => {
-  const SHARE_DETAIL_LABEL = "\\u5168\\u8cb7\\u3044\\u76ee\\u306f\\u3053\\u3061\\u3089";
-  const SHARE_URL = "https://www.ikaimo-ai.com/keiba";
-  const SHARE_HASHTAG = "#\\u3044\\u304b\\u3044\\u3082AI\\u7af6\\u99ac";
+  const SHARE_DETAIL_LABEL = "__SHARE_DETAIL_LABEL__";
+  const SHARE_URL = "__SHARE_URL__";
+  const SHARE_HASHTAG = "__SHARE_HASHTAG__";
   const SHARE_MAX_CHARS = 130;
 
   const parseRaceHeader = (title) => {
@@ -522,6 +522,12 @@ def _public_share_runtime_html():
 })();
 </script>
 """
+    return (
+        runtime
+        .replace('"__SHARE_DETAIL_LABEL__"', json.dumps(PUBLIC_SHARE_DETAIL_LABEL, ensure_ascii=True))
+        .replace('"__SHARE_URL__"', json.dumps(PUBLIC_SHARE_URL, ensure_ascii=True))
+        .replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
+    )
 
 
 def _inject_public_share_runtime(html_text):
