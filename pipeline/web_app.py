@@ -4520,7 +4520,7 @@ def build_llm_today_page(date_text="", scope_key=""):
                     <span>回收 {_format_yen_text(ticket_summary.get("payout_yen", 0))}</span>
                     <span>收支 {_format_yen_text(ticket_summary.get("profit_yen", 0))}</span>
                     <span>命中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
-                    <span>ROI {_format_percent_text(ticket_summary.get("roi", ""))}</span>
+                    <span>回収率 {_format_percent_text(ticket_summary.get("roi", ""))}</span>
                   </div>
                 </article>
                 """
@@ -4574,7 +4574,7 @@ def build_llm_today_page(date_text="", scope_key=""):
                 <span>投入 {_format_yen_text(stats['stake_yen'])}</span>
                 <span>回收 {_format_yen_text(stats['payout_yen'])}</span>
                 <span>收支 {_format_yen_text(stats['profit_yen'])}</span>
-                <span>ROI {_format_percent_text(roi)}</span>
+                <span>回収率 {_format_percent_text(roi)}</span>
               </div>
             </article>
             """
@@ -5133,7 +5133,7 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
                     <span>払戻 {_format_yen_text_ja(ticket_summary.get("payout_yen", 0))}</span>
                     <span>収支 {_format_yen_text_ja(ticket_summary.get("profit_yen", 0))}</span>
                     <span>的中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
-                    <span>ROI {_format_percent_text(ticket_summary.get("roi", ""))}</span>
+                    <span>回収率 {_format_percent_text(ticket_summary.get("roi", ""))}</span>
                   </div>
                 </article>
                 """
@@ -5187,7 +5187,7 @@ def build_llm_today_page_clean(date_text="", scope_key=""):
                 <span>投資 {_format_yen_text_ja(stats['stake_yen'])}</span>
                 <span>払戻 {_format_yen_text_ja(stats['payout_yen'])}</span>
                 <span>収支 {_format_yen_text_ja(stats['profit_yen'])}</span>
-                <span>ROI {_format_percent_text(roi)}</span>
+                <span>回収率 {_format_percent_text(roi)}</span>
               </div>
             </article>
             """
@@ -6010,7 +6010,7 @@ def build_public_llm_page(date_text="", scope_key=""):
                     <span>払戻 {_public_yen_text(ticket_summary.get("payout_yen", 0))}</span>
                     <span>収支 {_public_yen_text(ticket_summary.get("profit_yen", 0))}</span>
                     <span>的中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
-                    <span>ROI {_format_percent_text(ticket_summary.get("roi", ""))}</span>
+                    <span>回収率 {_format_percent_text(ticket_summary.get("roi", ""))}</span>
                   </div>
                 </article>
                 """
@@ -6086,7 +6086,7 @@ def build_public_llm_page(date_text="", scope_key=""):
                 <span>買い目 {int(stats['ticket_count'])}</span>
                 <span>投資 {_public_yen_text(stats['stake_yen'])}</span>
                 <span>払戻 {_public_yen_text(stats['payout_yen'])}</span>
-                <span>ROI {_format_percent_text(roi)}</span>
+                <span>回収率 {_format_percent_text(roi)}</span>
               </div>
             </article>
             """
@@ -6477,7 +6477,7 @@ def build_public_llm_page(date_text="", scope_key=""):
         <div class="front-highlight">
           <div class="front-eyebrow">TODAY SNAPSHOT</div>
           <strong>{_public_yen_text(total_profit)}</strong>
-          <p>総投資 {_public_yen_text(total_stake)} / 総払戻 {_public_yen_text(total_payout)} / ROI {_format_percent_text(total_roi)}</p>
+          <p>総投資 {_public_yen_text(total_stake)} / 総払戻 {_public_yen_text(total_payout)} / 回収率 {_format_percent_text(total_roi)}</p>
           <p>確定 {total_settled} レース・結果待ち {total_pending} レース</p>
         </div>
       </div>

@@ -102,7 +102,7 @@ function renderLeaderCards(cards) {
             <span>的中 ${escapeHtml(item.hit_races)}</span>
             <span>投資 ${escapeHtml(formatYen(item.stake_yen || 0))}</span>
             <span>払戻 ${escapeHtml(formatYen(item.payout_yen || 0))}</span>
-            <span>ROI ${escapeHtml(item.roi_text || "-")}</span>
+            <span>回収率 ${escapeHtml(item.roi_text || "-")}</span>
           </div>
         </article>
       `;
@@ -132,7 +132,7 @@ function renderSummaryCards(cards) {
             <span>買い目 ${escapeHtml(item.ticket_count)}</span>
             <span>投資 ${escapeHtml(formatYen(item.stake_yen || 0))}</span>
             <span>払戻 ${escapeHtml(formatYen(item.payout_yen || 0))}</span>
-            <span>ROI ${escapeHtml(item.roi_text || "-")}</span>
+            <span>回収率 ${escapeHtml(item.roi_text || "-")}</span>
           </div>
         </article>
       `
@@ -175,7 +175,7 @@ function renderModelCard(card) {
         <span>払戻 ${escapeHtml(formatYen(card.payout_yen || 0))}</span>
         <span>収支 ${escapeHtml(formatYen(card.profit_yen || 0))}</span>
         <span>的中 ${escapeHtml(card.hit_count)}</span>
-        <span>ROI ${escapeHtml(card.roi_text || "-")}</span>
+        <span>回収率 ${escapeHtml(card.roi_text || "-")}</span>
       </div>
     </article>
   `;
@@ -235,7 +235,7 @@ function renderBoard(data) {
             <span class="eyebrow">TODAY SNAPSHOT</span>
             <strong>${escapeHtml(formatYen(totals.profit_yen || 0))}</strong>
             <p>総投資 ${escapeHtml(formatYen(totals.stake_yen || 0))} / 総払戻 ${escapeHtml(formatYen(totals.payout_yen || 0))}</p>
-            <p>ROI ${escapeHtml(totals.roi_text || "-")} ・ 確定 ${escapeHtml(totals.settled_count || 0)} レース ・ 結果待ち ${escapeHtml(totals.pending_count || 0)} レース</p>
+            <p>回収率 ${escapeHtml(totals.roi_text || "-")} ・ 確定 ${escapeHtml(totals.settled_count || 0)} レース ・ 結果待ち ${escapeHtml(totals.pending_count || 0)} レース</p>
           </div>
         </div>
         <div class="hero-strip">
