@@ -117,28 +117,6 @@ def read_page_source_with_fallback(driver, url):
     return html or ""
 
 
-def load_cookies_from_json_file(path="cookie.txt"):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            cookie_json = json.load(f)
-    except FileNotFoundError:
-        return []
-    cookies = []
-    for item in cookie_json:
-        name = item.get("name")
-        value = item.get("value")
-        if name and value:
-            cookies.append({"name": name, "value": value})
-    return cookies
-
-
-def should_inject_cookies():
-    raw = os.environ.get("PIPELINE_SKIP_COOKIE_INJECTION", "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return True
-    return False
-
-
 def should_headless():
     raw = os.environ.get("PIPELINE_HEADLESS", "").strip().lower()
     if raw in ("1", "true", "yes", "on"):
@@ -1181,22 +1159,6 @@ def build_webdriver():
         pass
     return driver, shared_driver
 
-
-def prepare_driver_session(driver):
-    if should_inject_cookies():
-        cookies = load_cookies_from_json_file("cookie.txt")
-        driver.get("https://db.netkeiba.com")
-        assert_not_blocked(
-            read_page_source_with_fallback(driver, "https://db.netkeiba.com"),
-            get_driver_title(driver),
-            "https://db.netkeiba.com",
-        )
-        for cookie in cookies:
-            driver.add_cookie(cookie)
-        return
-    print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
-
-
 def fetch_primary_odds_via_browser(race_url, driver):
     tan_url = build_tan_odds_url(race_url)
     fuku_results = []
@@ -1350,7 +1312,6 @@ def run_browser_odds_flow(race_url, host):
         return
 
     try:
-        prepare_driver_session(driver)
         results, fuku_results = fetch_primary_odds_via_browser(race_url, driver)
         if not results:
             print("No odds found.")

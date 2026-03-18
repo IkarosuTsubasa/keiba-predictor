@@ -114,8 +114,6 @@ def start_shared_chrome():
     else:
         profile_dir = profile_env
         Path(profile_dir).mkdir(parents=True, exist_ok=True)
-        if "PIPELINE_SKIP_COOKIE_INJECTION" not in os.environ:
-            os.environ["PIPELINE_SKIP_COOKIE_INJECTION"] = "1"
     port = pick_free_port()
     args = [
         chrome_exe,

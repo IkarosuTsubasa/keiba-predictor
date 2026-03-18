@@ -110,7 +110,6 @@ python pipeline/offline_eval.py
 | `PIPELINE_SHARED_CHROME` | Disable shared Chrome (`0` = off) | `PIPELINE_SHARED_CHROME=0` |
 | `PIPELINE_HEADLESS` | Headless mode toggle | `PIPELINE_HEADLESS=1` |
 | `PIPELINE_CHROME_PROFILE` | Reuse Chrome profile dir | `PIPELINE_CHROME_PROFILE=D:\\keiba\\chrome_profile` |
-| `PIPELINE_SKIP_COOKIE_INJECTION` | Inject cookies when set to `0` | `PIPELINE_SKIP_COOKIE_INJECTION=0` |
 | `PIPELINE_SCRAPE_DELAY` | Fixed delay between scraping steps | `PIPELINE_SCRAPE_DELAY=3` |
 | `CHROME_BIN` / `GOOGLE_CHROME_BIN` / `CHROME_PATH` | Chrome binary override | `CHROME_BIN=C:\\Path\\To\\chrome.exe` |
 | `CHROME_DEBUGGER_ADDRESS` | Attach to existing Chrome | `CHROME_DEBUGGER_ADDRESS=127.0.0.1:9222` |
@@ -131,10 +130,4 @@ python pipeline/web_server.py
 
 ## Notes
 - `odds_extract.py` is Selenium-based.
-- `cookie.txt` is a JSON array of cookies with `name` and `value` fields:
-  ```json
-  [
-    {"name": "example", "value": "..."}
-  ]
-  ```
 - Root CSV outputs are overwritten each run; per-race snapshots are kept under `pipeline/data/<scope>/`.

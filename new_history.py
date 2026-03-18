@@ -8,7 +8,6 @@ import pandas as pd
 import os
 import time
 import re
-import json
 import random
 import sys
 from urllib.parse import urljoin
@@ -40,23 +39,6 @@ def configure_utf8_io():
 
 
 configure_utf8_io()
-# ===== 从 cookie.txt 加载 JSON 格式的 cookie =====
-def load_cookies_from_json_file(path="cookie.txt"):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            cookie_json = json.load(f)
-    except FileNotFoundError:
-        return []
-    except json.JSONDecodeError:
-        return []
-    cookies = []
-    for item in cookie_json:
-        if "name" in item and "value" in item:
-            cookies.append({
-                "name": item["name"],
-                "value": item["value"]
-            })
-    return cookies
 def assert_not_blocked(driver, url):
     page_source = driver.page_source or ""
     title = driver.title or ""
@@ -374,13 +356,6 @@ def find_date_column(df):
     return None
 
 
-def should_inject_cookies():
-    raw = os.environ.get("PIPELINE_SKIP_COOKIE_INJECTION", "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return True
-    return False
-
-
 def should_headless():
     raw = os.environ.get("PIPELINE_HEADLESS", "").strip().lower()
     if raw in ("1", "true", "yes", "on"):
@@ -410,20 +385,6 @@ try:
     driver.set_page_load_timeout(page_load_timeout)
 except Exception:
     pass
-
-# ===== 注入 cookie（需先访问主域）=====
-if should_inject_cookies():
-    cookies = load_cookies_from_json_file("cookie.txt")
-    if cookies:
-        get_page_source_fast(driver, "https://db.netkeiba.com")
-        assert_not_blocked(driver, "https://db.netkeiba.com")
-        for cookie in cookies:
-            driver.add_cookie(cookie)
-        print("Loaded login cookies.")
-    else:
-        print("No cookie file found; continue without cookies.")
-else:
-    print("Skipping cookie injection (PIPELINE_SKIP_COOKIE_INJECTION=1).")
 
 # ===== 打开目标列表页 =====
 page = get_page_source_fast(driver, url, wait_css='a[href^="/race/"]')
