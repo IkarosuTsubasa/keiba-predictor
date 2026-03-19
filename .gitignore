@@ -6,5 +6,6 @@ AGENTS.md
 __pycache__/
 *.pyc
 tmp_*.html
+_debug_*.html
 tmp_*.log
 frontend/node_modules/

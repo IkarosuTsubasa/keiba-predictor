@@ -103,11 +103,18 @@ def _fetch_official_result_payload_for_job(job):
     race_id = str(job.get("race_id", "") or "").strip()
     scope_key = str(job.get("scope_key", "") or "").strip()
     result_url = build_official_result_url(race_id=race_id, source=_official_result_source_for_scope(scope_key))
-    html_bytes = fetch_official_result_html(result_url, timeout=30)
-    payload = parse_official_result_page(html_bytes, source_url=result_url)
-    if not payload.get("result_available"):
-        return None
-    return payload
+    last_exc = None
+    for _ in range(2):
+        try:
+            html_bytes = fetch_official_result_html(result_url, timeout=30)
+            payload = parse_official_result_page(html_bytes, source_url=result_url)
+            if payload.get("result_available"):
+                return payload
+        except Exception as exc:
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    return None
 
 
 def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):

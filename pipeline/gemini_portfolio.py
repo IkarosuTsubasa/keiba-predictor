@@ -410,6 +410,33 @@ def eval_ticket_hit(bet_type, horse_names, actual_order):
     return 0
 
 
+def eval_ticket_hit_by_nos(bet_type, horse_nos, actual_top3_nos):
+    nos = [parse_horse_no(x) for x in list(horse_nos or [])]
+    nos = [x for x in nos if x is not None]
+    actual = [parse_horse_no(x) for x in list(actual_top3_nos or [])]
+    actual = [x for x in actual if x is not None]
+    if not nos or len(actual) < 3:
+        return 0
+    top3 = actual[:3]
+    top2 = actual[:2]
+    bet = str(bet_type or "").strip().lower()
+    if bet == "win":
+        return 1 if nos[0] == actual[0] else 0
+    if bet == "place":
+        return 1 if nos[0] in top3 else 0
+    if bet == "wide":
+        return 1 if len(nos) >= 2 and nos[0] in top3 and nos[1] in top3 else 0
+    if bet == "quinella":
+        return 1 if len(nos) >= 2 and nos[0] in top2 and nos[1] in top2 else 0
+    if bet == "exacta":
+        return 1 if len(nos) >= 2 and nos[0] == actual[0] and nos[1] == actual[1] else 0
+    if bet == "trio":
+        return 1 if len(nos) >= 3 and set(nos[:3]) == set(top3) else 0
+    if bet == "trifecta":
+        return 1 if len(nos) >= 3 and nos[:3] == top3 else 0
+    return 0
+
+
 def build_official_payout_lookup(official_result_payload):
     bet_type_map = {
         "単勝": "win",
@@ -486,6 +513,8 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     trio_odds_map = load_triple_odds_map(trio_path, ordered=False)
     trifecta_odds_map = load_triple_odds_map(trifecta_path, ordered=True)
     official_payouts = build_official_payout_lookup(official_result_payload)
+    official_top3_nos = [parse_horse_no(item.get("horse_no")) for item in list((official_result_payload or {}).get("top3", []) or [])[:3]]
+    official_top3_nos = [x for x in official_top3_nos if x is not None]
     settled_at = datetime.now().isoformat(timespec="seconds")
     total_stake = 0
     total_payout = 0
@@ -502,7 +531,7 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
         names = [x.strip() for x in str(row.get("horse_names", "")).split("/") if x.strip()]
         nos = [parse_horse_no(x) for x in str(row.get("horse_nos", "")).split("-") if str(x).strip()]
         nos = [x for x in nos if x is not None]
-        hit = eval_ticket_hit(bet_type, names, actual_top3_names)
+        hit = eval_ticket_hit_by_nos(bet_type, nos, official_top3_nos) if official_top3_nos else eval_ticket_hit(bet_type, names, actual_top3_names)
         stake = to_int(row.get("stake_yen"))
         payout = 0
         if hit:
