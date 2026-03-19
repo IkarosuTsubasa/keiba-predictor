@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -75,6 +76,7 @@ from web_auth import (
     verify_callback_hmac as _verify_callback_hmac,
 )
 from web_admin import operations as web_admin_ops
+from web_admin import remote_predictors as web_remote_predictors
 from web_admin import task_routes as web_admin_tasks
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_helpers import (
@@ -2352,4 +2354,197 @@ def internal_run_due(request: Request):
         admin_token_valid=_admin_token_valid,
         scan_due_race_jobs=scan_due_race_jobs,
         load_race_jobs=load_race_jobs,
+    )
+
+
+def _remote_v5_result_dir():
+    path = BASE_DIR / "data" / "_shared" / "remote_v5_results"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _remote_v5_result_summary_path(scope_key, race_id, run_id):
+    data_dir = get_data_dir(BASE_DIR, scope_key)
+    race_dir = data_dir / str(race_id or "").strip() if str(race_id or "").strip() else data_dir
+    race_dir.mkdir(parents=True, exist_ok=True)
+    if str(race_id or "").strip():
+        return race_dir / f"remote_predictor_summary_{run_id}_{race_id}.json"
+    return race_dir / f"remote_predictor_summary_{run_id}.json"
+
+
+def _apply_remote_v5_result(task, payload):
+    task_row = dict(task or {})
+    bundle_result = dict(payload.get("result") or {})
+    content_base64 = str(bundle_result.get("content_base64", "") or "").strip()
+    if not content_base64:
+        raise ValueError("remote predictor result content_base64 missing")
+    try:
+        zip_bytes = base64.b64decode(content_base64)
+    except Exception as exc:
+        raise ValueError(f"invalid remote predictor base64: {exc}") from exc
+
+    task_id = str(task_row.get("task_id", "") or "").strip()
+    run_id = str(task_row.get("run_id", "") or "").strip()
+    race_id = str(task_row.get("race_id", "") or "").strip()
+    scope_key = str(task_row.get("scope_key", "") or "").strip()
+    if not run_id or not scope_key:
+        raise ValueError("remote predictor task missing run_id or scope_key")
+
+    result_dir = _remote_v5_result_dir()
+    result_zip_path = result_dir / f"{task_id}.zip"
+    result_zip_path.write_bytes(zip_bytes)
+
+    data_dir = get_data_dir(BASE_DIR, scope_key)
+    updates = {}
+    summary_path_text = ""
+    with zipfile.ZipFile(BytesIO(zip_bytes), "r") as zf:
+        names = set(zf.namelist())
+        for spec in list_predictors():
+            latest_name = str(spec.get("latest_filename", "") or "").strip()
+            if not latest_name or latest_name not in names:
+                continue
+            dest_path = snapshot_prediction_path(data_dir, race_id, run_id, spec["id"])
+            if dest_path is None:
+                continue
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            dest_path.write_bytes(zf.read(latest_name))
+            updates[str(spec.get("run_field", "") or "").strip()] = str(dest_path)
+        if "remote_predictor_summary.json" in names:
+            summary_path = _remote_v5_result_summary_path(scope_key, race_id, run_id)
+            summary_path.write_bytes(zf.read("remote_predictor_summary.json"))
+            summary_path_text = str(summary_path)
+
+    run_row = resolve_run(run_id, scope_key)
+    if run_row is None:
+        raise ValueError(f"run row not found for remote predictor callback: run_id={run_id}")
+    if updates:
+        update_run_row_fields(scope_key, run_row, updates)
+    return {
+        "run_id": run_id,
+        "race_id": race_id,
+        "scope_key": scope_key,
+        "updated_fields": sorted([key for key in updates.keys() if key]),
+        "result_zip_path": str(result_zip_path),
+        "summary_path": summary_path_text,
+    }
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/bundle")
+def internal_v5_task_bundle(task_id: str, token: str = ""):
+    task = get_v5_remote_task(BASE_DIR, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="remote task not found")
+    expected = str((task or {}).get("bundle_token", "") or "").strip()
+    supplied = str(token or "").strip()
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="bundle token invalid")
+    bundle_bytes = web_remote_predictors.remote_v5_bundle_zip_bytes(task)
+    return Response(
+        content=bundle_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{task_id}.zip"'},
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/callback")
+async def internal_v5_task_callback(task_id: str, request: Request):
+    task = get_v5_remote_task(BASE_DIR, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="remote task not found")
+    body = await request.body()
+    signature = str(request.headers.get("X-Hub-Signature-256", "") or "").strip()
+    if not _verify_callback_hmac(body, signature):
+        raise HTTPException(status_code=403, detail="callback signature invalid")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid callback json: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid callback payload")
+
+    status = str(payload.get("status", "") or "").strip().lower()
+    log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
+    summary_payload = payload.get("summary", {})
+    if not isinstance(summary_payload, dict):
+        summary_payload = {}
+    job_id = str((task or {}).get("job_id", "") or "").strip()
+    run_id = str((task or {}).get("run_id", "") or "").strip()
+
+    if status == "succeeded":
+        try:
+            saved = _apply_remote_v5_result(task, payload)
+        except Exception as exc:
+            update_v5_remote_task(
+                BASE_DIR,
+                task_id,
+                lambda row, now_text: row.update(
+                    {
+                        "status": "failed",
+                        "finished_at": now_text,
+                        "error_message": str(exc),
+                        "result_summary": dict(summary_payload or {}),
+                    }
+                ),
+            )
+            if job_id:
+                from race_job_runner import fail_race_job
+
+                fail_race_job(BASE_DIR, job_id, str(exc))
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        update_v5_remote_task(
+            BASE_DIR,
+            task_id,
+            lambda row, now_text: row.update(
+                {
+                    "status": "succeeded",
+                    "finished_at": now_text,
+                    "error_message": "",
+                    "result_path": str(saved.get("result_zip_path", "") or ""),
+                    "result_summary": dict(summary_payload or {}),
+                }
+            ),
+        )
+        web_remote_predictors.promote_job_after_remote_v5(
+            base_dir=BASE_DIR,
+            job_id=job_id,
+            run_id=run_id,
+            task_id=task_id,
+            log_output=log_excerpt,
+            update_race_job=update_race_job,
+            initialize_race_job_step_fields=initialize_race_job_step_fields,
+            set_race_job_step_state=set_race_job_step_state,
+        )
+        if web_remote_predictors.remote_predictor_auto_continue_enabled() and job_id:
+            web_remote_predictors.auto_continue_remote_policy(base_dir=BASE_DIR, job_id=job_id)
+        return JSONResponse({"ok": True, "status": "succeeded", **saved})
+
+    error_message = str(payload.get("error_message", "") or "remote predictor batch failed").strip()
+    update_v5_remote_task(
+        BASE_DIR,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "failed",
+                "finished_at": now_text,
+                "error_message": error_message,
+                "result_summary": dict(summary_payload or {}),
+            }
+        ),
+    )
+    if job_id:
+        from race_job_runner import fail_race_job
+
+        fail_race_job(BASE_DIR, job_id, error_message)
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": "failed",
+            "task_id": task_id,
+            "job_id": job_id,
+            "run_id": run_id,
+            "error_message": error_message,
+            "log_excerpt": log_excerpt,
+        },
+        status_code=200,
     )
