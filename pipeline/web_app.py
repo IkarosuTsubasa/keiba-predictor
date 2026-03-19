@@ -22,7 +22,6 @@ from urllib.parse import quote_plus
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
 
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path, snapshot_prediction_path
 from gemini_portfolio import (
@@ -70,6 +69,19 @@ from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, update_task as update_v5_remote_task
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_note import build_mark_note_text
+from web_public import (
+    CONSOLE_BASE_PATH,
+    PUBLIC_API_BASE_PATH,
+    PUBLIC_BASE_PATH,
+    PUBLIC_SHARE_DETAIL_LABEL,
+    PUBLIC_SHARE_HASHTAG,
+    PUBLIC_SHARE_MAX_CHARS,
+    PUBLIC_SHARE_URL,
+    build_public_index_response,
+    mount_public_assets,
+    prefix_public_html_routes as _prefix_public_html_routes,
+    register_public_static_routes,
+)
 from web_ui.components import (
     build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
     build_metric_table as ui_build_metric_table,
@@ -82,7 +94,6 @@ from web_ui.stats_block import build_stats_block as ui_build_stats_block
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
-PUBLIC_FRONTEND_DIST_DIR = BASE_DIR / "public_frontend_dist"
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
@@ -93,473 +104,10 @@ OFFLINE_EVAL = BASE_DIR / "offline_eval.py"
 INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
-PUBLIC_BASE_PATH = "/keiba"
-CONSOLE_BASE_PATH = f"{PUBLIC_BASE_PATH}/console"
-PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
-PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
-PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
-PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
-PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
-PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
-PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
-PUBLIC_META_TITLE = "\u3044\u304b\u3044\u3082AI\u7af6\u99ac"
-PUBLIC_META_DESCRIPTION = (
-    "4\u3064\u306eAI\u304c\u540c\u6642\u306b\u7af6\u99ac\u4e88\u60f3"
-)
 app = FastAPI()
 load_local_env(BASE_DIR, override=False)
-app.mount("/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="public-assets")
-app.mount(f"{PUBLIC_BASE_PATH}/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="keiba-public-assets")
-
-def _prefix_public_html_routes(content=""):
-    html_text = str(content or "")
-    replacements = (
-        ('href="/console', f'href="{CONSOLE_BASE_PATH}'),
-        ('action="/console', f'action="{CONSOLE_BASE_PATH}'),
-        ('href="/llm_today"', f'href="{PUBLIC_BASE_PATH}"'),
-        ('action="/llm_today"', f'action="{PUBLIC_BASE_PATH}"'),
-        ('href="/site-icon.png"', f'href="{PUBLIC_SITE_ICON_PATH}"'),
-        ('href="/favicon.ico"', f'href="{PUBLIC_FAVICON_PATH}"'),
-    )
-    for source, target in replacements:
-        html_text = html_text.replace(source, target)
-    return html_text
-
-
-def _load_public_index_html():
-    index_path = PUBLIC_FRONTEND_DIST_DIR / "index.html"
-    for enc in ("utf-8", "utf-8-sig"):
-        try:
-            with open(index_path, "r", encoding=enc) as f:
-                return f.read()
-        except UnicodeDecodeError:
-            continue
-    with open(index_path, "r", encoding="cp932") as f:
-        return f.read()
-
-
-def _inject_public_meta_tags(content=""):
-    html_text = str(content or "")
-    if not html_text:
-        return html_text
-
-    title_tag = f"<title>{html.escape(PUBLIC_META_TITLE)}</title>"
-    description_tag = f'<meta name="description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />'
-    html_text = re.sub(r"<title>.*?</title>", title_tag, html_text, count=1, flags=re.IGNORECASE | re.DOTALL)
-    html_text = re.sub(
-        r'<meta\s+name=["\']description["\'][^>]*>',
-        description_tag,
-        html_text,
-        count=1,
-        flags=re.IGNORECASE,
-    )
-    html_text = re.sub(r'\s*<link\s+rel=["\']canonical["\'][^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'\s*<meta\s+property=["\']og:[^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
-    html_text = re.sub(r'\s*<meta\s+name=["\']twitter:[^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
-
-    meta_block = f"""
-    <link rel="canonical" href="{html.escape(PUBLIC_CANONICAL_URL)}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta property="og:title" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta property="og:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
-    <meta property="og:url" content="{html.escape(PUBLIC_CANONICAL_URL)}" />
-    <meta property="og:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
-    <meta property="og:image:alt" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta name="twitter:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
-    <meta name="twitter:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
-    """.strip()
-    return re.sub(r"</head>", f"{meta_block}\n  </head>", html_text, count=1, flags=re.IGNORECASE)
-
-
-def _public_share_runtime_html():
-    runtime = """
-<style>
-.share-title-row,
-.share-title-inline {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.share-title-row {
-  justify-content: space-between;
-}
-.share-inline-button {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  appearance: none;
-  border: 1px solid rgba(15, 18, 24, 0.18);
-  border-radius: 999px;
-  background: #111827;
-  color: #ffffff;
-  cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
-}
-.share-inline-button:hover {
-  transform: translateY(-1px);
-  background: #0f172a;
-  border-color: rgba(15, 18, 24, 0.28);
-}
-.share-inline-button img {
-  width: 15px;
-  height: 15px;
-  display: block;
-  object-fit: contain;
-}
-@media (max-width: 760px) {
-  .share-title-row {
-    align-items: flex-start;
-  }
-  .share-title-inline {
-    align-items: flex-start;
-  }
-}
-</style>
-<script>
-(() => {
-  const SHARE_DETAIL_LABEL = "__SHARE_DETAIL_LABEL__";
-  const SHARE_URL = "__SHARE_URL__";
-  const SHARE_HASHTAG = "__SHARE_HASHTAG__";
-  const SHARE_MAX_CHARS = 130;
-
-  const parseRaceHeader = (title) => {
-    const text = String(title || "").trim();
-    const matched = text.match(/^(.*?)(\\d+R)$/i);
-    if (!matched) {
-      return text ? `#${text}` : "#\\u7af6\\u99acAI";
-    }
-    let venue = String(matched[1] || "").replace(/\\s+/g, "");
-    const raceNo = String(matched[2] || "").trim();
-    if (venue && !venue.endsWith("\\u7af6\\u99ac")) {
-      venue += "\\u7af6\\u99ac";
-    }
-    if (venue) {
-      return `#${venue} ${raceNo}`;
-    }
-    return raceNo || "#\\u7af6\\u99acAI";
-  };
-
-  const splitLines = (text) =>
-    String(text || "")
-      .split(/\\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-  const buildShareText = (raceTitle, card) => {
-    let ticketText = "";
-    let marksText = "\\u5370\\u306a\\u3057";
-    if (card.matches(".model-card")) {
-      const blocks = Array.from(card.querySelectorAll(".model-block"));
-      ticketText = blocks[0]?.querySelector("p")?.innerText || "";
-      marksText = blocks[2]?.querySelector("p")?.innerText || "\\u5370\\u306a\\u3057";
-    } else {
-      const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
-      const subMarks = Array.from(card.querySelectorAll(".ai-pick-summary__submark")).map((item) => {
-        const symbol = item.querySelector("em")?.textContent?.trim() || "";
-        const horseNo = item.querySelector("strong")?.textContent?.trim() || "";
-        return symbol && horseNo ? `${symbol}${horseNo}` : "";
-      }).filter(Boolean);
-      const markParts = [];
-      if (mainHorse) {
-        markParts.push(`\\u25ce${mainHorse}`);
-      }
-      markParts.push(...subMarks);
-      if (markParts.length) {
-        marksText = markParts.join(" ");
-      }
-      ticketText = Array.from(card.querySelectorAll(".bet-preview-list li")).map((item) => item.textContent?.trim() || "").filter(Boolean).join("\\n");
-    }
-    const header = parseRaceHeader(raceTitle);
-    const ticketLines = splitLines(ticketText);
-    const tailLines = [SHARE_DETAIL_LABEL, SHARE_URL, SHARE_HASHTAG];
-    const lines = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", "\\u8cb7\\u3044\\u76ee\\uff08\\u4e00\\u90e8\\uff09"];
-    for (const ticketLine of ticketLines) {
-      const candidate = [...lines, ticketLine, "", ...tailLines].join("\\n");
-      if (candidate.length > SHARE_MAX_CHARS) {
-        break;
-      }
-      lines.push(ticketLine);
-    }
-    if (lines.length === 4) {
-      const fallback = [...lines, "\\u8cb7\\u3044\\u76ee\\u306a\\u3057", "", ...tailLines].join("\\n");
-      if (fallback.length <= SHARE_MAX_CHARS) {
-        lines.push("\\u8cb7\\u3044\\u76ee\\u306a\\u3057");
-      }
-    }
-    let text = [...lines, "", ...tailLines].join("\\n");
-    if (text.length <= SHARE_MAX_CHARS) {
-      return text;
-    }
-    text = [header, "", String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", ...tailLines].join("\\n");
-    if (text.length <= SHARE_MAX_CHARS) {
-      return text;
-    }
-    const tailLength = ["", ...tailLines].join("\\n").length;
-    const remain = Math.max(1, SHARE_MAX_CHARS - header.length - tailLength - 4);
-    return [header, "", String(marksText || "\\u5370\\u306a\\u3057").trim().slice(0, remain), "", ...tailLines].join("\\n");
-  };
-
-  const openShare = async (text) => {
-    const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
-    const isMobileShare =
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
-      (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) ||
-      ("ontouchstart" in window);
-    if (isMobileShare && navigator.share) {
-      try {
-        await navigator.share({ text });
-        return;
-      } catch (error) {
-        if (error && error.name === "AbortError") {
-          return;
-        }
-      }
-    }
-    if (isMobileShare) {
-      window.location.href = shareUrl;
-      return;
-    }
-    const width = 720;
-    const height = 640;
-    const left = Math.max(0, Math.round((window.screen.width - width) / 2));
-    const top = Math.max(0, Math.round((window.screen.height - height) / 2));
-    const popup = window.open(
-      shareUrl,
-      "ikaimo-share",
-      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-    );
-    if (popup && !popup.closed) {
-      try {
-        popup.focus();
-      } catch (_error) {
-      }
-      return;
-    }
-    window.location.href = shareUrl;
-  };
-
-  const createShareButton = () => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "share-inline-button";
-    button.setAttribute("aria-label", "\\u30b7\\u30a7\\u30a2");
-    button.setAttribute("title", "\\u30b7\\u30a7\\u30a2");
-    button.innerHTML =
-      '<img src="/keiba/assets/Xlogo-white.png" alt="" aria-hidden="true">';
-    return button;
-  };
-
-  const parseRaceCardMinutes = (raceCard) => {
-    if (!raceCard) {
-      return null;
-    }
-    const badges = Array.from(raceCard.querySelectorAll(".race-card-header__badges span"));
-    for (const badge of badges) {
-      const text = String(badge.textContent || "").trim();
-      const matched = text.match(/^(\\d{1,2}):(\\d{2})$/);
-      if (!matched) {
-        continue;
-      }
-      const hour = Number(matched[1]);
-      const minute = Number(matched[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-        continue;
-      }
-      return hour * 60 + minute;
-    }
-    return null;
-  };
-
-  const compareRaceCardsByTime = (left, right) => {
-    const leftMinutes = parseRaceCardMinutes(left);
-    const rightMinutes = parseRaceCardMinutes(right);
-    if (leftMinutes !== null && rightMinutes !== null) {
-      if (leftMinutes !== rightMinutes) {
-        return rightMinutes - leftMinutes;
-      }
-    } else if (leftMinutes !== null || rightMinutes !== null) {
-      return leftMinutes !== null ? -1 : 1;
-    }
-    const leftTitle = String(left?.querySelector(".race-card-header h3")?.textContent || "").trim();
-    const rightTitle = String(right?.querySelector(".race-card-header h3")?.textContent || "").trim();
-    return leftTitle.localeCompare(rightTitle, "ja");
-  };
-
-  const sortRaceGrids = () => {
-    document.querySelectorAll(".race-grid").forEach((grid) => {
-      const cards = Array.from(grid.querySelectorAll(":scope > .race-card"));
-      if (cards.length < 2) {
-        return;
-      }
-      const sorted = [...cards].sort(compareRaceCardsByTime);
-      const changed = sorted.some((card, index) => card !== cards[index]);
-      if (!changed) {
-        return;
-      }
-      sorted.forEach((card) => grid.appendChild(card));
-    });
-  };
-
-  const findCardsForShare = (root) => {
-    const modernCards = Array.from(root.querySelectorAll(".ai-pick-summary"));
-    if (modernCards.length) {
-      return modernCards;
-    }
-    return Array.from(root.querySelectorAll(".model-card"));
-  };
-
-  const mountLegacyShareButton = (summary) => {
-    if (!summary || summary.dataset.shareMounted === "1") {
-      return;
-    }
-    const raceCopy = summary.querySelector(".race-copy");
-    const title = raceCopy?.querySelector("h2");
-    if (!raceCopy || !title) {
-      return;
-    }
-    const row = document.createElement("div");
-    row.className = "share-title-row";
-    title.parentNode.insertBefore(row, title);
-    row.appendChild(title);
-    const button = createShareButton();
-    row.appendChild(button);
-    const handleShare = async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const raceBoard = summary.closest(".race-board");
-      const cards = findCardsForShare(raceBoard || document);
-      if (!cards.length) {
-        return;
-      }
-      const selected = cards[Math.floor(Math.random() * cards.length)];
-      const text = buildShareText(title.textContent || "", selected);
-      if (!text) {
-        return;
-      }
-      await openShare(text);
-    };
-    button.addEventListener("click", handleShare);
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    summary.dataset.shareMounted = "1";
-  };
-
-  const mountModernShareButton = (header) => {
-    if (!header || header.dataset.shareMounted === "1") {
-      return;
-    }
-    const main = header.querySelector(".race-card-header__main");
-    const titleHost = main?.querySelector("div");
-    const title = titleHost?.querySelector("h3");
-    if (!main || !titleHost || !title) {
-      return;
-    }
-    const row = document.createElement("div");
-    row.className = "share-title-inline";
-    titleHost.insertBefore(row, title);
-    row.appendChild(title);
-    const button = createShareButton();
-    row.appendChild(button);
-    const handleShare = async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const raceCard = header.closest(".race-card");
-      const cards = findCardsForShare(raceCard || document);
-      if (!cards.length) {
-        return;
-      }
-      const selected = cards[Math.floor(Math.random() * cards.length)];
-      const text = buildShareText(title.textContent || "", selected);
-      if (!text) {
-        return;
-      }
-      await openShare(text);
-    };
-    button.addEventListener("click", handleShare);
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    header.dataset.shareMounted = "1";
-  };
-
-  const refreshShareButtons = () => {
-    document.querySelectorAll(".race-summary").forEach(mountLegacyShareButton);
-    document.querySelectorAll(".race-card-header").forEach(mountModernShareButton);
-    sortRaceGrids();
-  };
-
-  const observer = new MutationObserver(() => {
-    refreshShareButtons();
-  });
-
-  const start = () => {
-    refreshShareButtons();
-    observer.observe(document.body, { childList: true, subtree: true });
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
-  } else {
-    start();
-  }
-})();
-</script>
-"""
-    return (
-        runtime
-        .replace('"__SHARE_DETAIL_LABEL__"', json.dumps(PUBLIC_SHARE_DETAIL_LABEL, ensure_ascii=True))
-        .replace('"__SHARE_URL__"', json.dumps(PUBLIC_SHARE_URL, ensure_ascii=True))
-        .replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
-    )
-
-
-def _inject_public_share_runtime(html_text):
-    content = str(html_text or "")
-    runtime = _public_share_runtime_html()
-    if runtime in content:
-        return content
-    if "</body>" in content:
-        return content.replace("</body>", runtime + "\n</body>", 1)
-    return content + runtime
-
-
-@app.get(PUBLIC_SITE_ICON_PATH)
-@app.get("/site-icon.png")
-def public_site_icon():
-    icon_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
-    if icon_path.exists():
-        return FileResponse(icon_path)
-    raise HTTPException(status_code=404, detail="site icon not found")
-
-
-@app.get(PUBLIC_FAVICON_PATH)
-@app.get("/favicon.ico")
-def public_favicon():
-    icon_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
-    if icon_path.exists():
-        return FileResponse(icon_path, media_type="image/png")
-    raise HTTPException(status_code=404, detail="favicon not found")
-
-
-@app.get(PUBLIC_OG_IMAGE_PATH)
-@app.get("/og.png")
-def public_og_image():
-    candidates = [
-        PUBLIC_FRONTEND_DIST_DIR / "og.png",
-    ]
-    for path in candidates:
-        if path.exists():
-            return FileResponse(path, media_type="image/png")
-    raise HTTPException(status_code=404, detail="og image not found")
+mount_public_assets(app)
+register_public_static_routes(app)
 
 
 def _admin_token_expected():
@@ -3054,10 +2602,6 @@ LLM_BATTLE_SHORT_LABELS = {
     "deepseek": "deepseek",
     "grok": "grok",
 }
-PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
-PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
-PUBLIC_SHARE_MAX_CHARS = 130
 LLM_REPORT_SCOPE_KEYS = ("central_dirt", "central_turf", "local")
 BET_TYPE_TEXT_MAP = {
     "win": "単勝",
@@ -9256,11 +8800,7 @@ def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str =
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 @app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
-    html_text = _load_public_index_html()
-    html_text = _prefix_public_html_routes(html_text)
-    html_text = _inject_public_meta_tags(html_text)
-    html_text = _inject_public_share_runtime(html_text)
-    return HTMLResponse(html_text)
+    return build_public_index_response()
 
 
 @app.get("/ads.txt")

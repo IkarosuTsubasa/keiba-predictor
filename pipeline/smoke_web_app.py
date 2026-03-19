@@ -1,4 +1,5 @@
 import os
+import os
 import sys
 from pathlib import Path
 
@@ -24,12 +25,16 @@ def main():
     assert_true(getattr(body, "headers", {}).get("location") == web_app.PUBLIC_BASE_PATH, "index should redirect to /keiba")
 
     keiba_home = web_app.llm_today()
-    assert_true(str(getattr(keiba_home, "path", "")).endswith("index.html"), "keiba home should return public frontend file")
-    expected_root = "public_frontend_dist" if (Path(web_app.BASE_DIR) / "public_frontend_dist" / "index.html").exists() else "public_frontend"
-    assert_true(expected_root in str(getattr(keiba_home, "path", "")), "keiba home should return active public frontend")
+    keiba_html = getattr(keiba_home, "body", b"").decode("utf-8", errors="ignore")
+    assert_true(getattr(keiba_home, "status_code", 0) == 200, "keiba home should return 200")
+    assert_true("<!doctype html" in keiba_html.lower(), "keiba home should render public frontend html")
+    assert_true("twitter:card" in keiba_html, "keiba home should inject public meta tags")
+    assert_true("Xlogo-white.png" in keiba_html, "keiba home should inject share runtime")
 
     llm_today_html = web_app.llm_today()
-    assert_true(str(getattr(llm_today_html, "path", "")).endswith("index.html"), "llm_today should return public frontend file")
+    llm_today_body = getattr(llm_today_html, "body", b"").decode("utf-8", errors="ignore")
+    assert_true(getattr(llm_today_html, "status_code", 0) == 200, "llm_today should return 200")
+    assert_true("</html>" in llm_today_body.lower(), "llm_today should render public frontend file")
     board_payload = web_app.public_board_api()
     assert_true(getattr(board_payload, "status_code", 200) == 200, "public board api should return JSON")
 
