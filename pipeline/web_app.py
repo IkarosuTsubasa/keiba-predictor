@@ -1,12 +1,9 @@
 import csv
-import hashlib
-import hmac as hmac_mod
 import html
 import json
 import math
 import os
 import re
-import secrets
 import shutil
 import subprocess
 import sys
@@ -67,7 +64,33 @@ from race_job_store import (
 )
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, update_task as update_v5_remote_task
+from web_auth import (
+    admin_token_enabled as _admin_token_enabled,
+    admin_token_expected as _admin_token_expected,
+    admin_token_valid as _admin_token_valid,
+    verify_callback_hmac as _verify_callback_hmac,
+)
+from web_admin import console as web_admin_console
+from web_admin import jobs_page as web_admin_jobs
+from web_admin import task_routes as web_admin_tasks
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
+from web_helpers import (
+    extract_section,
+    extract_top5,
+    format_path_mtime,
+    get_env_timeout,
+    is_run_id,
+    load_csv_rows,
+    load_csv_rows_flexible,
+    load_json_file,
+    load_text_file,
+    normalize_race_id,
+    parse_horse_no,
+    parse_run_id,
+    run_script,
+    to_float,
+    to_int_or_none,
+)
 from web_note import build_mark_note_text
 from web_public import (
     CONSOLE_BASE_PATH,
@@ -81,6 +104,42 @@ from web_public import (
     mount_public_assets,
     prefix_public_html_routes as _prefix_public_html_routes,
     register_public_static_routes,
+)
+from web_pages import public_llm as web_public_llm
+from web_pages import workspace as web_workspace
+from web_report import bundles as report_bundles
+from web_report import data as report_data
+from web_report.helpers import (
+    BET_TYPE_TEXT_MAP as REPORT_BET_TYPE_TEXT_MAP,
+    LLM_BATTLE_LABELS as REPORT_LLM_BATTLE_LABELS,
+    LLM_BATTLE_ORDER as REPORT_LLM_BATTLE_ORDER,
+    LLM_BATTLE_SHORT_LABELS as REPORT_LLM_BATTLE_SHORT_LABELS,
+    LLM_NOTE_LABELS as REPORT_LLM_NOTE_LABELS,
+    LLM_REPORT_SCOPE_KEYS as REPORT_LLM_REPORT_SCOPE_KEYS,
+    build_battle_title as report_build_battle_title,
+    format_jp_date_text as report_format_jp_date_text,
+    format_jp_date_value as report_format_jp_date_value,
+    format_marks_text as report_format_marks_text,
+    format_percent_text as report_format_percent_text,
+    format_race_label as report_format_race_label,
+    format_ticket_plan_text as report_format_ticket_plan_text,
+    format_yen_text as report_format_yen_text,
+    has_llm_policy_assets as report_has_llm_policy_assets,
+    jst_today_text as report_jst_today_text,
+    llm_today_scope_keys as report_llm_today_scope_keys,
+    llm_today_scope_label_ja as report_llm_today_scope_label_ja,
+    normalize_report_date_text as report_normalize_report_date_text,
+    parse_run_date as report_parse_run_date,
+    payload_run_id as report_payload_run_id,
+    policy_marks_map as report_policy_marks_map,
+    policy_primary_budget as report_policy_primary_budget,
+    policy_primary_output as report_policy_primary_output,
+    public_scope_label_ja as report_public_scope_label_ja,
+    race_no_text as report_race_no_text,
+    report_scope_key_for_row as report_scope_key_for_row,
+    run_date_key as report_run_date_key,
+    safe_text as report_safe_text,
+    scope_display_name as report_scope_display_name,
 )
 from web_ui.components import (
     build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
@@ -110,266 +169,32 @@ mount_public_assets(app)
 register_public_static_routes(app)
 
 
-def _admin_token_expected():
-    return str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
-
-
-def _verify_callback_hmac(body: bytes, sig_header: str) -> bool:
-    secret = str(os.environ.get("PIPELINE_CALLBACK_SECRET", "") or "").strip()
-    if not secret or not sig_header:
-        return False
-    expected = "sha256=" + hmac_mod.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return secrets.compare_digest(sig_header, expected)
-
-
-def _admin_token_enabled():
-    return bool(_admin_token_expected())
-
-
-def _admin_token_valid(token=""):
-    expected = _admin_token_expected()
-    if not expected:
-        return True
-    supplied = str(token or "").strip()
-    return bool(supplied) and secrets.compare_digest(supplied, expected)
-
-
 def _pick_next_process_job_id():
-    jobs = load_race_jobs(BASE_DIR)
-    for job in jobs:
-        status = str(job.get("status", "") or "").strip().lower()
-        if status in ("queued_process", "queued_policy"):
-            return str(job.get("job_id", "") or "").strip()
-    return ""
+    return web_admin_tasks.pick_next_process_job_id(
+        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
+    )
 
 
 def _pick_next_settle_job_id():
-    jobs = load_race_jobs(BASE_DIR)
-    for job in jobs:
-        status = str(job.get("status", "") or "").strip().lower()
-        actual_top1 = str(job.get("actual_top1", "") or "").strip()
-        actual_top2 = str(job.get("actual_top2", "") or "").strip()
-        actual_top3 = str(job.get("actual_top3", "") or "").strip()
-        if status == "queued_settle" and actual_top1 and actual_top2 and actual_top3:
-            return str(job.get("job_id", "") or "").strip()
-    return ""
+    return web_admin_tasks.pick_next_settle_job_id(
+        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
+    )
 
 
 def run_due_jobs_once():
-    changed = scan_due_race_jobs(BASE_DIR)
-    process_results = []
-    settle_results = []
-    errors = []
-
-    while True:
-        job_id = _pick_next_process_job_id()
-        if not job_id:
-            break
-        print(
-            "[web_app] "
-            + json.dumps(
-                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "run_due_process_start", "job_id": job_id},
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-        try:
-            from race_job_runner import process_race_job
-
-            summary = process_race_job(BASE_DIR, job_id)
-            process_results.append(summary)
-            print(
-                "[web_app] "
-                + json.dumps(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "run_due_process_done",
-                        "job_id": job_id,
-                        "run_id": str((summary or {}).get("run_id", "") or "").strip(),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-        except Exception as exc:
-            try:
-                from race_job_runner import fail_race_job
-
-                fail_race_job(BASE_DIR, job_id, str(exc))
-            except Exception:
-                pass
-            print(
-                "[web_app] "
-                + json.dumps(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "run_due_process_error",
-                        "job_id": job_id,
-                        "error": str(exc),
-                        "traceback": traceback.format_exc(),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            errors.append({"kind": "process", "job_id": job_id, "error": str(exc)})
-
-    while True:
-        job_id = _pick_next_settle_job_id()
-        if not job_id:
-            break
-        job = next((item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "")).strip() == job_id), {})
-        actual_top3 = [
-            str(job.get("actual_top1", "") or "").strip(),
-            str(job.get("actual_top2", "") or "").strip(),
-            str(job.get("actual_top3", "") or "").strip(),
-        ]
-        try:
-            from race_job_runner import settle_race_job
-
-            settle_results.append(settle_race_job(BASE_DIR, job_id, actual_top3))
-        except Exception as exc:
-            try:
-                from race_job_runner import fail_race_job
-
-                fail_race_job(BASE_DIR, job_id, str(exc))
-            except Exception:
-                pass
-            errors.append({"kind": "settle", "job_id": job_id, "error": str(exc)})
-
-    return {
-        "queued_count": len(changed),
-        "queued_job_ids": [str(item.get("job_id", "") or "").strip() for item in changed],
-        "processed_count": len(process_results),
-        "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
-        "settled_count": len(settle_results),
-        "settled_job_ids": [str(item.get("job_id", "") or "").strip() for item in settle_results],
-        "errors": errors,
-    }
+    return web_admin_tasks.run_due_jobs_once(
+        base_dir=BASE_DIR,
+        scan_due_race_jobs=scan_due_race_jobs,
+        load_race_jobs=load_race_jobs,
+    )
 
 
 def build_console_gate_page(admin_token="", error_text=""):
-    error_block = ""
-    if error_text:
-        error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
-    return _prefix_public_html_routes(f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>控制台验证</title>
-  <style>
-    :root {{
-      --bg: #f4efe8;
-      --paper: rgba(255, 250, 244, 0.94);
-      --ink: #17201a;
-      --muted: #617064;
-      --accent: #145846;
-      --danger: #ad4d3b;
-      --line: rgba(23,31,26,0.1);
-      --shadow: 0 18px 50px rgba(28,33,29,0.09);
-      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: var(--body-font);
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
-        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
-        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
-    }}
-    .gate {{
-      max-width: 760px;
-      margin: 64px auto;
-      padding: 0 18px;
-      display: grid;
-      gap: 18px;
-    }}
-    .panel, .job-flash {{
-      padding: 24px;
-      border-radius: 24px;
-      background: var(--paper);
-      border: 1px solid rgba(255,255,255,0.75);
-      box-shadow: var(--shadow);
-    }}
-    .eyebrow {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }}
-    h1 {{
-      margin: 8px 0 10px;
-      font-family: var(--title-font);
-      font-size: clamp(34px, 5vw, 50px);
-      line-height: 0.96;
-    }}
-    p {{
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.65;
-    }}
-    form {{
-      display: grid;
-      gap: 12px;
-      margin-top: 18px;
-    }}
-    input {{
-      min-height: 44px;
-      padding: 0 14px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      font: inherit;
-    }}
-    button, a {{
-      min-height: 42px;
-      padding: 0 14px;
-      border-radius: 999px;
-      border: 0;
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
-      font-weight: 700;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }}
-    .job-flash--error {{
-      color: var(--danger);
-      border-color: rgba(173,77,59,0.24);
-      background: rgba(255, 245, 242, 0.95);
-    }}
-    .actions {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }}
-  </style>
-</head>
-<body>
-  <main class="gate">
-    {error_block}
-    <section class="panel">
-      <div class="eyebrow">Protected</div>
-      <h1>控制台验证</h1>
-      <p>这里是你的后台。输入正确的 `ADMIN_TOKEN` 后才能进入 `/console`。</p>
-      <form method="get" action="/console">
-        <input type="password" name="token" placeholder="ADMIN_TOKEN" value="{html.escape(admin_token)}">
-        <div class="actions">
-          <button type="submit">进入控制台</button>
-          <a href="/llm_today">返回前台</a>
-        </div>
-      </form>
-    </section>
-  </main>
-</body>
-</html>""")
+    return web_admin_console.build_console_gate_page(
+        admin_token=admin_token,
+        error_text=error_text,
+        prefix_public_html_routes=_prefix_public_html_routes,
+    )
 
 
 def load_runs(scope_key):
@@ -613,19 +438,6 @@ def strict_llm_odds_gate_enabled():
     return raw not in ("0", "false", "no", "off")
 
 
-def get_env_timeout(name, default):
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return int(default)
-    try:
-        value = int(float(raw))
-    except ValueError:
-        return int(default)
-    if value <= 0:
-        return int(default)
-    return value
-
-
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -777,141 +589,12 @@ def refresh_odds_for_run(
     return True, "", warnings
 
 
-def run_script(script_path, inputs=None, args=None, extra_blanks=0, extra_env=None):
-    payload = ""
-    if inputs is not None:
-        payload = "\n".join([str(v) for v in inputs] + [""] * int(extra_blanks)) + "\n"
-    cmd = [sys.executable, str(script_path)]
-    if args:
-        cmd.extend(args)
-    env = os.environ.copy()
-    env.setdefault("PYTHONIOENCODING", "utf-8")
-    env.setdefault("PYTHONUTF8", "1")
-    if extra_env:
-        env.update(extra_env)
-    result = subprocess.run(
-        cmd,
-        input=payload,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        cwd=str(BASE_DIR),
-        env=env,
-    )
-    output = result.stdout or ""
-    if result.stderr:
-        output = f"{output}\n[stderr]\n{result.stderr}"
-    return result.returncode, output.strip()
-
-
-def extract_section(output_text, start_label, end_label=None):
-    if not output_text:
-        return ""
-    start_idx = output_text.find(start_label)
-    if start_idx < 0:
-        return ""
-    start_idx += len(start_label)
-    section = output_text[start_idx:]
-    if section.startswith("\n"):
-        section = section[1:]
-    if end_label:
-        end_idx = section.find(end_label)
-        if end_idx >= 0:
-            section = section[:end_idx]
-    return section.strip()
-
-
-def extract_top5(output_text):
-    return extract_section(output_text, "Top5 predictions:", "Saved: predictions.csv")
-
-def parse_run_id(output_text):
-    if not output_text:
-        return ""
-    match = re.search(r"Logged run: (\d{8}_\d{6})", output_text)
-    return match.group(1) if match else ""
-
-def normalize_race_id(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    match = re.search(r"race_id=(\d+)", raw)
-    if match:
-        return match.group(1)
-    return re.sub(r"\D", "", raw)
-
-
-def is_run_id(value):
-    return bool(re.fullmatch(r"\d{8}_\d{6}", str(value or "").strip()))
-
-
 def find_run_in_scope(scope_key, id_text):
     return run_resolver.find_run_in_scope(load_runs, normalize_race_id, scope_key, id_text)
 
 
 def infer_scope_and_run(id_text):
     return run_resolver.infer_scope_and_run(load_runs, normalize_race_id, id_text)
-
-
-def load_csv_rows(path):
-    if not path.exists():
-        return []
-    with open(path, "r", encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
-
-
-def load_text_file(path):
-    if not path:
-        return ""
-    path = Path(path)
-    if not path.exists():
-        return ""
-    for enc in ("utf-8-sig", "utf-8", "cp932"):
-        try:
-            with open(path, "r", encoding=enc) as f:
-                return f.read()
-        except UnicodeDecodeError:
-            continue
-    return ""
-
-
-def load_json_file(path):
-    text = load_text_file(path)
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except Exception:
-        return {}
-
-
-def to_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def to_int_or_none(value):
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        return int(float(text))
-    except (TypeError, ValueError):
-        return None
-
-
-def format_path_mtime(path, label):
-    if not path:
-        return f"{label}: (missing path)"
-    path = Path(path)
-    if not path.exists():
-        return f"{label}: {path} (missing)"
-    ts = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
-    return f"{label}: {path} (mtime={ts})"
 
 
 def parse_odds_value(value):
@@ -1150,34 +833,6 @@ def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_wa
 def build_gemini_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output):
     return build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output, "gemini")
 
-
-def load_csv_rows_flexible(path):
-    if not path:
-        return []
-    path = Path(path)
-    if not path.exists():
-        return []
-    for enc in ("utf-8-sig", "utf-8", "cp932"):
-        try:
-            with open(path, "r", encoding=enc, newline="") as f:
-                return list(csv.DictReader(f))
-        except UnicodeDecodeError:
-            continue
-    return []
-
-
-def parse_horse_no(value):
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        return int(float(text))
-    except (TypeError, ValueError):
-        pass
-    digits = re.findall(r"\d+", text)
-    if len(digits) == 1:
-        return int(digits[0])
-    return None
 
 
 def normalize_horse_no_text(value):
@@ -2583,6 +2238,140 @@ def build_policy_workspace_html(payloads):
     return "".join(blocks)
 
 
+def load_ability_marks_table(scope_key, run_id, run_row=None):
+    return view_data.load_ability_marks_table(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        scope_key,
+        run_id,
+        run_row,
+    )
+
+
+def page_template(
+    output_text="",
+    error_text="",
+    run_options="",
+    view_run_options="",
+    view_selected_run_id="",
+    current_race_id="",
+    top5_text="",
+    top5_table_html="",
+    mark_table_html="",
+    mark_note_text="",
+    llm_battle_html="",
+    llm_note_text="",
+    llm_compare_html="",
+    gemini_policy_html="",
+    daily_report_html="",
+    daily_report_text="",
+    weekly_report_html="",
+    weekly_report_text="",
+    summary_table_html="",
+    stats_block="",
+    default_scope="central_dirt",
+    default_policy_engine="gemini",
+    default_policy_model="",
+    admin_token="",
+    admin_enabled=False,
+    admin_workspace_html="",
+):
+    return ui_page_template(
+        output_text=output_text,
+        error_text=error_text,
+        run_options=run_options,
+        view_run_options=view_run_options,
+        view_selected_run_id=view_selected_run_id,
+        current_race_id=current_race_id,
+        top5_text=top5_text,
+        top5_table_html=top5_table_html,
+        mark_table_html=mark_table_html,
+        mark_note_text=mark_note_text,
+        llm_battle_html=llm_battle_html,
+        llm_note_text=llm_note_text,
+        llm_compare_html=llm_compare_html,
+        gemini_policy_html=gemini_policy_html,
+        daily_report_html=daily_report_html,
+        daily_report_text=daily_report_text,
+        weekly_report_html=weekly_report_html,
+        weekly_report_text=weekly_report_text,
+        summary_table_html=summary_table_html,
+        stats_block=stats_block,
+        default_scope=default_scope,
+        default_policy_engine=default_policy_engine,
+        default_policy_model=default_policy_model,
+        admin_token=admin_token,
+        admin_enabled=admin_enabled,
+        admin_workspace_html=admin_workspace_html,
+    )
+
+
+def render_page(
+    scope_key="central_dirt",
+    output_text="",
+    error_text="",
+    top5_text="",
+    summary_run_id="",
+    selected_run_id="",
+    admin_token="",
+    admin_workspace_html="",
+):
+    return web_workspace.render_workspace_page(
+        scope_key=scope_key,
+        output_text=output_text,
+        error_text=error_text,
+        top5_text=top5_text,
+        summary_run_id=summary_run_id,
+        selected_run_id=selected_run_id,
+        admin_token=admin_token,
+        admin_workspace_html=admin_workspace_html,
+        build_run_options=build_run_options,
+        build_llm_compare_block=ui_build_llm_compare_block,
+        build_stats_block=ui_build_stats_block,
+        build_table_html=build_table_html,
+        load_policy_bankroll_summary=load_policy_bankroll_summary,
+        load_policy_daily_profit_summary=load_policy_daily_profit_summary,
+        build_daily_profit_chart_html=ui_build_daily_profit_chart_html,
+        resolve_run=resolve_run,
+        parse_run_id=parse_run_id,
+        normalize_race_id=normalize_race_id,
+        resolve_predictor_paths=resolve_predictor_paths,
+        load_top5_table=load_top5_table,
+        load_ability_marks_table=load_ability_marks_table,
+        load_mark_recommendation_table=load_mark_recommendation_table,
+        load_text_file=load_text_file,
+        build_mark_note_text=build_mark_note_text,
+        load_prediction_summary=load_prediction_summary,
+        load_bet_engine_v3_cfg_summary=load_bet_engine_v3_cfg_summary,
+        load_policy_payloads=load_policy_payloads,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        build_policy_workspace_html=build_policy_workspace_html,
+        build_llm_battle_bundle=_build_llm_battle_bundle,
+        build_llm_daily_report_bundle=_build_llm_daily_report_bundle,
+        build_llm_weekly_report_bundle=_build_llm_weekly_report_bundle,
+        load_actual_result_map=_load_actual_result_map,
+        normalize_policy_engine=normalize_policy_engine,
+        resolve_policy_model=resolve_policy_model,
+        default_gemini_model=DEFAULT_GEMINI_MODEL,
+        prefix_public_html_routes=_prefix_public_html_routes,
+        page_template=page_template,
+        admin_token_enabled=_admin_token_enabled,
+        load_predictor_summary=load_predictor_summary,
+    )
+
+
+def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
+    return render_page(
+        scope_key,
+        error_text=str(message or "管理员执行被拒绝。"),
+        selected_run_id=selected_run_id,
+        summary_run_id=summary_run_id,
+        admin_token=token,
+    )
+
+
 LLM_BATTLE_ORDER = ("openai", "gemini", "deepseek", "grok")
 LLM_BATTLE_LABELS = {
     "openai": "ChatGPT",
@@ -2831,15 +2620,7 @@ def _report_scope_key_for_row(run_row, fallback_scope=""):
 
 
 def _load_combined_llm_report_runs():
-    runs = []
-    for report_scope_key in LLM_REPORT_SCOPE_KEYS:
-        for row in load_runs(report_scope_key):
-            if not _has_llm_policy_assets(row):
-                continue
-            item = dict(row)
-            item["_report_scope_key"] = report_scope_key
-            runs.append(item)
-    return runs
+    return report_data.load_combined_llm_report_runs(load_runs, LLM_REPORT_SCOPE_KEYS)
 
 
 def _payload_run_id(payload, fallback_run_id=""):
@@ -2898,139 +2679,61 @@ def _build_battle_title(run_row):
 
 
 def _load_actual_result_map(scope_key):
-    path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
-    rows = load_csv_rows(path) if path.exists() else []
-    result_map = {}
-    for row in rows:
-        run_id = _safe_text(row.get("run_id"))
-        if not run_id:
-            continue
-        predictor_id = canonical_predictor_id(row.get("predictor_id"))
-        current = result_map.get(run_id)
-        item = {
-            "actual_top1": _safe_text(row.get("actual_top1")),
-            "actual_top2": _safe_text(row.get("actual_top2")),
-            "actual_top3": _safe_text(row.get("actual_top3")),
-        }
-        if current is None or predictor_id == "main":
-            result_map[run_id] = item
-    scope_norm = normalize_scope_key(scope_key)
-    for job in load_race_jobs(BASE_DIR):
-        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
-            continue
-        run_id = _safe_text(job.get("current_run_id"))
-        if not run_id:
-            continue
-        item = {
-            "actual_top1": _safe_text(job.get("actual_top1")),
-            "actual_top2": _safe_text(job.get("actual_top2")),
-            "actual_top3": _safe_text(job.get("actual_top3")),
-        }
-        if not any(item.values()):
-            continue
-        current = dict(result_map.get(run_id, {}) or {})
-        if not any(_safe_text(current.get(key)) for key in ("actual_top1", "actual_top2", "actual_top3")):
-            result_map[run_id] = item
-    return result_map
+    return report_data.load_actual_result_map(
+        BASE_DIR,
+        scope_key,
+        get_data_dir=get_data_dir,
+        load_csv_rows=load_csv_rows,
+        canonical_predictor_id=canonical_predictor_id,
+        load_race_jobs=load_race_jobs,
+    )
 
 
 def _find_actual_result_from_jobs(scope_key, run_id, run_row=None):
-    scope_norm = normalize_scope_key(scope_key)
-    run_id_text = _safe_text(run_id)
-    race_id_text = _safe_text((run_row or {}).get("race_id"))
-    best = {}
-    best_time = ""
-    for job in load_race_jobs(BASE_DIR):
-        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
-            continue
-        job_run_id = _safe_text(job.get("current_run_id"))
-        job_race_id = _safe_text(job.get("race_id"))
-        if run_id_text and job_run_id == run_id_text:
-            matched = True
-        elif race_id_text and job_race_id == race_id_text:
-            matched = True
-        else:
-            matched = False
-        if not matched:
-            continue
-        item = {
-            "actual_top1": _safe_text(job.get("actual_top1")),
-            "actual_top2": _safe_text(job.get("actual_top2")),
-            "actual_top3": _safe_text(job.get("actual_top3")),
-        }
-        if not any(item.values()):
-            continue
-        settled_at = _safe_text(job.get("settled_at")) or _safe_text(job.get("updated_at")) or _safe_text(job.get("created_at"))
-        if not best or settled_at >= best_time:
-            best = item
-            best_time = settled_at
-    return best
+    return report_data.find_actual_result_from_jobs(
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        load_race_jobs=load_race_jobs,
+    )
 
 
 def _find_job_meta_for_run(scope_key, run_id, run_row=None):
-    scope_norm = normalize_scope_key(scope_key)
-    run_id_text = _safe_text(run_id)
-    race_id_text = _safe_text((run_row or {}).get("race_id"))
-    best = {}
-    best_time = ""
-    for job in load_race_jobs(BASE_DIR):
-        if normalize_scope_key(_safe_text(job.get("scope_key"))) != scope_norm:
-            continue
-        job_run_id = _safe_text(job.get("current_run_id"))
-        job_race_id = _safe_text(job.get("race_id"))
-        if run_id_text and job_run_id == run_id_text:
-            matched = True
-        elif race_id_text and job_race_id == race_id_text:
-            matched = True
-        else:
-            matched = False
-        if not matched:
-            continue
-        updated_at = _safe_text(job.get("updated_at")) or _safe_text(job.get("created_at"))
-        if not best or updated_at >= best_time:
-            best = {
-                "job_id": _safe_text(job.get("job_id")),
-                "location": _safe_text(job.get("location")),
-                "scheduled_off_time": _safe_text(job.get("scheduled_off_time")),
-                "target_distance": _safe_text(job.get("target_distance")),
-                "target_track_condition": _safe_text(job.get("target_track_condition")),
-                "race_date": _safe_text(job.get("race_date")),
-            }
-            best_time = updated_at
-    return best
+    return report_data.find_job_meta_for_run(
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        load_race_jobs=load_race_jobs,
+    )
 
 
 def _load_name_to_no_map_for_run(scope_key, run_id, run_row):
-    odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "odds_path", "odds")
-    if not odds_path or not Path(odds_path).exists():
-        return {}
-    raw = load_name_to_no(odds_path) or {}
-    out = {}
-    for name, horse_no in raw.items():
-        norm_name = normalize_name(name)
-        text_no = normalize_horse_no_text(horse_no)
-        if norm_name and text_no:
-            out[norm_name] = text_no
-    return out
+    return report_data.load_name_to_no_map_for_run(
+        scope_key,
+        run_id,
+        run_row,
+        resolve_run_asset_path=resolve_run_asset_path,
+        load_name_to_no=load_name_to_no,
+        normalize_name=normalize_name,
+        normalize_horse_no_text=normalize_horse_no_text,
+    )
 
 
 def _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map):
-    actual = dict((actual_result_map or {}).get(run_id, {}) or {})
-    if not any(_safe_text(actual.get(key)) for key in ("actual_top1", "actual_top2", "actual_top3")):
-        actual = _find_actual_result_from_jobs(scope_key, run_id, run_row)
-    actual_names = [
-        _safe_text(actual.get("actual_top1")),
-        _safe_text(actual.get("actual_top2")),
-        _safe_text(actual.get("actual_top3")),
-    ]
-    name_to_no = _load_name_to_no_map_for_run(scope_key, run_id, run_row)
-    actual_horse_nos = []
-    for name in actual_names:
-        actual_horse_nos.append(name_to_no.get(normalize_name(name), "") if name else "")
-    return {
-        "actual_names": actual_names,
-        "actual_horse_nos": actual_horse_nos,
-    }
+    return report_data.actual_result_snapshot(
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        actual_result_map,
+        load_race_jobs=load_race_jobs,
+        resolve_run_asset_path=resolve_run_asset_path,
+        load_name_to_no=load_name_to_no,
+        normalize_name=normalize_name,
+        normalize_horse_no_text=normalize_horse_no_text,
+    )
 
 
 def _marks_result_triplet(marks_map, actual_horse_nos):
@@ -3133,779 +2836,74 @@ def _public_trend_series(days=10):
 
 
 def _public_all_time_roi_summary():
-    cards = []
-    total_stake = 0
-    total_payout = 0
-    total_profit = 0
-    for engine in LLM_BATTLE_ORDER:
-        rows = load_rows(ledger_path(BASE_DIR, policy_engine=engine))
-        stake_yen = 0
-        payout_yen = 0
-        profit_yen = 0
-        for row in rows:
-            if _safe_text(row.get("status")).lower() != "settled":
-                continue
-            stake_yen += int(row.get("stake_yen", 0) or 0)
-            payout_yen += int(row.get("payout_yen", 0) or 0)
-            profit_yen += int(row.get("profit_yen", 0) or 0)
-        if stake_yen <= 0:
-            continue
-        total_stake += stake_yen
-        total_payout += payout_yen
-        total_profit += profit_yen
-        cards.append(
-            {
-                "engine": engine,
-                "label": LLM_BATTLE_LABELS.get(engine, engine),
-                "stake_yen": stake_yen,
-                "payout_yen": payout_yen,
-                "profit_yen": profit_yen,
-                "roi_text": _format_percent_text(round(float(payout_yen) / float(stake_yen), 4)),
-            }
-        )
-    total_roi_text = ""
-    if total_stake > 0:
-        total_roi_text = _format_percent_text(round(float(total_payout) / float(total_stake), 4))
-    return {
-        "cards": cards,
-        "totals": {
-            "stake_yen": total_stake,
-            "payout_yen": total_payout,
-            "profit_yen": total_profit,
-            "roi_text": total_roi_text,
-        },
-    }
+    return report_bundles.public_all_time_roi_summary(
+        BASE_DIR,
+        ledger_path=ledger_path,
+        load_rows=load_rows,
+    )
 
 
 def _policy_primary_choice(output):
-    marks = list((output or {}).get("marks", []) or [])
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
-    best = None
-    for row in marks:
-        symbol = _safe_text(row.get("symbol"))
-        horse_no = _safe_text(row.get("horse_no"))
-        if not symbol or not horse_no:
-            continue
-        score = symbol_order.get(symbol, 99)
-        if best is None or score < best[0]:
-            best = (score, horse_no)
-    if best is not None:
-        return best[1]
-    key_horses = list((output or {}).get("key_horses", []) or [])
-    for horse_no in key_horses:
-        text = _safe_text(horse_no)
-        if text:
-            return text
-    return ""
-
+    return report_bundles._policy_primary_choice(output)
 
 def _llm_agreement_summary(outputs):
-    top_choices = []
-    for output in list(outputs or []):
-        horse_no = _policy_primary_choice(output)
-        if horse_no:
-            top_choices.append(horse_no)
-    if not top_choices:
-        return {"label": "不明", "score": 0.5}
-    counts = {}
-    for horse_no in top_choices:
-        counts[horse_no] = counts.get(horse_no, 0) + 1
-    max_count = max(counts.values()) if counts else 0
-    unique_count = len(counts)
-    if max_count >= 4:
-        return {"label": "高", "score": 1.0}
-    if max_count == 3:
-        return {"label": "やや高", "score": 0.8}
-    if max_count == 2 and unique_count <= 2:
-        return {"label": "中", "score": 0.5}
-    if max_count == 2:
-        return {"label": "やや低", "score": 0.3}
-    return {"label": "低", "score": 0.0}
-
+    return report_bundles._llm_agreement_summary(outputs)
 
 def _difficulty_summary(outputs, agreement_score):
-    outputs = list(outputs or [])
-    if not outputs:
-        return "★★★☆☆"
-    score = 2.0
-    mixed_count = 0
-    low_conf_count = 0
-    low_stability_count = 0
-    one_shot_count = 0
-    strong_favorite_count = 0
-    place_focus_count = 0
-    risk_total = 0.0
-    for output in outputs:
-        reason_codes = {str(item or "").strip() for item in list(output.get("reason_codes", []) or []) if str(item or "").strip()}
-        if "MIXED_FIELD" in reason_codes:
-            mixed_count += 1
-        if "LOW_CONFIDENCE" in reason_codes:
-            low_conf_count += 1
-        if "LOW_STABILITY" in reason_codes:
-            low_stability_count += 1
-        if "HIGH_ODDS_ONE_SHOT" in reason_codes:
-            one_shot_count += 1
-        if "STRONG_FAVORITE" in reason_codes:
-            strong_favorite_count += 1
-        if "PLACE_FOCUS" in reason_codes:
-            place_focus_count += 1
-        risk_tilt = _safe_text(output.get("risk_tilt")).lower()
-        if risk_tilt == "high":
-            risk_total += 0.8
-        elif risk_tilt == "medium":
-            risk_total += 0.4
-        elif risk_tilt == "low":
-            risk_total += 0.1
-    total = float(len(outputs))
-    score += (mixed_count / total) * 2.0
-    score += (low_conf_count / total) * 1.0
-    score += (low_stability_count / total) * 0.8
-    score += (one_shot_count / total) * 0.5
-    score -= (strong_favorite_count / total) * 1.1
-    score -= (place_focus_count / total) * 0.3
-    score += risk_total / total
-    score += (1.0 - float(agreement_score or 0.0)) * 1.6
-    star_count = max(1, min(5, int(round(score))))
-    return "★" * star_count + "☆" * (5 - star_count)
-
+    return report_bundles._difficulty_summary(outputs, agreement_score)
 
 def _build_llm_battle_bundle(scope_key, run_id, run_row, payloads, actual_result_map):
-    payload_map = {}
-    for payload in list(payloads or []):
-        engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
-        if engine:
-            payload_map[engine] = payload
-    if not payload_map:
-        return {"html": "", "note_text": ""}
-
-    actual_snapshot = _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map)
-    actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-    race_label = _format_race_label(run_row)
-    battle_title = _build_battle_title(run_row)
-    outputs = []
-    cards = []
-    premium_lines = ["【AI予想の考え方】", ""]
-    note_lines = [battle_title, "", f"レース：{race_label}"]
-
-    for engine in LLM_BATTLE_ORDER:
-        payload = payload_map.get(engine)
-        if not payload:
-            continue
-        output = _policy_primary_output(payload)
-        outputs.append(output)
-        marks_map = _policy_marks_map(payload)
-        ticket_rows = load_policy_run_ticket_rows(run_id, policy_engine=engine) or list(
-            _policy_primary_budget(payload).get("tickets", []) or []
-        )
-        ticket_summary = _summarize_ticket_rows(ticket_rows)
-        result_triplet = _marks_result_triplet(marks_map, actual_horse_nos)
-        marks_text = _format_marks_text(marks_map)
-        ticket_plan_text = _format_ticket_plan_text(ticket_rows, output)
-        tendency_text = _safe_text(output.get("bet_tendency_ja")) or "未生成"
-        strategy_text = _safe_text(output.get("strategy_text_ja")) or "未生成"
-        meta_tags = [
-            f"状態 {ticket_summary['status']}",
-            f"投資 {ticket_summary['stake_yen']}円" if ticket_summary["stake_yen"] else "未購入",
-        ]
-        if ticket_summary["roi"] != "":
-            meta_tags.append(f"ROI {ticket_summary['roi']:.4f}")
-        cards.append(
-            {
-                "engine": engine,
-                "label": LLM_BATTLE_LABELS.get(engine, engine),
-                "marks_text": marks_text,
-                "ticket_plan_text": ticket_plan_text,
-                "tendency_text": tendency_text,
-                "strategy_text": strategy_text,
-                "result_triplet_text": _format_triplet_text(result_triplet),
-                "meta_tags": meta_tags,
-            }
-        )
-        premium_lines.extend(
-            [
-                f"{LLM_NOTE_LABELS.get(engine, LLM_BATTLE_LABELS.get(engine, engine))}",
-                strategy_text,
-                "",
-            ]
-        )
-
-    agreement = _llm_agreement_summary(outputs)
-    difficulty = _difficulty_summary(outputs, agreement.get("score", 0.5))
-    note_lines.extend(
-        [
-            f"難易度：{difficulty}",
-            f"一致度：{agreement.get('label', '不明')}",
-            "",
-        ]
+    return report_bundles.build_llm_battle_bundle(
+        scope_key,
+        run_id,
+        run_row,
+        payloads,
+        actual_result_map,
+        normalize_policy_engine=normalize_policy_engine,
+        actual_result_snapshot=_actual_result_snapshot,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        summarize_ticket_rows=_summarize_ticket_rows,
+        marks_result_triplet=_marks_result_triplet,
+        format_triplet_text=_format_triplet_text,
     )
-
-    card_html = []
-    premium_html = []
-    for card in cards:
-        tag_html = "".join(
-            f'<span class="battle-meta-chip">{html.escape(tag)}</span>' for tag in list(card.get("meta_tags", []) or [])
-        )
-        card_html.append(
-            f"""
-            <article class="battle-card">
-              <div class="battle-card-head">
-                <div>
-                  <div class="eyebrow">LLM Battle</div>
-                  <h3>{html.escape(card['label'])}</h3>
-                </div>
-                <div class="battle-meta-row">{tag_html}</div>
-              </div>
-              <div class="battle-mark-band">
-                <span class="battle-band-label">印</span>
-                <strong>{html.escape(card['marks_text'])}</strong>
-              </div>
-              <div class="battle-public-grid">
-                <section class="battle-copy-card">
-                  <div class="policy-label">買い目</div>
-                  <p>{html.escape(card['ticket_plan_text'])}</p>
-                </section>
-                <section class="battle-copy-card">
-                  <div class="policy-label">買い目傾向</div>
-                  <p>{html.escape(card['tendency_text'])}</p>
-                </section>
-              </div>
-              <div class="battle-result-row">
-                <span class="policy-label">着順対応印</span>
-                <code>{html.escape(card['result_triplet_text'])}</code>
-              </div>
-            </article>
-            """
-        )
-        note_lines.extend(
-            [
-                f"{LLM_NOTE_LABELS.get(card['engine'], card['label'])}",
-                f"印：{card['marks_text']}",
-                "",
-                "買い目",
-                "",
-                card["ticket_plan_text"],
-                "",
-                f"買い目傾向：{card['tendency_text']}",
-                "",
-            ]
-        )
-        premium_html.append(
-            f"""
-            <section class="battle-copy-card">
-              <div class="policy-label">{html.escape(card['label'])} Strategy</div>
-              <p>{html.escape(card['strategy_text'])}</p>
-            </section>
-            """
-        )
-    summary_html = (
-        '<section class="panel battle-hero-panel">'
-        '<div class="panel-title-row">'
-        f'<div><div class="eyebrow">Note Layout</div><h2>{html.escape(battle_title)}</h2></div>'
-        f'<span class="section-chip">{html.escape(race_label)}</span>'
-        "</div>"
-        '<div class="battle-overview-grid">'
-        f'<section class="battle-overview-card"><span class="battle-band-label">レース</span><strong>{html.escape(race_label)}</strong></section>'
-        f'<section class="battle-overview-card"><span class="battle-band-label">難易度</span><strong>{html.escape(difficulty)}</strong></section>'
-        f'<section class="battle-overview-card"><span class="battle-band-label">一致度</span><strong>{html.escape(str(agreement.get("label", "不明")))}</strong></section>'
-        "</div>"
-        '<p class="helper-text">難易度は混戦度が高いほど星が増える想定です。一致度は 4 LLM の本命がどれだけ揃っているかを見ています。</p>'
-        f'<div class="battle-grid">{"".join(card_html)}</div>'
-        '<section class="panel battle-hero-panel" style="margin-top:14px;">'
-        '<div class="panel-title-row">'
-        '<div><div class="eyebrow">Paid Block</div><h2>AI予想の考え方</h2></div>'
-        '<span class="section-chip">note footer</span>'
-        "</div>"
-        '<p class="helper-text">このブロックは note 記事の最下部に置く前提で、4 LLM の Strategy をひとまとめにしています。</p>'
-        f'<div class="battle-public-grid">{"".join(premium_html)}</div>'
-        "</section>"
-        "</section>"
-    )
-    note_text = "\n".join(line for line in note_lines if line is not None).strip()
-    premium_text = "\n".join(line for line in premium_lines if line is not None).strip()
-    if premium_text:
-        note_text = f"{note_text}\n\n{premium_text}".strip()
-    return {"html": summary_html, "note_text": note_text}
-
 
 def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map):
-    target_date = _run_date_key(current_run_row)
-    if not target_date:
-        return {"html": "", "text": ""}
-
-    actual_result_maps = {report_scope_key: _load_actual_result_map(report_scope_key) for report_scope_key in LLM_REPORT_SCOPE_KEYS}
-    runs = [row for row in _load_combined_llm_report_runs() if _run_date_key(row) == target_date]
-    if not runs:
-        return {"html": "", "text": ""}
-
-    runs.sort(key=lambda row: (_safe_text(row.get("race_id")), _safe_text(row.get("timestamp")), _safe_text(row.get("run_id"))))
-    metric_rows = {
-        engine: {
-            "model": LLM_BATTLE_LABELS.get(engine, engine),
-            "runs": 0,
-            "race_hit_count": 0,
-            "ticket_hit_count": 0,
-            "ticket_count": 0,
-            "honmei_hit_count": 0,
-            "mark_hit_count": 0,
-            "mark_total_count": 0,
-            "stake_yen": 0,
-            "payout_yen": 0,
-            "profit_yen": 0,
-        }
-        for engine in LLM_BATTLE_ORDER
-    }
-    race_rows = []
-    report_lines = [f"{target_date} 第1回 いかいもAI競馬対決杯｜ 日報", ""]
-
-    for run_row in runs:
-        run_id = _safe_text(run_row.get("run_id"))
-        report_scope_key = _report_scope_key_for_row(run_row, scope_key)
-        payload_map = {}
-        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
-            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
-            if engine:
-                payload_map[engine] = payload
-        if not payload_map:
-            continue
-        race_run_id = run_id
-        if not race_run_id:
-            for payload in payload_map.values():
-                race_run_id = _payload_run_id(payload, race_run_id)
-                if race_run_id:
-                    break
-        if not race_run_id:
-            continue
-        actual_snapshot = _actual_result_snapshot(
-            report_scope_key,
-            race_run_id,
-            run_row,
-            actual_result_maps.get(report_scope_key, {}),
-        )
-        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-        race_label = _format_race_label(run_row)
-        race_row = {"race": race_label}
-        report_lines.append(race_label)
-        for engine in LLM_BATTLE_ORDER:
-            payload = payload_map.get(engine)
-            triplet_text = "- - -"
-            report_line_text = triplet_text
-            if payload:
-                output = _policy_primary_output(payload)
-                marks_map = _policy_marks_map(payload)
-                triplet = _marks_result_triplet(marks_map, actual_horse_nos)
-                triplet_text = _format_triplet_text(triplet)
-                bet_decision = _safe_text(output.get("bet_decision")).lower()
-                ticket_run_id = _payload_run_id(payload, race_run_id)
-                ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine)
-                ticket_summary = _summarize_ticket_rows(ticket_rows)
-                if bet_decision == "no_bet" or int(ticket_summary.get("ticket_count", 0) or 0) <= 0:
-                    report_line_text = "見"
-                else:
-                    recovery_rate_text = _percent_text_from_ratio(ticket_summary.get("roi", ""))
-                    report_line_text = triplet_text if recovery_rate_text == "-" else f"{triplet_text} 回収率：{recovery_rate_text}"
-                stats = metric_rows[engine]
-                stats["runs"] += 1
-                stats["race_hit_count"] += 1 if ticket_summary["hit_count"] > 0 else 0
-                stats["ticket_hit_count"] += int(ticket_summary["hit_count"])
-                stats["ticket_count"] += int(ticket_summary["ticket_count"])
-                stats["stake_yen"] += int(ticket_summary["stake_yen"])
-                stats["payout_yen"] += int(ticket_summary["payout_yen"])
-                stats["profit_yen"] += int(ticket_summary["profit_yen"])
-                if actual_horse_nos:
-                    if triplet and triplet[0] == "◎":
-                        stats["honmei_hit_count"] += 1
-                    actual_set = {horse_no for horse_no in actual_horse_nos if horse_no}
-                    stats["mark_hit_count"] += len(set(marks_map.keys()) & actual_set)
-                    stats["mark_total_count"] += len(set(marks_map.keys()))
-            race_row[LLM_BATTLE_SHORT_LABELS.get(engine, engine)] = triplet_text
-            report_lines.append(f"{LLM_BATTLE_SHORT_LABELS.get(engine, engine)} {report_line_text}")
-        race_rows.append(race_row)
-        report_lines.append("")
-
-    summary_rows = []
-    for engine in LLM_BATTLE_ORDER:
-        stats = metric_rows[engine]
-        if stats["runs"] <= 0:
-            continue
-        stake_yen = int(stats["stake_yen"])
-        payout_yen = int(stats["payout_yen"])
-        recovery_rate_value = round(payout_yen / stake_yen, 4) if stake_yen > 0 else ""
-        stats["recovery_rate_value"] = recovery_rate_value
-        stats["honmei_hit_rate"] = _ratio_text(stats["honmei_hit_count"], stats["runs"])
-        stats["mark_hit_rate"] = _ratio_text(stats["mark_hit_count"], stats["mark_total_count"])
-        stats["race_hit_rate"] = _ratio_text(stats["race_hit_count"], stats["runs"])
-        stats["ticket_hit_rate"] = _ratio_text(stats["ticket_hit_count"], stats["ticket_count"])
-        summary_rows.append(
-            {
-                "model": stats["model"],
-                "レース数": stats["runs"],
-                "的中": f"{stats['runs']}レース中 {stats['race_hit_count']}レース的中",
-                "的中率": stats["race_hit_rate"],
-                "本命命中率": stats["honmei_hit_rate"],
-                "印命中率": stats["mark_hit_rate"],
-                "honmei_hit_rate_value": round(float(stats["honmei_hit_count"]) / float(stats["runs"]), 6)
-                if stats["runs"]
-                else "",
-                "mark_hit_rate_value": round(float(stats["mark_hit_count"]) / float(stats["mark_total_count"]), 6)
-                if stats["mark_total_count"]
-                else "",
-                "hit_rate_value": round(float(stats["race_hit_count"]) / float(stats["runs"]), 6)
-                if stats["runs"]
-                else "",
-                "投資円": stake_yen,
-                "回収円": payout_yen,
-                "収支円": int(stats["profit_yen"]),
-                "回収率": _percent_text_from_ratio(recovery_rate_value),
-                "recovery_rate_value": recovery_rate_value,
-            }
-        )
-
-    if not race_rows and not summary_rows:
-        return {"html": "", "text": ""}
-
-    report_lines.append("【当日成績】")
-    report_lines.append("")
-    for row in summary_rows:
-        report_lines.append(str(row.get("model", "-") or "-"))
-        report_lines.append(
-            "{hit_summary} 的中率 {hit_rate} 投資{stake_yen}円 回収{payout_yen}円 収支{profit_yen}円 回収率 {recovery_rate} 本命命中率 {honmei_hit_rate} 印命中率 {mark_hit_rate}".format(
-                hit_summary=row.get("的中", "-"),
-                hit_rate=row.get("的中率", "-"),
-                stake_yen=row.get("投資円", 0),
-                payout_yen=row.get("回収円", 0),
-                profit_yen=row.get("収支円", 0),
-                recovery_rate=row.get("回収率", "-"),
-                honmei_hit_rate=row.get("本命命中率", "-"),
-                mark_hit_rate=row.get("印命中率", "-"),
-            )
-        )
-        report_lines.append("")
-
-    def _leader_rows(metric_key, title):
-        ordered = sorted(
-            summary_rows,
-            key=lambda row: (
-                float(row.get(metric_key)) if row.get(metric_key, "") not in ("", None) else -1.0,
-                float(_safe_text(row.get("収支円")) or 0.0),
-            ),
-            reverse=True,
-        )
-        out = []
-        for idx, row in enumerate(ordered[:4], start=1):
-            value = row.get(metric_key, "")
-            if metric_key in ("recovery_rate_value", "honmei_hit_rate_value", "mark_hit_rate_value", "hit_rate_value"):
-                value_text = _percent_text_from_ratio(value)
-            else:
-                value_text = _safe_text(value) or "-"
-            out.append({"順位": idx, "model": row.get("model", ""), "value": value_text})
-        report_lines.append("")
-        report_lines.append(f"【{title}】")
-        for item in out:
-            report_lines.append(f"{item['順位']}. {item['model']} {item['value']}")
-        return out
-
-    leaderboard_hit = _leader_rows("hit_rate_value", "的中率ランキング")
-    leaderboard_honmei = _leader_rows("honmei_hit_rate_value", "本命命中率ランキング")
-    leaderboard_recovery = _leader_rows("recovery_rate_value", "回収率ランキング")
-    leaderboard_mark = _leader_rows("mark_hit_rate_value", "印命中率ランキング")
-
-    race_table_html = build_table_html(
-        race_rows,
-        ["race", "chatgpt", "gemini", "deepseek", "grok"],
-        "当日レース別対戦",
+    return report_bundles.build_llm_daily_report_bundle(
+        scope_key,
+        current_run_row,
+        actual_result_map,
+        load_actual_result_map=_load_actual_result_map,
+        load_combined_llm_report_runs=_load_combined_llm_report_runs,
+        load_policy_payloads=load_policy_payloads,
+        normalize_policy_engine=normalize_policy_engine,
+        actual_result_snapshot=_actual_result_snapshot,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        summarize_ticket_rows=_summarize_ticket_rows,
+        marks_result_triplet=_marks_result_triplet,
+        format_triplet_text=_format_triplet_text,
+        ratio_text=_ratio_text,
+        percent_text_from_ratio=_percent_text_from_ratio,
+        build_table_html=build_table_html,
     )
-    summary_table_html = build_table_html(
-        summary_rows,
-        [
-            "model",
-            "レース数",
-            "的中",
-            "的中率",
-            "本命命中率",
-            "印命中率",
-            "投資円",
-            "回収円",
-            "収支円",
-            "回収率",
-        ],
-        "当日収支と命中",
-    )
-    leaderboard_html = "".join(
-        [
-            build_table_html(leaderboard_hit, ["順位", "model", "value"], "的中率ランキング"),
-            build_table_html(leaderboard_honmei, ["順位", "model", "value"], "本命命中率ランキング"),
-            build_table_html(leaderboard_recovery, ["順位", "model", "value"], "回収率ランキング"),
-            build_table_html(leaderboard_mark, ["順位", "model", "value"], "印命中率ランキング"),
-        ]
-    )
-    header_html = (
-        '<section class="panel battle-hero-panel">'
-        '<div class="panel-title-row">'
-        '<div><div class="eyebrow">Daily Report</div><h2>LLM 当日戦績</h2></div>'
-        f'<span class="section-chip">{html.escape(target_date)}</span>'
-        "</div>"
-        '<p class="helper-text">対象：中央・地方合算。各レースでは実際の1着から3着に対応した印を並べ、そのまま日報へ転記できる形にしています。</p>'
-        "</section>"
-    )
-    return {
-        "html": f"{header_html}{race_table_html}{summary_table_html}{leaderboard_html}",
-        "text": "\n".join(report_lines).strip(),
-    }
-
 
 def _build_llm_weekly_report_bundle(scope_key, current_run_row, actual_result_map):
-    target_date = _parse_run_date(_run_date_key(current_run_row))
-    if not target_date:
-        return {"html": "", "text": ""}
-
-    week_start = target_date - timedelta(days=target_date.weekday())
-    week_end = week_start + timedelta(days=6)
-
-    actual_result_maps = {report_scope_key: _load_actual_result_map(report_scope_key) for report_scope_key in LLM_REPORT_SCOPE_KEYS}
-    runs = []
-    for row in _load_combined_llm_report_runs():
-        run_date = _parse_run_date(_run_date_key(row))
-        if run_date is None:
-            continue
-        if week_start <= run_date <= week_end:
-            runs.append((run_date, row))
-    if not runs:
-        return {"html": "", "text": ""}
-
-    runs.sort(
-        key=lambda item: (
-            item[0].isoformat(),
-            _safe_text(item[1].get("race_id")),
-            _safe_text(item[1].get("timestamp")),
-            _safe_text(item[1].get("run_id")),
-        )
+    return report_bundles.build_llm_weekly_report_bundle(
+        scope_key,
+        current_run_row,
+        actual_result_map,
+        load_actual_result_map=_load_actual_result_map,
+        load_combined_llm_report_runs=_load_combined_llm_report_runs,
+        load_policy_payloads=load_policy_payloads,
+        normalize_policy_engine=normalize_policy_engine,
+        actual_result_snapshot=_actual_result_snapshot,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        summarize_ticket_rows=_summarize_ticket_rows,
+        marks_result_triplet=_marks_result_triplet,
+        format_triplet_text=_format_triplet_text,
+        percent_text_from_ratio=_percent_text_from_ratio,
+        parse_run_date=_parse_run_date,
+        build_table_html=build_table_html,
     )
-    metric_rows = {
-        engine: {
-            "model": LLM_BATTLE_LABELS.get(engine, engine),
-            "runs": 0,
-            "race_hit_count": 0,
-            "stake_yen": 0,
-            "payout_yen": 0,
-            "profit_yen": 0,
-        }
-        for engine in LLM_BATTLE_ORDER
-    }
-    best_entry = None
-    week_label = f"{_format_jp_date_value(week_start)}〜{_format_jp_date_value(week_end)}"
-    report_lines = [f"【LLM 週報】{week_label} 中央・地方合算", ""]
-
-    for run_date, run_row in runs:
-        run_id = _safe_text(run_row.get("run_id"))
-        report_scope_key = _report_scope_key_for_row(run_row, scope_key)
-        payload_map = {}
-        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
-            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
-            if engine:
-                payload_map[engine] = payload
-        if not payload_map:
-            continue
-        race_run_id = run_id
-        if not race_run_id:
-            for payload in payload_map.values():
-                race_run_id = _payload_run_id(payload, race_run_id)
-                if race_run_id:
-                    break
-        if not race_run_id:
-            continue
-        actual_snapshot = _actual_result_snapshot(
-            report_scope_key,
-            race_run_id,
-            run_row,
-            actual_result_maps.get(report_scope_key, {}),
-        )
-        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-        race_label = _format_race_label(run_row)
-        race_date_text = _format_jp_date_text(run_row) or _format_jp_date_value(run_date)
-        for engine in LLM_BATTLE_ORDER:
-            payload = payload_map.get(engine)
-            if not payload:
-                continue
-            marks_map = _policy_marks_map(payload)
-            triplet = _marks_result_triplet(marks_map, actual_horse_nos)
-            triplet_text = _format_triplet_text(triplet)
-            ticket_run_id = _payload_run_id(payload, race_run_id)
-            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine)
-            ticket_summary = _summarize_ticket_rows(ticket_rows)
-            stats = metric_rows[engine]
-            stats["runs"] += 1
-            stats["race_hit_count"] += 1 if ticket_summary["hit_count"] > 0 else 0
-            stats["stake_yen"] += int(ticket_summary["stake_yen"])
-            stats["payout_yen"] += int(ticket_summary["payout_yen"])
-            stats["profit_yen"] += int(ticket_summary["profit_yen"])
-            if ticket_summary["stake_yen"] > 0:
-                recovery_rate_value = round(ticket_summary["payout_yen"] / ticket_summary["stake_yen"], 4)
-                candidate = {
-                    "model": LLM_BATTLE_LABELS.get(engine, engine),
-                    "race": race_label,
-                    "date": race_date_text,
-                    "的中印": triplet_text,
-                    "投資円": int(ticket_summary["stake_yen"]),
-                    "回収円": int(ticket_summary["payout_yen"]),
-                    "収支円": int(ticket_summary["profit_yen"]),
-                    "回収率": _percent_text_from_ratio(recovery_rate_value),
-                    "recovery_rate_value": recovery_rate_value,
-                    "status_rank": 1 if ticket_summary.get("status") == "settled" else 0,
-                }
-                if best_entry is None or (
-                    candidate["recovery_rate_value"],
-                    candidate["回収円"],
-                    candidate["status_rank"],
-                ) > (
-                    best_entry["recovery_rate_value"],
-                    best_entry["回収円"],
-                    best_entry["status_rank"],
-                ):
-                    best_entry = candidate
-
-    summary_rows = []
-    for engine in LLM_BATTLE_ORDER:
-        stats = metric_rows[engine]
-        if stats["runs"] <= 0:
-            continue
-        stake_yen = int(stats["stake_yen"])
-        payout_yen = int(stats["payout_yen"])
-        profit_yen = int(stats["profit_yen"])
-        recovery_rate_value = round(payout_yen / stake_yen, 4) if stake_yen > 0 else ""
-        hit_rate_value = round(float(stats["race_hit_count"]) / float(stats["runs"]), 6) if stats["runs"] else ""
-        summary_rows.append(
-            {
-                "model": stats["model"],
-                "レース数": stats["runs"],
-                "的中": f"{stats['runs']}レース中 {stats['race_hit_count']}レース的中",
-                "的中率": _percent_text_from_ratio(hit_rate_value),
-                "投資円": stake_yen,
-                "回収円": payout_yen,
-                "収支円": profit_yen,
-                "回収率": _percent_text_from_ratio(recovery_rate_value),
-                "stake_value": stake_yen,
-                "payout_value": payout_yen,
-                "profit_value": profit_yen,
-                "hit_rate_value": hit_rate_value,
-                "recovery_rate_value": recovery_rate_value,
-            }
-        )
-
-    if not summary_rows:
-        return {"html": "", "text": ""}
-
-    report_lines.append("【週間成績】")
-    for row in summary_rows:
-        report_lines.append(
-            "{model} {hit_summary} 的中率 {hit_rate} 投資{stake_yen}円 回収{payout_yen}円 収支{profit_yen}円 回収率 {recovery_rate}".format(
-                model=row.get("model", "-"),
-                hit_summary=row.get("的中", "-"),
-                hit_rate=row.get("的中率", "-"),
-                stake_yen=row.get("投資円", 0),
-                payout_yen=row.get("回収円", 0),
-                profit_yen=row.get("収支円", 0),
-                recovery_rate=row.get("回収率", "-"),
-            )
-        )
-
-    def _leader_rows(metric_key, title, value_kind):
-        ordered = sorted(
-            summary_rows,
-            key=lambda row: (
-                float(row.get(metric_key)) if row.get(metric_key, "") not in ("", None) else -1.0,
-                float(_safe_text(row.get("収支円")) or 0.0),
-            ),
-            reverse=True,
-        )
-        out = []
-        for idx, row in enumerate(ordered[:4], start=1):
-            value = row.get(metric_key, "")
-            if value_kind == "percent":
-                value_text = _percent_text_from_ratio(value)
-            else:
-                value_text = f"{int(value)}円" if value not in ("", None) else "-"
-            out.append({"順位": idx, "model": row.get("model", ""), "value": value_text})
-        report_lines.append("")
-        report_lines.append(f"【{title}】")
-        for item in out:
-            report_lines.append(f"{item['順位']}. {item['model']} {item['value']}")
-        return out
-
-    leaderboard_stake = _leader_rows("stake_value", "投資額ランキング", "yen")
-    leaderboard_payout = _leader_rows("payout_value", "回収額ランキング", "yen")
-    leaderboard_profit = _leader_rows("profit_value", "収支ランキング", "yen")
-    leaderboard_recovery = _leader_rows("recovery_rate_value", "回収率ランキング", "percent")
-    leaderboard_hit = _leader_rows("hit_rate_value", "的中率ランキング", "percent")
-
-    if best_entry:
-        report_lines.extend(
-            [
-                "",
-                "【今週のベスト】",
-                "{model} {date} {race} 的中印 {triplet} 投資{stake_yen}円 回収{payout_yen}円 収支{profit_yen}円 回収率 {recovery_rate}".format(
-                    model=best_entry.get("model", "-"),
-                    date=best_entry.get("date", "-"),
-                    race=best_entry.get("race", "-"),
-                    triplet=best_entry.get("的中印", "- - -"),
-                    stake_yen=best_entry.get("投資円", 0),
-                    payout_yen=best_entry.get("回収円", 0),
-                    profit_yen=best_entry.get("収支円", 0),
-                    recovery_rate=best_entry.get("回収率", "-"),
-                ),
-            ]
-        )
-
-    summary_table_html = build_table_html(
-        summary_rows,
-        ["model", "レース数", "的中", "的中率", "投資円", "回収円", "収支円", "回収率"],
-        "週間収支サマリー",
-    )
-    leaderboard_html = "".join(
-        [
-            build_table_html(leaderboard_stake, ["順位", "model", "value"], "投資額ランキング"),
-            build_table_html(leaderboard_payout, ["順位", "model", "value"], "回収額ランキング"),
-            build_table_html(leaderboard_profit, ["順位", "model", "value"], "収支ランキング"),
-            build_table_html(leaderboard_recovery, ["順位", "model", "value"], "回収率ランキング"),
-            build_table_html(leaderboard_hit, ["順位", "model", "value"], "的中率ランキング"),
-        ]
-    )
-    best_html = ""
-    if best_entry:
-        best_table_rows = [
-            {
-                "model": best_entry.get("model", "-"),
-                "date": best_entry.get("date", "-"),
-                "race": best_entry.get("race", "-"),
-                "的中印": best_entry.get("的中印", "- - -"),
-                "投資円": best_entry.get("投資円", 0),
-                "回収円": best_entry.get("回収円", 0),
-                "収支円": best_entry.get("収支円", 0),
-                "回収率": best_entry.get("回収率", "-"),
-            }
-        ]
-        best_html = (
-            '<section class="panel battle-hero-panel">'
-            '<div class="panel-title-row">'
-            '<div><div class="eyebrow">Best Of Week</div><h2>今週のベスト</h2></div>'
-            f'<span class="section-chip">{html.escape(best_entry.get("model", "-"))}</span>'
-            "</div>"
-            '<p class="helper-text">今週の中で回収率が最も高かったレースです。</p>'
-            f"{build_table_html(best_table_rows, ['model', 'date', 'race', '的中印', '投資円', '回収円', '収支円', '回収率'], '今週のベスト')}"
-            "</section>"
-        )
-    header_html = (
-        '<section class="panel battle-hero-panel">'
-        '<div class="panel-title-row">'
-        '<div><div class="eyebrow">Weekly Report</div><h2>LLM 週報</h2></div>'
-        f'<span class="section-chip">{html.escape(week_label)}</span>'
-        "</div>"
-        '<p class="helper-text">対象：中央・地方合算。週単位で投資、回収、収支、回収率、的中率をまとめています。</p>'
-        "</section>"
-    )
-    return {
-        "html": f"{header_html}{summary_table_html}{leaderboard_html}{best_html}",
-        "text": "\n".join(report_lines).strip(),
-    }
 
 
 def _jst_today_text():
@@ -5092,48 +4090,13 @@ def _public_scope_label_ja(scope_key):
 
 
 def _public_status_meta_ja(ticket_summary, actual_names):
-    status = _safe_text((ticket_summary or {}).get("status", "")).lower()
-    actual_ready = any(_safe_text(name) for name in list(actual_names or []))
-    if status == "settled":
-        return "確定", "settled"
-    if status == "pending":
-        return "結果待ち", "pending"
-    if actual_ready:
-        return "結果反映済み", "result"
-    return "公開中", "planned"
-
+    return web_public_llm.public_status_meta_ja(ticket_summary, actual_names)
 
 def _public_yen_text(value):
-    try:
-        amount = int(value or 0)
-    except (TypeError, ValueError):
-        amount = 0
-    sign = "-" if amount < 0 else ""
-    return f"{sign}¥{abs(amount):,}"
-
+    return web_public_llm.public_yen_text(value)
 
 def _public_ticket_plan_text(ticket_rows):
-    bet_type_map = {
-        "win": "単勝",
-        "place": "複勝",
-        "wide": "ワイド",
-        "quinella": "馬連",
-        "exacta": "馬単",
-        "trio": "三連複",
-        "trifecta": "三連単",
-    }
-    rows = list(ticket_rows or [])
-    if not rows:
-        return "買い目なし"
-    lines = []
-    for row in rows:
-        bet_type = bet_type_map.get(_safe_text(row.get("bet_type")).lower(), _safe_text(row.get("bet_type")) or "-")
-        horse_no = _safe_text(row.get("horse_no")) or "-"
-        amount = _public_yen_text(row.get("amount_yen") or row.get("stake_yen") or 0)
-        line = f"{bet_type} {horse_no} {amount}"
-        lines.append(line)
-    return "\n".join(lines)
-
+    return web_public_llm.public_ticket_plan_text(ticket_rows)
 
 def _share_hashtag_race_label(run_row):
     venue = _safe_text((run_row or {}).get("location")) or _safe_text((run_row or {}).get("trigger_race"))
@@ -5185,944 +4148,89 @@ def _share_marks_text(marks_map):
 
 
 def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=PUBLIC_SHARE_MAX_CHARS):
-    header = _share_hashtag_race_label(run_row)
-    marks_text = _share_marks_text(marks_map)
-    tail_lines = [PUBLIC_SHARE_DETAIL_LABEL, PUBLIC_SHARE_URL, PUBLIC_SHARE_HASHTAG]
-    base_lines = [header, "", marks_text, "", "買い目（一部）"]
-    ticket_lines = _share_ticket_lines(ticket_rows)
-    lines = list(base_lines)
-    for ticket_line in ticket_lines:
-        candidate = "\n".join(lines + [ticket_line, "", *tail_lines])
-        if len(candidate) > int(max_chars or PUBLIC_SHARE_MAX_CHARS):
-            break
-        lines.append(ticket_line)
-    if len(lines) == len(base_lines):
-        placeholder = "買い目なし"
-        candidate = "\n".join(base_lines + [placeholder, "", *tail_lines])
-        if len(candidate) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
-            lines.append(placeholder)
-    text = "\n".join(lines + ["", *tail_lines])
-    if len(text) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
-        return text
-    fallback_lines = [header, "", marks_text, "", *tail_lines]
-    text = "\n".join(fallback_lines)
-    if len(text) <= int(max_chars or PUBLIC_SHARE_MAX_CHARS):
-        return text
-    tail_len = len("\n".join(["", *tail_lines]))
-    compact_marks = marks_text[: max(0, int(max_chars or PUBLIC_SHARE_MAX_CHARS) - len(header) - tail_len - 4)]
-    compact_lines = [header, "", compact_marks or "印", "", *tail_lines]
-    return "\n".join(compact_lines)
-
+    return web_public_llm.build_public_share_text(
+        run_row,
+        engine,
+        marks_map,
+        ticket_rows,
+        max_chars=max_chars,
+        share_detail_label=PUBLIC_SHARE_DETAIL_LABEL,
+        share_url=PUBLIC_SHARE_URL,
+        share_hashtag=PUBLIC_SHARE_HASHTAG,
+        to_int_or_none=to_int_or_none,
+    )
 
 def _public_result_triplet_text(actual_names):
-    names = [_safe_text(name) for name in list(actual_names or [])[:3] if _safe_text(name)]
-    if not names:
-        return "結果未確定"
-    return " / ".join(f"{idx + 1}着 {name}" for idx, name in enumerate(names))
-
+    return web_public_llm.public_result_triplet_text(actual_names)
 
 def _public_result_triplet_text_with_nos(actual_names, actual_horse_nos):
-    names = [_safe_text(name) for name in list(actual_names or [])[:3]]
-    horse_nos = [_safe_text(horse_no) for horse_no in list(actual_horse_nos or [])[:3]]
-    entries = []
-    max_len = max(len(names), len(horse_nos))
-    for idx in range(max_len):
-        name = names[idx] if idx < len(names) else ""
-        horse_no = horse_nos[idx] if idx < len(horse_nos) else ""
-        if not name and not horse_no:
-            continue
-        parts = [f"{idx + 1}着"]
-        if horse_no:
-            parts.append(horse_no)
-        if name:
-            parts.append(name)
-        entries.append(" ".join(parts))
-    if not entries:
-        return _public_result_triplet_text(actual_names)
-    return " / ".join(entries)
-
+    return web_public_llm.public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
 
 def _public_date_label(date_text):
-    parsed = _parse_run_date(date_text)
-    if not parsed:
-        return str(date_text or "").strip()
-    return f"{parsed.year}年{parsed.month}月{parsed.day}日"
+    return web_public_llm.public_date_label(date_text, parse_run_date=_parse_run_date)
+
+LLM_BATTLE_ORDER = REPORT_LLM_BATTLE_ORDER
+LLM_BATTLE_LABELS = REPORT_LLM_BATTLE_LABELS
+LLM_NOTE_LABELS = REPORT_LLM_NOTE_LABELS
+LLM_BATTLE_SHORT_LABELS = REPORT_LLM_BATTLE_SHORT_LABELS
+LLM_REPORT_SCOPE_KEYS = REPORT_LLM_REPORT_SCOPE_KEYS
+BET_TYPE_TEXT_MAP = REPORT_BET_TYPE_TEXT_MAP
+_scope_display_name = report_scope_display_name
+_safe_text = report_safe_text
+_policy_primary_budget = report_policy_primary_budget
+_policy_primary_output = report_policy_primary_output
+_policy_marks_map = report_policy_marks_map
+_format_ticket_plan_text = report_format_ticket_plan_text
+_format_marks_text = report_format_marks_text
+_run_date_key = report_run_date_key
+_parse_run_date = report_parse_run_date
+_format_jp_date_value = report_format_jp_date_value
+_has_llm_policy_assets = report_has_llm_policy_assets
+_report_scope_key_for_row = report_scope_key_for_row
+_payload_run_id = report_payload_run_id
+_race_no_text = report_race_no_text
+_format_race_label = report_format_race_label
+_format_jp_date_text = report_format_jp_date_text
+_build_battle_title = report_build_battle_title
+_jst_today_text = report_jst_today_text
+_normalize_report_date_text = report_normalize_report_date_text
+_llm_today_scope_keys = report_llm_today_scope_keys
+_format_yen_text = report_format_yen_text
+_format_percent_text = report_format_percent_text
+_llm_today_scope_label_ja = report_llm_today_scope_label_ja
+_public_scope_label_ja = report_public_scope_label_ja
 
 
 def build_public_board_payload(date_text="", scope_key=""):
-    requested_date = _normalize_report_date_text(date_text)
-    scope_norm = normalize_scope_key(scope_key)
-    scope_keys = _llm_today_scope_keys(scope_norm)
-    target_date, fallback_notice, combined_rows = _resolve_llm_today_target_date(requested_date, scope_norm)
-    actual_result_maps = {
-        report_scope_key: _load_actual_result_map(report_scope_key)
-        for report_scope_key in scope_keys
-    }
-
-    runs = []
-    for row in combined_rows:
-        report_scope_key = _report_scope_key_for_row(row, scope_norm)
-        if report_scope_key not in scope_keys:
-            continue
-        if _run_date_key(row) != target_date:
-            continue
-        runs.append(row)
-    runs.sort(
-        key=lambda row: (
-            _safe_text(row.get("race_date")),
-            _safe_text(row.get("location")),
-            _safe_text(row.get("race_id")),
-            _safe_text(row.get("timestamp")),
-            _safe_text(row.get("run_id")),
-        )
+    return web_public_llm.build_public_board_payload(
+        date_text=date_text,
+        scope_key=scope_key,
+        normalize_report_date_text=_normalize_report_date_text,
+        llm_today_scope_keys=_llm_today_scope_keys,
+        resolve_llm_today_target_date=_resolve_llm_today_target_date,
+        load_actual_result_map=_load_actual_result_map,
+        load_combined_llm_report_runs=_load_combined_llm_report_runs,
+        find_job_meta_for_run=_find_job_meta_for_run,
+        load_policy_payloads=load_policy_payloads,
+        normalize_policy_engine=normalize_policy_engine,
+        actual_result_snapshot=_actual_result_snapshot,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        summarize_ticket_rows=_summarize_ticket_rows,
+        format_triplet_text=_format_triplet_text,
+        marks_result_triplet=_marks_result_triplet,
+        format_confidence_text=_format_confidence_text,
+        format_distance_label=_format_distance_label,
+        public_all_time_roi_summary=_public_all_time_roi_summary,
+        public_trend_series=_public_trend_series,
+        parse_run_date=_parse_run_date,
     )
-
-    summary_by_engine = {
-        engine: {
-            "engine": engine,
-            "label": LLM_BATTLE_LABELS.get(engine, engine),
-            "races": 0,
-            "settled_races": 0,
-            "pending_races": 0,
-            "hit_races": 0,
-            "ticket_count": 0,
-            "stake_yen": 0,
-            "payout_yen": 0,
-            "profit_yen": 0,
-        }
-        for engine in LLM_BATTLE_ORDER
-    }
-
-    race_items = []
-    for run_row in runs:
-        run_id = _safe_text(run_row.get("run_id"))
-        report_scope_key = _report_scope_key_for_row(run_row, scope_norm)
-        job_meta = _find_job_meta_for_run(report_scope_key, run_id, run_row)
-        payload_map = {}
-        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
-            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
-            if engine:
-                payload_map[engine] = payload
-        if not payload_map:
-            continue
-
-        actual_snapshot = _actual_result_snapshot(
-            report_scope_key,
-            run_id,
-            run_row,
-            actual_result_maps.get(report_scope_key, {}),
-        )
-        actual_names = list(actual_snapshot.get("actual_names", []) or [])
-        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-        actual_text = _public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
-
-        cards = []
-        for engine in LLM_BATTLE_ORDER:
-            payload = payload_map.get(engine)
-            if not payload:
-                continue
-            output = _policy_primary_output(payload)
-            payload_input = dict((payload or {}).get("input", {}) or {})
-            ai_summary = dict(payload_input.get("ai", {}) or {})
-            marks_map = _policy_marks_map(payload)
-            ticket_run_id = _payload_run_id(payload, run_id)
-            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
-                _policy_primary_budget(payload).get("tickets", []) or []
-            )
-            ticket_summary = _summarize_ticket_rows(ticket_rows)
-            status_label, status_tone = _public_status_meta_ja(ticket_summary, actual_names)
-            result_triplet = _format_triplet_text(_marks_result_triplet(marks_map, actual_horse_nos))
-            result_triplet_text = result_triplet if any(_safe_text(x) for x in actual_horse_nos) else "未確定"
-            strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "戦略情報なし"
-            tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "傾向情報なし"
-            decision_text = _safe_text(output.get("bet_decision")) or "-"
-            confidence_value = ai_summary.get("confidence_score", "")
-            confidence_text = _format_confidence_text(confidence_value)
-
-            stats = summary_by_engine[engine]
-            stats["races"] += 1
-            stats["ticket_count"] += int(ticket_summary.get("ticket_count", 0) or 0)
-            stats["stake_yen"] += int(ticket_summary.get("stake_yen", 0) or 0)
-            stats["payout_yen"] += int(ticket_summary.get("payout_yen", 0) or 0)
-            stats["profit_yen"] += int(ticket_summary.get("profit_yen", 0) or 0)
-            if ticket_summary.get("status") == "settled":
-                stats["settled_races"] += 1
-            elif ticket_summary.get("status") == "pending":
-                stats["pending_races"] += 1
-            if int(ticket_summary.get("hit_count", 0) or 0) > 0:
-                stats["hit_races"] += 1
-
-            cards.append(
-                {
-                    "engine": engine,
-                    "label": LLM_BATTLE_LABELS.get(engine, engine),
-                    "decision_text": decision_text,
-                    "status_label": status_label,
-                    "status_tone": status_tone,
-                    "ticket_plan_text": _public_ticket_plan_text(ticket_rows),
-                    "strategy_text": strategy_text,
-                    "tendency_text": tendency_text,
-                    "marks_text": _format_marks_text(marks_map),
-                    "result_triplet_text": result_triplet_text,
-                    "ticket_count": int(ticket_summary.get("ticket_count", 0) or 0),
-                    "stake_yen": int(ticket_summary.get("stake_yen", 0) or 0),
-                    "payout_yen": int(ticket_summary.get("payout_yen", 0) or 0),
-                    "profit_yen": int(ticket_summary.get("profit_yen", 0) or 0),
-                    "hit_count": int(ticket_summary.get("hit_count", 0) or 0),
-                    "roi_text": _format_percent_text(ticket_summary.get("roi", "")),
-                    "confidence_text": confidence_text,
-                    "confidence_value": confidence_value,
-                }
-            )
-
-        if not cards:
-            continue
-
-        race_items.append(
-            {
-                "scope_key": report_scope_key,
-                "scope_label": _public_scope_label_ja(report_scope_key),
-                "race_title": _format_race_label(run_row),
-                "date_label": _public_date_label(_safe_text(run_row.get("race_date")) or target_date),
-                "actual_text": actual_text,
-                "location": _safe_text(job_meta.get("location")) or _safe_text(run_row.get("location")),
-                "scheduled_off_time": _safe_text(job_meta.get("scheduled_off_time")),
-                "distance_label": _format_distance_label(job_meta.get("target_distance")),
-                "track_condition": _safe_text(job_meta.get("target_track_condition")) or "良",
-                "run_id": run_id or "-",
-                "cards": cards,
-            }
-        )
-
-    summary_cards = []
-    total_stake = 0
-    total_payout = 0
-    total_profit = 0
-    total_settled = 0
-    total_pending = 0
-    visible_engine_count = 0
-    for engine in LLM_BATTLE_ORDER:
-        stats = summary_by_engine[engine]
-        if int(stats.get("races", 0) or 0) <= 0:
-            continue
-        visible_engine_count += 1
-        total_stake += int(stats.get("stake_yen", 0) or 0)
-        total_payout += int(stats.get("payout_yen", 0) or 0)
-        total_profit += int(stats.get("profit_yen", 0) or 0)
-        total_settled += int(stats.get("settled_races", 0) or 0)
-        total_pending += int(stats.get("pending_races", 0) or 0)
-        roi_value = ""
-        if int(stats.get("stake_yen", 0) or 0) > 0:
-            roi_value = round(float(stats["payout_yen"]) / float(stats["stake_yen"]), 4)
-        summary_cards.append(
-            {
-                "engine": engine,
-                "label": stats["label"],
-                "races": int(stats["races"]),
-                "settled_races": int(stats["settled_races"]),
-                "pending_races": int(stats["pending_races"]),
-                "hit_races": int(stats["hit_races"]),
-                "ticket_count": int(stats["ticket_count"]),
-                "stake_yen": int(stats["stake_yen"]),
-                "payout_yen": int(stats["payout_yen"]),
-                "profit_yen": int(stats["profit_yen"]),
-                "roi_text": _format_percent_text(roi_value),
-            }
-        )
-
-    total_roi_value = ""
-    if total_stake > 0:
-        total_roi_value = round(float(total_payout) / float(total_stake), 4)
-    generated_at_label = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M JST")
-    ranked_summary_cards = sorted(
-        list(summary_cards),
-        key=lambda item: (
-            1 if _safe_text(item.get("roi_text")) in ("", "-") else 0,
-            -(float(str(item.get("roi_text", "0")).replace("%", "") or 0.0) if _safe_text(item.get("roi_text")) not in ("", "-") else -9999.0),
-            -int(item.get("profit_yen", 0) or 0),
-        ),
-    )
-    hero_races = sorted(
-        list(race_items),
-        key=lambda item: (
-            -(int(re.search(r"(\d+)R", _safe_text(item.get("race_title"))).group(1)) if re.search(r"(\d+)R", _safe_text(item.get("race_title"))) else 0),
-            _safe_text(item.get("race_title")),
-        ),
-    )
-    lead_race = dict(hero_races[0]) if hero_races else {}
-
-    return {
-        "requested_date": requested_date,
-        "target_date": target_date,
-        "target_date_label": _public_date_label(target_date),
-        "generated_at_label": generated_at_label,
-        "scope_key": scope_norm or "",
-        "scope_options": [
-            {"value": "", "label": "すべての範囲"},
-            *[
-                {"value": key, "label": _public_scope_label_ja(key)}
-                for key in LLM_REPORT_SCOPE_KEYS
-            ],
-        ],
-        "fallback_notice": fallback_notice,
-        "all_time_roi": _public_all_time_roi_summary(),
-        "trend": _public_trend_series(days=10),
-        "totals": {
-            "race_count": len(race_items),
-            "engine_count": visible_engine_count,
-            "stake_yen": total_stake,
-            "payout_yen": total_payout,
-            "profit_yen": total_profit,
-            "settled_count": total_settled,
-            "pending_count": total_pending,
-            "roi_text": _format_percent_text(total_roi_value),
-        },
-        "summary_cards": summary_cards,
-        "hero": {
-            "lead_race": lead_race,
-            "leader": ranked_summary_cards[0] if ranked_summary_cards else {},
-        },
-        "races": race_items,
-    }
-
 
 def build_public_llm_page(date_text="", scope_key=""):
-    requested_date = _normalize_report_date_text(date_text)
-    scope_norm = normalize_scope_key(scope_key)
-    scope_keys = _llm_today_scope_keys(scope_norm)
-    target_date, fallback_notice, combined_rows = _resolve_llm_today_target_date(requested_date, scope_norm)
-    actual_result_maps = {
-        report_scope_key: _load_actual_result_map(report_scope_key)
-        for report_scope_key in scope_keys
-    }
-
-    runs = []
-    for row in combined_rows:
-        report_scope_key = _report_scope_key_for_row(row, scope_norm)
-        if report_scope_key not in scope_keys:
-            continue
-        if _run_date_key(row) != target_date:
-            continue
-        runs.append(row)
-    runs.sort(
-        key=lambda row: (
-            _safe_text(row.get("race_date")),
-            _safe_text(row.get("location")),
-            _safe_text(row.get("race_id")),
-            _safe_text(row.get("timestamp")),
-            _safe_text(row.get("run_id")),
-        )
+    payload = build_public_board_payload(date_text=date_text, scope_key=scope_key)
+    return web_public_llm.build_public_llm_page(
+        payload=payload,
+        prefix_public_html_routes=_prefix_public_html_routes,
     )
-
-    summary_by_engine = {
-        engine: {
-            "label": LLM_BATTLE_LABELS.get(engine, engine),
-            "races": 0,
-            "settled_races": 0,
-            "pending_races": 0,
-            "hit_races": 0,
-            "ticket_count": 0,
-            "stake_yen": 0,
-            "payout_yen": 0,
-            "profit_yen": 0,
-        }
-        for engine in LLM_BATTLE_ORDER
-    }
-
-    race_sections = []
-    for run_row in runs:
-        run_id = _safe_text(run_row.get("run_id"))
-        report_scope_key = _report_scope_key_for_row(run_row, scope_norm)
-        payload_map = {}
-        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
-            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
-            if engine:
-                payload_map[engine] = payload
-        if not payload_map:
-            continue
-
-        actual_snapshot = _actual_result_snapshot(
-            report_scope_key,
-            run_id,
-            run_row,
-            actual_result_maps.get(report_scope_key, {}),
-        )
-        actual_names = list(actual_snapshot.get("actual_names", []) or [])
-        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-        actual_text = _public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
-
-        engine_cards = []
-        for engine in LLM_BATTLE_ORDER:
-            payload = payload_map.get(engine)
-            if not payload:
-                continue
-            output = _policy_primary_output(payload)
-            marks_map = _policy_marks_map(payload)
-            ticket_run_id = _payload_run_id(payload, run_id)
-            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
-                _policy_primary_budget(payload).get("tickets", []) or []
-            )
-            ticket_summary = _summarize_ticket_rows(ticket_rows)
-            status_label, status_tone = _public_status_meta_ja(ticket_summary, actual_names)
-            ticket_text = html.escape(_public_ticket_plan_text(ticket_rows)).replace("\n", "<br>")
-            marks_text = html.escape(_format_marks_text(marks_map))
-            result_triplet = _format_triplet_text(_marks_result_triplet(marks_map, actual_horse_nos))
-            result_triplet_text = html.escape(result_triplet if any(_safe_text(x) for x in actual_horse_nos) else "未確定")
-            strategy_text = _safe_text(output.get("strategy_text_ja")) or _safe_text(output.get("strategy_mode")) or "戦略情報なし"
-            tendency_text = _safe_text(output.get("bet_tendency_ja")) or _safe_text(output.get("buy_style")) or "傾向情報なし"
-            decision_text = _safe_text(output.get("bet_decision")) or "-"
-
-            stats = summary_by_engine[engine]
-            stats["races"] += 1
-            stats["ticket_count"] += int(ticket_summary.get("ticket_count", 0) or 0)
-            stats["stake_yen"] += int(ticket_summary.get("stake_yen", 0) or 0)
-            stats["payout_yen"] += int(ticket_summary.get("payout_yen", 0) or 0)
-            stats["profit_yen"] += int(ticket_summary.get("profit_yen", 0) or 0)
-            if ticket_summary.get("status") == "settled":
-                stats["settled_races"] += 1
-            elif ticket_summary.get("status") == "pending":
-                stats["pending_races"] += 1
-            if int(ticket_summary.get("hit_count", 0) or 0) > 0:
-                stats["hit_races"] += 1
-
-            engine_cards.append(
-                f"""
-                <article class="front-card front-card--{html.escape(status_tone)}">
-                  <div class="front-card-head">
-                    <div>
-                      <div class="front-card-engine">{html.escape(LLM_BATTLE_LABELS.get(engine, engine))}</div>
-                      <div class="front-card-decision">判定: {html.escape(decision_text)}</div>
-                    </div>
-                    <span class="front-card-badge front-card-badge--{html.escape(status_tone)}">{html.escape(status_label)}</span>
-                  </div>
-                  <div class="front-card-body">
-                    <section class="front-card-block">
-                      <h4>買い目</h4>
-                      <p>{ticket_text}</p>
-                    </section>
-                    <section class="front-card-block">
-                      <h4>戦略</h4>
-                      <p>{html.escape(strategy_text)}</p>
-                      <p class="front-card-subtext">{html.escape(tendency_text)}</p>
-                    </section>
-                    <section class="front-card-block">
-                      <h4>印</h4>
-                      <p>{marks_text}</p>
-                    </section>
-                    <section class="front-card-block">
-                      <h4>印の結果</h4>
-                      <p>{result_triplet_text}</p>
-                    </section>
-                  </div>
-                  <div class="front-card-kpis">
-                    <span><strong>{int(ticket_summary.get("ticket_count", 0) or 0)}</strong> 点</span>
-                    <span>投資 {_public_yen_text(ticket_summary.get("stake_yen", 0))}</span>
-                    <span>払戻 {_public_yen_text(ticket_summary.get("payout_yen", 0))}</span>
-                    <span>収支 {_public_yen_text(ticket_summary.get("profit_yen", 0))}</span>
-                    <span>的中 {int(ticket_summary.get("hit_count", 0) or 0)}</span>
-                    <span>回収率 {_format_percent_text(ticket_summary.get("roi", ""))}</span>
-                  </div>
-                </article>
-                """
-            )
-
-        if not engine_cards:
-            continue
-
-        share_button_html = ""
-        if share_options:
-            share_options_json = html.escape(json.dumps(share_options, ensure_ascii=False), quote=True)
-            share_button_html = (
-                f'<button type="button" class="front-share-button" '
-                f'data-share-options="{share_options_json}" aria-label="シェア" title="シェア">↗</button>'
-            )
-
-        race_sections.append(
-            f"""
-            <section class="front-race">
-              <div class="front-race-head">
-                <div class="front-race-copy">
-                  <div class="front-race-eyebrow">{html.escape(_public_scope_label_ja(report_scope_key))}</div>
-                  <div class="front-race-title-row">
-                    <h2>{html.escape(_format_race_label(run_row))}</h2>
-                    {share_button_html}
-                  </div>
-                  <p>{html.escape(_public_date_label(_safe_text(run_row.get("race_date")) or target_date))}</p>
-                </div>
-                <div class="front-race-meta">
-                  <span>{html.escape(actual_text)}</span>
-                  <span>Run {html.escape(run_id or "-")}</span>
-                </div>
-              </div>
-              <div class="front-card-grid">
-                {"".join(engine_cards)}
-              </div>
-            </section>
-            """
-        )
-
-    visible_engine_count = 0
-    total_stake = 0
-    total_payout = 0
-    total_profit = 0
-    total_settled = 0
-    total_pending = 0
-    summary_cards = []
-    for engine in LLM_BATTLE_ORDER:
-        stats = summary_by_engine[engine]
-        if int(stats.get("races", 0) or 0) <= 0:
-            continue
-        visible_engine_count += 1
-        total_stake += int(stats.get("stake_yen", 0) or 0)
-        total_payout += int(stats.get("payout_yen", 0) or 0)
-        total_profit += int(stats.get("profit_yen", 0) or 0)
-        total_settled += int(stats.get("settled_races", 0) or 0)
-        total_pending += int(stats.get("pending_races", 0) or 0)
-        roi = ""
-        if int(stats.get("stake_yen", 0) or 0) > 0:
-            roi = round(float(stats["payout_yen"]) / float(stats["stake_yen"]), 4)
-        summary_cards.append(
-            f"""
-            <article class="hero-summary-card">
-              <div class="hero-summary-head">
-                <strong>{html.escape(stats['label'])}</strong>
-                <span>{int(stats['races'])}レース</span>
-              </div>
-              <div class="hero-summary-figure">{_public_yen_text(stats['profit_yen'])}</div>
-              <div class="hero-summary-metrics">
-                <span>確定 {int(stats['settled_races'])}</span>
-                <span>待機 {int(stats['pending_races'])}</span>
-                <span>的中 {int(stats['hit_races'])}</span>
-                <span>買い目 {int(stats['ticket_count'])}</span>
-                <span>投資 {_public_yen_text(stats['stake_yen'])}</span>
-                <span>払戻 {_public_yen_text(stats['payout_yen'])}</span>
-                <span>回収率 {_format_percent_text(roi)}</span>
-              </div>
-            </article>
-            """
-        )
-
-    total_roi = ""
-    if total_stake > 0:
-        total_roi = round(float(total_payout) / float(total_stake), 4)
-
-    scope_options = ['<option value="">すべての範囲</option>']
-    for key in LLM_REPORT_SCOPE_KEYS:
-        selected_attr = " selected" if scope_norm == key else ""
-        scope_options.append(
-            f'<option value="{html.escape(key)}"{selected_attr}>{html.escape(_public_scope_label_ja(key))}</option>'
-        )
-
-    hero_metrics_html = "".join(
-        [
-            f'<article class="hero-metric-card"><span>表示日</span><strong>{html.escape(_public_date_label(target_date))}</strong></article>',
-            f'<article class="hero-metric-card"><span>公開レース数</span><strong>{len(race_sections)}</strong></article>',
-            f'<article class="hero-metric-card"><span>稼働モデル</span><strong>{visible_engine_count}</strong></article>',
-            f'<article class="hero-metric-card"><span>総収支</span><strong>{_public_yen_text(total_profit)}</strong></article>',
-        ]
-    )
-
-    empty_state = ""
-    if not race_sections:
-        empty_state = """
-        <section class="front-empty">
-          <div class="front-empty-badge">NO DATA</div>
-          <h2>この日の公開データはまだありません</h2>
-          <p>直近の予想が公開されると、ここに各モデルの買い目、戦略、結果がまとめて表示されます。</p>
-        </section>
-        """
-
-    summary_html = "".join(summary_cards) if summary_cards else '<p class="hero-empty-inline">この日の集計データはまだありません。</p>'
-    fallback_notice_html = ""
-    if fallback_notice:
-        fallback_notice_html = f'<section class="front-notice">{html.escape(fallback_notice)}</section>'
-
-    return f"""<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LLM AI競馬予想ダッシュボード</title>
-  <style>
-    :root {{
-      --bg: #f4ede2;
-      --ink: #1c1c16;
-      --muted: #666454;
-      --paper: rgba(255, 252, 247, 0.9);
-      --paper-strong: #fffdf8;
-      --line: rgba(28, 28, 22, 0.08);
-      --accent: #0f5f4d;
-      --accent-strong: #09382e;
-      --accent-soft: rgba(15, 95, 77, 0.1);
-      --gold: #b7862e;
-      --gold-soft: rgba(183, 134, 46, 0.12);
-      --rose: #b55546;
-      --rose-soft: rgba(181, 85, 70, 0.12);
-      --slate: #59657a;
-      --slate-soft: rgba(89, 101, 122, 0.12);
-      --shadow: 0 24px 70px rgba(25, 23, 18, 0.1);
-      --hero-shadow: 0 36px 90px rgba(19, 24, 20, 0.12);
-      --title-font: "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif;
-      --body-font: "Hiragino Sans", "Yu Gothic UI", "Aptos", sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      color: var(--ink);
-      font-family: var(--body-font);
-      background:
-        radial-gradient(circle at 0% 0%, rgba(214, 188, 143, 0.46), transparent 28%),
-        radial-gradient(circle at 100% 0%, rgba(155, 190, 171, 0.42), transparent 30%),
-        linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
-    }}
-    .front-page {{
-      max-width: 1500px;
-      margin: 0 auto;
-      padding: 28px 20px 54px;
-      display: grid;
-      gap: 24px;
-    }}
-    .front-hero, .front-section, .front-race, .front-empty, .front-notice {{
-      background: var(--paper);
-      border: 1px solid rgba(255,255,255,0.7);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-    }}
-    .front-hero {{
-      position: relative;
-      overflow: hidden;
-      padding: 34px;
-      display: grid;
-      gap: 22px;
-      box-shadow: var(--hero-shadow);
-    }}
-    .front-hero::before {{
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        radial-gradient(circle at 85% 18%, rgba(15, 95, 77, 0.14), transparent 22%),
-        radial-gradient(circle at 12% 8%, rgba(183, 134, 46, 0.18), transparent 20%);
-      pointer-events: none;
-    }}
-    .front-hero-head,
-    .front-hero-grid,
-    .hero-summary-grid,
-    .front-card-grid {{
-      position: relative;
-      z-index: 1;
-    }}
-    .front-hero-head {{
-      display: grid;
-      gap: 14px;
-      grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
-      align-items: end;
-    }}
-    .front-eyebrow, .front-race-eyebrow {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }}
-    .front-hero-copy, .front-race-copy {{
-      display: grid;
-      gap: 10px;
-    }}
-    .front-race-title-row {{
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-    }}
-    .front-hero-copy h1, .front-race-copy h2, .front-section-head h2, .front-empty h2 {{
-      margin: 0;
-      font-family: var(--title-font);
-      font-weight: 700;
-      letter-spacing: 0.01em;
-    }}
-    .front-hero-copy h1 {{
-      font-size: clamp(40px, 5.6vw, 76px);
-      line-height: 0.9;
-      max-width: 9.5em;
-    }}
-    .front-hero-copy p, .front-highlight p, .front-section-head p, .front-race-copy p, .front-empty p {{
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.65;
-    }}
-    .front-highlight {{
-      display: grid;
-      gap: 12px;
-      padding: 20px;
-      border-radius: 22px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.48));
-      border: 1px solid rgba(28,28,22,0.06);
-    }}
-    .front-highlight strong, .hero-summary-figure, .hero-metric-card strong {{
-      font-size: 28px;
-      font-family: var(--title-font);
-      color: var(--accent-strong);
-    }}
-    .front-hero-grid, .hero-summary-grid, .front-card-grid {{
-      display: grid;
-      gap: 16px;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    }}
-    .hero-metric-card, .hero-summary-card, .front-card {{
-      border-radius: 22px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.78);
-      padding: 18px;
-      display: grid;
-      gap: 12px;
-    }}
-    .hero-summary-head, .front-card-head, .front-race-head, .front-section-head {{
-      display: flex;
-      gap: 14px;
-      justify-content: space-between;
-      align-items: start;
-    }}
-    .hero-summary-metrics, .front-card-kpis, .front-race-meta {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }}
-    .hero-summary-metrics span, .front-card-kpis span, .front-race-meta span {{
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(28,28,22,0.06);
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .front-filter {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: end;
-      position: relative;
-      z-index: 1;
-    }}
-    .front-filter label {{
-      display: grid;
-      gap: 6px;
-      min-width: 180px;
-      color: var(--muted);
-      font-size: 13px;
-    }}
-    .front-filter input, .front-filter select {{
-      min-height: 42px;
-      padding: 0 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: var(--paper-strong);
-      color: var(--ink);
-      font: inherit;
-    }}
-    .front-filter button {{
-      min-height: 42px;
-      padding: 0 18px;
-      border-radius: 999px;
-      border: 0;
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }}
-    .front-notice, .front-section, .front-race, .front-empty {{
-      padding: 24px;
-    }}
-    .front-notice {{
-      border-color: rgba(15, 95, 77, 0.12);
-      background: rgba(15, 95, 77, 0.08);
-      line-height: 1.6;
-    }}
-    .front-section {{
-      display: grid;
-      gap: 18px;
-    }}
-    .front-race {{
-      display: grid;
-      gap: 18px;
-    }}
-    .front-race-meta {{
-      justify-content: end;
-      align-self: center;
-    }}
-    .front-race-meta span {{
-      background: rgba(15,95,77,0.08);
-      color: var(--accent-strong);
-    }}
-    .front-card--settled {{
-      border-color: rgba(15,95,77,0.18);
-      background: linear-gradient(180deg, rgba(15,95,77,0.08), rgba(255,255,255,0.8));
-    }}
-    .front-card--pending {{
-      border-color: rgba(183,134,46,0.18);
-      background: linear-gradient(180deg, rgba(183,134,46,0.08), rgba(255,255,255,0.8));
-    }}
-    .front-card--planned, .front-card--result {{
-      border-color: rgba(89,101,122,0.18);
-    }}
-    .front-card-engine {{
-      font-size: 24px;
-      font-family: var(--title-font);
-    }}
-    .front-card-decision {{
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 13px;
-    }}
-    .front-card-badge {{
-      padding: 7px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-    }}
-    .front-card-badge--settled {{ background: var(--accent-soft); color: var(--accent-strong); }}
-    .front-card-badge--pending {{ background: var(--gold-soft); color: var(--gold); }}
-    .front-card-badge--planned, .front-card-badge--result {{ background: var(--slate-soft); color: var(--slate); }}
-    .front-card-body {{
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    }}
-    .front-card-block {{
-      padding: 14px;
-      border-radius: 18px;
-      background: rgba(28,28,22,0.04);
-      min-height: 138px;
-      display: grid;
-      gap: 8px;
-      align-content: start;
-    }}
-    .front-card-block h4 {{
-      margin: 0;
-      font-size: 13px;
-      color: var(--muted);
-    }}
-    .front-card-block p {{
-      margin: 0;
-      white-space: pre-wrap;
-      line-height: 1.55;
-    }}
-    .front-card-subtext {{
-      color: var(--muted);
-      font-size: 13px;
-    }}
-    .front-card-kpis strong {{
-      font-size: 14px;
-      color: var(--ink);
-    }}
-    .front-share-button {{
-      width: 38px;
-      height: 38px;
-      flex: 0 0 38px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 999px;
-      border: 1px solid rgba(15,95,77,0.16);
-      background: rgba(15,95,77,0.08);
-      color: var(--accent-strong);
-      font: inherit;
-      font-size: 18px;
-      font-weight: 700;
-      line-height: 1;
-      cursor: pointer;
-      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
-    }}
-    .front-share-button:hover {{
-      transform: translateY(-1px);
-      background: rgba(15,95,77,0.14);
-      border-color: rgba(15,95,77,0.24);
-    }}
-    .front-empty {{
-      text-align: center;
-      display: grid;
-      gap: 12px;
-    }}
-    .front-empty-badge {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto;
-      min-height: 32px;
-      padding: 0 14px;
-      border-radius: 999px;
-      background: rgba(28,28,22,0.06);
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-    }}
-    .hero-empty-inline {{
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
-    }}
-    @media (max-width: 760px) {{
-      .front-page {{ padding: 18px 14px 28px; }}
-      .front-hero, .front-section, .front-race, .front-empty, .front-notice {{ padding: 18px; }}
-      .front-hero-head {{ grid-template-columns: 1fr; }}
-      .front-filter {{ flex-direction: column; align-items: stretch; }}
-      .front-filter label, .front-filter input, .front-filter select, .front-filter button {{ width: 100%; }}
-      .front-race-head, .front-card-head, .front-section-head {{ flex-direction: column; }}
-      .front-race-title-row {{ align-items: flex-start; }}
-      .front-race-meta {{ justify-content: start; }}
-    }}
-  </style>
-</head>
-<body>
-  <main class="front-page">
-    <section class="front-hero">
-      <div class="front-hero-head">
-        <div class="front-hero-copy">
-          <div class="front-eyebrow">LLM AI HORSE RACING BOARD</div>
-          <h1>今日公開されているLLM予想を、ひと目で。</h1>
-          <p>各モデルの買い目、戦略、印、回収結果までを1ページに集約。今日はどのAIがどう買っているかを、一般ユーザーでも直感的に追える公開ボードです。</p>
-        </div>
-        <div class="front-highlight">
-          <div class="front-eyebrow">TODAY SNAPSHOT</div>
-          <strong>{_public_yen_text(total_profit)}</strong>
-          <p>総投資 {_public_yen_text(total_stake)} / 総払戻 {_public_yen_text(total_payout)} / 回収率 {_format_percent_text(total_roi)}</p>
-          <p>確定 {total_settled} レース・結果待ち {total_pending} レース</p>
-        </div>
-      </div>
-      <div class="front-hero-grid">
-        {hero_metrics_html}
-      </div>
-      <form class="front-filter" method="get" action="/llm_today">
-        <label>日付
-          <input type="date" name="date" value="{html.escape(target_date)}">
-        </label>
-        <label>範囲
-          <select name="scope_key">
-            {"".join(scope_options)}
-          </select>
-        </label>
-        <button type="submit">表示を更新</button>
-      </form>
-    </section>
-    {fallback_notice_html}
-    <section class="front-section">
-      <div class="front-section-head">
-        <div>
-          <div class="front-eyebrow">MODEL SUMMARY</div>
-          <h2>モデル別サマリー</h2>
-        </div>
-        <p>その日に公開された全レースをモデル別に集計しています。まずはここで、どのモデルがどんな収支傾向だったかをつかめます。</p>
-      </div>
-      <div class="hero-summary-grid">{summary_html}</div>
-    </section>
-    {empty_state}
-    {"".join(race_sections)}
-  </main>
-</body>
-</html>"""
-
 
 _JOB_STEP_LABELS = {
     "odds": "赔率",
@@ -6756,22 +4864,7 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
 
 
 def _race_job_status_label_clean(status):
-    mapping = {
-        "uploaded": "已上传",
-        "scheduled": "待处理",
-        "queued_process": "待执行",
-        "processing": "处理中",
-        "waiting_v5": "等待远程预测",
-        "queued_policy": "等待 LLM",
-        "processing_policy": "LLM 处理中",
-        "ready": "预测已生成",
-        "queued_settle": "待结算",
-        "settling": "结算中",
-        "settled": "已结算",
-        "failed": "失败",
-    }
-    text = str(status or "").strip().lower()
-    return mapping.get(text, text or "-")
+    return web_admin_jobs.race_job_status_label_clean(status)
 
 
 def _race_job_action_buttons_clean(job_id, status, admin_token=""):
@@ -6812,775 +4905,104 @@ def _race_job_action_buttons_clean(job_id, status, admin_token=""):
 
 
 def _race_job_settle_form_clean(row, admin_token=""):
-    current_run_id = str((row or {}).get("current_run_id", "") or "").strip()
-    if not current_run_id:
-        return ""
-    status_text = str((row or {}).get("status", "") or "").strip().lower()
-    if status_text not in ("ready", "queued_settle", "settling", "settled", "failed"):
-        return ""
-    job_id = str((row or {}).get("job_id", "") or "").strip()
-    top1 = str((row or {}).get("actual_top1", "") or "").strip()
-    top2 = str((row or {}).get("actual_top2", "") or "").strip()
-    top3 = str((row or {}).get("actual_top3", "") or "").strip()
-    if status_text == "settled":
-        return ""
-    return f"""
-    <section class="job-settle-panel">
-      <div class="job-settle-head">
-        <strong>Step 3: 录入赛果并结算</strong>
-        <span>填写 1-3 着马名后直接结算。</span>
-      </div>
-      <div class="job-settle-actions">
-        <form method="post" action="/console/tasks/settle_now" class="job-settle-form">
-          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(top1)}" placeholder="1着马名">
-          <input type="text" name="actual_top2" value="{html.escape(top2)}" placeholder="2着马名">
-          <input type="text" name="actual_top3" value="{html.escape(top3)}" placeholder="3着马名">
-          <button type="submit">立即结算</button>
-        </form>
-      </div>
-    </section>
-    """
+    return web_admin_jobs.race_job_settle_form_clean(row, admin_token=admin_token)
 
 
-def _race_job_edit_form_clean(row, admin_token=""):
-    row = dict(row or {})
-    job_id = str(row.get("job_id", "") or "").strip()
-    race_id = str(row.get("race_id", "") or "").strip()
-    location = str(row.get("location", "") or "").strip()
-    race_date = str(row.get("race_date", "") or "").strip() or _default_job_race_date_text()
-    scheduled_off_time = str(row.get("scheduled_off_time", "") or "").strip()
-    lead_minutes = str(row.get("lead_minutes", 30) or 30).strip() or "30"
-    target_distance = str(row.get("target_distance", "") or "").strip()
-    target_track_condition = str(row.get("target_track_condition", "") or "").strip()
-    notes = str(row.get("notes", "") or "").strip()
-    return f"""
-    <details class="panel-subtle" style="margin-top:12px;">
-      <summary style="cursor:pointer;font-weight:700;">编辑任务信息</summary>
-      <form method="post" action="/console/tasks/edit" class="stack-form" style="margin-top:12px;">
-        <input type="hidden" name="token" value="{html.escape(admin_token)}">
-        <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-        <div class="field-grid">
-          <div>
-            <label>Race ID</label>
-            <input type="text" name="race_id" value="{html.escape(race_id)}">
-          </div>
-          <div>
-            <label>比赛地点</label>
-            <input type="text" name="location" value="{html.escape(location)}">
-          </div>
-          <div>
-            <label>比赛日期</label>
-            <input type="date" name="race_date" value="{html.escape(race_date)}">
-          </div>
-          <div>
-            <label>开赛时间</label>
-            <input type="datetime-local" name="scheduled_off_time" value="{html.escape(scheduled_off_time[:16])}">
-          </div>
-          <div>
-            <label>提前分钟</label>
-            <input type="number" name="lead_minutes" min="0" value="{html.escape(lead_minutes)}">
-          </div>
-          <div>
-            <label>比赛距离</label>
-            <input type="number" name="target_distance" min="100" step="100" value="{html.escape(target_distance)}">
-          </div>
-          <div>
-            <label>场地状态</label>
-            <select name="target_track_condition">
-              <option value="良"{' selected' if target_track_condition == '良' else ''}>良</option>
-              <option value="稍重"{' selected' if target_track_condition == '稍重' else ''}>稍重</option>
-              <option value="重"{' selected' if target_track_condition == '重' else ''}>重</option>
-              <option value="不良"{' selected' if target_track_condition == '不良' else ''}>不良</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label>备注</label>
-          <textarea name="notes">{html.escape(notes)}</textarea>
-        </div>
-        <button type="submit" class="secondary-button">保存修改</button>
-      </form>
-    </details>
-    """
+def _race_job_edit_form_clean(row, admin_token="", default_job_race_date_text=None):
+    return web_admin_jobs.race_job_edit_form_clean(
+        row,
+        admin_token=admin_token,
+        default_job_race_date_text=default_job_race_date_text or _default_job_race_date_text,
+    )
 
 
 def _admin_job_card_html_clean(row, admin_token=""):
-    row = dict(row or {})
-    job_id = str(row.get("job_id", "") or "").strip()
-    status = str(row.get("status", "") or "").strip()
-    current_run_id = str(row.get("current_run_id", "") or "").strip()
-    scope_key = str(row.get("scope_key", "") or "").strip()
-    race_date = str(row.get("race_date", "") or "").strip()
-    location = str(row.get("location", "") or "").strip()
-    race_id = str(row.get("race_id", "") or "").strip()
-    notes = str(row.get("notes", "") or "").strip()
-    actual_top1 = str(row.get("actual_top1", "") or "").strip()
-    actual_top2 = str(row.get("actual_top2", "") or "").strip()
-    actual_top3 = str(row.get("actual_top3", "") or "").strip()
-    artifacts = list(row.get("artifacts", []) or [])
-    artifact_map = {
-        str(item.get("artifact_type", "")).strip().lower(): dict(item)
-        for item in artifacts
-        if isinstance(item, dict)
-    }
-    kachiuma_name = str((artifact_map.get("kachiuma") or {}).get("original_name", "") or "未上传")
-    shutuba_name = str((artifact_map.get("shutuba") or {}).get("original_name", "") or "未上传")
-    timing_items = []
-    for label, key in (
-        ("开赛", "scheduled_off_time"),
-        ("预计开始处理", "process_after_time"),
-        ("入处理队列", "queued_process_at"),
-        ("预测完成", "ready_at"),
-        ("结算完成", "settled_at"),
-    ):
-        value = str(row.get(key, "") or "").strip()
-        if value:
-            timing_items.append(f"<span>{html.escape(label)} {html.escape(value)}</span>")
-    open_links = ""
-    if current_run_id:
-        open_links = f"""
-        <form method="post" action="/view_run" class="stack-form">
-          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
-          <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">打开 Run</button>
-        </form>
-        <form method="get" action="/llm_today" class="stack-form">
-          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
-          <input type="hidden" name="date" value="{html.escape(race_date)}">
-          <button type="submit" class="secondary-button">查看当日看板</button>
-        </form>
-        """
-    return f"""
-    <section class="panel panel--tight">
-      <div class="section-title">
-        <div>
-          <div class="eyebrow">Task</div>
-          <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '未命名任务')}</h2>
-        </div>
-        <span class="section-chip">{html.escape(_race_job_status_label_clean(status))}</span>
-      </div>
-      <div class="copy-row">
-        <span class="hero-pill">范围 {html.escape(_scope_display_name(scope_key))}</span>
-        <span class="hero-pill">日期 {html.escape(race_date or '-')}</span>
-        <span class="hero-pill">条件 {html.escape(str(row.get('target_surface', '') or '-'))} / {html.escape(str(row.get('target_distance', '') or '-'))}m / {html.escape(str(row.get('target_track_condition', '') or '-'))}</span>
-        <span class="hero-pill">Run {html.escape(current_run_id or '-')}</span>
-        <span class="hero-pill">赛果 {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
-      </div>
-      <div class="copy-row">
-        <span class="hero-pill">kachiuma: {html.escape(kachiuma_name)}</span>
-        <span class="hero-pill">shutuba: {html.escape(shutuba_name)}</span>
-        {''.join(timing_items)}
-      </div>
-      <p class="helper-text">{html.escape(notes or '无备注')}</p>
-      <div class="copy-row">
-        {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
-        {open_links}
-      </div>
-      {_race_job_edit_form_clean(row, admin_token=admin_token)}
-      {_race_job_settle_form_clean(row, admin_token=admin_token)}
-    </section>
-    """
+    return web_admin_jobs.admin_job_card_html_clean(
+        row,
+        admin_token=admin_token,
+        scope_display_name=_scope_display_name,
+        race_job_action_buttons_v2=_race_job_action_buttons_v2,
+        race_job_status_label_clean=_race_job_status_label_clean,
+        race_job_edit_form_clean=_race_job_edit_form_clean,
+        race_job_settle_form_clean=_race_job_settle_form_clean,
+        default_job_race_date_text=_default_job_race_date_text,
+    )
 
 
 def build_admin_filter_panel(admin_token="", show_settled=False):
-    toggle_value = "0" if show_settled else "1"
-    toggle_label = "隐藏已结算任务" if show_settled else "显示已结算任务"
-    return f"""
-    <section class="panel panel--tight">
-      <div class="section-title">
-        <div>
-          <div class="eyebrow">Filter</div>
-          <h2>任务过滤</h2>
-        </div>
-        <span class="section-chip">view</span>
-      </div>
-      <div class="copy-row">
-        <span class="hero-pill">默认隐藏已结算任务</span>
-        <span class="hero-pill">已录入赛果不显示 Step 3</span>
-      </div>
-      <div class="copy-row">
-        <a href="/console?token={html.escape(admin_token)}&show_settled={toggle_value}" class="secondary-button">{toggle_label}</a>
-        <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">所有LLM追加当日预算</button>
-        </form>
-      </div>
-    </section>
-    """
+    return web_admin_jobs.build_admin_filter_panel(admin_token=admin_token, show_settled=show_settled)
 
 
 def build_admin_workspace_html_clean(message_text="", error_text="", admin_token="", authorized=True, show_settled=False):
-    if not authorized:
-        return f"""
-        <section class="content-cluster" id="admin-zone">
-          <section class="panel panel-error">
-            <div class="section-title">
-              <div>
-                <div class="eyebrow">Admin</div>
-                <h2>任务后台</h2>
-              </div>
-              <span class="section-chip">locked</span>
-            </div>
-            <p class="helper-text">{html.escape(error_text or "管理口令无效。")}</p>
-          </section>
-        </section>
-        """
-
-    jobs = load_race_jobs(BASE_DIR)
-    summary = {
-        "total": len(jobs),
-        "scheduled": 0,
-        "processing": 0,
-        "ready": 0,
-        "settled": 0,
-    }
-    for job in jobs:
-        status = str(job.get("status", "") or "").strip().lower()
-        if status == "scheduled":
-            summary["scheduled"] += 1
-        elif status in ("queued_process", "processing", "queued_settle", "settling"):
-            summary["processing"] += 1
-        elif status == "ready":
-            summary["ready"] += 1
-        elif status == "settled":
-            summary["settled"] += 1
-
-    visible_jobs = [
-        job
-        for job in jobs
-        if show_settled or str(job.get("status", "") or "").strip().lower() != "settled"
-    ]
-    cards_html = "".join(_admin_job_card_html_clean(job, admin_token=admin_token) for job in visible_jobs)
-    if not cards_html:
-        cards_html = """
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Tasks</div>
-              <h2>暂无任务</h2>
-            </div>
-            <span class="section-chip">empty</span>
-          </div>
-          <p class="helper-text">先上传一场比赛的 `kachiuma.csv` 和 `shutuba.csv`，再执行预测流程。</p>
-        </section>
-        """
-
-    message_panel = ""
-    if message_text:
-        message_panel = f"""
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Result</div>
-              <h2>操作结果</h2>
-            </div>
-            <span class="section-chip">ok</span>
-          </div>
-          <p class="helper-text">{html.escape(message_text)}</p>
-        </section>
-        """
-    error_panel = ""
-    if error_text:
-        error_panel = f"""
-        <section class="panel panel-error">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Error</div>
-              <h2>错误信息</h2>
-            </div>
-            <span class="section-chip">error</span>
-          </div>
-          <pre>{html.escape(error_text)}</pre>
-        </section>
-        """
-
-    default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
-    default_date = _default_job_race_date_text()
-    return f"""
-    <section class="content-cluster" id="admin-zone">
-      <div class="cluster-head">
-        <div>
-          <div class="eyebrow">Admin Workspace</div>
-          <h2>任务后台</h2>
-        </div>
-        <p>当前后台只做三件事：上传输入、执行预测、录入赛果并结算。流程已经跑通，这里主要服务日常运营。</p>
-      </div>
-      <div class="cluster-grid cluster-grid--stack">
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Overview</div>
-              <h2>任务概览</h2>
-            </div>
-            <span class="section-chip">manual</span>
-          </div>
-          <div class="copy-row">
-            <span class="hero-pill">总任务 {summary['total']}</span>
-            <span class="hero-pill">待处理 {summary['scheduled']}</span>
-            <span class="hero-pill">处理中 {summary['processing']}</span>
-            <span class="hero-pill">预测已生成 {summary['ready']}</span>
-            <span class="hero-pill">已结算 {summary['settled']}</span>
-          </div>
-          <div class="copy-row">
-            <form method="post" action="/console/tasks/scan_due" class="stack-form">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">扫描到点任务</button>
-            </form>
-            <form method="post" action="/console/tasks/run_due_now" class="stack-form">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">执行已入队任务</button>
-            </form>
-            <a href="/llm_today" class="secondary-button">查看前台看板</a>
-          </div>
-          <p class="helper-text">如果暂时不做自动调度，就按这个节奏操作：上传两份 CSV，手动执行，赛后录入前三名并结算。</p>
-        </section>
-        {message_panel}
-        {error_panel}
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Step 1</div>
-              <h2>上传输入文件</h2>
-            </div>
-            <span class="section-chip">upload</span>
-          </div>
-          <form class="stack-form" method="post" action="/console/tasks/create" enctype="multipart/form-data">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div class="field-grid">
-              <div>
-                <label>赛道范围</label>
-                <select name="scope_key">
-                  <option value="central_dirt">中央 Dirt</option>
-                  <option value="central_turf">中央 Turf</option>
-                  <option value="local">地方</option>
-                </select>
-              </div>
-              <div>
-                <label>Race ID</label>
-                <input type="text" name="race_id" placeholder="202606010109">
-              </div>
-              <div>
-                <label>比赛地点</label>
-                <input type="text" name="location" placeholder="中山">
-              </div>
-              <div>
-                <label>比赛日期</label>
-	                <input type="date" name="race_date" value="{html.escape(default_date)}">
-              </div>
-              <div>
-                <label>开赛时间</label>
-                <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
-              </div>
-              <div>
-                <label>提前执行分钟数</label>
-                <input type="number" name="lead_minutes" min="0" value="30">
-              </div>
-              <div>
-                <label>本场场地</label>
-              </div>
-              <div>
-                <label>本场距离</label>
-                <input type="number" name="target_distance" min="100" step="100" value="1600" placeholder="1600">
-              </div>
-              <div>
-                <label>本场马场状态</label>
-                <select name="target_track_condition">
-                  <option value="良">良</option>
-                  <option value="稍重">稍重</option>
-                  <option value="重">重</option>
-                  <option value="不良">不良</option>
-                </select>
-              </div>
-              <div>
-                <label>kachiuma.csv</label>
-                <input type="file" name="kachiuma_file" accept=".csv">
-              </div>
-              <div>
-                <label>shutuba.csv</label>
-                <input type="file" name="shutuba_file" accept=".csv">
-              </div>
-            </div>
-            <div>
-              <label>备注</label>
-              <textarea name="notes" placeholder="可记录这场比赛的说明、上传来源或临时备注。"></textarea>
-            </div>
-            <button type="submit">创建任务</button>
-          </form>
-        </section>
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Step 2 / Step 3</div>
-              <h2>预测与结算任务</h2>
-            </div>
-            <span class="section-chip">jobs</span>
-          </div>
-          <div class="cluster-grid cluster-grid--stack">
-            {cards_html}
-          </div>
-        </section>
-      </div>
-    </section>
-    """
+    return web_admin_jobs.build_admin_workspace_html_clean(
+        message_text=message_text,
+        error_text=error_text,
+        admin_token=admin_token,
+        authorized=authorized,
+        show_settled=show_settled,
+        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
+        admin_job_card_html_clean=lambda row, admin_token="": _admin_job_card_html_clean(row, admin_token=admin_token),
+        default_job_race_date_text=_default_job_race_date_text,
+    )
 
 
 def render_console_page(message_text="", error_text="", admin_token="", show_settled=False):
-    return render_page(
-        "",
+    return web_admin_console.render_console_page(
+        message_text=message_text,
+        error_text=error_text,
         admin_token=admin_token,
-        admin_workspace_html=(
-            build_import_archive_panel(admin_token=admin_token)
-            + build_admin_filter_panel(admin_token=admin_token, show_settled=show_settled)
-            + build_admin_workspace_html_clean(
-                message_text=message_text,
-                error_text=error_text,
-                admin_token=admin_token,
-                authorized=_admin_token_valid(admin_token),
-                show_settled=show_settled,
-            )
-        ),
+        show_settled=show_settled,
+        render_page=render_page,
+        build_import_archive_panel=build_import_archive_panel,
+        build_admin_filter_panel=build_admin_filter_panel,
+        build_admin_workspace_html_clean=build_admin_workspace_html_clean,
+        admin_token_valid=_admin_token_valid,
     )
 
 
 def _resolve_console_run_state(scope_key="", selected_run_id="", summary_run_id="", output_text=""):
-    scope_norm = normalize_scope_key(scope_key)
-    run_id = ""
-    run_row = None
-    if scope_norm:
-        if selected_run_id:
-            run_row = resolve_run(selected_run_id, scope_norm)
-            if run_row:
-                run_id = run_row.get("run_id", selected_run_id)
-            else:
-                run_id = selected_run_id
-        else:
-            run_id = parse_run_id(output_text)
-            if run_id:
-                run_row = resolve_run(run_id, scope_norm)
-            else:
-                run_row = resolve_run("", scope_norm)
-                if run_row:
-                    run_id = run_row.get("run_id", "")
-    view_selected_run_id = selected_run_id or run_id or summary_run_id
-    current_race_id = ""
-    if run_row:
-        current_race_id = normalize_race_id(run_row.get("race_id", ""))
-    if not current_race_id:
-        race_candidate = re.sub(r"\D", "", selected_run_id or summary_run_id or "")
-        if re.fullmatch(r"\d{12}", race_candidate):
-            current_race_id = race_candidate
-    return {
-        "scope_key": scope_norm or scope_key or "central_dirt",
-        "run_id": str(run_id or "").strip(),
-        "run_row": dict(run_row or {}),
-        "current_race_id": str(current_race_id or "").strip(),
-        "selected_run_id": str(view_selected_run_id or "").strip(),
-    }
+    return web_admin_console.resolve_console_run_state(
+        scope_key=scope_key,
+        selected_run_id=selected_run_id,
+        summary_run_id=summary_run_id,
+        output_text=output_text,
+        resolve_run=resolve_run,
+        parse_run_id=parse_run_id,
+        normalize_race_id=normalize_race_id,
+    )
 
 
 def _load_note_workspace(scope_key="", run_id="", run_row=None):
-    mark_note_text = ""
-    llm_note_text = ""
-    daily_report_text = ""
-    weekly_report_text = ""
-    if not run_id:
-        return {
-            "mark_note_text": "",
-            "llm_note_text": "",
-            "daily_report_text": "",
-            "weekly_report_text": "",
-        }
-
-    scope_norm = normalize_scope_key(scope_key)
-    run_row = dict(run_row or {})
-    bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm, run_id)
-    policy_payloads = []
-    actual_result_map = _load_actual_result_map(scope_norm)
-    for payload in load_policy_payloads(scope_norm, run_id, run_row):
-        payload = dict(payload)
-        budget_items = [dict(item) for item in list(payload.get("budgets", []) or [])]
-        live_policy_engine = normalize_policy_engine(payload.get("policy_engine", "gemini"))
-        live_summary = load_policy_bankroll_summary(
-            run_id,
-            (run_row or {}).get("timestamp", ""),
-            policy_engine=live_policy_engine,
-        )
-        live_tickets = load_policy_run_ticket_rows(run_id, policy_engine=live_policy_engine)
-        if budget_items:
-            first = dict(budget_items[0])
-            portfolio = dict(first.get("portfolio", {}) or {})
-            portfolio.setdefault("before", dict(live_summary))
-            portfolio["after"] = dict(live_summary)
-            first["portfolio"] = portfolio
-            if live_tickets:
-                first["tickets"] = live_tickets
-            budget_items[0] = first
-        payload["budgets"] = budget_items
-        policy_payloads.append(payload)
-
-    primary_policy_payload = dict(policy_payloads[0]) if policy_payloads else {}
-    battle_bundle = _build_llm_battle_bundle(
-        scope_norm,
-        run_id,
-        run_row,
-        policy_payloads,
-        actual_result_map,
+    return web_admin_console.load_note_workspace(
+        scope_key=scope_key,
+        run_id=run_id,
+        run_row=run_row,
+        load_bet_engine_v3_cfg_summary=load_bet_engine_v3_cfg_summary,
+        load_actual_result_map=_load_actual_result_map,
+        load_policy_payloads=load_policy_payloads,
+        normalize_policy_engine=normalize_policy_engine,
+        load_policy_bankroll_summary=load_policy_bankroll_summary,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        build_llm_battle_bundle=_build_llm_battle_bundle,
+        build_llm_daily_report_bundle=_build_llm_daily_report_bundle,
+        build_llm_weekly_report_bundle=_build_llm_weekly_report_bundle,
+        resolve_predictor_paths=resolve_predictor_paths,
+        load_ability_marks_table=load_ability_marks_table,
+        load_mark_recommendation_table=load_mark_recommendation_table,
+        load_text_file=load_text_file,
+        build_mark_note_text=build_mark_note_text,
     )
-    llm_note_text = str(battle_bundle.get("note_text", "") or "").strip()
-    daily_report_text = str(_build_llm_daily_report_bundle(scope_norm, run_row, actual_result_map).get("text", "") or "").strip()
-    weekly_report_text = str(_build_llm_weekly_report_bundle(scope_norm, run_row, actual_result_map).get("text", "") or "").strip()
-
-    predictor_note_texts = []
-    for spec, pred_path in resolve_predictor_paths(scope_norm, run_id, run_row):
-        if not pred_path or not pred_path.exists():
-            continue
-        predictor_run_row = dict(run_row or {})
-        predictor_run_row["predictions_path"] = str(pred_path)
-        ability_rows, _ability_cols = load_ability_marks_table(scope_norm, run_id, predictor_run_row)
-        if not ability_rows:
-            ability_rows, _mark_cols = load_mark_recommendation_table(scope_norm, run_id, predictor_run_row)
-        pred_csv_text = load_text_file(pred_path)
-        note_text = build_mark_note_text(
-            ability_rows if ability_rows else [],
-            pred_path.name if pred_path else "",
-            pred_csv_text,
-            bet_engine_v3_summary=bet_engine_v3_summary,
-            gemini_policy_payload=primary_policy_payload,
-        ).strip()
-        if note_text:
-            predictor_note_texts.append(f"[{spec['label']}]\n{note_text}")
-    if predictor_note_texts:
-        mark_note_text = "\n\n".join(predictor_note_texts)
-
-    return {
-        "mark_note_text": mark_note_text,
-        "llm_note_text": llm_note_text,
-        "daily_report_text": daily_report_text,
-        "weekly_report_text": weekly_report_text,
-    }
 
 
 def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
-    state = _resolve_console_run_state(scope_key=scope_key, selected_run_id=run_id)
-    scope_norm = normalize_scope_key(state["scope_key"]) or "central_dirt"
-    note_bundle = _load_note_workspace(scope_norm, state["run_id"], state["run_row"])
-    encoded_token = quote_plus(str(admin_token or "").strip()) if admin_token else ""
-    back_href = f"/console?token={encoded_token}" if encoded_token else "/console"
-    encoded_scope = quote_plus(scope_norm)
-    run_value = state["selected_run_id"] or state["current_race_id"]
-    note_href = f"/console/note?scope_key={encoded_scope}"
-    if run_value:
-        note_href += f"&run_id={quote_plus(run_value)}"
-    if encoded_token:
-        note_href += f"&token={encoded_token}"
-
-    def _note_block(title, text_value, dom_id, tone=""):
-        text_value = str(text_value or "").strip()
-        tone_class = f" note-card--{tone}" if tone else ""
-        if not text_value:
-            return f"""
-            <section class="note-card{tone_class}">
-              <div class="note-card-head">
-                <div>
-                  <div class="note-eyebrow">Note</div>
-                  <h2>{html.escape(title)}</h2>
-                </div>
-                <span class="note-chip">empty</span>
-              </div>
-              <p class="note-empty">当前没有可复制的内容。</p>
-            </section>
-            """
-        return f"""
-        <section class="note-card{tone_class}">
-          <div class="note-card-head">
-            <div>
-              <div class="note-eyebrow">Note</div>
-              <h2>{html.escape(title)}</h2>
-            </div>
-            <span class="note-chip">ready</span>
-          </div>
-          <div class="note-actions">
-            <button type="button" class="note-copy-button" data-copy-target="{html.escape(dom_id)}" data-copy-status="{html.escape(dom_id)}-status">复制</button>
-            <span id="{html.escape(dom_id)}-status" class="note-copy-status"></span>
-          </div>
-          <details class="note-preview" open>
-            <summary>预览</summary>
-            <pre>{html.escape(text_value)}</pre>
-          </details>
-          <textarea id="{html.escape(dom_id)}" class="note-source" readonly>{html.escape(text_value)}</textarea>
-        </section>
-        """
-
-    blocks_html = "".join(
-        [
-            _note_block("单场 LLM Note", note_bundle["llm_note_text"], "note-llm", tone="accent"),
-            _note_block("Predictor Note", note_bundle["mark_note_text"], "note-predictor"),
-            _note_block("Daily Report", note_bundle["daily_report_text"], "note-daily"),
-            _note_block("Weekly Report", note_bundle["weekly_report_text"], "note-weekly"),
-        ]
+    return web_admin_console.build_note_workspace_page(
+        scope_key=scope_key,
+        run_id=run_id,
+        admin_token=admin_token,
+        resolve_console_run_state=_resolve_console_run_state,
+        load_note_workspace=_load_note_workspace,
+        prefix_public_html_routes=_prefix_public_html_routes,
     )
-
-    run_label = state["run_id"] or "未指定"
-    race_label = state["current_race_id"] or "-"
-    return _prefix_public_html_routes(f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Note Workspace</title>
-  <style>
-    :root {{
-      --bg: #f3efe7;
-      --paper: rgba(255, 251, 246, 0.95);
-      --ink: #17201a;
-      --muted: #607063;
-      --accent: #145846;
-      --line: rgba(23,31,26,0.1);
-      --shadow: 0 18px 50px rgba(28,33,29,0.08);
-      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      color: var(--ink);
-      font-family: var(--body-font);
-      background:
-        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
-        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.6), transparent 30%),
-        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
-    }}
-    .note-page {{ max-width: 1320px; margin: 0 auto; padding: 28px 20px 40px; display: grid; gap: 20px; }}
-    .note-hero, .note-tools, .note-card {{
-      background: var(--paper);
-      border: 1px solid rgba(255,255,255,0.75);
-      border-radius: 24px;
-      box-shadow: var(--shadow);
-      padding: 22px;
-    }}
-    .note-eyebrow {{ font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }}
-    .note-hero h1, .note-card h2 {{ margin: 6px 0 0; font-family: var(--title-font); }}
-    .note-meta, .note-actions, .note-links {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
-    .note-pill {{
-      padding: 7px 12px;
-      border-radius: 999px;
-      background: rgba(23,31,26,0.06);
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .note-links a, .note-links button {{
-      min-height: 40px;
-      padding: 0 14px;
-      border: 0;
-      border-radius: 999px;
-      background: var(--accent);
-      color: #fff;
-      text-decoration: none;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-    }}
-    .note-tools form {{ display: grid; gap: 12px; }}
-    .note-form-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
-    .note-tools label {{ display: grid; gap: 6px; color: var(--muted); font-size: 13px; }}
-    .note-tools input, .note-tools select {{
-      width: 100%;
-      min-height: 42px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.95);
-      font: inherit;
-      color: var(--ink);
-    }}
-    .note-grid {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }}
-    .note-card-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: start; }}
-    .note-chip {{ padding: 7px 12px; border-radius: 999px; background: rgba(20,88,70,0.1); color: var(--accent); font-size: 12px; font-weight: 700; }}
-    .note-copy-button {{ min-height: 38px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }}
-    .note-copy-status {{ color: var(--muted); font-size: 12px; }}
-    .note-preview summary {{ cursor: pointer; font-weight: 700; }}
-    .note-preview pre {{
-      margin: 12px 0 0;
-      padding: 14px;
-      border-radius: 16px;
-      background: rgba(23,31,26,0.05);
-      overflow: auto;
-      white-space: pre-wrap;
-      line-height: 1.55;
-    }}
-    .note-source {{ position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }}
-    .note-empty {{ margin: 10px 0 0; color: var(--muted); }}
-    @media (max-width: 760px) {{
-      .note-page {{ padding: 18px 14px 30px; }}
-      .note-hero, .note-tools, .note-card {{ padding: 18px; }}
-    }}
-  </style>
-</head>
-<body>
-  <main class="note-page">
-    <section class="note-hero">
-      <div class="note-eyebrow">Console</div>
-      <h1>Note Workspace</h1>
-      <div class="note-meta" style="margin-top:12px;">
-        <span class="note-pill">Scope: {html.escape(scope_norm)}</span>
-        <span class="note-pill">Run: {html.escape(run_label)}</span>
-        <span class="note-pill">Race: {html.escape(race_label)}</span>
-      </div>
-      <div class="note-links" style="margin-top:14px;">
-        <a href="{html.escape(back_href)}">返回控制台</a>
-      </div>
-    </section>
-    <section class="note-tools">
-      <form method="get" action="/console/note">
-        <input type="hidden" name="token" value="{html.escape(admin_token)}">
-        <div class="note-form-grid">
-          <label>范围
-            <select name="scope_key">
-              <option value="central_dirt"{' selected' if scope_norm == 'central_dirt' else ''}>central_dirt</option>
-              <option value="central_turf"{' selected' if scope_norm == 'central_turf' else ''}>central_turf</option>
-              <option value="local"{' selected' if scope_norm == 'local' else ''}>local</option>
-            </select>
-          </label>
-          <label>Run ID / Race ID
-            <input type="text" name="run_id" value="{html.escape(run_value)}" placeholder="202501010101 或 20250101_123456">
-          </label>
-        </div>
-        <div class="note-links">
-          <button type="submit">打开这场 Note</button>
-          <a href="{html.escape(note_href)}">刷新当前页面</a>
-        </div>
-      </form>
-    </section>
-    <section class="note-grid">
-      {blocks_html}
-    </section>
-  </main>
-  <script>
-    const copyButtons = document.querySelectorAll(".note-copy-button");
-    copyButtons.forEach((button) => {{
-      button.addEventListener("click", async () => {{
-        const targetId = button.getAttribute("data-copy-target");
-        const statusId = button.getAttribute("data-copy-status");
-        const target = document.getElementById(targetId);
-        const status = document.getElementById(statusId);
-        if (!target) return;
-        try {{
-          await navigator.clipboard.writeText(target.value || "");
-          if (status) status.textContent = "已复制";
-        }} catch (error) {{
-          target.focus();
-          target.select();
-          document.execCommand("copy");
-          if (status) status.textContent = "已复制";
-        }}
-      }});
-    }});
-  </script>
-</body>
-</html>""")
 
 
 def _target_surface_from_scope(scope_key):
@@ -7610,1174 +5032,30 @@ def _default_job_race_date_text():
 
 
 def _import_history_zip(base_dir, archive_bytes, overwrite=False):
-    data_root = Path(base_dir) / "data"
-    data_root.mkdir(parents=True, exist_ok=True)
-    written = 0
-    skipped = 0
-    imported_paths = []
-    with zipfile.ZipFile(BytesIO(archive_bytes)) as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            raw_name = str(info.filename or "").replace("\\", "/").strip("/")
-            if not raw_name:
-                continue
-            parts = [part for part in raw_name.split("/") if part and part not in (".", "..")]
-            if not parts:
-                continue
-            rel_parts = None
-            if len(parts) >= 2 and parts[0] == "pipeline" and parts[1] == "data":
-                rel_parts = parts[2:]
-            elif parts[0] == "data":
-                rel_parts = parts[1:]
-            elif parts[0] in ("_shared", "central_dirt", "central_turf", "local"):
-                rel_parts = parts
-            if not rel_parts:
-                skipped += 1
-                continue
-            dest = data_root.joinpath(*rel_parts)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists() and not overwrite:
-                skipped += 1
-                continue
-            file_bytes = zf.read(info)
-            dest.write_bytes(file_bytes)
-            written += 1
-            imported_paths.append(str(dest.relative_to(data_root)).replace("\\", "/"))
-    return {
-        "written": written,
-        "skipped": skipped,
-        "sample_paths": imported_paths[:8],
-    }
+    return web_admin_tasks.import_history_zip(
+        base_dir=base_dir,
+        archive_bytes=archive_bytes,
+        overwrite=overwrite,
+    )
 
 
 def build_import_archive_panel(admin_token=""):
-    return f"""
-    <section class="content-cluster" id="import-zone">
-      <div class="cluster-head">
-        <div>
-          <div class="eyebrow">Import</div>
-          <h2>历史数据导入</h2>
-        </div>
-        <p>把你本地 3 月 14 日跑过的数据打成 ZIP，直接导入到 Render 的持久磁盘。</p>
-      </div>
-      <div class="cluster-grid cluster-grid--stack">
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Archive</div>
-              <h2>导入历史数据 ZIP</h2>
-            </div>
-            <span class="section-chip">disk</span>
-          </div>
-          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div>
-              <label>历史数据 ZIP</label>
-              <input type="file" name="archive_file" accept=".zip,application/zip">
-            </div>
-            <label class="radio-option">
-              <input type="checkbox" name="overwrite" value="1">
-              <span class="radio-text">覆盖同名文件</span>
-            </label>
-            <p class="helper-text">支持 `pipeline/data/...`、`data/...`，或者直接包含 `central_dirt`、`central_turf`、`local`、`_shared` 的 ZIP。</p>
-            <button type="submit">导入到 Render Disk</button>
-          </form>
-        </section>
-      </div>
-    </section>
-    """
+    return web_admin_jobs.build_import_archive_panel(admin_token=admin_token)
 
 
 def build_race_jobs_page(message_text="", error_text="", admin_token="", authorized=True):
-    if authorized:
-        return render_console_page(message_text=message_text, error_text=error_text, admin_token=admin_token)
-    return render_console_page(message_text=message_text, error_text=error_text, admin_token=admin_token)
-
-    if not authorized:
-        error_block = ""
-        if error_text:
-            error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
-        helper_text = "已启用管理口令。输入正确 token 后才能上传文件、扫描到点任务或修改状态。"
-        return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Race Job 调度看板</title>
-  <style>
-    :root {{
-      --bg: #f4efe8;
-      --paper: rgba(255, 250, 244, 0.94);
-      --ink: #17201a;
-      --muted: #617064;
-      --accent: #145846;
-      --danger: #ad4d3b;
-      --line: rgba(23,31,26,0.1);
-      --shadow: 0 18px 50px rgba(28,33,29,0.09);
-      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: var(--body-font);
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
-        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
-        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
-    }}
-    .gate {{
-      max-width: 760px;
-      margin: 64px auto;
-      padding: 0 18px;
-      display: grid;
-      gap: 18px;
-    }}
-    .panel, .job-flash {{
-      padding: 24px;
-      border-radius: 24px;
-      background: var(--paper);
-      border: 1px solid rgba(255,255,255,0.75);
-      box-shadow: var(--shadow);
-    }}
-    .eyebrow {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }}
-    h1 {{
-      margin: 8px 0 10px;
-      font-family: var(--title-font);
-      font-size: clamp(34px, 5vw, 50px);
-      line-height: 0.96;
-    }}
-    p {{
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.65;
-    }}
-    form {{
-      display: grid;
-      gap: 12px;
-      margin-top: 18px;
-    }}
-    input {{
-      min-height: 44px;
-      padding: 0 14px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      font: inherit;
-    }}
-    button, a {{
-      min-height: 42px;
-      padding: 0 14px;
-      border-radius: 999px;
-      border: 0;
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
-      font-weight: 700;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }}
-    .job-flash--error {{
-      color: var(--danger);
-      border-color: rgba(173,77,59,0.24);
-      background: rgba(255, 245, 242, 0.95);
-    }}
-    .actions {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }}
-  </style>
-</head>
-<body>
-  <main class="gate">
-    {error_block}
-    <section class="panel">
-      <div class="eyebrow">Protected</div>
-      <h1>Race Job 调度看板</h1>
-      <p>{html.escape(helper_text)}</p>
-      <form method="get" action="/console">
-        <input type="password" name="token" placeholder="ADMIN_TOKEN" value="{html.escape(admin_token)}">
-        <div class="actions">
-          <button type="submit">进入管理页</button>
-          <a href="/llm_today">仅看公开看板</a>
-        </div>
-      </form>
-    </section>
-  </main>
-</body>
-</html>"""
-
-    jobs = load_race_jobs(BASE_DIR)
-    summary = {
-        "total": len(jobs),
-        "scheduled": 0,
-        "processing": 0,
-        "ready": 0,
-        "settled": 0,
-    }
-    for job in jobs:
-        status = _race_job_display_code(job)
-        if status in ("scheduled", "uploaded"):
-            summary["scheduled"] += 1
-        elif status in ("odds_running", "predictor_running", "policy_running", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
-            summary["processing"] += 1
-        elif status in ("ready", "predictor_ready"):
-            summary["ready"] += 1
-        elif status == "settled":
-            summary["settled"] += 1
-
-    job_cards = []
-    for job in jobs:
-        row = dict(job)
-        row, _ = _race_job_view(row)
-        job_id = str(row.get("job_id", "") or "").strip()
-        status = str(row.get("status", "") or "").strip()
-        tone = _race_job_display_tone(row)
-        artifacts = list(row.get("artifacts", []) or [])
-        artifact_map = {str(item.get("artifact_type", "")).strip().lower(): dict(item) for item in artifacts}
-        kachiuma = artifact_map.get("kachiuma", {})
-        shutuba = artifact_map.get("shutuba", {})
-        notes = str(row.get("notes", "") or "").strip()
-        current_run_id = str(row.get("current_run_id", "") or "").strip()
-        actual_top1 = str(row.get("actual_top1", "") or "").strip()
-        actual_top2 = str(row.get("actual_top2", "") or "").strip()
-        actual_top3 = str(row.get("actual_top3", "") or "").strip()
-        timing_tags = []
-        for label, key in (
-            ("开赛", "scheduled_off_time"),
-            ("开始处理", "process_after_time"),
-            ("处理队列", "queued_process_at"),
-            ("已就绪", "ready_at"),
-            ("已结算", "settled_at"),
-        ):
-            value = str(row.get(key, "") or "").strip()
-            if value:
-                timing_tags.append(f'<span>{html.escape(label)} {html.escape(value)}</span>')
-        job_cards.append(
-            f"""
-            <article class="job-card job-card--{html.escape(tone)}">
-              <div class="job-card-head">
-                <div>
-                  <div class="job-eyebrow">{html.escape(_scope_display_name(row.get('scope_key', '')))}</div>
-                  <h3>{html.escape(str(row.get('location', '') or '-') + ' ' + str(row.get('race_id', '') or '-'))}</h3>
-                </div>
-                <span class="job-badge job-badge--{html.escape(tone)}">{html.escape(_race_job_display_label(row))}</span>
-              </div>
-              <div class="job-meta-row">
-                <span>比赛日 {html.escape(str(row.get('race_date', '') or '-'))}</span>
-                <span>Job {html.escape(job_id or '-')}</span>
-                <span>提前 {html.escape(str(row.get('lead_minutes', 30) or 30))} 分钟启动</span>
-                <span>条件 {html.escape(str(row.get('target_surface', '') or '-'))} / {html.escape(str(row.get('target_distance', '') or '-'))}m / {html.escape(str(row.get('target_track_condition', '') or '-'))}</span>
-                <span>Run {html.escape(current_run_id or '-')}</span>
-                <span>赛果 {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
-              </div>
-              <div class="job-file-grid">
-                <section>
-                  <h4>kachiuma.csv</h4>
-                  <p>{html.escape(str(kachiuma.get('original_name', '') or '未上传'))}</p>
-                </section>
-                <section>
-                  <h4>shutuba.csv</h4>
-                  <p>{html.escape(str(shutuba.get('original_name', '') or '未上传'))}</p>
-                </section>
-              </div>
-              <div class="job-meta-row">
-                {''.join(timing_tags) if timing_tags else '<span>还没有时间节点</span>'}
-              </div>
-              <div class="job-notes">{html.escape(notes or '无备注')}</div>
-              {_race_job_process_log_html(row)}
-              {_race_job_edit_form_clean(row, admin_token=admin_token)}
-              {_race_job_settle_form(row, admin_token=admin_token)}
-              <div class="job-actions">
-                {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
-                {
-                    f'''
-                    <form method="post" action="/view_run">
-                      <input type="hidden" name="scope_key" value="{html.escape(str(row.get("scope_key", "") or ""))}">
-                      <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
-                      <button type="submit">打开 Run</button>
-                    </form>
-                    <form method="get" action="/llm_today">
-                      <input type="hidden" name="scope_key" value="{html.escape(str(row.get("scope_key", "") or ""))}">
-                      <input type="hidden" name="date" value="{html.escape(str(row.get("race_date", "") or ""))}">
-                      <button type="submit">打开当日看板</button>
-                    </form>
-                    '''
-                    if current_run_id
-                    else ""
-                }
-              </div>
-            </article>
-            """
-        )
-
-    empty_state = ""
-    if not job_cards:
-        empty_state = """
-        <section class="job-empty">
-          <h2>还没有调度任务</h2>
-          <p>先上传某一场比赛的 kachiuma.csv 和 shutuba.csv，再设置开赛时间。页面会自动计算“开赛前 30 分钟开始处理”。</p>
-        </section>
-        """
-
-    message_block = ""
-    if message_text:
-        message_block = f'<section class="job-flash job-flash--ok">{html.escape(message_text)}</section>'
-    error_block = ""
-    if error_text:
-        error_block = f'<section class="job-flash job-flash--error">{html.escape(error_text)}</section>'
-    auth_notice = ""
-    if _admin_token_enabled():
-        auth_notice = '<span>管理口令：已启用</span>'
-    else:
-        auth_notice = '<span>管理口令：未启用</span>'
-
-    default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
-    default_date = _default_job_race_date_text()
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Race Job 调度看板</title>
-  <style>
-    :root {{
-      --bg: #f4efe8;
-      --paper: rgba(255, 250, 244, 0.92);
-      --line: rgba(23, 31, 26, 0.1);
-      --ink: #17201a;
-      --muted: #617064;
-      --accent: #145846;
-      --accent-soft: rgba(20, 88, 70, 0.12);
-      --warn: #a36a18;
-      --warn-soft: rgba(163, 106, 24, 0.12);
-      --danger: #ad4d3b;
-      --danger-soft: rgba(173, 77, 59, 0.12);
-      --shadow: 0 18px 50px rgba(28, 33, 29, 0.09);
-      --title-font: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      --body-font: "Aptos", "Segoe UI Variable Text", "Yu Gothic UI", sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      color: var(--ink);
-      font-family: var(--body-font);
-      background:
-        radial-gradient(circle at 0% 0%, rgba(226, 209, 180, 0.55), transparent 28%),
-        radial-gradient(circle at 100% 0%, rgba(198, 221, 210, 0.65), transparent 30%),
-        linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
-    }}
-    .job-page {{
-      max-width: 1500px;
-      margin: 0 auto;
-      padding: 28px 20px 40px;
-      display: grid;
-      gap: 22px;
-    }}
-    .job-hero, .job-panel, .job-card, .job-empty, .job-flash {{
-      background: var(--paper);
-      border: 1px solid rgba(255,255,255,0.7);
-      border-radius: 26px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-    }}
-    .job-hero, .job-panel, .job-empty, .job-flash {{ padding: 24px; }}
-    .job-eyebrow {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }}
-    .job-hero h1, .job-panel h2, .job-card h3, .job-empty h2 {{
-      margin: 0;
-      font-family: var(--title-font);
-      font-weight: 700;
-      letter-spacing: 0.01em;
-    }}
-    .job-hero h1 {{ font-size: clamp(34px, 5vw, 52px); line-height: 0.96; }}
-    .job-hero p, .job-empty p {{
-      margin: 0;
-      max-width: 72ch;
-      color: var(--muted);
-      line-height: 1.65;
-    }}
-    .job-flash--ok {{ border-color: rgba(20, 88, 70, 0.2); }}
-    .job-flash--error {{ border-color: rgba(173, 77, 59, 0.25); background: rgba(255, 245, 242, 0.95); }}
-    .job-summary-grid, .job-board-grid {{
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    }}
-    .job-summary-card, .job-card {{
-      padding: 18px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.78);
-      border-radius: 20px;
-      display: grid;
-      gap: 12px;
-    }}
-    .job-summary-card strong {{ font-size: 28px; font-family: var(--title-font); }}
-    .job-tools {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-    }}
-    .job-tools a, .job-tools button, .job-actions button, .job-upload button {{
-      min-height: 40px;
-      padding: 0 14px;
-      border-radius: 999px;
-      border: 0;
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-    }}
-    .job-upload {{
-      display: grid;
-      gap: 12px;
-    }}
-    .job-upload-grid {{
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    }}
-    .job-upload label {{
-      display: grid;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 13px;
-    }}
-    .job-upload input, .job-upload select, .job-upload textarea {{
-      width: 100%;
-      min-height: 42px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.9);
-      font: inherit;
-      color: var(--ink);
-    }}
-    .job-upload textarea {{ min-height: 90px; resize: vertical; }}
-    .job-card--good {{ border-color: rgba(20, 88, 70, 0.2); }}
-    .job-card--active {{ border-color: rgba(163, 106, 24, 0.22); }}
-    .job-card--danger {{ border-color: rgba(173, 77, 59, 0.24); }}
-    .job-card-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: start;
-    }}
-    .job-badge {{
-      padding: 7px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
-    }}
-    .job-badge--good {{ background: var(--accent-soft); color: var(--accent); }}
-    .job-badge--active {{ background: var(--warn-soft); color: var(--warn); }}
-    .job-badge--danger {{ background: var(--danger-soft); color: var(--danger); }}
-    .job-badge--muted {{ background: rgba(23,31,26,0.06); color: var(--muted); }}
-    .job-meta-row, .job-actions {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }}
-    .job-meta-row span {{
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(23,31,26,0.06);
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .job-file-grid {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    }}
-    .job-file-grid section {{
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(23,31,26,0.04);
-    }}
-    .job-file-grid h4 {{
-      margin: 0 0 8px;
-      font-size: 13px;
-      color: var(--muted);
-    }}
-    .job-file-grid p, .job-notes {{
-      margin: 0;
-      line-height: 1.55;
-      word-break: break-word;
-    }}
-    .job-process-log {{
-      display: grid;
-      gap: 10px;
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(23,31,26,0.04);
-    }}
-    .job-process-title {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }}
-    .job-process-list {{
-      display: grid;
-      gap: 8px;
-    }}
-    .job-process-item {{
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(255,255,255,0.72);
-      border: 1px solid rgba(23,31,26,0.06);
-      display: grid;
-      gap: 6px;
-    }}
-    .job-process-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: baseline;
-    }}
-    .job-process-head strong {{
-      font-size: 13px;
-      color: var(--ink);
-    }}
-    .job-process-head span {{
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }}
-    .job-process-preview {{
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-      word-break: break-word;
-    }}
-    .job-settle-panel {{
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(20, 88, 70, 0.06);
-      display: grid;
-      gap: 10px;
-    }}
-    .job-settle-head {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: space-between;
-      align-items: baseline;
-    }}
-    .job-settle-head span {{
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .job-settle-actions {{
-      display: grid;
-      gap: 10px;
-    }}
-    .job-settle-form {{
-      display: grid;
-      gap: 8px;
-      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-    }}
-    .job-settle-form input {{
-      width: 100%;
-      min-height: 40px;
-      padding: 0 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.95);
-      color: var(--ink);
-      font: inherit;
-    }}
-    .job-actions form {{ margin: 0; }}
-    @media (max-width: 760px) {{
-      .job-page {{ padding: 18px 14px 30px; }}
-      .job-hero, .job-panel, .job-empty, .job-flash {{ padding: 18px; }}
-      .job-card-head {{ flex-direction: column; }}
-      .job-tools {{ align-items: stretch; }}
-      .job-settle-form {{ grid-template-columns: 1fr; }}
-    }}
-  </style>
-</head>
-<body>
-  <main class="job-page">
-    <section class="job-hero">
-      <div class="job-eyebrow">Manual Admin Flow</div>
-      <h1>任务后台</h1>
-      <p>这里按手动三步流来管理：先上传 `kachiuma.csv` 和 `shutuba.csv`，再手动执行预测，最后录入赛果并结算。开赛时间和提前分钟现在只作为记录和手动筛选参考，不会自动到点运行。</p>
-      <div class="job-tools">
-        <div class="job-meta-row">
-          <span>总任务 {summary['total']}</span>
-          <span>待处理 {summary['scheduled']}</span>
-          <span>处理中 {summary['processing']}</span>
-          <span>预测已生成 {summary['ready']}</span>
-          <span>已结算 {summary['settled']}</span>
-          {auth_notice}
-        </div>
-        <div class="job-actions">
-          <form method="post" action="/console/tasks/scan_due">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <button type="submit">按时间筛选任务</button>
-          </form>
-          <form method="post" action="/console/tasks/run_due_now">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <button type="submit">执行已入队任务</button>
-          </form>
-          <a href="/llm_today">看 LLM 看板</a>
-          <a href="/console">回主控制台</a>
-        </div>
-      </div>
-    </section>
-    {message_block}
-    {error_block}
-    <section class="job-panel">
-      <div class="job-eyebrow">Step 1</div>
-      <h2>上传两个 CSV</h2>
-      <form class="job-upload" method="post" action="/console/tasks/create" enctype="multipart/form-data">
-        <input type="hidden" name="token" value="{html.escape(admin_token)}">
-        <div class="job-upload-grid">
-          <label>范围
-            <select name="scope_key">
-              <option value="central_dirt">中央 Dirt</option>
-              <option value="central_turf">中央 Turf</option>
-              <option value="local">地方</option>
-            </select>
-          </label>
-          <label>Race ID
-            <input type="text" name="race_id" placeholder="202606010109">
-          </label>
-          <label>场地
-            <input type="text" name="location" placeholder="中山">
-          </label>
-          <label>比赛日期（展示用）
-            <input type="date" name="race_date">
-          </label>
-          <label>开赛时间（记录用）
-            <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
-          </label>
-          <label>提前多少分钟（手动筛选参考）
-            <input type="number" name="lead_minutes" min="0" value="30">
-          </label>
-          <label>kachiuma.csv
-            <input type="file" name="kachiuma_file" accept=".csv">
-          </label>
-          <label>shutuba.csv
-            <input type="file" name="shutuba_file" accept=".csv">
-          </label>
-        </div>
-        <label>备注
-          <textarea name="notes" placeholder="例如：前一天上传，比赛前手动点击执行预测"></textarea>
-        </label>
-        <div class="job-actions">
-          <button type="submit">创建任务</button>
-        </div>
-      </form>
-    </section>
-    {empty_state}
-    <section class="job-panel">
-      <div class="job-eyebrow">Step 2 / Step 3</div>
-      <h2>预测与结算任务</h2>
-      <div class="job-board-grid">
-        {''.join(job_cards)}
-      </div>
-    </section>
-  </main>
-</body>
-</html>"""
-
-
-def load_ability_marks_table(scope_key, run_id, run_row=None):
-    return view_data.load_ability_marks_table(
-        get_data_dir,
-        BASE_DIR,
-        load_csv_rows,
-        to_float,
-        scope_key,
-        run_id,
-        run_row,
-    )
-
-
-def page_template(
-    output_text="",
-    error_text="",
-    run_options="",
-    view_run_options="",
-    view_selected_run_id="",
-    current_race_id="",
-    top5_text="",
-    top5_table_html="",
-    mark_table_html="",
-    mark_note_text="",
-    llm_battle_html="",
-    llm_note_text="",
-    llm_compare_html="",
-    gemini_policy_html="",
-    daily_report_html="",
-    daily_report_text="",
-    weekly_report_html="",
-    weekly_report_text="",
-    summary_table_html="",
-    stats_block="",
-    default_scope="central_dirt",
-    default_policy_engine="gemini",
-    default_policy_model="",
-    admin_token="",
-    admin_enabled=False,
-    admin_workspace_html="",
-):
-    return ui_page_template(
-        output_text=output_text,
+    return web_admin_jobs.build_race_jobs_page(
+        message_text=message_text,
         error_text=error_text,
-        run_options=run_options,
-        view_run_options=view_run_options,
-        view_selected_run_id=view_selected_run_id,
-        current_race_id=current_race_id,
-        top5_text=top5_text,
-        top5_table_html=top5_table_html,
-        mark_table_html=mark_table_html,
-        mark_note_text=mark_note_text,
-        llm_battle_html=llm_battle_html,
-        llm_note_text=llm_note_text,
-        llm_compare_html=llm_compare_html,
-        gemini_policy_html=gemini_policy_html,
-        daily_report_html=daily_report_html,
-        daily_report_text=daily_report_text,
-        weekly_report_html=weekly_report_html,
-        weekly_report_text=weekly_report_text,
-        summary_table_html=summary_table_html,
-        stats_block=stats_block,
-        default_scope=default_scope,
-        default_policy_engine=default_policy_engine,
-        default_policy_model=default_policy_model,
         admin_token=admin_token,
-        admin_enabled=admin_enabled,
-        admin_workspace_html=admin_workspace_html,
-    )
-
-
-def render_page(
-    scope_key="central_dirt",
-    output_text="",
-    error_text="",
-    top5_text="",
-    summary_run_id="",
-    selected_run_id="",
-    admin_token="",
-    admin_workspace_html="",
-):
-    scope_norm = normalize_scope_key(scope_key)
-    default_scope = scope_norm or "central_dirt"
-    run_options = build_run_options(scope_norm or scope_key)
-    selected_run_id = str(selected_run_id or "").strip()
-    llm_compare_html = ui_build_llm_compare_block(
-        build_table_html=build_table_html,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        load_policy_daily_profit_summary=load_policy_daily_profit_summary,
-    )
-    stats_block = ui_build_stats_block(
-        scope_norm,
-        load_predictor_summary=load_predictor_summary,
-        build_table_html=build_table_html,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        load_policy_daily_profit_summary=load_policy_daily_profit_summary,
-        build_daily_profit_chart_html=ui_build_daily_profit_chart_html,
-    )
-    run_id = ""
-    run_row = None
-    if scope_norm:
-        if selected_run_id:
-            run_row = resolve_run(selected_run_id, scope_norm)
-            if run_row:
-                run_id = run_row.get("run_id", selected_run_id)
-            else:
-                run_id = selected_run_id
-        else:
-            run_id = parse_run_id(output_text)
-            if run_id:
-                run_row = resolve_run(run_id, scope_norm)
-            else:
-                run_row = resolve_run("", scope_norm)
-                if run_row:
-                    run_id = run_row.get("run_id", "")
-    view_selected_run_id = selected_run_id or run_id or summary_run_id
-    current_race_id = ""
-    if run_row:
-        current_race_id = normalize_race_id(run_row.get("race_id", ""))
-    if not current_race_id:
-        race_candidate = re.sub(r"\D", "", selected_run_id or summary_run_id or "")
-        if re.fullmatch(r"\d{12}", race_candidate):
-            current_race_id = race_candidate
-    view_run_options = build_run_options(scope_norm or scope_key, view_selected_run_id)
-    top5_table_html = ""
-    mark_table_html = ""
-    mark_note_text = ""
-    llm_battle_html = ""
-    llm_note_text = ""
-    gemini_policy_html = ""
-    daily_report_html = ""
-    daily_report_text = ""
-    weekly_report_html = ""
-    weekly_report_text = ""
-    summary_table_html = ""
-    if run_id:
-        predictor_top_sections = []
-        predictor_mark_sections = []
-        predictor_summary_sections = []
-        predictor_note_texts = []
-        bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
-        policy_payloads = []
-        actual_result_map = _load_actual_result_map(scope_norm or scope_key)
-        for payload in load_policy_payloads(scope_norm or scope_key, run_id, run_row):
-            payload = dict(payload)
-            budget_items = [dict(item) for item in list(payload.get("budgets", []) or [])]
-            live_policy_engine = normalize_policy_engine(payload.get("policy_engine", "gemini"))
-            live_summary = load_policy_bankroll_summary(
-                run_id,
-                (run_row or {}).get("timestamp", ""),
-                policy_engine=live_policy_engine,
-            )
-            live_tickets = load_policy_run_ticket_rows(run_id, policy_engine=live_policy_engine)
-            if budget_items:
-                first = dict(budget_items[0])
-                portfolio = dict(first.get("portfolio", {}) or {})
-                portfolio.setdefault("before", dict(live_summary))
-                portfolio["after"] = dict(live_summary)
-                first["portfolio"] = portfolio
-                if live_tickets:
-                    first["tickets"] = live_tickets
-                budget_items[0] = first
-            payload["budgets"] = budget_items
-            policy_payloads.append(payload)
-        primary_policy_payload = dict(policy_payloads[0]) if policy_payloads else {}
-        gemini_policy_html = build_policy_workspace_html(policy_payloads)
-        battle_bundle = _build_llm_battle_bundle(
-            scope_norm or scope_key,
-            run_id,
-            run_row,
-            policy_payloads,
-            actual_result_map,
-        )
-        llm_battle_html = battle_bundle.get("html", "")
-        llm_note_text = battle_bundle.get("note_text", "")
-        daily_bundle = _build_llm_daily_report_bundle(scope_norm or scope_key, run_row, actual_result_map)
-        daily_report_html = daily_bundle.get("html", "")
-        daily_report_text = daily_bundle.get("text", "")
-        weekly_bundle = _build_llm_weekly_report_bundle(scope_norm or scope_key, run_row, actual_result_map)
-        weekly_report_html = weekly_bundle.get("html", "")
-        weekly_report_text = weekly_bundle.get("text", "")
-        for spec, pred_path in resolve_predictor_paths(scope_norm or scope_key, run_id, run_row):
-            if not pred_path or not pred_path.exists():
-                continue
-            predictor_run_row = dict(run_row or {})
-            predictor_run_row["predictions_path"] = str(pred_path)
-            top_rows, top_cols = load_top5_table(scope_norm or scope_key, run_id, predictor_run_row)
-            if top_rows:
-                predictor_top_sections.append(
-                    build_table_html(top_rows, top_cols, f"Top5 Predictions - {spec['label']}")
-                )
-            ability_rows, ability_cols = load_ability_marks_table(scope_norm or scope_key, run_id, predictor_run_row)
-            if ability_rows:
-                predictor_mark_sections.append(
-                    build_table_html(ability_rows, ability_cols, f"Ability Marks - {spec['label']}")
-                )
-            else:
-                mark_rows, mark_cols = load_mark_recommendation_table(scope_norm or scope_key, run_id, predictor_run_row)
-                ability_rows = mark_rows
-                if mark_rows:
-                    predictor_mark_sections.append(
-                        build_table_html(mark_rows, mark_cols, f"Integrated Marks - {spec['label']}")
-                    )
-            pred_csv_text = load_text_file(pred_path)
-            note_text = build_mark_note_text(
-                ability_rows if ability_rows else [],
-                pred_path.name if pred_path else "",
-                pred_csv_text,
-                bet_engine_v3_summary=bet_engine_v3_summary,
-                gemini_policy_payload=primary_policy_payload,
-            ).strip()
-            if note_text:
-                predictor_note_texts.append(f"[{spec['label']}]\n{note_text}")
-            summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, predictor_run_row)
-            if summary_rows:
-                predictor_summary_sections.append(
-                    build_table_html(summary_rows, ["metric", "value"], f"Model Status - {spec['label']}")
-                )
-        if predictor_top_sections:
-            top5_table_html = "".join(predictor_top_sections)
-        if predictor_mark_sections:
-            mark_table_html = "".join(predictor_mark_sections)
-        if predictor_note_texts:
-            mark_note_text = "\n\n".join(predictor_note_texts)
-        if predictor_summary_sections:
-            summary_table_html = "".join(predictor_summary_sections)
-    return _prefix_public_html_routes(page_template(
-        output_text=output_text,
-        error_text=error_text,
-        run_options=run_options,
-        view_run_options=view_run_options,
-        view_selected_run_id=view_selected_run_id,
-        current_race_id=current_race_id,
-        top5_text=top5_text if not top5_table_html else "",
-        top5_table_html=top5_table_html,
-        mark_table_html=mark_table_html,
-        mark_note_text=mark_note_text,
-        llm_battle_html=llm_battle_html,
-        llm_note_text=llm_note_text,
-        llm_compare_html=llm_compare_html,
-        gemini_policy_html=gemini_policy_html,
-        daily_report_html=daily_report_html,
-        daily_report_text=daily_report_text,
-        weekly_report_html=weekly_report_html,
-        weekly_report_text=weekly_report_text,
-        summary_table_html=summary_table_html,
-        stats_block=stats_block,
-        default_scope=default_scope,
-        default_policy_engine=normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
-        default_policy_model=resolve_policy_model(
-            normalize_policy_engine(os.environ.get("POLICY_ENGINE", "gemini") or "gemini"),
-            os.environ.get("POLICY_MODEL", ""),
-            os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-        ),
-        admin_token=admin_token,
-        admin_enabled=_admin_token_enabled(),
-        admin_workspace_html=admin_workspace_html,
-    ))
-
-
-def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
-    return render_page(
-        scope_key,
-        error_text=str(message or "管理口令错误，不能执行该操作。"),
-        selected_run_id=selected_run_id,
-        summary_run_id=summary_run_id,
-        admin_token=token,
+        authorized=authorized,
+        render_console_page=render_console_page,
     )
 
 
 @app.get("/", include_in_schema=False)
 def index():
     return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
-
-
-@app.get(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/bundle")
-@app.get("/internal/v5_tasks/{task_id}/bundle")
-def get_remote_v5_bundle(task_id: str, token: str = ""):
-    task = get_v5_remote_task(BASE_DIR, task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="v5 task not found")
-    expected = str(task.get("bundle_token", "") or "").strip()
-    supplied = str(token or "").strip()
-    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
-        raise HTTPException(status_code=403, detail="invalid bundle token")
-    status_text = str(task.get("status", "") or "").strip().lower()
-    if status_text in ("queued", "dispatching", "dispatched"):
-        update_v5_remote_task(
-            BASE_DIR,
-            task_id,
-            lambda row, now_text: row.update(
-                {
-                    "status": "running",
-                    "started_at": str(row.get("started_at", "") or now_text),
-                }
-            ),
-        )
-    print(
-        "[web_app] "
-        + json.dumps(
-            {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "event": "remote_v5_bundle_download",
-                "task_id": task_id,
-                "job_id": str(task.get("job_id", "") or "").strip(),
-                "run_id": str(task.get("run_id", "") or "").strip(),
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
-    body = _remote_v5_bundle_zip_bytes(task)
-    return Response(
-        content=body,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{task_id}_bundle.zip"'},
-    )
-
-
-@app.post(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/callback")
-@app.post("/internal/v5_tasks/{task_id}/callback")
-async def remote_v5_callback(task_id: str, request: Request):
-    task = get_v5_remote_task(BASE_DIR, task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="v5 task not found")
-    body = await request.body()
-    sig_header = request.headers.get("X-Hub-Signature-256", "")
-    if not _verify_callback_hmac(body, sig_header):
-        raise HTTPException(status_code=403, detail="invalid callback signature")
-    try:
-        payload = json.loads(body)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid json: {exc}")
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="invalid callback payload")
-    status_text = str(payload.get("status", "") or "").strip().lower()
-    if status_text not in ("succeeded", "failed"):
-        raise HTTPException(status_code=400, detail="invalid callback status")
-    current_status = str(task.get("status", "") or "").strip().lower()
-    if current_status == "succeeded" and status_text == "succeeded":
-        return JSONResponse({"ok": True, "ignored": True, "reason": "already_succeeded"})
-
-    job_id = str(task.get("job_id", "") or "").strip()
-    run_id = str(task.get("run_id", "") or "").strip()
-    race_id = str(task.get("race_id", "") or "").strip()
-    scope_key = str(task.get("scope_key", "") or "").strip()
-    log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
-    print(
-        "[web_app] "
-        + json.dumps(
-            {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "event": "remote_v5_callback",
-                "task_id": task_id,
-                "job_id": job_id,
-                "run_id": run_id,
-                "status": status_text,
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
-
-    if status_text == "failed":
-        error_message = str(payload.get("error_message", "") or log_excerpt or "remote v5 failed").strip()
-        update_v5_remote_task(
-            BASE_DIR,
-            task_id,
-            lambda row, now_text: row.update(
-                {
-                    "status": "failed",
-                    "finished_at": now_text,
-                    "error_message": error_message,
-                    "result_summary": dict(payload.get("summary", {}) or {}),
-                }
-            ),
-        )
-
-        def _fail_remote_job(row, now_text):
-            row.update(initialize_race_job_step_fields(row))
-            current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
-            if current_task_id and current_task_id != task_id:
-                return
-            row["status"] = "failed"
-            row["error_message"] = error_message
-            row["last_process_output"] = _append_job_process_log_entry(
-                row,
-                "predictors_remote_callback",
-                1,
-                error_message,
-            )
-            set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
-
-        update_race_job(BASE_DIR, job_id, _fail_remote_job)
-        return JSONResponse({"ok": True, "task_id": task_id, "status": "failed"})
-
-    result = dict(payload.get("result", {}) or {})
-    content_base64 = str(result.get("content_base64", "") or payload.get("content_base64", "") or "").strip()
-    if not content_base64:
-        raise HTTPException(status_code=400, detail="missing result content_base64")
-    try:
-        zip_bytes = base64.b64decode(content_base64.encode("utf-8"), validate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid result content_base64: {exc}")
-
-    run_row = resolve_run(run_id, scope_key)
-    if run_row is None:
-        raise HTTPException(status_code=400, detail=f"run not found for run_id={run_id}")
-    data_dir = get_data_dir(BASE_DIR, scope_key)
-    try:
-        archive = zipfile.ZipFile(BytesIO(zip_bytes), "r")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid predictor result zip: {exc}")
-    saved_paths = {}
-    missing_files = []
-    with archive:
-        names = set(archive.namelist())
-        for spec in list_predictors():
-            latest_name = str(spec.get("latest_filename", "") or "").strip()
-            run_field = str(spec.get("run_field", "") or "").strip()
-            predictor_id = str(spec.get("id", "") or "").strip()
-            if not latest_name or not run_field or not predictor_id:
-                continue
-            if latest_name not in names:
-                missing_files.append(latest_name)
-                continue
-            dest_path = snapshot_prediction_path(data_dir, race_id, run_id, predictor_id)
-            if dest_path is None:
-                raise HTTPException(status_code=500, detail=f"snapshot path unavailable for {predictor_id}")
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_path.write_bytes(archive.read(latest_name))
-            saved_paths[run_field] = str(dest_path)
-    if missing_files:
-        raise HTTPException(status_code=400, detail="missing predictor outputs: " + ", ".join(missing_files))
-    update_ok = update_run_row_fields(scope_key, run_row, saved_paths)
-    if not update_ok:
-        raise HTTPException(status_code=500, detail="failed to update runs.csv for predictor results")
-
-    summary_payload = dict(payload.get("summary", {}) or {})
-    summary_payload.setdefault("bytes", len(zip_bytes))
-    summary_payload.setdefault("saved_paths", dict(saved_paths))
-    update_v5_remote_task(
-        BASE_DIR,
-        task_id,
-        lambda row, now_text: row.update(
-            {
-                "status": "succeeded",
-                "finished_at": now_text,
-                "error_message": "",
-                "result_path": json.dumps(saved_paths, ensure_ascii=False),
-                "result_summary": summary_payload,
-            }
-        ),
-    )
-    _promote_job_after_remote_v5(
-        job_id,
-        run_id,
-        task_id,
-        log_excerpt or ("saved=" + ", ".join(Path(path).name for path in saved_paths.values())),
-    )
-    if remote_predictor_auto_continue_enabled():
-        _auto_continue_remote_policy(job_id)
-    return JSONResponse(
-        {
-            "ok": True,
-            "task_id": task_id,
-            "status": "succeeded",
-            "run_id": run_id,
-            "saved_paths": saved_paths,
-            "auto_continue": remote_predictor_auto_continue_enabled(),
-        }
-    )
 
 
 @app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
@@ -8830,79 +5108,30 @@ def create_race_job_view(
     kachiuma_file: UploadFile = File(None),
     shutuba_file: UploadFile = File(None),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法创建任务。",
-        )
-    race_id = normalize_race_id(race_id)
-    scope_norm = normalize_scope_key(scope_key)
-    race_date = str(race_date or "").strip() or _default_job_race_date_text()
-    if not scope_norm:
-        return build_race_jobs_page(admin_token=token, error_text="范围无效。")
-    if not race_id:
-        return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
-    if not scheduled_off_time.strip():
-        return build_race_jobs_page(admin_token=token, error_text="请填写开赛时间。")
-    target_surface = _target_surface_from_scope(scope_norm)
-    if False:
-        return build_race_jobs_page(admin_token=token, error_text="请填写本场场地：turf 或 dirt。")
-    target_distance = str(target_distance or "").strip()
-    try:
-        target_distance_value = int(target_distance)
-    except ValueError:
-        return build_race_jobs_page(admin_token=token, error_text="请填写本场距离，例如 1200 或 1800。")
-    if target_distance_value <= 0:
-        return build_race_jobs_page(admin_token=token, error_text="距离必须大于 0。")
-    target_track_condition = str(target_track_condition or "").strip()
-    if target_track_condition not in ("良", "稍重", "重", "不良"):
-        return build_race_jobs_page(admin_token=token, error_text="请填写本场马场状态：良 / 稍重 / 重 / 不良。")
-    if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
-        return build_race_jobs_page(admin_token=token, error_text="请上传 kachiuma.csv。")
-    if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
-        return build_race_jobs_page(admin_token=token, error_text="请上传 shutuba.csv。")
-    try:
-        lead_value = int(str(lead_minutes or "30").strip() or "30")
-    except ValueError:
-        lead_value = 30
-    artifact_payloads = []
-    job = create_race_job(
-        BASE_DIR,
+    return web_admin_tasks.create_race_job_response(
+        base_dir=BASE_DIR,
+        token=token,
+        scope_key=scope_key,
         race_id=race_id,
-        scope_key=scope_norm,
         location=location,
         race_date=race_date,
         scheduled_off_time=scheduled_off_time,
-        target_surface=target_surface,
-        target_distance=str(target_distance_value),
+        target_distance=target_distance,
         target_track_condition=target_track_condition,
-        lead_minutes=lead_value,
+        lead_minutes=lead_minutes,
         notes=notes,
-        artifacts=[],
+        kachiuma_file=kachiuma_file,
+        shutuba_file=shutuba_file,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        normalize_race_id=normalize_race_id,
+        normalize_scope_key=normalize_scope_key,
+        default_job_race_date_text=_default_job_race_date_text,
+        target_surface_from_scope=_target_surface_from_scope,
+        create_race_job=create_race_job,
+        save_race_job_artifact=save_race_job_artifact,
+        update_race_job=update_race_job,
     )
-    for artifact_type, upload in (("kachiuma", kachiuma_file), ("shutuba", shutuba_file)):
-        if upload is None:
-            continue
-        payload = upload.file.read()
-        artifact_payloads.append(
-            save_race_job_artifact(
-                BASE_DIR,
-                job["job_id"],
-                artifact_type,
-                upload.filename or f"{artifact_type}.csv",
-                payload,
-            )
-        )
-
-    def _attach_artifacts(row, now_text):
-        row["artifacts"] = artifact_payloads
-        row["status"] = "scheduled"
-        row["updated_at"] = now_text
-
-    update_race_job(BASE_DIR, job["job_id"], _attach_artifacts)
-    return build_race_jobs_page(admin_token=token, message_text=f"已创建任务 {job['job_id']}。")
-
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/import_archive", response_class=HTMLResponse)
 @app.post("/console/tasks/import_archive", response_class=HTMLResponse)
@@ -8911,108 +5140,60 @@ async def import_history_archive(
     overwrite: str = Form(""),
     archive_file: UploadFile = File(None),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，不能导入历史数据。",
-        )
-    if archive_file is None or not str(getattr(archive_file, "filename", "") or "").strip():
-        return build_race_jobs_page(admin_token=token, error_text="请上传 ZIP 文件。")
-    filename = str(archive_file.filename or "").strip()
-    if not filename.lower().endswith(".zip"):
-        return build_race_jobs_page(admin_token=token, error_text="只支持 ZIP 文件。")
-    try:
-        archive_bytes = await archive_file.read()
-        summary = _import_history_zip(
-            BASE_DIR,
-            archive_bytes,
-            overwrite=str(overwrite or "").strip() == "1",
-        )
-    except zipfile.BadZipFile:
-        return build_race_jobs_page(admin_token=token, error_text="ZIP 文件损坏或格式无效。")
-    except Exception as exc:
-        return build_race_jobs_page(admin_token=token, error_text=f"导入失败：{exc}")
-    message = f"已导入 {summary['written']} 个文件，跳过 {summary['skipped']} 个。"
-    sample_paths = list(summary.get("sample_paths", []) or [])
-    if sample_paths:
-        message += " 示例: " + ", ".join(sample_paths)
-    return build_race_jobs_page(admin_token=token, message_text=message)
-
+    return await web_admin_tasks.import_history_archive_response(
+        base_dir=BASE_DIR,
+        token=token,
+        overwrite=overwrite,
+        archive_file=archive_file,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/scan_due", response_class=HTMLResponse)
 @app.post("/console/tasks/scan_due", response_class=HTMLResponse)
 def scan_race_jobs_due(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法扫描任务。",
-        )
-    changed = scan_due_race_jobs(BASE_DIR)
-    if changed:
-        return build_race_jobs_page(admin_token=token, message_text=f"已将 {len(changed)} 场比赛加入处理队列。")
-    return build_race_jobs_page(admin_token=token, message_text="当前没有到点任务。")
-
+    return web_admin_tasks.scan_due_race_jobs_response(
+        base_dir=BASE_DIR,
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        scan_due_race_jobs=scan_due_race_jobs,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/run_due_now", response_class=HTMLResponse)
 @app.post("/console/tasks/run_due_now", response_class=HTMLResponse)
 def run_due_race_jobs_now(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令错误，不能执行到点任务。",
-        )
-    summary = run_due_jobs_once()
-    message_parts = [
-        f"queued={int(summary.get('queued_count', 0) or 0)}",
-        f"processed={int(summary.get('processed_count', 0) or 0)}",
-        f"settled={int(summary.get('settled_count', 0) or 0)}",
-        f"errors={len(list(summary.get('errors', []) or []))}",
-    ]
-    error_items = list(summary.get("errors", []) or [])
-    if error_items:
-        error_text = "\n".join(
-            f"[{item.get('kind', 'job')}] {item.get('job_id', '-')}: {item.get('error', '')}"
-            for item in error_items
-        )
-        return build_race_jobs_page(
-            admin_token=token,
-            message_text="已执行到点任务：" + ", ".join(message_parts),
-            error_text=error_text,
-        )
-    return build_race_jobs_page(
-        admin_token=token,
-        message_text="已执行到点任务：" + ", ".join(message_parts),
+    return web_admin_tasks.run_due_race_jobs_now_response(
+        base_dir=BASE_DIR,
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        scan_due_race_jobs=scan_due_race_jobs,
+        load_race_jobs=load_race_jobs,
     )
-
 
 @app.get("/internal/run_due")
 @app.post("/internal/run_due")
 def internal_run_due(token: str = ""):
-    if not _admin_token_valid(token):
-        return JSONResponse({"ok": False, "error": "invalid_admin_token"}, status_code=403)
-    summary = run_due_jobs_once()
-    ok = not bool(list(summary.get("errors", []) or []))
-    return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
-
+    return web_admin_tasks.internal_run_due_response(
+        base_dir=BASE_DIR,
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        scan_due_race_jobs=scan_due_race_jobs,
+        load_race_jobs=load_race_jobs,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/topup_today_all_llm", response_class=HTMLResponse)
 @app.post("/console/tasks/topup_today_all_llm", response_class=HTMLResponse)
 def topup_today_all_llm_budget(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return render_console_page(
-            admin_token=token,
-            error_text="管理口令无效，不能追加资金。",
-        )
-    ledger_date = _default_job_race_date_text().replace("-", "")
-    amount_yen = resolve_daily_bankroll_yen(ledger_date)
-    for engine in ("gemini", "deepseek", "openai", "grok"):
-        add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
-    return render_console_page(
-        admin_token=token,
-        message_text=f"已按 {ledger_date} 给四个 LLM 各追加 {amount_yen}。",
+    return web_admin_tasks.topup_today_all_llm_budget_response(
+        base_dir=BASE_DIR,
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        render_console_page=render_console_page,
+        default_job_race_date_text=_default_job_race_date_text,
+        resolve_daily_bankroll_yen=resolve_daily_bankroll_yen,
+        add_bankroll_topup=add_bankroll_topup,
     )
 
 

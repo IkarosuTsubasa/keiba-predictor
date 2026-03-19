@@ -57,7 +57,7 @@ def main():
         note_gate = web_app.console_note(token="bad-token")
         assert_true("Protected" in note_gate and "ADMIN_TOKEN" in note_gate, "console note should show gate without valid token")
         note_html = web_app.console_note(token="smoke-token")
-        assert_true("Note Workspace" in note_html and "返回控制台" in note_html, "console note page did not render")
+        assert_true("Note Workspace" in note_html and "/console" in note_html, "console note page did not render")
         denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
         assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
         denied_run_due = web_app.internal_run_due(token="bad-token")
