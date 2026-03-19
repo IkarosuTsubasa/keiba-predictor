@@ -373,7 +373,7 @@ def _public_share_runtime_html():
     const badges = Array.from(raceCard.querySelectorAll(".race-card-header__badges span"));
     for (const badge of badges) {
       const text = String(badge.textContent || "").trim();
-      const matched = text.match(/^(\d{1,2}):(\d{2})$/);
+      const matched = text.match(/^(\\d{1,2}):(\\d{2})$/);
       if (!matched) {
         continue;
       }
