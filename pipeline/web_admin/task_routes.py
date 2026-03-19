@@ -1,4 +1,5 @@
 import json
+import os
 import traceback
 import zipfile
 from datetime import datetime
@@ -6,6 +7,52 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
+
+RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
+
+
+def _run_due_lock_path(base_dir):
+    return Path(base_dir) / "data" / "_shared" / "run_due.lock"
+
+
+def _acquire_run_due_lock(base_dir):
+    lock_path = _run_due_lock_path(base_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    now_ts = datetime.now().timestamp()
+    if lock_path.exists():
+        try:
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        started_ts = float(payload.get("started_ts", 0) or 0)
+        if started_ts and now_ts - started_ts < RUN_DUE_LOCK_TTL_SECONDS:
+            return False, payload, lock_path
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+    payload = {
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "started_ts": now_ts,
+        "pid": os.getpid(),
+    }
+    try:
+        with lock_path.open("x", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+    except FileExistsError:
+        try:
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        return False, payload, lock_path
+    return True, payload, lock_path
+
+
+def _release_run_due_lock(lock_path):
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def pick_next_process_job_id(*, load_race_jobs):
@@ -163,10 +210,23 @@ def import_history_zip(*, base_dir, archive_bytes, overwrite=False):
 def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_race_jobs, load_race_jobs):
     if not admin_token_valid(token):
         return JSONResponse({"ok": False, "error": "invalid_admin_token"}, status_code=403)
-    summary = run_due_jobs_once(
-        base_dir=base_dir,
-        scan_due_race_jobs=scan_due_race_jobs,
-        load_race_jobs=load_race_jobs,
-    )
-    ok = not bool(list(summary.get("errors", []) or []))
-    return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+    locked, lock_payload, lock_path = _acquire_run_due_lock(base_dir)
+    if not locked:
+        return JSONResponse(
+            {
+                "ok": True,
+                "skipped": True,
+                "reason": "already_running",
+                "lock": lock_payload,
+            }
+        )
+    try:
+        summary = run_due_jobs_once(
+            base_dir=base_dir,
+            scan_due_race_jobs=scan_due_race_jobs,
+            load_race_jobs=load_race_jobs,
+        )
+        ok = not bool(list(summary.get("errors", []) or []))
+        return JSONResponse({"ok": ok, "skipped": False, **summary}, status_code=200 if ok else 500)
+    finally:
+        _release_run_due_lock(lock_path)

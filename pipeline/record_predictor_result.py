@@ -55,24 +55,6 @@ def load_runs():
     return []
 
 
-def resolve_pred_path_for_run(run, run_id, race_id, last_run_id):
-    candidates = []
-    run_path = str(run.get("predictions_path") or "").strip()
-    if run_path:
-        candidates.append(Path(run_path))
-    if race_id:
-        candidates.append(DATA_DIR / race_id / f"predictions_{run_id}_{race_id}.csv")
-    candidates.append(DATA_DIR / f"predictions_{run_id}.csv")
-    for path in candidates:
-        if path.exists():
-            return path
-    if last_run_id and run_id == last_run_id:
-        latest = ROOT_DIR / "predictions.csv"
-        if latest.exists():
-            return latest
-    return candidates[0] if candidates else None
-
-
 def ensure_csv_header(path, fieldnames):
     if not path.exists():
         return

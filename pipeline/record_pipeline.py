@@ -186,7 +186,7 @@ def load_runs():
     return []
 
 
-def resolve_pred_path_for_run(run, run_id, race_id, race_dir, last_run_id):
+def resolve_pred_path_for_run(run, run_id, race_id, race_dir):
     candidates = []
     run_path = str(run.get("predictions_path") or "").strip()
     if run_path:
@@ -197,10 +197,6 @@ def resolve_pred_path_for_run(run, run_id, race_id, race_dir, last_run_id):
     for path in candidates:
         if path.exists():
             return path
-    if last_run_id and run_id == last_run_id:
-        latest = ROOT_DIR / "predictions.csv"
-        if latest.exists():
-            return latest
     return candidates[0] if candidates else None
 
 
@@ -928,7 +924,7 @@ def main():
     )
     odds_path_run = Path(odds_path)
     wide_odds_path_run = Path(wide_odds_path)
-    pred_path_run = resolve_pred_path_for_run(run, run_id, race_id, race_dir, last_run)
+    pred_path_run = resolve_pred_path_for_run(run, run_id, race_id, race_dir)
     updated, odds_msg = refresh_odds_for_run(
         run,
         odds_path,
@@ -943,20 +939,10 @@ def main():
         print("Updated odds for this run.")
     elif odds_msg:
         print(f"Odds update skipped: {odds_msg}")
-    if not Path(odds_path).exists():
-        odds_path = str(ROOT_DIR / "odds.csv")
     odds_map = load_odds_map(odds_path)
-    if not Path(wide_odds_path).exists():
-        wide_odds_path = str(ROOT_DIR / "wide_odds.csv")
     wide_odds_map = load_wide_odds_map(wide_odds_path)
-    if not Path(fuku_odds_path).exists():
-        fuku_odds_path = str(ROOT_DIR / "fuku_odds.csv")
     fuku_odds_map = load_fuku_odds_map(fuku_odds_path)
-    if not Path(quinella_odds_path).exists():
-        quinella_odds_path = str(ROOT_DIR / "quinella_odds.csv")
     quinella_odds_map = load_quinella_odds_map(quinella_odds_path)
-    if not Path(trifecta_odds_path).exists():
-        trifecta_odds_path = str(ROOT_DIR / "trifecta_odds.csv")
     trifecta_odds_map = load_trifecta_odds_map(trifecta_odds_path)
 
     strategy = run.get("strategy", "")
