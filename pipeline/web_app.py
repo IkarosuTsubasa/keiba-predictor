@@ -614,9 +614,9 @@ def build_predictor_performance_context(scope_key, run_id, run_row, predictor_id
     path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
     predictor_rows = load_csv_rows(path)
     scope_label_map = {
-        "central_turf": "荳ｭ螟ｮ闕牙慍",
-        "central_dirt": "荳ｭ螟ｮ豕･蝨ｰ",
-        "local": "蝨ｰ譁ｹ",
+        "central_turf": "中央芝",
+        "central_dirt": "中央ダート",
+        "local": "地方",
     }
     filtered_rows = []
     for row in predictor_rows:
@@ -1034,68 +1034,6 @@ def load_ability_marks_table(scope_key, run_id, run_row=None):
     )
 
 
-LLM_BATTLE_ORDER = ("openai", "gemini", "deepseek", "grok")
-LLM_BATTLE_LABELS = {
-    "openai": "ChatGPT",
-    "gemini": "Gemini",
-    "deepseek": "DeepSeek",
-    "grok": "Grok",
-}
-LLM_NOTE_LABELS = {
-    "openai": "ChatGPT",
-    "gemini": "Gemini",
-    "deepseek": "DeepSeek",
-    "grok": "Grok",
-}
-LLM_BATTLE_SHORT_LABELS = {
-    "openai": "chatgpt",
-    "gemini": "gemini",
-    "deepseek": "deepseek",
-    "grok": "grok",
-}
-LLM_REPORT_SCOPE_KEYS = ("central_dirt", "central_turf", "local")
-BET_TYPE_TEXT_MAP = {
-    "win": "単勝",
-    "place": "複勝",
-    "wide": "ワイド",
-    "quinella": "馬連",
-    "exacta": "馬単",
-    "trio": "三連複",
-    "trifecta": "三連単",
-}
-
-
-
-
-def _safe_text(value):
-    return str(value or "").strip()
-
-
-def _policy_primary_budget(payload):
-    budgets = list((payload or {}).get("budgets", []) or [])
-    for item in budgets:
-        if isinstance(item, dict):
-            return item
-    return {}
-
-
-def _policy_primary_output(payload):
-    item = _policy_primary_budget(payload)
-    return dict(item.get("output", {}) or {})
-
-
-def _policy_marks_map(payload):
-    marks = {}
-    for row in list(_policy_primary_output(payload).get("marks", []) or []):
-        symbol = _safe_text(row.get("symbol"))
-        horse_no = _safe_text(row.get("horse_no"))
-        if symbol and horse_no and horse_no not in marks:
-            marks[horse_no] = symbol
-    return marks
-
-
-
-
 def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=PUBLIC_SHARE_MAX_CHARS):
     return web_public_llm.build_public_share_text(
         run_row,
@@ -1335,19 +1273,6 @@ def _race_job_view(row):
     display = derive_race_job_display_state(hydrated)
     return hydrated, display
 
-
-def _race_job_step_badges_html(row):
-    hydrated, _ = _race_job_view(row)
-    chips = []
-    for step_name in ("odds", "predictor", "policy", "settlement"):
-        state = str(hydrated.get(f"{step_name}_status", "idle") or "idle").strip().lower() or "idle"
-        tone = _JOB_STEP_STATE_TONES.get(state, "muted")
-        chips.append(
-            f'<span class="hero-pill hero-pill--{html.escape(tone)}">{html.escape(_JOB_STEP_LABELS.get(step_name, step_name))}: {html.escape(_JOB_STEP_STATE_LABELS.get(state, state))}</span>'
-        )
-    return "".join(chips)
-
-
 def _race_job_display_tone(row):
     _, display = _race_job_view(row)
     return str(display.get("tone", "muted") or "muted")
@@ -1388,39 +1313,6 @@ def _race_job_process_log_entries(row):
                 preview = preview[:137] + "..."
         entries.append({"step": step, "code": code, "preview": preview})
     return entries
-
-
-def _race_job_process_log_html(row):
-    entries = _race_job_process_log_entries(row)
-    if not entries:
-        return ""
-    items = []
-    for entry in entries:
-        code_text = f"exit {entry['code']}" if entry.get("code", "") != "" else "exit -"
-        preview_html = (
-            f'<div class="job-process-preview">{html.escape(entry["preview"])}</div>'
-            if entry.get("preview")
-            else ""
-        )
-        items.append(
-            f"""
-            <article class="job-process-item">
-              <div class="job-process-head">
-                <strong>{html.escape(entry["step"])}</strong>
-                <span>{html.escape(code_text)}</span>
-              </div>
-              {preview_html}
-            </article>
-            """
-        )
-    return f"""
-    <section class="job-process-log">
-      <div class="job-process-title">Process Log</div>
-      <div class="job-process-list">
-        {"".join(items)}
-      </div>
-    </section>
-    """
 
 
 def _admin_supplied_token(request: Request, token: str = ""):

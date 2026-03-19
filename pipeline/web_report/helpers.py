@@ -12,12 +12,7 @@ LLM_BATTLE_LABELS = {
     "deepseek": "DeepSeek",
     "grok": "Grok",
 }
-LLM_NOTE_LABELS = {
-    "openai": "ChatGPT",
-    "gemini": "Gemini",
-    "deepseek": "DeepSeek",
-    "grok": "Grok",
-}
+LLM_NOTE_LABELS = dict(LLM_BATTLE_LABELS)
 LLM_BATTLE_SHORT_LABELS = {
     "openai": "chatgpt",
     "gemini": "gemini",
@@ -34,6 +29,7 @@ BET_TYPE_TEXT_MAP = {
     "trio": "三連複",
     "trifecta": "三連単",
 }
+MARK_SYMBOL_ORDER = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
 
 
 def safe_text(value):
@@ -90,6 +86,11 @@ def format_ticket_target_text(bet_type, target):
     return "-".join(parts) if parts else text
 
 
+def _format_amount_text(value):
+    amount = to_int_or_none(value)
+    return f"¥{amount}" if amount is not None else "-"
+
+
 def format_ticket_plan_text(ticket_rows, output):
     rows = list(ticket_rows or [])
     grouped = {}
@@ -97,75 +98,50 @@ def format_ticket_plan_text(ticket_rows, output):
         bet_type_key = safe_text(row.get("bet_type")).lower()
         bet_type = format_bet_type_text(bet_type_key)
         horse_no = format_ticket_target_text(bet_type_key, row.get("horse_no"))
-        amount = to_int_or_none(row.get("amount_yen"))
-        if amount is None:
-            amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"{amount}円" if amount is not None else "-"
-        grouped.setdefault(bet_type, []).append(f"{horse_no}　{amount_text}")
-    if grouped:
-        lines = []
-        ordered_types = [
-            BET_TYPE_TEXT_MAP[key]
-            for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place")
-            if BET_TYPE_TEXT_MAP.get(key) in grouped
-        ]
-        for bet_type in ordered_types:
-            lines.append(bet_type)
-            lines.extend(grouped.get(bet_type, []))
-            lines.append("")
-        for bet_type, items in grouped.items():
-            if bet_type in ordered_types:
-                continue
-            lines.append(bet_type)
-            lines.extend(items)
-            lines.append("")
-        return "\n".join(lines).strip()
+        amount = row.get("amount_yen")
+        if amount in ("", None):
+            amount = row.get("stake_yen")
+        amount_text = _format_amount_text(amount)
+        grouped.setdefault(bet_type, []).append(f"{horse_no} {amount_text}")
+    if not grouped:
+        plan_rows = list((output or {}).get("ticket_plan", []) or [])
+        for row in plan_rows:
+            ticket_id = safe_text(row.get("id"))
+            if ticket_id:
+                bet_type, _, target = ticket_id.partition(":")
+            else:
+                bet_type = safe_text(row.get("bet_type")).lower()
+                legs = [safe_text(x) for x in list(row.get("legs", []) or []) if safe_text(x)]
+                if not bet_type or not legs:
+                    continue
+                target = "-".join(legs)
+            bet_type_label = format_bet_type_text(bet_type)
+            target_text = format_ticket_target_text(bet_type, target or "-")
+            amount_text = _format_amount_text(row.get("stake_yen"))
+            grouped.setdefault(bet_type_label, []).append(f"{target_text} {amount_text}")
+    if not grouped:
+        return "買い目なし"
 
-    plan_rows = list((output or {}).get("ticket_plan", []) or [])
-    grouped = {}
-    for row in plan_rows:
-        ticket_id = safe_text(row.get("id"))
-        amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"{amount}円" if amount is not None else "-"
-        if ticket_id:
-            bet_type, _, target = ticket_id.partition(":")
-        else:
-            bet_type = safe_text(row.get("bet_type")).lower()
-            legs = [safe_text(x) for x in list(row.get("legs", []) or []) if safe_text(x)]
-            if not bet_type or not legs:
-                continue
-            target = "-".join(legs)
-        bet_type_label = format_bet_type_text(bet_type)
-        target_text = format_ticket_target_text(bet_type, target or "-")
-        grouped.setdefault(bet_type_label, []).append(f"{target_text}　{amount_text}")
-    if grouped:
-        lines = []
-        ordered_types = [
-            BET_TYPE_TEXT_MAP[key]
-            for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place")
-            if BET_TYPE_TEXT_MAP.get(key) in grouped
-        ]
-        for bet_type in ordered_types:
-            lines.append(bet_type)
-            lines.extend(grouped.get(bet_type, []))
-            lines.append("")
-        for bet_type, items in grouped.items():
-            if bet_type in ordered_types:
-                continue
-            lines.append(bet_type)
-            lines.extend(items)
-            lines.append("")
-        return "\n".join(lines).strip()
-    return "未生成"
+    ordered_types = [
+        BET_TYPE_TEXT_MAP[key]
+        for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place")
+        if BET_TYPE_TEXT_MAP.get(key) in grouped
+    ]
+    extra_types = [bet_type for bet_type in grouped if bet_type not in ordered_types]
+    lines = []
+    for bet_type in ordered_types + extra_types:
+        lines.append(bet_type)
+        lines.extend(grouped.get(bet_type, []))
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def format_marks_text(marks_map):
     if not marks_map:
-        return "未生成"
+        return "印なし"
     ordered = []
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
     for horse_no, symbol in marks_map.items():
-        ordered.append((symbol_order.get(symbol, 99), horse_no, symbol))
+        ordered.append((MARK_SYMBOL_ORDER.get(symbol, 99), horse_no, symbol))
     ordered.sort(key=lambda item: (item[0], to_int_or_none(item[1]) or 999, item[1]))
     return " ".join(f"{symbol}{horse_no}" for _, horse_no, symbol in ordered)
 
@@ -254,11 +230,11 @@ def build_battle_title(run_row):
     race_label = format_race_label(run_row)
     date_label = format_jp_date_text(run_row)
     race_name = safe_text((run_row or {}).get("trigger_race"))
-    parts = ["第1回 いかいもAI競馬対決杯"]
+    parts = ["4つのAI競馬予想"]
     if date_label or race_label:
         detail = " ".join(part for part in [date_label, race_label] if part)
         if race_name:
-            detail = f"{detail}｜{race_name}｜" if detail else f"｜{race_name}｜"
+            detail = f"{detail}（{race_name}）" if detail else f"（{race_name}）"
         if detail:
             parts.append(detail)
     return " ".join(parts)
@@ -293,7 +269,7 @@ def format_yen_text(value):
     except (TypeError, ValueError):
         amount = 0
     sign = "-" if amount < 0 else ""
-    return f"{sign}{abs(amount):,}円"
+    return f"{sign}¥{abs(amount):,}"
 
 
 def format_percent_text(value):

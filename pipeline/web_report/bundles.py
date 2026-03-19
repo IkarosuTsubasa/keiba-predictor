@@ -14,6 +14,8 @@ from web_report.helpers import (
     safe_text,
 )
 
+MARK_SYMBOL_ORDER = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
+
 
 def public_all_time_roi_summary(base_dir, *, ledger_path, load_rows):
     cards = []
@@ -62,14 +64,13 @@ def public_all_time_roi_summary(base_dir, *, ledger_path, load_rows):
 
 def _policy_primary_choice(output):
     marks = list((output or {}).get("marks", []) or [])
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
     best = None
     for row in marks:
         symbol = safe_text(row.get("symbol"))
         horse_no = safe_text(row.get("horse_no"))
         if not symbol or not horse_no:
             continue
-        score = symbol_order.get(symbol, 99)
+        score = MARK_SYMBOL_ORDER.get(symbol, 99)
         if best is None or score < best[0]:
             best = (score, horse_no)
     if best is not None:
@@ -95,7 +96,7 @@ def _llm_agreement_summary(outputs):
     max_count = max(counts.values()) if counts else 0
     unique_count = len(counts)
     if max_count >= 4:
-        return {"label": "非常に高い", "score": 1.0}
+        return {"label": "かなり高い", "score": 1.0}
     if max_count == 3:
         return {"label": "高い", "score": 0.8}
     if max_count == 2 and unique_count <= 2:
@@ -108,7 +109,7 @@ def _llm_agreement_summary(outputs):
 def _difficulty_summary(outputs, agreement_score):
     outputs = list(outputs or [])
     if not outputs:
-        return "★☆☆☆☆"
+        return "★★★☆☆"
     score = 2.0
     mixed_count = 0
     low_conf_count = 0
@@ -197,11 +198,11 @@ def build_llm_battle_bundle(
         result_triplet = marks_result_triplet(marks_map, actual_horse_nos)
         marks_text = format_marks_text(marks_map)
         ticket_plan_text = format_ticket_plan_text(ticket_rows, output)
-        meta_tags = [f"状态 {ticket_summary['status']}"]
+        meta_tags = [f"状態 {ticket_summary['status']}"]
         if ticket_summary["stake_yen"]:
-            meta_tags.append(f"投注 {ticket_summary['stake_yen']}円")
+            meta_tags.append(f"投資 ¥{ticket_summary['stake_yen']}")
         else:
-            meta_tags.append("未投注")
+            meta_tags.append("投資なし")
         if ticket_summary["roi"] != "":
             meta_tags.append(f"ROI {ticket_summary['roi']:.4f}")
         cards.append(
@@ -217,7 +218,7 @@ def build_llm_battle_bundle(
 
     agreement = _llm_agreement_summary(outputs)
     difficulty = _difficulty_summary(outputs, agreement.get("score", 0.5))
-    note_lines.extend([f"难度：{difficulty}", f"一致度：{agreement.get('label', '中')}", ""])
+    note_lines.extend([f"難易度: {difficulty}", f"一致度: {agreement.get('label', '中')}", ""])
 
     card_html = []
     for card in cards:
@@ -240,12 +241,12 @@ def build_llm_battle_bundle(
               </div>
               <div class="battle-public-grid">
                 <section class="battle-copy-card">
-                  <div class="policy-label">买い目</div>
+                  <div class="policy-label">買い目</div>
                   <p>{html.escape(card['ticket_plan_text'])}</p>
                 </section>
               </div>
               <div class="battle-result-row">
-                <span class="policy-label">结果对应</span>
+                <span class="policy-label">結果一致</span>
                 <code>{html.escape(card['result_triplet_text'])}</code>
               </div>
             </article>
@@ -254,9 +255,9 @@ def build_llm_battle_bundle(
         note_lines.extend(
             [
                 card["label"],
-                f"印：{card['marks_text']}",
+                f"印: {card['marks_text']}",
                 "",
-                "买い目",
+                "買い目",
                 "",
                 card["ticket_plan_text"],
                 "",
@@ -270,11 +271,11 @@ def build_llm_battle_bundle(
         f'<span class="section-chip">{html.escape(race_label)}</span>'
         "</div>"
         '<div class="battle-overview-grid">'
-        f'<section class="battle-overview-card"><span class="battle-band-label">比赛</span><strong>{html.escape(race_label)}</strong></section>'
-        f'<section class="battle-overview-card"><span class="battle-band-label">难度</span><strong>{html.escape(difficulty)}</strong></section>'
+        f'<section class="battle-overview-card"><span class="battle-band-label">対象</span><strong>{html.escape(race_label)}</strong></section>'
+        f'<section class="battle-overview-card"><span class="battle-band-label">難易度</span><strong>{html.escape(difficulty)}</strong></section>'
         f'<section class="battle-overview-card"><span class="battle-band-label">一致度</span><strong>{html.escape(str(agreement.get("label", "中")))}</strong></section>'
         "</div>"
-        '<p class="helper-text">仅保留印、买い目与结果对应。</p>'
+        '<p class="helper-text">各AIの印、買い目、結果一致を比較できます。</p>'
         f'<div class="battle-grid">{"".join(card_html)}</div>'
         "</section>"
     )
