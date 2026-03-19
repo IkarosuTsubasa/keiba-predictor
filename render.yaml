@@ -3,7 +3,7 @@ services:
     name: keiba-web
     runtime: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && cd frontend && npm install && npm run build
     startCommand: cd pipeline && python web_server.py
     healthCheckPath: /
     disk:

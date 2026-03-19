@@ -208,21 +208,6 @@ def get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT, query=""):
     return out
 
 
-def build_run_options(scope_key, selected_run_id=""):
-    options = []
-    scope_key = normalize_scope_key(scope_key)
-    selected_run_id = str(selected_run_id or "")
-    if not scope_key:
-        return '<option value="" disabled>Select data scope</option>'
-    for item in get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT):
-        value = html.escape(item["run_id"])
-        label = html.escape(item["label"])
-        selected_attr = ' selected' if selected_run_id and item["run_id"] == selected_run_id else ""
-        options.append(f'<option value="{value}"{selected_attr}>{label}</option>')
-    if not options:
-        options.append('<option value="" disabled>No runs</option>')
-    return "\n".join(options)
-
 def resolve_run(run_id, scope_key):
     return run_resolver.resolve_run(load_runs, run_id, scope_key)
 
@@ -1035,26 +1020,6 @@ def load_policy_payloads(scope_key, run_id, run_row=None):
         load_json_file=load_json_file,
         normalize_policy_engine=normalize_policy_engine,
     )
-def _policy_chip_row(label, values, tone=""):
-    return web_policy_html._policy_chip_row(label, values, tone=tone)
-
-
-def _policy_detail_row(label, value, code=False):
-    return web_policy_html._policy_detail_row(label, value, code=code)
-
-
-def _policy_mark_html(marks):
-    return web_policy_html._policy_mark_html(marks)
-
-
-def _policy_ticket_html(rows):
-    return web_policy_html._policy_ticket_html(rows)
-
-
-def build_policy_html(payload):
-    return web_policy_html.build_policy_html(payload, to_float=to_float)
-def build_policy_workspace_html(payloads):
-    return web_policy_html.build_policy_workspace_html(payloads, to_float=to_float)
 
 
 def load_ability_marks_table(scope_key, run_id, run_row=None):
@@ -1341,13 +1306,6 @@ def build_public_board_payload(date_text="", scope_key=""):
         public_all_time_roi_summary=_public_all_time_roi_summary,
         public_trend_series=_public_trend_series,
         parse_run_date=_parse_run_date,
-    )
-
-def build_public_llm_page(date_text="", scope_key=""):
-    payload = build_public_board_payload(date_text=date_text, scope_key=scope_key)
-    return web_public_llm.build_public_llm_page(
-        payload=payload,
-        prefix_public_html_routes=_prefix_public_html_routes,
     )
 
 _JOB_STEP_LABELS = {
@@ -1833,7 +1791,7 @@ def admin_auth_check(request: Request, token: str = ""):
         {
             "enabled": enabled,
             "valid": valid,
-            "console_url": f"{CONSOLE_BASE_PATH}?token={supplied}" if supplied else CONSOLE_BASE_PATH,
+            "console_url": CONSOLE_BASE_PATH,
         }
     )
 

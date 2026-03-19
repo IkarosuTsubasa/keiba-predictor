@@ -315,27 +315,13 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
   const initialScope = search.get("scope_key") || "central_dirt";
   const initialRunId = search.get("run_id") || "";
 
-  const [token, setToken] = useState(() => search.get("token") || window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
+  const [token, setToken] = useState(() => window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
   const [scopeKey, setScopeKey] = useState(initialScope);
   const [runId, setRunId] = useState(initialRunId);
   const [reloadTick, setReloadTick] = useState(0);
   const [busyKey, setBusyKey] = useState("");
   const [opResult, setOpResult] = useState("");
   const [state, setState] = useState({ loading: false, error: "", data: null });
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const queryToken = String(params.get("token") || "").trim();
-    if (queryToken) {
-      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, queryToken);
-      setToken(queryToken);
-      params.delete("token");
-    }
-    if (!queryToken) return;
-    const nextSearch = params.toString();
-    const nextUrl = `${appBasePath}/console/workspace${nextSearch ? `?${nextSearch}` : ""}`;
-    window.history.replaceState({}, "", nextUrl);
-  }, [appBasePath]);
 
   useEffect(() => {
     if (!token.trim()) {

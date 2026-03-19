@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import AdminLoginPage, { ADMIN_TOKEN_STORAGE_KEY } from "./AdminLoginPage";
 import PageSectionHeader from "./PageSectionHeader";
 
+const TRACK_CONDITION_OPTIONS = [
+  { value: "\u826f", label: "\u826f" },
+  { value: "\u7a0d\u91cd", label: "\u7a0d\u91cd" },
+  { value: "\u91cd", label: "\u91cd" },
+  { value: "\u4e0d\u826f", label: "\u4e0d\u826f" },
+];
+
 function formatDateInputValue(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -34,7 +41,7 @@ function createDefaultCreateJobForm() {
     race_date: formatDateInputValue(now),
     scheduled_off_time: formatDateTimeLocalValue(now),
     target_distance: "1600",
-    target_track_condition: "濶ｯ",
+    target_track_condition: "\u826f",
     lead_minutes: "30",
     notes: "",
     kachiuma_file: null,
@@ -82,42 +89,30 @@ function ProcessLog({ entries }) {
   );
 }
 
+function TrackConditionSelect({ value, onChange }) {
+  return (
+    <select value={value} onChange={onChange}>
+      {TRACK_CONDITION_OPTIONS.map((item) => (
+        <option key={item.value} value={item.value}>
+          {item.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function CreateJobForm({ onSubmit, busy }) {
-  const [form, setForm] = useState({
-    scope_key: "local",
-    race_id: "",
-    location: "",
-    race_date: "",
-    scheduled_off_time: "",
-    target_distance: "1600",
-    target_track_condition: "良",
-    lead_minutes: "30",
-    notes: "",
-    kachiuma_file: null,
-    shutuba_file: null,
-  });
+  const [form, setForm] = useState(createDefaultCreateJobForm);
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  useEffect(() => {
-    setForm((prev) => {
-      if (prev.race_date && prev.scheduled_off_time) return prev;
-      const defaults = createDefaultCreateJobForm();
-      return {
-        ...prev,
-        race_date: prev.race_date || defaults.race_date,
-        scheduled_off_time: prev.scheduled_off_time || defaults.scheduled_off_time,
-      };
-    });
-  }, []);
-
   return (
     <details className="admin-tool-panel admin-tool-panel--primary" open>
       <summary>Create Task</summary>
       <div className="admin-tool-panel__body admin-tool-panel__body--primary">
-        <p>默认带入当前日期和当前时刻，适合快速录入即将开赛的比赛任务。</p>
+        <p>Defaults to the current date and off time for fast task creation.</p>
       </div>
       <form
         className="admin-inline-form admin-inline-form--primary"
@@ -148,7 +143,12 @@ function CreateJobForm({ onSubmit, busy }) {
         </label>
         <label>
           <span>Off Time</span>
-          <input type="datetime-local" step={300} value={form.scheduled_off_time} onChange={(event) => updateField("scheduled_off_time", event.target.value)} />
+          <input
+            type="datetime-local"
+            step={300}
+            value={form.scheduled_off_time}
+            onChange={(event) => updateField("scheduled_off_time", event.target.value)}
+          />
         </label>
         <label>
           <span>Distance</span>
@@ -156,12 +156,7 @@ function CreateJobForm({ onSubmit, busy }) {
         </label>
         <label>
           <span>Track</span>
-          <select value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)}>
-            <option value="良">良</option>
-            <option value="稍重">稍重</option>
-            <option value="重">重</option>
-            <option value="不良">不良</option>
-          </select>
+          <TrackConditionSelect value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)} />
         </label>
         <label>
           <span>Lead Minutes</span>
@@ -228,7 +223,7 @@ function EditJobForm({ job, onSubmit, busy }) {
     race_date: job.race_date || "",
     scheduled_off_time: job.scheduled_off_time || "",
     target_distance: job.target_distance || "",
-    target_track_condition: job.target_track_condition || "良",
+    target_track_condition: job.target_track_condition || "\u826f",
     lead_minutes: job.lead_minutes || 30,
     notes: job.notes || "",
   });
@@ -240,7 +235,7 @@ function EditJobForm({ job, onSubmit, busy }) {
       race_date: job.race_date || "",
       scheduled_off_time: job.scheduled_off_time || "",
       target_distance: job.target_distance || "",
-      target_track_condition: job.target_track_condition || "良",
+      target_track_condition: job.target_track_condition || "\u826f",
       lead_minutes: job.lead_minutes || 30,
       notes: job.notes || "",
     });
@@ -274,7 +269,12 @@ function EditJobForm({ job, onSubmit, busy }) {
         </label>
         <label>
           <span>Off Time</span>
-          <input type="datetime-local" step={300} value={String(form.scheduled_off_time || "").slice(0, 16)} onChange={(event) => updateField("scheduled_off_time", event.target.value)} />
+          <input
+            type="datetime-local"
+            step={300}
+            value={String(form.scheduled_off_time || "").slice(0, 16)}
+            onChange={(event) => updateField("scheduled_off_time", event.target.value)}
+          />
         </label>
         <label>
           <span>Distance</span>
@@ -282,12 +282,7 @@ function EditJobForm({ job, onSubmit, busy }) {
         </label>
         <label>
           <span>Track</span>
-          <select value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)}>
-            <option value="良">良</option>
-            <option value="稍重">稍重</option>
-            <option value="重">重</option>
-            <option value="不良">不良</option>
-          </select>
+          <TrackConditionSelect value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)} />
         </label>
         <label>
           <span>Lead Minutes</span>
@@ -351,7 +346,7 @@ function OpsPanel({ busy, onReset }) {
     <article className="admin-tool-panel admin-tool-panel--compact">
       <div className="admin-tool-panel__body">
         <h3>Reset LLM State</h3>
-        <p>低频维护操作，通常只在状态异常或联调时使用。</p>
+        <p>Low-frequency maintenance action for recovery and debugging only.</p>
         <div className="admin-toolbar">
           <button type="button" disabled={busy} onClick={onReset}>
             {busy ? "Resetting..." : "Reset LLM State"}
@@ -365,7 +360,6 @@ function OpsPanel({ busy, onReset }) {
 function JobCard({ job, onAction, busyAction }) {
   const actualText = [job.actual_top1, job.actual_top2, job.actual_top3].filter(Boolean).join(" / ") || "Not settled";
   const title = `${job.location || ""}${job.race_id ? ` ${job.race_id}` : ""}`.trim() || job.job_id;
-  const consoleUrl = "/keiba/console";
   const workspaceUrl =
     job.current_run_id && job.scope_key
       ? `/keiba/console/workspace?scope_key=${encodeURIComponent(job.scope_key)}&run_id=${encodeURIComponent(job.current_run_id)}`
@@ -412,23 +406,17 @@ function JobCard({ job, onAction, busyAction }) {
           Delete
         </button>
         {workspaceUrl ? <a href={workspaceUrl}>Workspace</a> : null}
-        <a href={consoleUrl}>Console</a>
       </div>
 
       <EditJobForm job={job} busy={busy} onSubmit={(payload) => onAction("edit", job, payload)} />
       <SettleJobForm busy={busy} onSubmit={(payload) => onAction("settle_now", job, payload)} />
-
       <ProcessLog entries={job.process_log} />
     </article>
   );
 }
 
 export default function AdminJobsPage({ appBasePath = "/keiba" }) {
-  const [token, setToken] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const queryToken = params.get("token") || "";
-    return queryToken || window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
-  });
+  const [token, setToken] = useState(() => window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
   const [showSettled, setShowSettled] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [busyAction, setBusyAction] = useState("");
@@ -438,20 +426,6 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     error: "",
     data: null,
   });
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const queryToken = String(params.get("token") || "").trim();
-    if (queryToken) {
-      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, queryToken);
-      setToken(queryToken);
-      params.delete("token");
-    }
-    if (!queryToken) return;
-    const nextSearch = params.toString();
-    const nextUrl = `${appBasePath}/console${nextSearch ? `?${nextSearch}` : ""}`;
-    window.history.replaceState({}, "", nextUrl);
-  }, [appBasePath]);
 
   useEffect(() => {
     if (!token.trim()) {
@@ -611,7 +585,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         <PageSectionHeader
           kicker="Admin Jobs"
           title="Task Console"
-          subtitle="Manage race tasks, trigger processing, import archives, and run standalone maintenance operations."
+          subtitle="Manage race tasks, trigger processing, import archives, and run maintenance actions."
           meta={[`${(state.data?.jobs || []).length} visible`, showSettled ? "showing settled" : "hiding settled"]}
         />
 
@@ -628,10 +602,13 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           <button type="button" disabled={busyAction === "run_due_now"} onClick={() => runToolbarAction("run_due_now", () => postJson("/api/admin/jobs/run_due_now", {}))}>
             {busyAction === "run_due_now" ? "Running..." : "Run Due Now"}
           </button>
-          <button type="button" disabled={busyAction === "topup_today_all_llm"} onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}>
+          <button
+            type="button"
+            disabled={busyAction === "topup_today_all_llm"}
+            onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
+          >
             {busyAction === "topup_today_all_llm" ? "Applying..." : "Top Up All LLM"}
           </button>
-          <a href={`${appBasePath}/console`}>Console</a>
         </section>
 
         <section className="admin-tool-hero">
