@@ -186,12 +186,12 @@ def create_race_job_response(
     update_race_job,
 ):
     if not admin_token_valid(token):
-        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员口令无效，无法创建任务。")
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能创建赛事任务。")
     race_id = normalize_race_id(race_id)
     scope_norm = normalize_scope_key(scope_key)
     race_date = str(race_date or "").strip() or default_job_race_date_text()
     if not scope_norm:
-        return build_race_jobs_page(admin_token=token, error_text="范围无效。")
+        return build_race_jobs_page(admin_token=token, error_text="数据范围无效。")
     if not race_id:
         return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
     if not str(scheduled_off_time or "").strip():
@@ -200,12 +200,12 @@ def create_race_job_response(
     try:
         target_distance_value = int(str(target_distance or "").strip())
     except ValueError:
-        return build_race_jobs_page(admin_token=token, error_text="请填写比赛距离，例如 1200 或 1800。")
+        return build_race_jobs_page(admin_token=token, error_text="距离必须是整数，例如 1200 或 1800。")
     if target_distance_value <= 0:
-        return build_race_jobs_page(admin_token=token, error_text="比赛距离必须大于 0。")
+        return build_race_jobs_page(admin_token=token, error_text="距离必须大于 0。")
     target_track_condition = str(target_track_condition or "").strip()
     if target_track_condition not in ("良", "稍重", "重", "不良"):
-        return build_race_jobs_page(admin_token=token, error_text="场地状态只能是 良 / 稍重 / 重 / 不良。")
+        return build_race_jobs_page(admin_token=token, error_text="马场状态必须是 良 / 稍重 / 重 / 不良。")
     if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
         return build_race_jobs_page(admin_token=token, error_text="请上传 kachiuma.csv。")
     if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
@@ -250,7 +250,7 @@ def create_race_job_response(
         row["updated_at"] = now_text
 
     update_race_job(base_dir, job["job_id"], _attach_artifacts)
-    return build_race_jobs_page(admin_token=token, message_text=f"已创建任务 {job['job_id']}。")
+    return build_race_jobs_page(admin_token=token, message_text=f"已创建赛事任务 {job['job_id']}")
 
 
 async def import_history_archive_response(
@@ -263,7 +263,7 @@ async def import_history_archive_response(
     build_race_jobs_page,
 ):
     if not admin_token_valid(token):
-        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员口令无效，无法导入历史数据。")
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能导入历史归档。")
     if archive_file is None or not str(getattr(archive_file, "filename", "") or "").strip():
         return build_race_jobs_page(admin_token=token, error_text="请上传 ZIP 文件。")
     filename = str(archive_file.filename or "").strip()
@@ -277,28 +277,28 @@ async def import_history_archive_response(
             overwrite=str(overwrite or "").strip() == "1",
         )
     except zipfile.BadZipFile:
-        return build_race_jobs_page(admin_token=token, error_text="ZIP 文件损坏或格式无效。")
+        return build_race_jobs_page(admin_token=token, error_text="ZIP 文件损坏或格式不正确。")
     except Exception as exc:
         return build_race_jobs_page(admin_token=token, error_text=f"导入失败：{exc}")
     message = f"已导入 {summary['written']} 个文件，跳过 {summary['skipped']} 个。"
     sample_paths = list(summary.get("sample_paths", []) or [])
     if sample_paths:
-        message += " 示例: " + ", ".join(sample_paths)
+        message += " 样例: " + ", ".join(sample_paths)
     return build_race_jobs_page(admin_token=token, message_text=message)
 
 
 def scan_due_race_jobs_response(*, base_dir, token, admin_token_valid, build_race_jobs_page, scan_due_race_jobs):
     if not admin_token_valid(token):
-        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员口令无效，无法扫描任务。")
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能扫描到期任务。")
     changed = scan_due_race_jobs(base_dir)
     if changed:
-        return build_race_jobs_page(admin_token=token, message_text=f"已将 {len(changed)} 场比赛加入处理队列。")
-    return build_race_jobs_page(admin_token=token, message_text="当前没有到点任务。")
+        return build_race_jobs_page(admin_token=token, message_text=f"已发现 {len(changed)} 个到期任务。")
+    return build_race_jobs_page(admin_token=token, message_text="当前没有到期任务。")
 
 
 def run_due_race_jobs_now_response(*, base_dir, token, admin_token_valid, build_race_jobs_page, scan_due_race_jobs, load_race_jobs):
     if not admin_token_valid(token):
-        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员口令无效，无法立即执行任务。")
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能立即执行到期任务。")
     summary = run_due_jobs_once(
         base_dir=base_dir,
         scan_due_race_jobs=scan_due_race_jobs,
@@ -318,13 +318,10 @@ def run_due_race_jobs_now_response(*, base_dir, token, admin_token_valid, build_
         )
         return build_race_jobs_page(
             admin_token=token,
-            message_text="已执行到点任务。 " + ", ".join(message_parts),
+            message_text="已执行到期任务: " + ", ".join(message_parts),
             error_text=error_text,
         )
-    return build_race_jobs_page(
-        admin_token=token,
-        message_text="已执行到点任务。 " + ", ".join(message_parts),
-    )
+    return build_race_jobs_page(admin_token=token, message_text="已执行到期任务: " + ", ".join(message_parts))
 
 
 def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_race_jobs, load_race_jobs):
@@ -350,12 +347,192 @@ def topup_today_all_llm_budget_response(
     add_bankroll_topup,
 ):
     if not admin_token_valid(token):
-        return render_console_page(admin_token=token, error_text="管理员口令无效，无法追加预算。")
+        return render_console_page(admin_token=token, error_text="管理员令牌无效，不能追加今日预算。")
     ledger_date = default_job_race_date_text().replace("-", "")
     amount_yen = resolve_daily_bankroll_yen(ledger_date)
     for engine in ("gemini", "deepseek", "openai", "grok"):
         add_bankroll_topup(base_dir, ledger_date, amount_yen, policy_engine=engine)
+    return render_console_page(admin_token=token, message_text=f"已为 {ledger_date} 的全部 LLM 追加预算 {amount_yen}。")
+
+
+def update_race_job_response(
+    *,
+    base_dir,
+    token,
+    job_id,
+    action,
+    admin_token_valid,
+    build_race_jobs_page,
+    apply_race_job_action,
+):
+    if not admin_token_valid(token):
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能更新任务。")
+    job = apply_race_job_action(base_dir, job_id, action)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="未找到要更新的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已执行操作：{action}")
+
+
+def delete_race_job_response(
+    *,
+    base_dir,
+    token,
+    job_id,
+    admin_token_valid,
+    build_race_jobs_page,
+    delete_race_job,
+):
+    if not admin_token_valid(token):
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能删除任务。")
+    deleted = delete_race_job(base_dir, job_id)
+    if deleted is None:
+        return build_race_jobs_page(admin_token=token, error_text="未找到要删除的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已删除。")
+
+
+def process_race_job_now_response(
+    *,
+    base_dir,
+    token,
+    job_id,
+    admin_token_valid,
+    build_race_jobs_page,
+):
+    if not admin_token_valid(token):
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能立即处理任务。")
+    try:
+        from race_job_runner import process_race_job
+
+        print(
+            "[web_app] "
+            + json.dumps(
+                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "process_now_start", "job_id": job_id},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        summary = process_race_job(base_dir, job_id)
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "process_now_done",
+                    "job_id": job_id,
+                    "run_id": str((summary or {}).get("run_id", "") or "").strip(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    except Exception as exc:
+        try:
+            from race_job_runner import fail_race_job
+
+            fail_race_job(base_dir, job_id, str(exc))
+        except Exception:
+            pass
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "process_now_error",
+                    "job_id": job_id,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 处理失败：{exc}")
+    run_id = str((summary or {}).get("run_id", "") or "").strip()
+    engine_count = len(list((summary or {}).get("policy_engines", []) or []))
+    task_id = str((summary or {}).get("remote_predictor_task_id", "") or (summary or {}).get("v5_remote_task_id", "") or "").strip()
+    if task_id:
+        message_text = f"{job_id} 已进入远程预测，run_id={run_id or '-'} task_id={task_id}"
+    else:
+        message_text = f"{job_id} 已处理完成，run_id={run_id or '-'} engines={engine_count}"
+    return build_race_jobs_page(admin_token=token, message_text=message_text)
+
+
+def queue_race_job_settle_response(
+    *,
+    base_dir,
+    token,
+    job_id,
+    actual_top1,
+    actual_top2,
+    actual_top3,
+    admin_token_valid,
+    build_race_jobs_page,
+    initialize_race_job_step_fields,
+    set_race_job_step_state,
+    update_race_job,
+):
+    if not admin_token_valid(token):
+        return build_race_jobs_page(admin_token=token, authorized=False, error_text="管理员令牌无效，不能排队结算。")
+    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
+    if not all(names):
+        return build_race_jobs_page(admin_token=token, error_text="请填写第 1-3 名。")
+
+    def _queue_settle(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
+        row["actual_top1"] = names[0]
+        row["actual_top2"] = names[1]
+        row["actual_top3"] = names[2]
+        row["status"] = "queued_settle"
+        row["queued_settle_at"] = now_text
+        row["error_message"] = ""
+        set_race_job_step_state(row, "settlement", "queued")
+
+    job = update_race_job(base_dir, job_id, _queue_settle)
+    if job is None:
+        return build_race_jobs_page(admin_token=token, error_text="未找到要结算的任务。")
+    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已加入结算队列。")
+
+
+def settle_race_job_now_response(
+    *,
+    base_dir,
+    token,
+    job_id,
+    actual_top1,
+    actual_top2,
+    actual_top3,
+    admin_token_valid,
+    render_console_page,
+    initialize_race_job_step_fields,
+    set_race_job_step_state,
+    update_race_job,
+):
+    if not admin_token_valid(token):
+        return render_console_page(admin_token=token, error_text="管理员令牌无效，不能立即结算。")
+    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
+    if not all(names):
+        return render_console_page(admin_token=token, error_text="请填写第 1-3 名。")
+    try:
+        from race_job_runner import settle_race_job
+
+        summary = settle_race_job(base_dir, job_id, names)
+    except Exception as exc:
+        def _restore_settle_retry(row, now_text):
+            row.update(initialize_race_job_step_fields(row))
+            row["status"] = "ready"
+            row["actual_top1"] = names[0]
+            row["actual_top2"] = names[1]
+            row["actual_top3"] = names[2]
+            row["error_message"] = str(exc)
+            row["last_settlement_output"] = str(exc)
+            set_race_job_step_state(row, "settlement", "failed", now_text, str(exc))
+
+        try:
+            update_race_job(base_dir, job_id, _restore_settle_retry)
+        except Exception:
+            pass
+        return render_console_page(admin_token=token, error_text=f"{job_id} 结算失败：{exc}")
     return render_console_page(
         admin_token=token,
-        message_text=f"已为 {ledger_date} 的全部 LLM 追加预算 {amount_yen}。",
+        message_text=f"{job_id} 已完成结算，run_id={str((summary or {}).get('run_id', '') or '-')}",
     )

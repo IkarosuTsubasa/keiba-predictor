@@ -72,6 +72,8 @@ from web_auth import (
 )
 from web_admin import console as web_admin_console
 from web_admin import jobs_page as web_admin_jobs
+from web_admin import operations as web_admin_ops
+from web_admin import remote_predictors as web_remote_predictors
 from web_admin import task_routes as web_admin_tasks
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_helpers import (
@@ -107,6 +109,10 @@ from web_public import (
 )
 from web_pages import public_llm as web_public_llm
 from web_pages import workspace as web_workspace
+from web_policy import engine as web_policy_engine
+from web_policy import html as web_policy_html
+from web_policy import payload as web_policy_payload
+from web_policy import runtime as web_policy_runtime
 from web_report import bundles as report_bundles
 from web_report import data as report_data
 from web_report.helpers import (
@@ -302,191 +308,56 @@ def update_run_row_fields(scope_key, run_row, updates):
 
 
 def remote_v5_enabled():
-    raw = os.environ.get("PIPELINE_REMOTE_V5_ENABLED", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    return web_remote_predictors.remote_v5_enabled()
 
 
 def remote_predictor_auto_continue_enabled():
-    raw = os.environ.get("PIPELINE_REMOTE_PREDICTORS_AUTO_CONTINUE", "").strip().lower()
-    return raw not in ("0", "false", "no", "off")
+    return web_remote_predictors.remote_predictor_auto_continue_enabled()
 
 
 def _append_job_process_log_entry(row, step, code, output):
-    payload = {}
-    raw = str((row or {}).get("last_process_output", "") or "").strip()
-    if raw:
-        try:
-            payload = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    process_log = list(payload.get("process_log", []) or [])
-    process_log.append(
-        {
-            "step": str(step or "").strip(),
-            "code": int(code) if str(code).strip("-").isdigit() else code,
-            "output": str(output or "").strip(),
-        }
-    )
-    payload["process_log"] = process_log
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    return web_remote_predictors.append_job_process_log_entry(row, step, code, output)
 
 
 def _remote_v5_bundle_zip_bytes(task):
-    task_row = dict(task or {})
-    bundle = BytesIO()
-    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for archive_name, src_path in dict(task_row.get("bundle_files", {}) or {}).items():
-            path = Path(str(src_path or "").strip())
-            if not archive_name or not path.exists():
-                continue
-            zf.write(path, arcname=str(archive_name))
-        meta_bytes = json.dumps(dict(task_row.get("bundle_meta", {}) or {}), ensure_ascii=False, indent=2).encode("utf-8")
-        zf.writestr("task_meta.json", meta_bytes)
-    bundle.seek(0)
-    return bundle.getvalue()
+    return web_remote_predictors.remote_v5_bundle_zip_bytes(task)
 
 
 def _promote_job_after_remote_v5(job_id, run_id, task_id, log_output):
-    def mutate(row, now_text):
-        row.update(initialize_race_job_step_fields(row))
-        current_status = str(row.get("status", "") or "").strip().lower()
-        current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
-        if current_status not in ("waiting_v5", "queued_policy", "processing_policy"):
-            return
-        if current_task_id and current_task_id != str(task_id or "").strip():
-            return
-        row["status"] = "queued_policy"
-        row["current_run_id"] = str(run_id or "").strip()
-        row["current_v5_task_id"] = str(task_id or "").strip()
-        row["error_message"] = ""
-        row["last_process_output"] = _append_job_process_log_entry(
-            row,
-            "predictors_remote_callback",
-            0,
-            log_output,
-        )
-        set_race_job_step_state(row, "predictor", "succeeded", now_text)
-        set_race_job_step_state(row, "policy", "queued")
-
-    return update_race_job(BASE_DIR, job_id, mutate)
+    return web_remote_predictors.promote_job_after_remote_v5(
+        base_dir=BASE_DIR,
+        job_id=job_id,
+        run_id=run_id,
+        task_id=task_id,
+        log_output=log_output,
+        update_race_job=update_race_job,
+        initialize_race_job_step_fields=initialize_race_job_step_fields,
+        set_race_job_step_state=set_race_job_step_state,
+    )
 
 
 def _auto_continue_remote_policy(job_id):
-    target_job_id = str(job_id or "").strip()
-    if not target_job_id:
-        return
-
-    def _runner():
-        try:
-            from race_job_runner import process_race_job
-
-            print(
-                "[web_app] "
-                + json.dumps(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "remote_predictors_auto_continue_start",
-                        "job_id": target_job_id,
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            summary = process_race_job(BASE_DIR, target_job_id)
-            print(
-                "[web_app] "
-                + json.dumps(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "remote_predictors_auto_continue_done",
-                        "job_id": target_job_id,
-                        "run_id": str((summary or {}).get("run_id", "") or "").strip(),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-        except Exception as exc:
-            try:
-                from race_job_runner import fail_race_job
-
-                fail_race_job(BASE_DIR, target_job_id, str(exc))
-            except Exception:
-                pass
-            print(
-                "[web_app] "
-                + json.dumps(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "remote_predictors_auto_continue_error",
-                        "job_id": target_job_id,
-                        "error": str(exc),
-                        "traceback": traceback.format_exc(),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-    threading.Thread(target=_runner, name=f"remote-policy-{target_job_id}", daemon=True).start()
+    return web_remote_predictors.auto_continue_remote_policy(base_dir=BASE_DIR, job_id=job_id)
 
 
 def strict_llm_odds_gate_enabled():
-    raw = os.environ.get("PIPELINE_BLOCK_LLM_ON_ODDS_WARNING", "").strip().lower()
-    return raw not in ("0", "false", "no", "off")
+    return web_policy_runtime.strict_llm_odds_gate_enabled()
 
 
 def expected_odds_output_names(scope_key):
-    return [
-        "odds.csv",
-        "fuku_odds.csv",
-        "wide_odds.csv",
-        "quinella_odds.csv",
-        "exacta_odds.csv",
-        "trio_odds.csv",
-        "trifecta_odds.csv",
-    ]
+    return web_policy_runtime.expected_odds_output_names(scope_key)
 
 
 def capture_output_mtimes(root_dir, names):
-    mtimes = {}
-    for name in list(names or []):
-        path = Path(root_dir) / name
-        try:
-            mtimes[name] = path.stat().st_mtime
-        except OSError:
-            mtimes[name] = None
-    return mtimes
+    return web_policy_runtime.capture_output_mtimes(root_dir, names)
 
 
 def is_fresh_output(path, previous_mtime, started_at):
-    path = Path(path)
-    if not path.exists():
-        return False
-    try:
-        current_mtime = path.stat().st_mtime
-    except OSError:
-        return False
-    if previous_mtime is None:
-        return current_mtime >= (float(started_at) - 1.0)
-    return current_mtime > float(previous_mtime)
+    return web_policy_runtime.is_fresh_output(path, previous_mtime, started_at)
 
 
 def copy_fresh_odds_output(tmp_path, dest_path, before_mtimes, started_at, warnings):
-    tmp_name = Path(tmp_path).name
-    if not dest_path:
-        return True, ""
-    if not is_fresh_output(tmp_path, before_mtimes.get(tmp_name), started_at):
-        warnings.append(f"{tmp_name} not freshly generated.")
-        return True, ""
-    try:
-        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(tmp_path, dest_path)
-    except Exception as exc:
-        return False, f"Failed to update {tmp_name}: {exc}"
-    return True, ""
+    return web_policy_runtime.copy_fresh_odds_output(tmp_path, dest_path, before_mtimes, started_at, warnings)
 
 
 def refresh_odds_for_run(
@@ -500,93 +371,21 @@ def refresh_odds_for_run(
     trio_odds_path=None,
     trifecta_odds_path=None,
 ):
-    odds_timeout_seconds = get_env_timeout("PIPELINE_ODDS_EXTRACT_TIMEOUT", 300)
-    race_url = str(run_row.get("race_url") or "").strip()
-    race_id = normalize_race_id(run_row.get("race_id", ""))
-    if not race_url and race_id:
-        if scope_key in ("central_turf", "central_dirt"):
-            base = "https://race.netkeiba.com/race/shutuba.html?race_id="
-        else:
-            base = "https://nar.netkeiba.com/race/shutuba.html?race_id="
-        race_url = f"{base}{race_id}"
-    if not race_url:
-        return False, "Race URL missing for odds update.", []
-    if not ODDS_EXTRACT.exists():
-        return False, "odds_extract.py not found.", []
-    env = os.environ.copy()
-    env.setdefault("PYTHONIOENCODING", "utf-8")
-    env.setdefault("PYTHONUTF8", "1")
-    env.setdefault("PIPELINE_HEADLESS", "0")
-    expected_names = expected_odds_output_names(scope_key)
-    before_mtimes = capture_output_mtimes(ROOT_DIR, expected_names)
-    started_at = time.time()
-    try:
-        result = subprocess.run(
-            [sys.executable, str(ODDS_EXTRACT)],
-            input=f"{race_url}\n",
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            cwd=str(ROOT_DIR),
-            env=env,
-            check=False,
-            timeout=odds_timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as exc:
-        detail = f"odds_extract timeout after {odds_timeout_seconds}s"
-        stdout_text = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
-        stderr_text = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
-        if stdout_text:
-            detail = f"{detail}\n{stdout_text}"
-        if stderr_text:
-            detail = f"{detail}\n[stderr]\n{stderr_text}"
-        return False, detail, []
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        return False, f"odds_extract failed: {detail}", []
-    if "Saved: odds.csv" not in (result.stdout or ""):
-        return False, "odds_extract produced no new odds.", []
-    tmp_path = ROOT_DIR / "odds.csv"
-    if not is_fresh_output(tmp_path, before_mtimes.get("odds.csv"), started_at):
-        return False, "odds.csv not freshly generated.", []
-    warnings = []
-    try:
-        Path(odds_path).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(tmp_path, odds_path)
-    except Exception as exc:
-        return False, f"Failed to update odds file: {exc}", []
-    wide_tmp = ROOT_DIR / "wide_odds.csv"
-    ok, message = copy_fresh_odds_output(wide_tmp, wide_odds_path, before_mtimes, started_at, warnings)
-    if not ok:
-        return False, message, []
-    fuku_tmp = ROOT_DIR / "fuku_odds.csv"
-    ok, message = copy_fresh_odds_output(fuku_tmp, fuku_odds_path, before_mtimes, started_at, warnings)
-    if not ok:
-        return False, message, []
-    quinella_tmp = ROOT_DIR / "quinella_odds.csv"
-    ok, message = copy_fresh_odds_output(
-        quinella_tmp, quinella_odds_path, before_mtimes, started_at, warnings
+    return web_policy_runtime.refresh_odds_for_run(
+        run_row,
+        scope_key,
+        odds_path,
+        wide_odds_path=wide_odds_path,
+        fuku_odds_path=fuku_odds_path,
+        quinella_odds_path=quinella_odds_path,
+        exacta_odds_path=exacta_odds_path,
+        trio_odds_path=trio_odds_path,
+        trifecta_odds_path=trifecta_odds_path,
+        get_env_timeout=get_env_timeout,
+        normalize_race_id=normalize_race_id,
+        odds_extract_path=ODDS_EXTRACT,
+        root_dir=ROOT_DIR,
     )
-    if not ok:
-        return False, message, []
-    exacta_tmp = ROOT_DIR / "exacta_odds.csv"
-    ok, message = copy_fresh_odds_output(exacta_tmp, exacta_odds_path, before_mtimes, started_at, warnings)
-    if not ok:
-        return False, message, []
-    trio_tmp = ROOT_DIR / "trio_odds.csv"
-    ok, message = copy_fresh_odds_output(trio_tmp, trio_odds_path, before_mtimes, started_at, warnings)
-    if not ok:
-        return False, message, []
-    trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
-    ok, message = copy_fresh_odds_output(
-        trifecta_tmp, trifecta_odds_path, before_mtimes, started_at, warnings
-    )
-    if not ok:
-        return False, message, []
-    if strict_llm_odds_gate_enabled() and warnings:
-        return False, "Incomplete odds refresh: " + "; ".join(warnings), warnings
-    return True, "", warnings
 
 
 def find_run_in_scope(scope_key, id_text):
@@ -769,8 +568,14 @@ def load_predictor_summary(scope_key):
 
 
 def load_policy_bankroll_summary(run_id="", timestamp="", policy_engine="gemini"):
-    ledger_date = extract_ledger_date(run_id, timestamp)
-    return summarize_bankroll(BASE_DIR, ledger_date, policy_engine=policy_engine)
+    return web_policy_runtime.load_policy_bankroll_summary(
+        base_dir=BASE_DIR,
+        run_id=run_id,
+        timestamp=timestamp,
+        policy_engine=policy_engine,
+        extract_ledger_date=extract_ledger_date,
+        summarize_bankroll=summarize_bankroll,
+    )
 
 
 def load_gemini_bankroll_summary(run_id="", timestamp=""):
@@ -778,7 +583,12 @@ def load_gemini_bankroll_summary(run_id="", timestamp=""):
 
 
 def load_policy_daily_profit_summary(days=30, policy_engine="gemini"):
-    return load_daily_profit_rows(BASE_DIR, days=days, policy_engine=policy_engine)
+    return web_policy_runtime.load_policy_daily_profit_summary(
+        base_dir=BASE_DIR,
+        days=days,
+        policy_engine=policy_engine,
+        load_daily_profit_rows=load_daily_profit_rows,
+    )
 
 
 def load_gemini_daily_profit_summary(days=30):
@@ -786,24 +596,12 @@ def load_gemini_daily_profit_summary(days=30):
 
 
 def load_policy_run_ticket_rows(run_id, policy_engine="gemini"):
-    rows = load_run_tickets(BASE_DIR, run_id, policy_engine=policy_engine)
-    out = []
-    for row in rows:
-        out.append(
-            {
-                "status": row.get("status", ""),
-                "ticket_id": row.get("ticket_id", ""),
-                "bet_type": row.get("bet_type", ""),
-                "horse_no": row.get("horse_nos", ""),
-                "horse_name": row.get("horse_names", ""),
-                "amount_yen": row.get("stake_yen", ""),
-                "odds_used": row.get("odds_used", ""),
-                "hit": row.get("hit", ""),
-                "payout_yen": row.get("payout_yen", ""),
-                "profit_yen": row.get("profit_yen", ""),
-            }
-        )
-    return out
+    return web_policy_runtime.load_policy_run_ticket_rows(
+        base_dir=BASE_DIR,
+        run_id=run_id,
+        policy_engine=policy_engine,
+        load_run_tickets=load_run_tickets,
+    )
 
 
 def load_gemini_run_ticket_rows(run_id):
@@ -811,23 +609,14 @@ def load_gemini_run_ticket_rows(run_id):
 
 
 def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output, policy_engine=""):
-    parts = []
-    if summary_before:
-        parts.append(
-            (
-                "[bankroll_before] date={ledger_date} start_bankroll_yen={start_bankroll_yen} "
-                "realized_profit_yen={realized_profit_yen} open_stake_yen={open_stake_yen} "
-                "available_bankroll_yen={available_bankroll_yen} pending_tickets={pending_tickets}"
-            ).format(**summary_before)
-        )
-    parts.append(f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip())
-    if refresh_warnings:
-        parts.append("[odds_update][warnings] " + "; ".join(str(x) for x in refresh_warnings))
-    if str(policy_engine or "").strip():
-        parts.append(f"[policy] engine={policy_engine}")
-    if script_output:
-        parts.append(script_output.strip())
-    return "\n".join([part for part in parts if str(part).strip()]).strip()
+    return web_policy_runtime.build_llm_buy_output(
+        summary_before,
+        refresh_ok,
+        refresh_message,
+        refresh_warnings,
+        script_output,
+        policy_engine,
+    )
 
 
 def build_gemini_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output):
@@ -921,74 +710,17 @@ def _normalize_score_list(items):
 
 
 def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map):
-    items = []
-    has_explicit_rank = False
-    for idx, row in enumerate(list(pred_rows or []), start=1):
-        horse_name = str(_pick_first_value(row, ("HorseName", "horse_name", "name"), "") or "").strip()
-        if not horse_name:
-            continue
-        horse_no_raw = _pick_first_value(row, ("horse_no", "HorseNo", "umaban", "馬番"), "")
-        horse_no = normalize_horse_no_text(horse_no_raw)
-        if not horse_no:
-            mapped = name_to_no_map.get(normalize_name(horse_name))
-            if mapped is not None:
-                horse_no = normalize_horse_no_text(mapped)
-        top3_prob = _prediction_prob_value(row)
-        explicit_rank = to_int_or_none(_pick_first_value(row, ("pred_rank", "PredRank", "rank", "Rank"), ""))
-        if explicit_rank is not None and explicit_rank > 0:
-            has_explicit_rank = True
-        items.append(
-            {
-                "horse_no": horse_no,
-                "horse_name": horse_name,
-                "pred_rank": explicit_rank if explicit_rank is not None and explicit_rank > 0 else int(idx),
-                "top3_prob_model": top3_prob,
-                "confidence_score": max(0.0, to_float(row.get("confidence_score"))),
-                "stability_score": max(0.0, to_float(row.get("stability_score"))),
-                "risk_score": max(0.0, to_float(row.get("risk_score"))),
-                "_raw_rank_score": _prediction_score_value(row),
-                "_input_order": int(idx),
-                "source_row": dict(row),
-            }
-        )
-    if not items:
-        return []
-    if has_explicit_rank:
-        items.sort(
-            key=lambda item: (
-                int(item.get("pred_rank", 9999) or 9999),
-                -float(item.get("top3_prob_model", 0.0) or 0.0),
-                str(item.get("horse_no", "")),
-                str(item.get("horse_name", "")),
-            )
-        )
-    else:
-        items.sort(
-            key=lambda item: (
-                -float(item.get("top3_prob_model", 0.0) or 0.0),
-                -float(item.get("_raw_rank_score", 0.0) or 0.0),
-                str(item.get("horse_no", "")),
-                str(item.get("horse_name", "")),
-                int(item.get("_input_order", 9999) or 9999),
-            )
-        )
-    for idx, item in enumerate(items, start=1):
-        item["pred_rank"] = idx
-    _normalize_score_list(items)
-    top3_sum = sum(max(float(item.get("top3_prob_model", 0.0) or 0.0), 0.000001) for item in items)
-    for item in items:
-        horse_name = str(item.get("horse_name", "") or "")
-        horse_no_int = parse_horse_no(item.get("horse_no"))
-        item["win_odds"] = round(float(win_odds_map.get(normalize_name(horse_name), 0.0) or 0.0), 6)
-        item["place_odds"] = round(float(place_odds_map.get(horse_no_int, 0.0) or 0.0), 6) if horse_no_int else 0.0
-        item["win_prob_est"] = round(
-            min(
-                float(item.get("top3_prob_model", 0.0) or 0.0),
-                float(item.get("top3_prob_model", 0.0) or 0.0) / max(top3_sum, 1e-6),
-            ),
-            6,
-        )
-    return items
+    return web_policy_payload.build_policy_prediction_rows(
+        pred_rows,
+        name_to_no_map,
+        win_odds_map,
+        place_odds_map,
+        normalize_horse_no_text=normalize_horse_no_text,
+        normalize_name=normalize_name,
+        parse_horse_no=parse_horse_no,
+        to_float=to_float,
+        to_int_or_none=to_int_or_none,
+    )
 
 
 def _build_predictor_history_summary(scope_key, items, predictor_ids):
@@ -1187,219 +919,36 @@ def build_policy_candidates(
     trifecta_odds_map,
     allowed_types,
 ):
-    candidates = []
-    candidate_lookup = {}
-    horse_map = {str(item.get("horse_no", "") or ""): item for item in list(predictions or []) if str(item.get("horse_no", "") or "").strip()}
-    bet_type_order = {"win": 0, "place": 1, "wide": 2, "quinella": 3, "exacta": 4, "trio": 5, "trifecta": 6}
-    for item in predictions:
-        horse_no = str(item.get("horse_no", "") or "").strip()
-        if not horse_no:
-            continue
-        top3_prob = max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0))
-        if "win" in allowed_types:
-            win_odds = float(item.get("win_odds", 0.0) or 0.0)
-            if win_odds > 0:
-                candidate = {
-                    "id": f"win:{horse_no}",
-                    "bet_type": "win",
-                    "legs": [horse_no],
-                    "odds_used": round(win_odds, 6),
-                    "p_hit": 0.0,
-                    "ev": 0.0,
-                    "score": 0.0,
-                }
-                candidates.append(candidate)
-                candidate_lookup[candidate["id"]] = candidate
-        if "place" in allowed_types:
-            place_odds = float(item.get("place_odds", 0.0) or 0.0)
-            if place_odds > 0:
-                candidate = {
-                    "id": f"place:{horse_no}",
-                    "bet_type": "place",
-                    "legs": [horse_no],
-                    "odds_used": round(place_odds, 6),
-                    "p_hit": 0.0,
-                    "ev": 0.0,
-                    "score": 0.0,
-                }
-                candidates.append(candidate)
-                candidate_lookup[candidate["id"]] = candidate
-    if "wide" in allowed_types:
-        for pair, odds in sorted(wide_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            candidate = {
-                "id": f"wide:{pair[0]}-{pair[1]}",
-                "bet_type": "wide",
-                "legs": [str(pair[0]), str(pair[1])],
-                "odds_used": round(float(odds), 6),
-                "p_hit": 0.0,
-                "ev": 0.0,
-                "score": 0.0,
-            }
-            candidates.append(candidate)
-            candidate_lookup[candidate["id"]] = candidate
-    if "quinella" in allowed_types:
-        for pair, odds in sorted(quinella_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            candidate = {
-                "id": f"quinella:{pair[0]}-{pair[1]}",
-                "bet_type": "quinella",
-                "legs": [str(pair[0]), str(pair[1])],
-                "odds_used": round(float(odds), 6),
-                "p_hit": 0.0,
-                "ev": 0.0,
-                "score": 0.0,
-            }
-            candidates.append(candidate)
-            candidate_lookup[candidate["id"]] = candidate
-    if "exacta" in allowed_types:
-        for pair, odds in sorted(exacta_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            candidate = {
-                "id": f"exacta:{pair[0]}-{pair[1]}",
-                "bet_type": "exacta",
-                "legs": [str(pair[0]), str(pair[1])],
-                "odds_used": round(float(odds), 6),
-                "p_hit": 0.0,
-                "ev": 0.0,
-                "score": 0.0,
-            }
-            candidates.append(candidate)
-            candidate_lookup[candidate["id"]] = candidate
-    if "trio" in allowed_types:
-        for trio_key, odds in sorted(trio_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            candidate = {
-                "id": f"trio:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}",
-                "bet_type": "trio",
-                "legs": [str(trio_key[0]), str(trio_key[1]), str(trio_key[2])],
-                "odds_used": round(float(odds), 6),
-                "p_hit": 0.0,
-                "ev": 0.0,
-                "score": 0.0,
-            }
-            candidates.append(candidate)
-            candidate_lookup[candidate["id"]] = candidate
-    if "trifecta" in allowed_types:
-        for trio_key, odds in sorted(trifecta_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            candidate = {
-                "id": f"trifecta:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}",
-                "bet_type": "trifecta",
-                "legs": [str(trio_key[0]), str(trio_key[1]), str(trio_key[2])],
-                "odds_used": round(float(odds), 6),
-                "p_hit": 0.0,
-                "ev": 0.0,
-                "score": 0.0,
-            }
-            candidates.append(candidate)
-            candidate_lookup[candidate["id"]] = candidate
-    candidates.sort(
-        key=lambda item: (
-            bet_type_order.get(str(item.get("bet_type", "") or ""), 99),
-            float(item.get("odds_used", 0.0) or 0.0),
-            str(item.get("id", "")),
-        )
+    return web_policy_payload.build_policy_candidates(
+        predictions,
+        wide_odds_map,
+        quinella_odds_map,
+        exacta_odds_map,
+        trio_odds_map,
+        trifecta_odds_map,
+        allowed_types,
     )
-    return candidates, candidate_lookup, horse_map
 
 
 def build_pair_odds_top(candidate_lookup):
-    rows = []
-    for candidate in list(candidate_lookup.values()):
-        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella", "exacta", "trio", "trifecta"):
-            continue
-        legs = list(candidate.get("legs", []) or [])
-        if len(legs) < 2:
-            continue
-        rows.append(
-            {
-                "bet_type": str(candidate.get("bet_type", "") or ""),
-                "pair": "-".join(str(x) for x in legs),
-                "odds": round(float(candidate.get("odds_used", 0.0) or 0.0), 6),
-                "score": float(candidate.get("score", 0.0) or 0.0),
-            }
-        )
-    rows.sort(key=lambda item: (float(item.get("odds", 0.0) or 0.0), str(item.get("bet_type", "") or ""), str(item.get("pair", "") or "")))
-    return [{"bet_type": row["bet_type"], "pair": row["pair"], "odds": row["odds"]} for row in rows[:10]]
+    return web_policy_payload.build_pair_odds_top(candidate_lookup)
 
 
 def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None, trifecta_rows=None):
-    def _pair_rows(rows):
-        out = []
-        for row in list(rows or []):
-            a = str(row.get("horse_no_a", "") or "").strip()
-            b = str(row.get("horse_no_b", "") or "").strip()
-            if not a or not b:
-                continue
-            odds = to_float(row.get("odds_mid", row.get("odds", 0)) or 0)
-            out.append({"pair": f"{a}-{b}", "horse_no_a": a, "horse_no_b": b, "odds": round(odds, 6)})
-        return out
-
-    def _triple_rows(rows):
-        out = []
-        for row in list(rows or []):
-            a = str(row.get("horse_no_a", "") or "").strip()
-            b = str(row.get("horse_no_b", "") or "").strip()
-            c = str(row.get("horse_no_c", "") or "").strip()
-            if not a or not b or not c:
-                continue
-            odds = to_float(row.get("odds", 0) or 0)
-            out.append(
-                {
-                    "triple": f"{a}-{b}-{c}",
-                    "horse_no_a": a,
-                    "horse_no_b": b,
-                    "horse_no_c": c,
-                    "odds": round(odds, 6),
-                }
-            )
-        return out
-
-    def _single_rows(rows, odds_key):
-        out = []
-        for row in list(rows or []):
-            horse_no = str(row.get("horse_no", "") or "").strip()
-            if not horse_no:
-                continue
-            out.append(
-                {
-                    "horse_no": horse_no,
-                    "name": str(row.get("name", "") or "").strip(),
-                    "odds": round(to_float(row.get(odds_key, 0) or 0), 6),
-                }
-            )
-        return out
-
-    return {
-        "win": _single_rows(win_rows, "odds"),
-        "place": _single_rows(place_rows, "odds_low" if place_rows and "odds_low" in place_rows[0] else "odds_mid"),
-        "wide": _pair_rows(wide_rows),
-        "quinella": _pair_rows(quinella_rows),
-        "exacta": _pair_rows(exacta_rows),
-        "trio": _triple_rows(trio_rows),
-        "trifecta": _triple_rows(trifecta_rows),
-    }
+    return web_policy_payload.build_odds_full(
+        win_rows,
+        place_rows,
+        wide_rows,
+        quinella_rows,
+        exacta_rows,
+        trio_rows,
+        trifecta_rows,
+        to_float=to_float,
+    )
 
 
 def build_prediction_field_guide():
-    return {
-        "horse_no": "马番",
-        "HorseName": "马名",
-        "pred_rank": "模型排序",
-        "Top3Prob_model": "模型给出的前三概率",
-        "rank_score_norm": "归一化排序分数",
-        "confidence_score": "置信度分数",
-        "stability_score": "稳定性分数",
-        "risk_score": "风险分数",
-        "win_odds": "单胜赔率",
-        "place_odds": "位置赔率",
-    }
+    return web_policy_payload.build_prediction_field_guide()
 
 
 def build_policy_input_payload(
@@ -1416,138 +965,38 @@ def build_policy_input_payload(
     trifecta_odds_path,
     policy_engine,
 ):
-    pred_rows = load_csv_rows_flexible(pred_path)
-    if not pred_rows:
-        return None, "Prediction file is missing or empty."
-    name_to_no_map = load_name_to_no(odds_path)
-    win_odds_map = load_win_odds_map(odds_path)
-    place_odds_map = load_place_odds_map(fuku_odds_path)
-    wide_odds_map = load_pair_odds_map(wide_odds_path)
-    quinella_odds_map = load_pair_odds_map(quinella_odds_path)
-    exacta_odds_map = load_exacta_odds_map(exacta_odds_path)
-    trio_odds_map = load_triple_odds_map(trio_odds_path, ordered=False)
-    trifecta_odds_map = load_triple_odds_map(trifecta_odds_path, ordered=True)
-    predictions = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
-    if not predictions:
-        return None, "No valid prediction rows could be built for policy input."
-    allowed_types = []
-    if any(float(item.get("win_odds", 0.0) or 0.0) > 0 for item in predictions):
-        allowed_types.append("win")
-    if any(float(item.get("place_odds", 0.0) or 0.0) > 0 for item in predictions):
-        allowed_types.append("place")
-    if wide_odds_map:
-        allowed_types.append("wide")
-    if quinella_odds_map:
-        allowed_types.append("quinella")
-    if exacta_odds_map:
-        allowed_types.append("exacta")
-    if trio_odds_map:
-        allowed_types.append("trio")
-    if trifecta_odds_map:
-        allowed_types.append("trifecta")
-    if not allowed_types:
-        return None, "No usable odds were found for LLM buy."
-    candidates, candidate_lookup, horse_map = build_policy_candidates(
-        predictions,
-        wide_odds_map,
-        quinella_odds_map,
-        exacta_odds_map,
-        trio_odds_map,
-        trifecta_odds_map,
-        allowed_types,
+    return web_policy_payload.build_policy_input_payload(
+        scope_key,
+        run_id,
+        run_row,
+        pred_path,
+        odds_path,
+        fuku_odds_path,
+        wide_odds_path,
+        quinella_odds_path,
+        exacta_odds_path,
+        trio_odds_path,
+        trifecta_odds_path,
+        policy_engine,
+        load_csv_rows_flexible=load_csv_rows_flexible,
+        load_name_to_no=load_name_to_no,
+        load_win_odds_map=load_win_odds_map,
+        load_place_odds_map=load_place_odds_map,
+        load_pair_odds_map=load_pair_odds_map,
+        load_exacta_odds_map=load_exacta_odds_map,
+        load_triple_odds_map=load_triple_odds_map,
+        build_policy_prediction_rows_fn=build_policy_prediction_rows,
+        extract_ledger_date=extract_ledger_date,
+        summarize_bankroll=summarize_bankroll,
+        base_dir=BASE_DIR,
+        build_multi_predictor_context=build_multi_predictor_context,
+        build_history_context=build_history_context,
+        to_float=to_float,
     )
-    if not candidates:
-        return None, "Candidate generation failed because odds data is incomplete."
-    ledger_date = extract_ledger_date(run_id, (run_row or {}).get("timestamp", ""))
-    bankroll = summarize_bankroll(BASE_DIR, ledger_date, policy_engine=policy_engine)
-    bankroll_yen = max(0, int(bankroll.get("available_bankroll_yen", 0) or 0))
-    multi_predictor = build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map)
-    payload = {
-        "race_id": str((run_row or {}).get("race_id", "") or ""),
-        "scope_key": str(scope_key or ""),
-        "field_size": len(predictions),
-        "ai": {
-            "gap": round(
-                max(
-                    0.0,
-                    float(predictions[0].get("top3_prob_model", 0.0) or 0.0)
-                    - float(predictions[1].get("top3_prob_model", 0.0) or 0.0 if len(predictions) > 1 else 0.0),
-                ),
-                6,
-            ),
-            "confidence_score": round(float(predictions[0].get("confidence_score", 0.5) or 0.5), 6),
-            "stability_score": round(float(predictions[0].get("stability_score", 0.5) or 0.5), 6),
-            "risk_score": round(float(predictions[0].get("risk_score", 0.5) or 0.5), 6),
-        },
-        "marks_top5": [
-            {
-                "horse_no": str(item.get("horse_no", "") or ""),
-                "horse_name": str(item.get("horse_name", "") or ""),
-                "pred_rank": int(item.get("pred_rank", 0) or 0),
-                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
-                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
-            }
-            for item in predictions[:5]
-        ],
-        "predictions": [
-            {
-                "horse_no": str(item.get("horse_no", "") or ""),
-                "horse_name": str(item.get("horse_name", "") or ""),
-                "pred_rank": int(item.get("pred_rank", 0) or 0),
-                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
-                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
-                "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
-                "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
-            }
-            for item in predictions[:10]
-        ],
-        "predictions_full": [
-            {
-                **dict(item.get("source_row", {}) or {}),
-                "horse_no": str(item.get("horse_no", "") or ""),
-                "HorseName": str(item.get("horse_name", "") or ""),
-                "pred_rank": int(item.get("pred_rank", 0) or 0),
-                "Top3Prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
-                "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
-                "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
-                "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
-            }
-            for item in predictions
-        ],
-        "pair_odds_top": build_pair_odds_top(candidate_lookup),
-        "odds_full": build_odds_full(
-            load_csv_rows_flexible(odds_path),
-            load_csv_rows_flexible(fuku_odds_path),
-            load_csv_rows_flexible(wide_odds_path),
-            load_csv_rows_flexible(quinella_odds_path),
-            load_csv_rows_flexible(exacta_odds_path),
-            load_csv_rows_flexible(trio_odds_path),
-            load_csv_rows_flexible(trifecta_odds_path),
-        ),
-        "prediction_field_guide": build_prediction_field_guide(),
-        "multi_predictor": multi_predictor,
-        "portfolio_history": build_history_context(BASE_DIR, ledger_date, lookback_days=14, recent_ticket_limit=8, policy_engine=policy_engine),
-        "candidates": candidates,
-        "constraints": {
-            "bankroll_yen": bankroll_yen,
-            "race_budget_yen": bankroll_yen,
-            "max_tickets_per_race": min(8, max(1, len(allowed_types) * 2)),
-            "high_odds_threshold": 12.0,
-            "allowed_types": allowed_types,
-        },
-    }
-    return {
-        "input": payload,
-        "predictions": predictions,
-        "candidate_lookup": candidate_lookup,
-        "horse_map": horse_map,
-        "summary_before": bankroll,
-        "ledger_date": ledger_date,
-    }, ""
 
 
 def apply_local_ticket_plan_fallback(output_dict, candidate_lookup, race_budget_yen):
-    return dict(output_dict or {})
+    return web_policy_engine.apply_local_ticket_plan_fallback(output_dict, candidate_lookup, race_budget_yen)
 
 
 def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_engine):
@@ -1614,258 +1063,79 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
 
 
 def _normalize_output_ticket_plan_from_rows(ticket_rows):
-    out = []
-    for ticket in list(ticket_rows or []):
-        bet_type = str(ticket.get("bet_type", "") or "").strip().lower()
-        legs = [str(x).strip() for x in str(ticket.get("horse_no", "") or "").split("-") if str(x).strip()]
-        stake_yen = int(ticket.get("stake_yen", ticket.get("amount_yen", 0)) or 0)
-        if not bet_type or not legs or stake_yen <= 0:
-            continue
-        out.append({"bet_type": bet_type, "legs": legs, "stake_yen": stake_yen})
-    return out
-
+    return web_policy_engine.normalize_output_ticket_plan_from_rows(ticket_rows)
 
 def _append_output_warning(output_dict, code):
-    warnings = [str(x).strip() for x in list((output_dict or {}).get("warnings", []) or []) if str(x).strip()]
-    text = str(code or "").strip()
-    if text and text not in warnings:
-        warnings.append(text)
-    output_dict["warnings"] = warnings
-    return output_dict
-
+    return web_policy_engine.append_output_warning(output_dict, code)
 
 def _set_output_no_bet(output_dict):
-    output_dict["bet_decision"] = "no_bet"
-    output_dict["participation_level"] = "no_bet"
-    output_dict["buy_style"] = "no_bet"
-    output_dict["strategy_mode"] = "no_bet"
-    output_dict["enabled_bet_types"] = []
-    output_dict["key_horses"] = []
-    output_dict["secondary_horses"] = []
-    output_dict["longshot_horses"] = []
-    output_dict["max_ticket_count"] = 0
-    output_dict["ticket_plan"] = []
-    return output_dict
-
+    return web_policy_engine.set_output_no_bet(output_dict)
 
 def save_policy_payload(scope_key, run_id, race_id, payload, policy_engine):
-    scope_norm = normalize_scope_key(scope_key)
-    if not scope_norm:
-        return None
-    race_dir = get_data_dir(BASE_DIR, scope_norm) / str(race_id or "")
-    race_dir.mkdir(parents=True, exist_ok=True)
-    engine = normalize_policy_engine(policy_engine)
-    path = race_dir / f"{engine}_policy_{run_id}_{race_id}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
+    return web_policy_engine.save_policy_payload(
+        base_dir=BASE_DIR,
+        scope_key=scope_key,
+        run_id=run_id,
+        race_id=race_id,
+        payload=payload,
+        policy_engine=policy_engine,
+        normalize_scope_key=normalize_scope_key,
+        get_data_dir=get_data_dir,
+        normalize_policy_engine=normalize_policy_engine,
+    )
 
 def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", policy_model=""):
-    scope_norm = normalize_scope_key(scope_key)
-    engine = normalize_policy_engine(policy_engine)
-    resolved_model = resolve_policy_model(engine, policy_model, DEFAULT_GEMINI_MODEL)
-    pred_path = resolve_pred_path(scope_norm, run_id, run_row)
-    odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "odds_path", "odds")
-    fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
-    wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
-    quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
-    exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
-    trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    context, error = build_policy_input_payload(
-        scope_norm,
-        run_id,
-        run_row,
-        pred_path,
-        odds_path,
-        fuku_odds_path,
-        wide_odds_path,
-        quinella_odds_path,
-        exacta_odds_path,
-        trio_odds_path,
-        trifecta_odds_path,
-        engine,
-    )
-    if error:
-        raise ValueError(error)
-    policy_output = call_policy(
-        input=context["input"],
-        policy_engine=engine,
-        model=resolved_model,
-        timeout_s=resolve_policy_timeout(engine),
-        cache_enable=True,
-    )
-    meta = get_last_call_meta()
-    output_dict = policy_output.model_dump() if hasattr(policy_output, "model_dump") else policy_output.dict()
-    output_dict = apply_local_ticket_plan_fallback(
-        output_dict,
-        context["candidate_lookup"],
-        context["input"]["constraints"]["race_budget_yen"],
-    )
-    requested_ticket_count = len(list(output_dict.get("ticket_plan", []) or []))
-    tickets = build_policy_ticket_rows(output_dict, context["candidate_lookup"], context["horse_map"], engine)
-    output_dict["ticket_plan"] = _normalize_output_ticket_plan_from_rows(tickets)
-    if len(tickets) < requested_ticket_count:
-        output_dict = _append_output_warning(output_dict, "INVALID_TICKET_DROPPED")
-    if str(output_dict.get("bet_decision", "") or "").strip().lower() == "bet" and not tickets:
-        output_dict = _append_output_warning(output_dict, "NO_EXECUTABLE_TICKETS")
-        output_dict = _set_output_no_bet(output_dict)
-    reserve_run_tickets(
-        BASE_DIR,
+    return web_policy_engine.execute_policy_buy(
+        base_dir=BASE_DIR,
+        scope_key=scope_key,
+        run_row=run_row,
         run_id=run_id,
-        scope_key=scope_norm,
-        race_id=str((run_row or {}).get("race_id", "") or ""),
-        ledger_date=context["ledger_date"],
-        tickets=tickets,
-        policy_engine=engine,
+        policy_engine=policy_engine,
+        policy_model=policy_model,
+        normalize_scope_key=normalize_scope_key,
+        normalize_policy_engine=normalize_policy_engine,
+        resolve_policy_model=resolve_policy_model,
+        default_gemini_model=DEFAULT_GEMINI_MODEL,
+        resolve_pred_path=resolve_pred_path,
+        resolve_run_asset_path=resolve_run_asset_path,
+        build_policy_input_payload=build_policy_input_payload,
+        call_policy=call_policy,
+        resolve_policy_timeout=resolve_policy_timeout,
+        get_last_call_meta=get_last_call_meta,
+        reserve_run_tickets=reserve_run_tickets,
+        summarize_bankroll=summarize_bankroll,
+        update_run_row_fields=update_run_row_fields,
+        get_data_dir=get_data_dir,
     )
-    summary_after = summarize_bankroll(BASE_DIR, context["ledger_date"], policy_engine=engine)
-    payload = {
-        "scope": scope_norm,
-        "race_id": str((run_row or {}).get("race_id", "") or ""),
-        "run_id": str(run_id or ""),
-        "policy_engine": engine,
-        "policy_model": resolved_model,
-        "gemini_model": resolved_model if engine == "gemini" else "",
-        "policy_budget_reuse": False,
-        "saved_at": datetime.now().isoformat(timespec="seconds"),
-        "budgets": [
-            {
-                "budget_yen": 0,
-                "shared_policy": True,
-                "output": output_dict,
-                "meta": meta,
-                "portfolio": {
-                    "ledger_date": context["ledger_date"],
-                    "before": context["summary_before"],
-                    "after": summary_after,
-                },
-                "tickets": tickets,
-            }
-        ],
-    }
-    path = save_policy_payload(scope_norm, run_id, (run_row or {}).get("race_id", ""), payload, engine)
-    updates = {f"{engine}_policy_path": str(path or "")}
-    if engine == "gemini":
-        updates["gemini_policy_path"] = str(path or "")
-        updates["tickets"] = str(len(tickets))
-        updates["amount_yen"] = str(sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets))
-    elif engine == "openai":
-        updates["openai_policy_path"] = str(path or "")
-    elif engine == "grok":
-        updates["grok_policy_path"] = str(path or "")
-    update_run_row_fields(scope_norm, run_row, updates)
-    output_lines = [
-        f"[llm_buy] run_id={run_id} engine={engine} model={resolved_model}",
-        f"[policy_save] path={path}" if path else "[policy_save] path=",
-        (
-            "[tickets] count={count} amount_yen={amount} decision={decision} buy_style={buy_style}".format(
-                count=len(tickets),
-                amount=sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets),
-                decision=str(output_dict.get("bet_decision", "") or ""),
-                buy_style=str(output_dict.get("buy_style", "") or ""),
-            )
-        ),
-        (
-            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback} error_detail={detail}".format(
-                cache_hit=int(bool(meta.get("cache_hit", False))),
-                latency=int(meta.get("llm_latency_ms", 0) or 0),
-                fallback=str(meta.get("fallback_reason", "") or ""),
-                detail=str(meta.get("error_detail", "") or ""),
-            )
-        ),
-    ]
-    for ticket in tickets:
-        output_lines.append(
-            "[ticket] {bet_type} {horse_no} {horse_name} stake={stake_yen} odds={odds_used} p_hit={p_hit}".format(
-                bet_type=str(ticket.get("bet_type", "") or ""),
-                horse_no=str(ticket.get("horse_no", "") or ""),
-                horse_name=str(ticket.get("horse_name", "") or ""),
-                stake_yen=int(ticket.get("stake_yen", 0) or 0),
-                odds_used=str(ticket.get("odds_used", "") or ""),
-                p_hit=str(ticket.get("p_hit", "") or ""),
-            )
-        )
-    return {
-        "engine": engine,
-        "model": resolved_model,
-        "summary_before": context["summary_before"],
-        "summary_after": summary_after,
-        "payload_path": str(path or ""),
-        "tickets": tickets,
-        "meta": meta,
-        "output_text": "\n".join(line for line in output_lines if str(line).strip()),
-    }
-
 
 def resolve_run_selection(scope_key, run_id):
-    scope_norm = normalize_scope_key(scope_key)
-    run_text = str(run_id or "").strip()
-    run_row = None
-    if not scope_norm:
-        scope_norm, run_row = infer_scope_and_run(run_text)
-    if run_row is None and scope_norm:
-        run_row = resolve_run(run_text, scope_norm)
-    if run_row is None and scope_norm:
-        race_id = normalize_race_id(run_text)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
-    resolved_run_id = str((run_row or {}).get("run_id", "") or "").strip() or run_text
-    return scope_norm, run_row, resolved_run_id
+    return web_policy_runtime.resolve_run_selection(
+        scope_key=scope_key,
+        run_id=run_id,
+        normalize_scope_key=normalize_scope_key,
+        infer_scope_and_run=infer_scope_and_run,
+        resolve_run=resolve_run,
+        normalize_race_id=normalize_race_id,
+        resolve_latest_run_by_race_id=resolve_latest_run_by_race_id,
+    )
 
 
 def maybe_refresh_run_odds(scope_norm, run_row, run_id, refresh_enabled):
-    if not refresh_enabled:
-        return True, "odds refresh skipped.", []
-    if run_row is None or not scope_norm:
-        return False, "Run row missing for odds update.", []
-    odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "odds_path", "odds")
-    wide_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "wide_odds_path", "wide_odds")
-    fuku_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "fuku_odds_path", "fuku_odds")
-    quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
-    exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
-    trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    return refresh_odds_for_run(
-        run_row,
-        scope_norm,
-        odds_path,
-        wide_odds_path=wide_odds_path,
-        fuku_odds_path=fuku_odds_path,
-        quinella_odds_path=quinella_odds_path,
-        exacta_odds_path=exacta_odds_path,
-        trio_odds_path=trio_odds_path,
-        trifecta_odds_path=trifecta_odds_path,
+    return web_policy_runtime.maybe_refresh_run_odds(
+        scope_norm=scope_norm,
+        run_row=run_row,
+        run_id=run_id,
+        refresh_enabled=refresh_enabled,
+        resolve_run_asset_path=resolve_run_asset_path,
+        refresh_odds_for_run=refresh_odds_for_run,
     )
 
 
 def resolve_policy_timeout(policy_engine):
-    engine = normalize_policy_engine(policy_engine)
-    env_keys = []
-    default_timeout = 20
-    if engine == "deepseek":
-        env_keys = ["DEEPSEEK_POLICY_TIMEOUT", "POLICY_TIMEOUT_DEEPSEEK", "POLICY_TIMEOUT"]
-        default_timeout = 75
-    elif engine == "openai":
-        env_keys = ["OPENAI_POLICY_TIMEOUT", "POLICY_TIMEOUT_OPENAI", "POLICY_TIMEOUT"]
-        default_timeout = 90
-    elif engine == "grok":
-        env_keys = ["GROK_POLICY_TIMEOUT", "POLICY_TIMEOUT_GROK", "POLICY_TIMEOUT"]
-        default_timeout = 120
-    elif engine == "gemini":
-        env_keys = ["GEMINI_POLICY_TIMEOUT", "POLICY_TIMEOUT_GEMINI", "POLICY_TIMEOUT"]
-        default_timeout = 60
-    for key in env_keys:
-        raw = str(os.environ.get(key, "") or "").strip()
-        if not raw:
-            continue
-        try:
-            value = int(raw)
-        except ValueError:
-            continue
-        if value > 0:
-            return value
-    return default_timeout
+    return web_policy_runtime.resolve_policy_timeout(
+        policy_engine=policy_engine,
+        normalize_policy_engine=normalize_policy_engine,
+    )
 
 
 def load_mark_recommendation_table(scope_key, run_id, run_row=None):
@@ -1890,65 +1160,24 @@ def load_bet_engine_v3_cfg_summary(scope_key, run_id):
 
 
 def load_policy_payload(scope_key, run_id, run_row=None):
-    candidates = [
-        ("policy_path", "policy"),
-        ("gemini_policy_path", "gemini_policy"),
-        ("deepseek_policy_path", "deepseek_policy"),
-        ("siliconflow_policy_path", "siliconflow_policy"),
-        ("openai_policy_path", "openai_policy"),
-        ("grok_policy_path", "grok_policy"),
-    ]
-    for field_name, prefix in candidates:
-        path = resolve_run_asset_path(
-            scope_key,
-            run_id,
-            run_row,
-            field_name,
-            prefix,
-            ext=".json",
-        )
-        payload = load_json_file(path)
-        if payload:
-            return payload
-    return {}
+    return web_policy_html.load_policy_payload(
+        scope_key,
+        run_id,
+        run_row,
+        resolve_run_asset_path=resolve_run_asset_path,
+        load_json_file=load_json_file,
+    )
 
 
 def load_policy_payloads(scope_key, run_id, run_row=None):
-    payloads = []
-    seen = set()
-    candidates = [
-        ("gemini", "gemini_policy_path", "gemini_policy"),
-        ("deepseek", "deepseek_policy_path", "deepseek_policy"),
-        ("deepseek", "siliconflow_policy_path", "siliconflow_policy"),
-        ("openai", "openai_policy_path", "openai_policy"),
-        ("grok", "grok_policy_path", "grok_policy"),
-        ("", "policy_path", "policy"),
-    ]
-    for default_engine, field_name, prefix in candidates:
-        path = resolve_run_asset_path(
-            scope_key,
-            run_id,
-            run_row,
-            field_name,
-            prefix,
-            ext=".json",
-        )
-        payload = load_json_file(path)
-        if not payload:
-            continue
-        item = dict(payload)
-        policy_engine = normalize_policy_engine(item.get("policy_engine", "") or default_engine or "gemini")
-        item["policy_engine"] = policy_engine
-        key = (
-            policy_engine,
-            str(item.get("run_id", "") or run_id or ""),
-            str(item.get("saved_at", "") or ""),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        payloads.append(item)
-    return payloads
+    return web_policy_html.load_policy_payloads(
+        scope_key,
+        run_id,
+        run_row,
+        resolve_run_asset_path=resolve_run_asset_path,
+        load_json_file=load_json_file,
+        normalize_policy_engine=normalize_policy_engine,
+    )
 
 
 def load_gemini_policy_payload(scope_key, run_id, run_row=None):
@@ -1956,286 +1185,31 @@ def load_gemini_policy_payload(scope_key, run_id, run_row=None):
 
 
 def _policy_chip_row(label, values, tone=""):
-    chips = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text:
-            continue
-        tone_class = f" policy-chip--{tone}" if tone else ""
-        chips.append(f'<span class="policy-chip{tone_class}">{html.escape(text)}</span>')
-    if not chips:
-        chips.append('<span class="policy-chip policy-chip--empty">none</span>')
-    return (
-        '<div class="policy-horse-group">'
-        f'<div class="policy-label">{html.escape(label)}</div>'
-        f'<div class="policy-chip-row">{"".join(chips)}</div>'
-        "</div>"
-    )
+    return web_policy_html._policy_chip_row(label, values, tone=tone)
 
 
 def _policy_detail_row(label, value, code=False):
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    body = f"<code>{html.escape(text)}</code>" if code else f"<span>{html.escape(text)}</span>"
-    return f'<div class="policy-detail-row"><strong>{html.escape(label)}</strong>{body}</div>'
+    return web_policy_html._policy_detail_row(label, value, code=code)
 
 
 def _policy_mark_html(marks):
-    items = []
-    for mark in list(marks or []):
-        symbol = str(mark.get("symbol", "") or "").strip()
-        horse_no = str(mark.get("horse_no", "") or "").strip()
-        if not symbol or not horse_no:
-            continue
-        items.append(
-            '<div class="policy-mark-item">'
-            f'<span class="policy-mark-symbol">{html.escape(symbol)}</span>'
-            f'<span class="policy-mark-horse">{html.escape(horse_no)}</span>'
-            "</div>"
-        )
-    if not items:
-        return ""
-    return (
-        '<section class="policy-marks">'
-        '<div class="policy-label">Marks</div>'
-        f'<div class="policy-mark-row">{"".join(items)}</div>'
-        "</section>"
-    )
+    return web_policy_html._policy_mark_html(marks)
 
 
 def _policy_ticket_html(rows):
-    if not rows:
-        return ""
-    body = []
-    for row in rows:
-        status = str(row.get("status", "") or "").strip() or "pending"
-        body.append(
-            "<tr>"
-            f"<td>{html.escape(status)}</td>"
-            f"<td>{html.escape(str(row.get('bet_type', '') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('horse_no', '') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('horse_name', '') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('amount_yen', '') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('odds_used', '') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('profit_yen', '') or ''))}</td>"
-            "</tr>"
-        )
-    return (
-        '<section class="policy-ticket-block">'
-        '<div class="policy-label">Ticket Plan</div>'
-        '<div class="table-wrap table-wrap--medium">'
-        '<table class="data-table data-table--medium">'
-        "<thead><tr><th>status</th><th>bet_type</th><th>horse_no</th><th>horse_name</th><th>amount_yen</th><th>odds_used</th><th>profit_yen</th></tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        "</table>"
-        "</div>"
-        "</section>"
-    )
+    return web_policy_html._policy_ticket_html(rows)
 
 
 def build_policy_html(payload):
-    if not isinstance(payload, dict) or not payload:
-        return ""
-    budgets = list(payload.get("budgets", []) or [])
-    model = str(payload.get("policy_model", "") or payload.get("gemini_model", "") or "")
-    policy_engine = str(payload.get("policy_engine", "") or "")
-    engine_label_map = {
-        "gemini": "Gemini",
-        "deepseek": "DeepSeek",
-        "openai": "ChatGPT",
-        "grok": "xAI Grok",
-    }
-    panel_title = engine_label_map.get(policy_engine, policy_engine or "LLM")
-    header_tags = []
-    if model:
-        header_tags.append(f'<span class="policy-meta-tag">{html.escape(model)}</span>')
-    if policy_engine:
-        header_tags.append(f'<span class="policy-meta-tag">{html.escape(policy_engine)}</span>')
-    budget_sections = []
-    for item in budgets:
-        if not isinstance(item, dict):
-            continue
-        is_shared = bool(item.get("shared_policy", False))
-        budget = int(to_float(item.get("budget_yen")))
-        output = dict(item.get("output", {}) or {})
-        meta = dict(item.get("meta", {}) or {})
-        header = "[shared]" if is_shared else f"[{budget}]"
-        decision = str(output.get("bet_decision", "") or "")
-        participation = str(output.get("participation_level", "") or "")
-        buy_style = str(output.get("buy_style", "") or "")
-        strategy_mode = str(output.get("strategy_mode", "") or "")
-        portfolio = dict(item.get("portfolio", {}) or {})
-        portfolio_before = dict(portfolio.get("before", {}) or {})
-        portfolio_after = dict(portfolio.get("after", {}) or {})
-        summary_tags = "".join(
-            f'<span class="policy-meta-tag">{html.escape(tag)}</span>'
-            for tag in [header, decision, participation, buy_style]
-            if str(tag or "").strip()
-        )
-        bankroll_cards = ""
-        if portfolio_before or portfolio_after:
-            bankroll_cards = (
-                '<div class="policy-bankroll-grid">'
-                '<article class="policy-text-card">'
-                '<div class="policy-label">Available Before</div>'
-                f"<p>{html.escape(str(portfolio_before.get('available_bankroll_yen', '')))} JPY</p>"
-                "</article>"
-                '<article class="policy-text-card">'
-                '<div class="policy-label">Available After</div>'
-                f"<p>{html.escape(str(portfolio_after.get('available_bankroll_yen', '')))} JPY</p>"
-                "</article>"
-                '<article class="policy-text-card">'
-                '<div class="policy-label">Realized P/L Today</div>'
-                f"<p>{html.escape(str(portfolio_after.get('realized_profit_yen', portfolio_before.get('realized_profit_yen', ''))))} JPY</p>"
-                "</article>"
-                '<article class="policy-text-card">'
-                '<div class="policy-label">Pending Tickets Before</div>'
-                f"<p>{html.escape(str(portfolio_before.get('pending_tickets', '')))}</p>"
-                "</article>"
-                '<article class="policy-text-card">'
-                '<div class="policy-label">Pending Tickets After</div>'
-                f"<p>{html.escape(str(portfolio_after.get('pending_tickets', '')))}</p>"
-                "</article>"
-                "</div>"
-            )
-        horse_groups = "".join(
-            [
-                _policy_chip_row("Key Horses", list(output.get("key_horses", []) or []), "key"),
-                _policy_chip_row("Secondary", list(output.get("secondary_horses", []) or []), "secondary"),
-                _policy_chip_row("Longshot", list(output.get("longshot_horses", []) or []), "longshot"),
-            ]
-        )
-        mark_block = _policy_mark_html(list(output.get("marks", []) or []))
-        ticket_block = _policy_ticket_html(list(item.get("tickets", []) or []))
-        strategy_text = str(output.get("strategy_text_ja", "") or "").strip()
-        tendency = str(output.get("bet_tendency_ja", "") or "").strip()
-        text_cards = ""
-        fallback_reason = str(meta.get("fallback_reason", "") or "").strip()
-        error_detail = str(meta.get("error_detail", "") or "").strip()
-        if strategy_text or tendency or fallback_reason or error_detail:
-            if fallback_reason:
-                error_lines = [fallback_reason]
-                if error_detail:
-                    error_lines.append(error_detail)
-                for warn in list(output.get("warnings", []) or []):
-                    text = str(warn or "").strip()
-                    if text and text not in error_lines:
-                        error_lines.append(text)
-                error_html = (
-                    '<article class="policy-text-card policy-text-card--primary">'
-                    '<div class="policy-label">Error</div>'
-                    f"<p>{html.escape(' | '.join(error_lines))}</p>"
-                    "</article>"
-                )
-                text_cards = f'<div class="policy-text-grid">{error_html}</div>'
-            else:
-                strategy_html = (
-                    '<article class="policy-text-card policy-text-card--primary">'
-                    '<div class="policy-label">Strategy</div>'
-                    f"<p>{html.escape(strategy_text or 'No strategy text.')}</p>"
-                    "</article>"
-                )
-                tendency_html = (
-                    '<article class="policy-text-card">'
-                    '<div class="policy-label">Bet Tendency</div>'
-                    f"<p>{html.escape(tendency or 'No tendency text.')}</p>"
-                    "</article>"
-                )
-                text_cards = f'<div class="policy-text-grid">{strategy_html}{tendency_html}</div>'
-        reason_codes = list(output.get("reason_codes", []) or [])
-        warnings = list(output.get("warnings", []) or [])
-        detail_rows = []
-        detail_rows.append(
-            _policy_detail_row(
-                "enabled_bet_types",
-                json.dumps(output.get("enabled_bet_types", []), ensure_ascii=False),
-                code=True,
-            )
-        )
-        detail_rows.append(
-            _policy_detail_row(
-                "max_ticket_count / risk_tilt",
-                f"{int(to_float(output.get('max_ticket_count')))} / {output.get('risk_tilt', '')}",
-                code=True,
-            )
-        )
-        detail_rows.append(
-            _policy_detail_row("pick_ids", json.dumps(output.get("pick_ids", []), ensure_ascii=False), code=True)
-        )
-        detail_rows.append(_policy_detail_row("strategy_mode", strategy_mode, code=True))
-        if reason_codes:
-            detail_rows.append(_policy_detail_row("reason_codes", ", ".join(str(x) for x in reason_codes), code=True))
-        if warnings:
-            detail_rows.append(_policy_detail_row("warnings", ", ".join(str(x) for x in warnings), code=True))
-        detail_rows.append(
-            _policy_detail_row(
-                "meta",
-                (
-                    "cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} "
-                    "error_detail={error_detail} requested_budget_yen={requested_budget_yen} "
-                    "requested_race_budget_yen={requested_race_budget_yen} "
-                    "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}"
-                ).format(
-                    cache_hit=int(bool(meta.get("cache_hit", False))),
-                    llm_latency_ms=int(meta.get("llm_latency_ms", 0) or 0),
-                    fallback_reason=str(meta.get("fallback_reason", "") or ""),
-                    error_detail=str(meta.get("error_detail", "") or ""),
-                    requested_budget_yen=int(meta.get("requested_budget_yen", 0) or 0),
-                    requested_race_budget_yen=int(meta.get("requested_race_budget_yen", 0) or 0),
-                    reused=int(bool(meta.get("reused", False))),
-                    source_budget_yen=int(meta.get("source_budget_yen", 0) or 0),
-                    policy_version=str(meta.get("policy_version", "") or ""),
-                ),
-                code=True,
-            )
-        )
-        detail_html = "".join(row for row in detail_rows if row)
-        budget_sections.append(
-            f"""
-            <section class="policy-block">
-              <div class="policy-summary">
-                <div class="policy-summary-tags">{summary_tags}</div>
-                <div class="policy-summary-line">{html.escape(f"strategy_mode={strategy_mode}" if strategy_mode else "")}</div>
-              </div>
-              {bankroll_cards}
-              <div class="policy-horse-grid">{horse_groups}</div>
-              {mark_block}
-              {text_cards}
-              {ticket_block}
-              <details class="policy-fold">
-                <summary>Other Fields</summary>
-                <div class="policy-detail-grid">
-                  {detail_html}
-                </div>
-              </details>
-            </section>
-            """
-        )
-    if not budget_sections:
-        return ""
-    return (
-        '<section class="panel policy-panel">'
-        '<div class="panel-title-row">'
-        f'<div><div class="eyebrow">LLM</div><h2>{html.escape(panel_title)} Policy</h2></div>'
-        f'<div class="policy-meta-row">{"".join(header_tags)}</div>'
-        "</div>"
-        f'{"".join(budget_sections)}'
-        "</section>"
-    )
+    return web_policy_html.build_policy_html(payload, to_float=to_float)
 
 
 def build_gemini_policy_html(payload):
-    return build_policy_html(payload)
+    return web_policy_html.build_gemini_policy_html(payload, to_float=to_float)
 
 
 def build_policy_workspace_html(payloads):
-    blocks = []
-    for payload in list(payloads or []):
-        block = build_policy_html(payload)
-        if block:
-            blocks.append(block)
-    return "".join(blocks)
+    return web_policy_html.build_policy_workspace_html(payloads, to_float=to_float)
 
 
 def load_ability_marks_table(scope_key, run_id, run_row=None):
@@ -5197,8 +4171,6 @@ def topup_today_all_llm_budget(token: str = Form("")):
     )
 
 
-"""
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/edit", response_class=HTMLResponse)
 @app.post("/console/tasks/edit", response_class=HTMLResponse)
 def edit_race_job_details(
     token: str = Form(""),
@@ -5212,146 +4184,30 @@ def edit_race_job_details(
     lead_minutes: str = Form("30"),
     notes: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="邂｡逅・哨莉､譌謨茨ｼ梧裏豕穂ｿｮ謾ｹ莉ｻ蜉｡縲・,
-        )
-    race_id = normalize_race_id(race_id)
-    if not race_id:
-        return build_race_jobs_page(admin_token=token, error_text="Race ID 荳崎・荳ｺ遨ｺ縲・)
-    race_date = str(race_date or "").strip() or _default_job_race_date_text()
-    scheduled_off_time = str(scheduled_off_time or "").strip()
-    if not scheduled_off_time:
-        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀吝ｼ襍帶慮髣ｴ縲・)
-    try:
-        target_distance_value = int(str(target_distance or "").strip())
-    except ValueError:
-        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀呎悽蝨ｺ霍晉ｦｻ・御ｾ句ｦ・1200 謌・1800縲・)
-    if target_distance_value <= 0:
-        return build_race_jobs_page(admin_token=token, error_text="霍晉ｦｻ蠢・｡ｻ螟ｧ莠・0縲・)
-    target_track_condition = str(target_track_condition or "").strip()
-    if target_track_condition not in ("良", "稍重", "重", "不良"):
-        return build_race_jobs_page(admin_token=token, error_text="隸ｷ蝪ｫ蜀呎悽蝨ｺ鬩ｬ蝨ｺ迥ｶ諤・ｼ壻良 / 稍重 / 重 / 不良縲・)
-    try:
-        lead_value = max(0, int(str(lead_minutes or "30").strip() or "30"))
-    except ValueError:
-        lead_value = 30
-
-    current = next((item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "") or "").strip() == str(job_id or "").strip()), None)
-    if current is None:
-        return build_race_jobs_page(admin_token=token, error_text="謇ｾ荳榊芦蟇ｹ蠎皮噪莉ｻ蜉｡縲・)
-
-    target_surface = _target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
-    off_dt = _parse_job_dt_text(scheduled_off_time)
-    process_after_dt = off_dt - timedelta(minutes=lead_value) if off_dt else None
-
-    def _edit_job(row, now_text):
-        row["race_id"] = race_id
-        row["location"] = str(location or "").strip()
-        row["race_date"] = race_date
-        row["scheduled_off_time"] = _format_job_dt_text(off_dt) or scheduled_off_time
-        row["process_after_time"] = _format_job_dt_text(process_after_dt)
-        row["target_surface"] = target_surface
-        row["target_distance"] = str(target_distance_value)
-        row["target_track_condition"] = target_track_condition
-        row["lead_minutes"] = lead_value
-        row["notes"] = str(notes or "").strip()
-        if str(row.get("status", "") or "").strip() in ("uploaded", "scheduled"):
-            row["status"] = compute_race_job_initial_status(row)
-
-    job = update_race_job(BASE_DIR, job_id, _edit_job)
-    if job is None:
-        return build_race_jobs_page(admin_token=token, error_text="謇ｾ荳榊芦蟇ｹ蠎皮噪莉ｻ蜉｡縲・)
-    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 蟾ｲ菫晏ｭ倥せ莉ｻ蜉｡蝗樊焚")
-
-
-"""
-
-
-@app.post("/console/tasks/edit", response_class=HTMLResponse)
-def edit_race_job_details(
-    token: str = Form(""),
-    job_id: str = Form(""),
-    race_id: str = Form(""),
-    location: str = Form(""),
-    race_date: str = Form(""),
-    scheduled_off_time: str = Form(""),
-    target_distance: str = Form(""),
-    target_track_condition: str = Form(""),
-    lead_minutes: str = Form("30"),
-    notes: str = Form(""),
-):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，不能修改任务。",
-        )
-    race_id = normalize_race_id(race_id)
-    if not race_id:
-        return build_race_jobs_page(admin_token=token, error_text="Race ID 不能为空。")
-    race_date = str(race_date or "").strip() or _default_job_race_date_text()
-    scheduled_off_time = str(scheduled_off_time or "").strip()
-    if not scheduled_off_time:
-        return build_race_jobs_page(admin_token=token, error_text="开赛时间不能为空。")
-    try:
-        target_distance_value = int(str(target_distance or "").strip())
-    except ValueError:
-        return build_race_jobs_page(admin_token=token, error_text="比赛距离必须是数字，例如 1200 或 1800。")
-    if target_distance_value <= 0:
-        return build_race_jobs_page(admin_token=token, error_text="比赛距离必须大于 0。")
-    target_track_condition = str(target_track_condition or "").strip()
-    if target_track_condition not in ("良", "稍重", "重", "不良"):
-        return build_race_jobs_page(admin_token=token, error_text="场地状态只能是 良 / 稍重 / 重 / 不良。")
-    try:
-        lead_value = max(0, int(str(lead_minutes or "30").strip() or "30"))
-    except ValueError:
-        lead_value = 30
-
-    current = next(
-        (item for item in load_race_jobs(BASE_DIR) if str(item.get("job_id", "") or "").strip() == str(job_id or "").strip()),
-        None,
+    return web_admin_ops.edit_race_job_details_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        race_id=race_id,
+        location=location,
+        race_date=race_date,
+        scheduled_off_time=scheduled_off_time,
+        target_distance=target_distance,
+        target_track_condition=target_track_condition,
+        lead_minutes=lead_minutes,
+        notes=notes,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        normalize_race_id=normalize_race_id,
+        default_job_race_date_text=_default_job_race_date_text,
+        load_race_jobs=load_race_jobs,
+        render_console_page=render_console_page,
+        target_surface_from_scope=_target_surface_from_scope,
+        parse_job_dt_text=_parse_job_dt_text,
+        format_job_dt_text=_format_job_dt_text,
+        update_race_job=update_race_job,
+        compute_race_job_initial_status=compute_race_job_initial_status,
     )
-    if current is None:
-        return build_race_jobs_page(admin_token=token, error_text="找不到要修改的任务。")
-    current_run_id = str(current.get("current_run_id", "") or "").strip()
-    current_race_date = str(current.get("race_date", "") or "").strip()
-    if current_run_id and race_date != current_race_date:
-        locked_date = current_race_date
-        if (not locked_date) and len(current_run_id) >= 8 and current_run_id[:8].isdigit():
-            locked_date = f"{current_run_id[:4]}-{current_run_id[4:6]}-{current_run_id[6:8]}"
-        return render_console_page(
-            admin_token=token,
-            error_text=f"这条任务已经生成 Run，比赛日期不能再修改。请恢复为 {locked_date or '原日期'}。",
-        )
-
-    target_surface = _target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
-    off_dt = _parse_job_dt_text(scheduled_off_time)
-    if off_dt is None:
-        return build_race_jobs_page(admin_token=token, error_text="开赛时间格式不正确。")
-    process_after_dt = off_dt - timedelta(minutes=lead_value) if off_dt else None
-
-    def _edit_job(row, now_text):
-        row["race_id"] = race_id
-        row["location"] = str(location or "").strip()
-        row["race_date"] = race_date
-        row["scheduled_off_time"] = _format_job_dt_text(off_dt) or scheduled_off_time
-        row["process_after_time"] = _format_job_dt_text(process_after_dt)
-        row["target_surface"] = target_surface
-        row["target_distance"] = str(target_distance_value)
-        row["target_track_condition"] = target_track_condition
-        row["lead_minutes"] = lead_value
-        row["notes"] = str(notes or "").strip()
-        if str(row.get("status", "") or "").strip() in ("uploaded", "scheduled"):
-            row["status"] = compute_race_job_initial_status(row)
-
-    job = update_race_job(BASE_DIR, job_id, _edit_job)
-    if job is None:
-        return build_race_jobs_page(admin_token=token, error_text="找不到要修改的任务。")
-    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存修改。")
-
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/update", response_class=HTMLResponse)
 @app.post("/console/tasks/update", response_class=HTMLResponse)
@@ -5360,17 +4216,15 @@ def update_race_job_view(
     job_id: str = Form(""),
     action: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法修改任务。",
-        )
-    job = apply_race_job_action(BASE_DIR, job_id, action)
-    if job is None:
-        return build_race_jobs_page(admin_token=token, error_text="找不到对应的任务。")
-    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已执行动作：{action}。")
-
+    return web_admin_tasks.update_race_job_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        action=action,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        apply_race_job_action=apply_race_job_action,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/delete", response_class=HTMLResponse)
 @app.post("/console/tasks/delete", response_class=HTMLResponse)
@@ -5378,17 +4232,14 @@ def delete_race_job_view(
     token: str = Form(""),
     job_id: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，不能删除任务。",
-        )
-    deleted = delete_race_job(BASE_DIR, job_id)
-    if deleted is None:
-        return build_race_jobs_page(admin_token=token, error_text="找不到要删除的任务。")
-    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已从任务列表删除。")
-
+    return web_admin_tasks.delete_race_job_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        delete_race_job=delete_race_job,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/process_now", response_class=HTMLResponse)
 @app.post("/console/tasks/process_now", response_class=HTMLResponse)
@@ -5396,71 +4247,13 @@ def process_race_job_now(
     token: str = Form(""),
     job_id: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法执行任务。",
-        )
-    try:
-        from race_job_runner import process_race_job
-
-        print(
-            "[web_app] "
-            + json.dumps(
-                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "process_now_start", "job_id": job_id},
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-        summary = process_race_job(BASE_DIR, job_id)
-        print(
-            "[web_app] "
-            + json.dumps(
-                {
-                    "ts": datetime.now().isoformat(timespec="seconds"),
-                    "event": "process_now_done",
-                    "job_id": job_id,
-                    "run_id": str((summary or {}).get("run_id", "") or "").strip(),
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-    except Exception as exc:
-        try:
-            from race_job_runner import fail_race_job
-
-            fail_race_job(BASE_DIR, job_id, str(exc))
-        except Exception:
-            pass
-        print(
-            "[web_app] "
-            + json.dumps(
-                {
-                    "ts": datetime.now().isoformat(timespec="seconds"),
-                    "event": "process_now_error",
-                    "job_id": job_id,
-                    "error": str(exc),
-                    "traceback": traceback.format_exc(),
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-        return build_race_jobs_page(admin_token=token, error_text=f"{job_id} 执行失败：{exc}")
-    run_id = str((summary or {}).get("run_id", "") or "").strip()
-    engine_count = len(list((summary or {}).get("policy_engines", []) or []))
-    task_id = str((summary or {}).get("remote_predictor_task_id", "") or (summary or {}).get("v5_remote_task_id", "") or "").strip()
-    if task_id:
-        message_text = f"{job_id} 已进入远程预测。run_id={run_id or '-'} task_id={task_id}"
-    else:
-        message_text = f"{job_id} 已完成处理。run_id={run_id or '-'} engines={engine_count}"
-    return build_race_jobs_page(
-        admin_token=token,
-        message_text=message_text,
+    return web_admin_tasks.process_race_job_now_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
     )
-
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/queue_settle", response_class=HTMLResponse)
 @app.post("/console/tasks/queue_settle", response_class=HTMLResponse)
@@ -5471,31 +4264,19 @@ def queue_race_job_settle(
     actual_top2: str = Form(""),
     actual_top3: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return build_race_jobs_page(
-            admin_token=token,
-            authorized=False,
-            error_text="管理口令无效，无法加入结算队列。",
-        )
-    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
-    if not all(names):
-        return build_race_jobs_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
-
-    def _queue_settle(row, now_text):
-        row.update(initialize_race_job_step_fields(row))
-        row["actual_top1"] = names[0]
-        row["actual_top2"] = names[1]
-        row["actual_top3"] = names[2]
-        row["status"] = "queued_settle"
-        row["queued_settle_at"] = now_text
-        row["error_message"] = ""
-        set_race_job_step_state(row, "settlement", "queued")
-
-    job = update_race_job(BASE_DIR, job_id, _queue_settle)
-    if job is None:
-        return build_race_jobs_page(admin_token=token, error_text="找不到对应的任务。")
-    return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已保存赛果并加入结算队列。")
-
+    return web_admin_tasks.queue_race_job_settle_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        actual_top1=actual_top1,
+        actual_top2=actual_top2,
+        actual_top3=actual_top3,
+        admin_token_valid=_admin_token_valid,
+        build_race_jobs_page=build_race_jobs_page,
+        initialize_race_job_step_fields=initialize_race_job_step_fields,
+        set_race_job_step_state=set_race_job_step_state,
+        update_race_job=update_race_job,
+    )
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/settle_now", response_class=HTMLResponse)
 @app.post("/console/tasks/settle_now", response_class=HTMLResponse)
@@ -5506,36 +4287,19 @@ def settle_race_job_now(
     actual_top2: str = Form(""),
     actual_top3: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return render_console_page(admin_token=token, error_text="管理口令无效，无法结算任务。")
-    names = [str(actual_top1 or "").strip(), str(actual_top2 or "").strip(), str(actual_top3 or "").strip()]
-    if not all(names):
-        return render_console_page(admin_token=token, error_text="请完整填写 1-3 着马名。")
-    try:
-        from race_job_runner import settle_race_job
-
-        summary = settle_race_job(BASE_DIR, job_id, names)
-    except Exception as exc:
-        def _restore_settle_retry(row, now_text):
-            row.update(initialize_race_job_step_fields(row))
-            row["status"] = "ready"
-            row["actual_top1"] = names[0]
-            row["actual_top2"] = names[1]
-            row["actual_top3"] = names[2]
-            row["error_message"] = str(exc)
-            row["last_settlement_output"] = str(exc)
-            set_race_job_step_state(row, "settlement", "failed", now_text, str(exc))
-
-        try:
-            update_race_job(BASE_DIR, job_id, _restore_settle_retry)
-        except Exception:
-            pass
-        return render_console_page(admin_token=token, error_text=f"{job_id} 结算失败：{exc}")
-    return render_console_page(
-        admin_token=token,
-        message_text=f"{job_id} 已完成结算。run_id={str((summary or {}).get('run_id', '') or '-')}",
+    return web_admin_tasks.settle_race_job_now_response(
+        base_dir=BASE_DIR,
+        token=token,
+        job_id=job_id,
+        actual_top1=actual_top1,
+        actual_top2=actual_top2,
+        actual_top3=actual_top3,
+        admin_token_valid=_admin_token_valid,
+        render_console_page=render_console_page,
+        initialize_race_job_step_fields=initialize_race_job_step_fields,
+        set_race_job_step_state=set_race_job_step_state,
+        update_race_job=update_race_job,
     )
-
 
 @app.post("/view_run", response_class=HTMLResponse)
 def view_run(
@@ -5543,57 +4307,31 @@ def view_run(
     scope_key: str = Form(""),
     token: str = Form(""),
 ):
-    run_id = run_id.strip()
-    scope_key = normalize_scope_key(scope_key)
-    run_row = None
-    if not scope_key:
-        scope_key, run_row = infer_scope_and_run(run_id)
-    if not scope_key:
-        return render_page("", error_text="Enter Run ID or Race ID to view history.", admin_token=token)
-    if run_row is None:
-        run_row = resolve_run(run_id, scope_key)
-    if run_row is None:
-        race_id = normalize_race_id(run_id)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_key)
-    if run_row is None:
-        return render_page(
-            scope_key,
-            error_text="Run ID / Race ID not found.",
-            selected_run_id=run_id,
-            admin_token=token,
-        )
-    resolved_run_id = str(run_row.get("run_id", "")).strip()
-    if not resolved_run_id:
-        resolved_run_id = infer_run_id_from_row(run_row)
-        if resolved_run_id:
-            update_run_row_fields(scope_key, run_row, {"run_id": resolved_run_id})
-            run_row["run_id"] = resolved_run_id
-    if not resolved_run_id:
-        return render_page(
-            scope_key,
-            error_text="Run exists but run_id is missing; cannot resolve artifacts.",
-            selected_run_id=run_id,
-            admin_token=token,
-        )
-    return render_page(
-        scope_key,
-        selected_run_id=resolved_run_id,
-        summary_run_id=resolved_run_id,
-        admin_token=token,
+    return web_admin_ops.view_run_response(
+        run_id=run_id,
+        scope_key=scope_key,
+        token=token,
+        normalize_scope_key=normalize_scope_key,
+        infer_scope_and_run=infer_scope_and_run,
+        render_page=render_page,
+        resolve_run=resolve_run,
+        normalize_race_id=normalize_race_id,
+        resolve_latest_run_by_race_id=resolve_latest_run_by_race_id,
+        infer_run_id_from_row=infer_run_id_from_row,
+        update_run_row_fields=update_run_row_fields,
     )
-
 
 @app.get("/api/runs")
 def api_runs(scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q: str = ""):
-    scope_key = normalize_scope_key(scope_key) or "central_dirt"
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = DEFAULT_RUN_LIMIT
-    limit = max(1, min(MAX_RUN_LIMIT, limit))
-    return get_recent_runs(scope_key, limit=limit, query=q)
-
+    return web_admin_ops.api_runs_response(
+        scope_key=scope_key,
+        limit=limit,
+        query=q,
+        normalize_scope_key=normalize_scope_key,
+        default_limit=DEFAULT_RUN_LIMIT,
+        max_limit=MAX_RUN_LIMIT,
+        get_recent_runs=get_recent_runs,
+    )
 
 @app.post("/run_pipeline", response_class=HTMLResponse)
 def run_pipeline(
@@ -5608,64 +4346,27 @@ def run_pipeline(
     distance: str = Form(""),
     track_cond: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 Pipeline。", scope_key=scope_key, token=token)
-    scope_key = normalize_scope_key(scope_key)
-    if not scope_key:
-        return render_page("", error_text="Please select a data scope.", admin_token=token)
-    race_id = normalize_race_id(race_id or race_url)
-    history_url = history_url.strip()
-    location = str(location or "").strip()
-    race_date = str(race_date or "").strip()
-    if not race_id or not history_url or not location:
-        return render_page(
-            scope_key,
-            error_text="Race ID, History URL, and Location are required.",
-            admin_token=token,
-        )
-    if scope_key == "local":
-        race_url = f"https://nar.netkeiba.com/race/shutuba.html?race_id={race_id}"
-    else:
-        race_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}"
-    if not surface.strip():
-        if scope_key == "central_turf":
-            surface = "1"
-        else:
-            surface = "2"
-    track_cond_norm = str(track_cond or "").strip().lower()
-    track_cond_map = {
-        "good": "good",
-        "slightly_heavy": "slightly_heavy",
-        "heavy": "heavy",
-        "bad": "bad",
-    }
-    if track_cond_norm in track_cond_map:
-        track_cond = track_cond_map[track_cond_norm]
-    inputs = [
-        race_url,
-        history_url,
-        location,
-        race_date,
-        surface,
-        distance,
-        track_cond,
-    ]
-    extra_env = {"SCOPE_KEY": scope_key}
-    code, output = run_script(
-        RUN_PIPELINE,
-        inputs=inputs,
-        extra_env=extra_env,
+    return web_admin_ops.run_pipeline_response(
+        token=token,
+        race_id=race_id,
+        race_url=race_url,
+        history_url=history_url,
+        scope_key=scope_key,
+        location=location,
+        race_date=race_date,
+        surface=surface,
+        distance=distance,
+        track_cond=track_cond,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        normalize_scope_key=normalize_scope_key,
+        render_page=render_page,
+        normalize_race_id=normalize_race_id,
+        run_script=run_script,
+        run_pipeline_path=RUN_PIPELINE,
+        extract_top5=extract_top5,
+        parse_run_id=parse_run_id,
     )
-    label = f"Exit code: {code}"
-    top5_text = extract_top5(output)
-    return render_page(
-        scope_key,
-        output_text=f"{label}\n{output}",
-        top5_text=top5_text,
-        summary_run_id=parse_run_id(output),
-        admin_token=token,
-    )
-
 
 @app.post("/record_predictor", response_class=HTMLResponse)
 def record_predictor(
@@ -5676,74 +4377,26 @@ def record_predictor(
     top2: str = Form(""),
     top3: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied(
-            "管理口令错误，不能录入 Predictor 结果。",
-            scope_key=scope_key,
-            token=token,
-            selected_run_id=str(run_id or "").strip(),
-        )
-    scope_norm = normalize_scope_key(scope_key)
-    run_id = str(run_id or "").strip()
-    run_row = None
-    if not scope_norm:
-        scope_norm, run_row = infer_scope_and_run(run_id)
-    if run_row is None and scope_norm:
-        run_row = resolve_run(run_id, scope_norm)
-    if run_row is None and scope_norm:
-        race_id = normalize_race_id(run_id)
-        if race_id:
-            run_row = resolve_latest_run_by_race_id(race_id, scope_norm)
-    resolved_run_id = str((run_row or {}).get("run_id", "") or "").strip() or run_id
-    if not top1 or not top2 or not top3:
-        return render_page(
-            scope_norm or scope_key,
-            error_text="Top1/Top2/Top3 are required.",
-            selected_run_id=resolved_run_id,
-            admin_token=token,
-        )
-    refresh_ok = False
-    refresh_message = "Run row missing for odds update."
-    refresh_warnings = []
-    if run_row is not None and scope_norm:
-        odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
-        wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
-        fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-        quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
-        exacta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "exacta_odds_path", "exacta_odds")
-        trio_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trio_odds_path", "trio_odds")
-        trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-        refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
-            run_row,
-            scope_norm,
-            odds_path,
-            wide_odds_path=wide_odds_path,
-            fuku_odds_path=fuku_odds_path,
-            quinella_odds_path=quinella_odds_path,
-            exacta_odds_path=exacta_odds_path,
-            trio_odds_path=trio_odds_path,
-            trifecta_odds_path=trifecta_odds_path,
-        )
-    inputs = [resolved_run_id, top1, top2, top3]
-    code, output = run_script(
-        RECORD_PREDICTOR,
-        inputs=inputs,
-        extra_blanks=2,
-        extra_env={"SCOPE_KEY": scope_norm or scope_key or "central_dirt"},
+    return web_admin_ops.record_predictor_response(
+        token=token,
+        scope_key=scope_key,
+        run_id=run_id,
+        top1=top1,
+        top2=top2,
+        top3=top3,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        normalize_scope_key=normalize_scope_key,
+        infer_scope_and_run=infer_scope_and_run,
+        resolve_run=resolve_run,
+        normalize_race_id=normalize_race_id,
+        resolve_latest_run_by_race_id=resolve_latest_run_by_race_id,
+        render_page=render_page,
+        resolve_run_asset_path=resolve_run_asset_path,
+        refresh_odds_for_run=refresh_odds_for_run,
+        run_script=run_script,
+        record_predictor_path=RECORD_PREDICTOR,
     )
-    label = f"Exit code: {code}"
-    output_parts = [f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip()]
-    if refresh_warnings:
-        output_parts.append("[odds_update][warnings] " + "; ".join(str(x) for x in refresh_warnings))
-    output_parts.append(label)
-    output_parts.append(output)
-    return render_page(
-        scope_norm or scope_key,
-        output_text="\n".join(part for part in output_parts if str(part).strip()),
-        selected_run_id=resolved_run_id,
-        admin_token=token,
-    )
-
 
 @app.post("/run_llm_buy", response_class=HTMLResponse)
 def run_llm_buy(
@@ -5754,75 +4407,23 @@ def run_llm_buy(
     policy_model: str = Form(""),
     refresh_odds: str = Form("1"),
 ):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied(
-            "管理口令错误，不能执行 LLM buy。",
-            scope_key=scope_key,
-            token=token,
-            selected_run_id=str(run_id or "").strip(),
-        )
-    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
-    if not scope_norm or run_row is None or not resolved_run_id:
-        return render_page(
-            scope_norm or scope_key,
-            error_text="Run ID / Race ID not found for LLM buy.",
-            selected_run_id=resolved_run_id or str(run_id or "").strip(),
-            admin_token=token,
-        )
-    refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
-    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
-    if not refresh_ok:
-        return render_page(
-            scope_norm,
-            error_text=build_llm_buy_output(
-                load_policy_bankroll_summary(
-                    resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine
-                ),
-                refresh_ok,
-                refresh_message,
-                refresh_warnings,
-                "[llm_buy][blocked] odds refresh failed; skip policy execution.",
-                policy_engine=normalize_policy_engine(policy_engine),
-            ),
-            selected_run_id=resolved_run_id,
-            admin_token=token,
-        )
-    try:
-        result = execute_policy_buy(
-            scope_norm,
-            run_row,
-            resolved_run_id,
-            policy_engine=policy_engine,
-            policy_model=policy_model,
-        )
-    except Exception as exc:
-        return render_page(
-            scope_norm,
-            error_text=build_llm_buy_output(
-                load_policy_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine),
-                refresh_ok,
-                refresh_message,
-                refresh_warnings,
-                f"[llm_buy][error] {exc}",
-                policy_engine=normalize_policy_engine(policy_engine),
-            ),
-            selected_run_id=resolved_run_id,
-            admin_token=token,
-        )
-    return render_page(
-        scope_norm,
-        output_text=build_llm_buy_output(
-            result["summary_before"],
-            refresh_ok,
-            refresh_message,
-            refresh_warnings,
-            result["output_text"],
-            result["engine"],
-        ),
-        selected_run_id=resolved_run_id,
-        admin_token=token,
+    return web_admin_ops.run_llm_buy_response(
+        token=token,
+        scope_key=scope_key,
+        run_id=run_id,
+        policy_engine=policy_engine,
+        policy_model=policy_model,
+        refresh_odds=refresh_odds,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        resolve_run_selection=resolve_run_selection,
+        render_page=render_page,
+        maybe_refresh_run_odds=maybe_refresh_run_odds,
+        build_llm_buy_output=build_llm_buy_output,
+        load_policy_bankroll_summary=load_policy_bankroll_summary,
+        normalize_policy_engine=normalize_policy_engine,
+        execute_policy_buy=execute_policy_buy,
     )
-
 
 @app.post("/run_gemini_buy", response_class=HTMLResponse)
 def run_gemini_buy(
@@ -5849,73 +4450,20 @@ def run_all_llm_buy(
     run_id: str = Form(""),
     refresh_odds: str = Form("1"),
 ):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied(
-            "管理口令错误，不能执行全部 LLM。",
-            scope_key=scope_key,
-            token=token,
-            selected_run_id=str(run_id or "").strip(),
-        )
-    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
-    if not scope_norm or run_row is None or not resolved_run_id:
-        return render_page(
-            scope_norm or scope_key,
-            error_text="Run ID / Race ID not found for LLM buy.",
-            selected_run_id=resolved_run_id or str(run_id or "").strip(),
-            admin_token=token,
-        )
-    refresh_enabled = str(refresh_odds or "").strip() not in ("", "0", "false", "False", "off")
-    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
-    if not refresh_ok:
-        return render_page(
-            scope_norm,
-            error_text=build_llm_buy_output(
-                load_policy_bankroll_summary(
-                    resolved_run_id, run_row.get("timestamp", ""), policy_engine="gemini"
-                ),
-                refresh_ok,
-                refresh_message,
-                refresh_warnings,
-                "[llm_buy][blocked] odds refresh failed; skip all policy engines.",
-                policy_engine="all",
-            ),
-            selected_run_id=resolved_run_id,
-            admin_token=token,
-        )
-    result_blocks = []
-    error_blocks = []
-    for engine in ("gemini", "deepseek", "openai", "grok"):
-        try:
-            result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=engine, policy_model="")
-            result_blocks.append(
-                build_llm_buy_output(
-                    result["summary_before"],
-                    refresh_ok,
-                    refresh_message,
-                    refresh_warnings,
-                    result["output_text"],
-                    result["engine"],
-                )
-            )
-        except Exception as exc:
-            error_blocks.append(f"[llm_buy][{engine}] {exc}")
-    if error_blocks and not result_blocks:
-        return render_page(
-            scope_norm,
-            error_text="\n\n".join(error_blocks),
-            selected_run_id=resolved_run_id,
-            admin_token=token,
-        )
-    output_text = "\n\n".join(block for block in result_blocks if str(block).strip())
-    if error_blocks:
-        output_text = "\n\n".join([output_text] + error_blocks if output_text else error_blocks)
-    return render_page(
-        scope_norm,
-        output_text=output_text,
-        selected_run_id=resolved_run_id,
-        admin_token=token,
+    return web_admin_ops.run_all_llm_buy_response(
+        token=token,
+        scope_key=scope_key,
+        run_id=run_id,
+        refresh_odds=refresh_odds,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        resolve_run_selection=resolve_run_selection,
+        render_page=render_page,
+        maybe_refresh_run_odds=maybe_refresh_run_odds,
+        build_llm_buy_output=build_llm_buy_output,
+        load_policy_bankroll_summary=load_policy_bankroll_summary,
+        execute_policy_buy=execute_policy_buy,
     )
-
 
 @app.post("/topup_all_llm_budget", response_class=HTMLResponse)
 def topup_all_llm_budget(
@@ -5923,94 +4471,85 @@ def topup_all_llm_budget(
     scope_key: str = Form(""),
     run_id: str = Form(""),
 ):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied(
-            "管理口令错误，不能执行资金充值。",
-            scope_key=scope_key,
-            token=token,
-            selected_run_id=str(run_id or "").strip(),
-        )
-    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
-    if not scope_norm or run_row is None or not resolved_run_id:
-        return render_page(
-            scope_norm or scope_key,
-            error_text="Run ID / Race ID not found for LLM bankroll top-up.",
-            selected_run_id=resolved_run_id or str(run_id or "").strip(),
-            admin_token=token,
-        )
-    ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
-    amount_yen = resolve_daily_bankroll_yen(ledger_date)
-    lines = [f"[llm_budget_topup] ledger_date={ledger_date} amount_yen={amount_yen} engines=4"]
-    for engine in ("gemini", "deepseek", "openai", "grok"):
-        summary = add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
-        lines.append(
-            "[topup][{engine}] available_bankroll_yen={available} topup_yen={topup}".format(
-                engine=engine,
-                available=int(summary.get("available_bankroll_yen", 0) or 0),
-                topup=int(summary.get("topup_yen", 0) or 0),
-            )
-        )
-    return render_page(
-        scope_norm,
-        output_text="\n".join(lines),
-        selected_run_id=resolved_run_id,
-        admin_token=token,
+    return web_admin_ops.topup_all_llm_budget_response(
+        base_dir=BASE_DIR,
+        token=token,
+        scope_key=scope_key,
+        run_id=run_id,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        resolve_run_selection=resolve_run_selection,
+        render_page=render_page,
+        extract_ledger_date=extract_ledger_date,
+        resolve_daily_bankroll_yen=resolve_daily_bankroll_yen,
+        add_bankroll_topup=add_bankroll_topup,
     )
-
 
 @app.post("/reset_llm_state", response_class=HTMLResponse)
 def reset_llm_state(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能重置 LLM 状态。", token=token)
-    summary = reset_llm_state_files(BASE_DIR)
-    return render_page(
-        "",
-        output_text=json.dumps(summary, ensure_ascii=False, indent=2),
-        admin_token=token,
+    return web_admin_ops.reset_llm_state_response(
+        base_dir=BASE_DIR,
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        render_page=render_page,
+        reset_llm_state_files=reset_llm_state_files,
     )
-
 
 @app.post("/optimize_params", response_class=HTMLResponse)
 def optimize_params(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 optimize_params。", token=token)
-    code, output = run_script(OPTIMIZE_PARAMS, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
-    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
-
+    return web_admin_ops.optimize_params_response(
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        run_script=run_script,
+        optimize_params_path=OPTIMIZE_PARAMS,
+        render_page=render_page,
+    )
 
 @app.post("/optimize_predictor", response_class=HTMLResponse)
 def optimize_predictor(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 optimize_predictor。", token=token)
-    code, output = run_script(OPTIMIZE_PREDICTOR, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
-    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
-
+    return web_admin_ops.optimize_predictor_response(
+        token=token,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        run_script=run_script,
+        optimize_predictor_path=OPTIMIZE_PREDICTOR,
+        render_page=render_page,
+    )
 
 @app.post("/offline_eval", response_class=HTMLResponse)
 def offline_eval(token: str = Form(""), window: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 offline_eval。", token=token)
-    inputs = [window, ""]
-    code, output = run_script(OFFLINE_EVAL, inputs=inputs, extra_blanks=1)
-    label = f"Exit code: {code}"
-    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
-
+    return web_admin_ops.offline_eval_response(
+        token=token,
+        window=window,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        run_script=run_script,
+        offline_eval_path=OFFLINE_EVAL,
+        render_page=render_page,
+    )
 
 @app.post("/init_update", response_class=HTMLResponse)
 def init_update(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 init_update。", token=token)
-    code, output = run_script(INIT_UPDATE, inputs=[""], extra_blanks=1)
-    label = f"Exit code: {code}"
-    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
-
+    return web_admin_ops.init_update_response(
+        token=token,
+        reset=False,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        run_script=run_script,
+        init_update_path=INIT_UPDATE,
+        render_page=render_page,
+    )
 
 @app.post("/init_update_reset", response_class=HTMLResponse)
 def init_update_reset(token: str = Form("")):
-    if not _admin_token_valid(token):
-        return _admin_execution_denied("管理口令错误，不能执行 init_update --reset。", token=token)
-    code, output = run_script(INIT_UPDATE, inputs=[""], args=["--reset"], extra_blanks=1)
-    label = f"Exit code: {code}"
-    return render_page("", output_text=f"{label}\n{output}", admin_token=token)
+    return web_admin_ops.init_update_response(
+        token=token,
+        reset=True,
+        admin_token_valid=_admin_token_valid,
+        admin_execution_denied=_admin_execution_denied,
+        run_script=run_script,
+        init_update_path=INIT_UPDATE,
+        render_page=render_page,
+    )
