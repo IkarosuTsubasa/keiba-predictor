@@ -303,6 +303,9 @@ function WorkspaceOps({ busyKey, onAction }) {
             <button type="button" disabled={busyKey === "topup"} onClick={() => onAction("topup")}>
               {busyKey === "topup" ? "Applying..." : "Top Up All LLM"}
             </button>
+            <button type="button" disabled={busyKey === "fetch_result_and_settle"} onClick={() => onAction("fetch_result_and_settle")}>
+              {busyKey === "fetch_result_and_settle" ? "Settling..." : "Fetch Result & Settle"}
+            </button>
           </div>
         </div>
       </article>
@@ -420,6 +423,22 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
           ...extra,
         });
         setOpResult(data.output_text || "");
+      } else if (kind === "fetch_result_and_settle") {
+        const data = await postWorkspaceAction("/api/admin/workspace/fetch_result_and_settle", {
+          scope_key: state.data.scope_key,
+          run_id: state.data.run_id,
+        });
+        setOpResult(
+          [
+            `job_id=${data.job_id || "-"}`,
+            `race_id=${data.race_id || "-"}`,
+            `actual_top3=${(data.actual_top3 || []).join(" / ")}`,
+            data.result_url ? `result_url=${data.result_url}` : "",
+            data.summary?.output || "",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        );
       } else {
         const engine = kind.replace("llm_", "");
         const data = await postWorkspaceAction("/api/admin/workspace/run_llm_buy", {

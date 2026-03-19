@@ -1088,7 +1088,7 @@ def _refresh_settlement_odds(scope_key, run_id):
     return detail_text
 
 
-def settle_race_job(base_dir, job_id, actual_top3_names):
+def settle_race_job(base_dir, job_id, actual_top3_names, official_result_payload=None):
     base_path = Path(base_dir)
     job = get_job(base_path, job_id)
     if job is None:
@@ -1109,13 +1109,23 @@ def settle_race_job(base_dir, job_id, actual_top3_names):
         lambda row, now_text: _mark_settlement_started(row, now_text, names),
     )
 
-    refresh_output = _refresh_settlement_odds(scope_key, run_id)
+    refresh_output = ""
+    extra_env = {"SCOPE_KEY": scope_key}
+    temp_payload_path = None
+    if official_result_payload:
+        official_dir = base_path / "data" / "_shared" / "official_results"
+        official_dir.mkdir(parents=True, exist_ok=True)
+        temp_payload_path = official_dir / f"official_result_{run_id}.json"
+        temp_payload_path.write_text(json.dumps(official_result_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        extra_env["OFFICIAL_RESULT_PAYLOAD_PATH"] = str(temp_payload_path)
+    else:
+        refresh_output = _refresh_settlement_odds(scope_key, run_id)
 
     code, output = _run_subprocess(
         base_path / "record_predictor_result.py",
         cwd=base_path,
         inputs=[run_id, names[0], names[1], names[2]],
-        env={"SCOPE_KEY": scope_key},
+        env=extra_env,
     )
     if code != 0:
         raise RuntimeError(f"settlement failed: {output}")

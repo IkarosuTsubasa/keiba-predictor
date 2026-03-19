@@ -2,13 +2,20 @@ import json
 import os
 import traceback
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
 
+from fetch_central_result import (
+    build_result_url as build_official_result_url,
+    fetch_html as fetch_official_result_html,
+    parse_result_page as parse_official_result_page,
+)
+
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
+AUTO_SETTLE_DELAY_MINUTES = 20
 
 
 def _run_due_lock_path(base_dir):
@@ -74,6 +81,55 @@ def pick_next_settle_job_id(*, load_race_jobs):
         if status == "queued_settle" and actual_top1 and actual_top2 and actual_top3:
             return str(job.get("job_id", "") or "").strip()
     return ""
+
+
+def _parse_dt_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _official_result_source_for_scope(scope_key):
+    return "local" if str(scope_key or "").strip().lower() == "local" else "central"
+
+
+def _fetch_official_result_payload_for_job(job):
+    race_id = str(job.get("race_id", "") or "").strip()
+    scope_key = str(job.get("scope_key", "") or "").strip()
+    result_url = build_official_result_url(race_id=race_id, source=_official_result_source_for_scope(scope_key))
+    html_bytes = fetch_official_result_html(result_url, timeout=30)
+    payload = parse_official_result_page(html_bytes, source_url=result_url)
+    if not payload.get("result_available"):
+        return None
+    return payload
+
+
+def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
+    current_dt = now_dt or datetime.now()
+    out = []
+    for job in load_race_jobs():
+        status = str(job.get("status", "") or "").strip().lower()
+        if status != "ready":
+            continue
+        if any(str(job.get(name, "") or "").strip() for name in ("actual_top1", "actual_top2", "actual_top3")):
+            continue
+        off_dt = _parse_dt_text(job.get("scheduled_off_time", ""))
+        if off_dt is None:
+            continue
+        if current_dt < off_dt + timedelta(minutes=AUTO_SETTLE_DELAY_MINUTES):
+            continue
+        race_id = str(job.get("race_id", "") or "").strip()
+        run_id = str(job.get("current_run_id", "") or "").strip()
+        if not race_id or not run_id:
+            continue
+        out.append(dict(job))
+    return out
 
 
 def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
@@ -157,6 +213,33 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
             except Exception:
                 pass
             errors.append({"kind": "settle", "job_id": job_id, "error": str(exc)})
+
+    for job in list_auto_settle_jobs(
+        load_race_jobs=lambda: load_race_jobs(base_dir),
+        now_dt=datetime.now(),
+    ):
+        job_id = str((job or {}).get("job_id", "") or "").strip()
+        if not job_id:
+            continue
+        try:
+            official_payload = _fetch_official_result_payload_for_job(job)
+            if not official_payload:
+                continue
+            actual_top3 = [str(item.get("horse_name", "") or "").strip() for item in list(official_payload.get("top3", []) or [])[:3]]
+            if len(actual_top3) < 3 or not all(actual_top3[:3]):
+                continue
+            from race_job_runner import settle_race_job
+
+            settle_results.append(
+                settle_race_job(
+                    base_dir,
+                    job_id,
+                    actual_top3,
+                    official_result_payload=official_payload,
+                )
+            )
+        except Exception as exc:
+            errors.append({"kind": "auto_settle", "job_id": job_id, "error": str(exc)})
 
     return {
         "queued_count": len(changed),

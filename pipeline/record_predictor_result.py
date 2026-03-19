@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import re
 import subprocess
@@ -206,6 +207,19 @@ def normalize_race_id(value):
     return re.sub(r"\D", "", raw)
 
 
+def load_official_result_payload():
+    path_text = str(os.environ.get("OFFICIAL_RESULT_PAYLOAD_PATH", "") or "").strip()
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def main():
     init_scope()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -244,6 +258,7 @@ def main():
     race_id = str(run.get("race_id") or "").strip()
     actual_names_raw = prompt_actual_top3()
     actual_names = [normalize_name(n) for n in actual_names_raw]
+    official_result_payload = load_official_result_payload()
     predictor_rows = []
     for spec in list_predictors():
         pred_path_run = resolve_run_prediction_path(
@@ -355,7 +370,13 @@ def main():
     else:
         print("[WARN] No predictor outputs were recorded for this run; continue with ticket settlement only.")
     for policy_engine in ("gemini", "deepseek", "openai", "grok"):
-        settlement = settle_run_tickets(BASE_DIR, run, actual_names_raw, policy_engine=policy_engine)
+        settlement = settle_run_tickets(
+            BASE_DIR,
+            run,
+            actual_names_raw,
+            policy_engine=policy_engine,
+            official_result_payload=official_result_payload,
+        )
         if settlement:
             print(
                 "[{policy_engine}_portfolio] settled_tickets={settled_ticket_count} run_stake_yen={run_stake_yen} "

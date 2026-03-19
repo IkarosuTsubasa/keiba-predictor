@@ -410,7 +410,57 @@ def eval_ticket_hit(bet_type, horse_names, actual_order):
     return 0
 
 
-def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemini"):
+def build_official_payout_lookup(official_result_payload):
+    bet_type_map = {
+        "単勝": "win",
+        "複勝": "place",
+        "ワイド": "wide",
+        "馬連": "quinella",
+        "馬単": "exacta",
+        "3連複": "trio",
+        "3連単": "trifecta",
+    }
+    payouts = {}
+    for jp_bet_type, entries in dict((official_result_payload or {}).get("payouts", {}) or {}).items():
+        bet_type = bet_type_map.get(str(jp_bet_type or "").strip(), "")
+        if not bet_type:
+            continue
+        bucket = payouts.setdefault(bet_type, {})
+        for entry in list(entries or []):
+            payout_yen = to_int((entry or {}).get("payout_yen"))
+            horse_numbers = [parse_horse_no(x) for x in list((entry or {}).get("horse_numbers", []) or [])]
+            horse_numbers = [x for x in horse_numbers if x is not None]
+            if payout_yen <= 0 or not horse_numbers:
+                continue
+            if bet_type in ("wide", "quinella", "trio"):
+                key = tuple(sorted(horse_numbers))
+            else:
+                key = tuple(horse_numbers)
+            bucket[key] = payout_yen
+    return payouts
+
+
+def _resolve_official_ticket_payout(stake_yen, bet_type, nos, official_payouts):
+    if not official_payouts:
+        return 0
+    bet = str(bet_type or "").strip().lower()
+    if bet not in dict(official_payouts or {}):
+        return 0
+    values = [parse_horse_no(x) for x in list(nos or [])]
+    values = [x for x in values if x is not None]
+    if not values:
+        return 0
+    if bet in ("wide", "quinella", "trio"):
+        key = tuple(sorted(values))
+    else:
+        key = tuple(values)
+    payout_per_100 = to_int(dict(official_payouts or {}).get(bet, {}).get(key))
+    if payout_per_100 <= 0:
+        return 0
+    return int(round((to_int(stake_yen) / 100.0) * payout_per_100))
+
+
+def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemini", official_result_payload=None):
     run_id = str((run_row or {}).get("run_id", "")).strip()
     if not run_id:
         return None
@@ -435,6 +485,7 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     exacta_odds_map = load_exacta_odds_map(exacta_path)
     trio_odds_map = load_triple_odds_map(trio_path, ordered=False)
     trifecta_odds_map = load_triple_odds_map(trifecta_path, ordered=True)
+    official_payouts = build_official_payout_lookup(official_result_payload)
     settled_at = datetime.now().isoformat(timespec="seconds")
     total_stake = 0
     total_payout = 0
@@ -455,22 +506,23 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
         stake = to_int(row.get("stake_yen"))
         payout = 0
         if hit:
-            if bet_type == "win" and names:
+            payout = _resolve_official_ticket_payout(stake, bet_type, nos, official_payouts)
+            if payout <= 0 and bet_type == "win" and names:
                 payout = int(round(stake * float(win_odds_map.get(normalize_name(names[0]), 0) or 0)))
-            elif bet_type == "place" and nos:
+            elif payout <= 0 and bet_type == "place" and nos:
                 payout = int(round(stake * float(place_odds_map.get(nos[0], 0) or 0)))
-            elif bet_type == "wide" and len(nos) >= 2:
+            elif payout <= 0 and bet_type == "wide" and len(nos) >= 2:
                 a, b = sorted(nos[:2])
                 payout = int(round(stake * float(wide_odds_map.get((a, b), 0) or 0)))
-            elif bet_type == "quinella" and len(nos) >= 2:
+            elif payout <= 0 and bet_type == "quinella" and len(nos) >= 2:
                 a, b = sorted(nos[:2])
                 payout = int(round(stake * float(quinella_odds_map.get((a, b), 0) or 0)))
-            elif bet_type == "exacta" and len(nos) >= 2:
+            elif payout <= 0 and bet_type == "exacta" and len(nos) >= 2:
                 payout = int(round(stake * float(exacta_odds_map.get((nos[0], nos[1]), 0) or 0)))
-            elif bet_type == "trio" and len(nos) >= 3:
+            elif payout <= 0 and bet_type == "trio" and len(nos) >= 3:
                 key = tuple(sorted(nos[:3]))
                 payout = int(round(stake * float(trio_odds_map.get(key, 0) or 0)))
-            elif bet_type == "trifecta" and len(nos) >= 3:
+            elif payout <= 0 and bet_type == "trifecta" and len(nos) >= 3:
                 key = tuple(nos[:3])
                 payout = int(round(stake * float(trifecta_odds_map.get(key, 0) or 0)))
         profit = int(payout - stake)

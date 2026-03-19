@@ -19,6 +19,11 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from fetch_central_result import (
+    build_result_url as build_official_result_url,
+    fetch_html as fetch_official_result_html,
+    parse_result_page as parse_official_result_page,
+)
 from predictor_catalog import canonical_predictor_id, list_predictors, predictor_label, resolve_run_prediction_path, snapshot_prediction_path
 from gemini_portfolio import (
     add_bankroll_topup,
@@ -1122,6 +1127,36 @@ def _find_job_meta_for_run(scope_key, run_id, run_row=None):
     )
 
 
+def _official_result_source_for_scope(scope_key):
+    return "local" if str(scope_key or "").strip() == "local" else "central"
+
+
+def _fetch_official_result_payload(scope_key, race_id):
+    race_id_text = normalize_race_id(race_id)
+    if not race_id_text:
+        raise ValueError("race_id required")
+    result_url = build_official_result_url(
+        race_id=race_id_text,
+        source=_official_result_source_for_scope(scope_key),
+    )
+    html_bytes = fetch_official_result_html(result_url, timeout=30)
+    payload = parse_official_result_page(html_bytes, source_url=result_url)
+    if not payload.get("result_available"):
+        raise RuntimeError(
+            f"official result not available: race_id={race_id_text}"
+            + (f" title={str(payload.get('page_title', '') or '').strip()}" if payload.get("page_title") else "")
+        )
+    return payload
+
+
+def _fetch_official_top3_names(scope_key, race_id):
+    payload = _fetch_official_result_payload(scope_key, race_id)
+    names = [str(item.get("horse_name", "") or "").strip() for item in list(payload.get("top3", []) or [])[:3]]
+    if len(names) < 3 or not all(names[:3]):
+        raise RuntimeError("official top3 not available")
+    return names[:3], payload
+
+
 def _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map):
     return report_data.actual_result_snapshot(
         BASE_DIR,
@@ -1589,6 +1624,7 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
 
     return {
         "authorized": True,
+        "job_id": str(job_meta.get("job_id", "") or "").strip(),
         "scope_key": scope_norm,
         "scope_label": _scope_display_name(scope_norm),
         "run_id": resolved_run_id,
@@ -1596,6 +1632,10 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
         "location": str((run_row or {}).get("location", "") or "").strip(),
         "race_date": str((run_row or {}).get("date", "") or (run_row or {}).get("race_date", "") or "").strip(),
         "timestamp": str((run_row or {}).get("timestamp", "") or "").strip(),
+        "official_result_url": build_official_result_url(
+            race_id=normalize_race_id((run_row or {}).get("race_id", "")),
+            source=_official_result_source_for_scope(scope_norm),
+        ),
         "x_post": {
             "status": str(job_meta.get("x_post_status", "") or "").strip(),
             "engine": str(job_meta.get("x_post_engine", "") or "").strip(),
@@ -1977,6 +2017,48 @@ async def admin_workspace_record_predictor_api(request: Request):
     )
 
 
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/fetch_result_and_settle")
+async def admin_workspace_fetch_result_and_settle_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    scope_key = str((payload or {}).get("scope_key", "") or "").strip()
+    run_id = str((payload or {}).get("run_id", "") or "").strip()
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    job_meta = _find_job_meta_for_run(scope_norm, resolved_run_id, run_row) or {}
+    job_id = str(job_meta.get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job not found for run"}, status_code=404)
+    race_id = normalize_race_id((run_row or {}).get("race_id", ""))
+    if not race_id:
+        return JSONResponse({"ok": False, "error": "race_id missing for run"}, status_code=400)
+    try:
+        actual_top3, official_payload = _fetch_official_top3_names(scope_norm, race_id)
+        from race_job_runner import settle_race_job
+
+        summary = settle_race_job(BASE_DIR, job_id, actual_top3, official_result_payload=official_payload)
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc), "job_id": job_id, "run_id": resolved_run_id, "race_id": race_id},
+            status_code=500,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "job_id": job_id,
+            "scope_key": scope_norm,
+            "run_id": resolved_run_id,
+            "race_id": race_id,
+            "actual_top3": actual_top3,
+            "result_url": str(official_payload.get("source_url", "") or "").strip(),
+            "summary": dict(summary or {}),
+        }
+    )
+
+
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/process_now")
 async def admin_jobs_process_now_api(request: Request):
     supplied = _admin_supplied_token(request)
@@ -2077,44 +2159,6 @@ async def admin_jobs_edit_api(request: Request):
     if job is None:
         return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
     return JSONResponse({"ok": True, "job_id": job_id})
-
-
-@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/settle_now")
-async def admin_jobs_settle_now_api(request: Request):
-    supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
-        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
-    payload = await request.json()
-    job_id = str((payload or {}).get("job_id", "") or "").strip()
-    actual_top1 = str((payload or {}).get("actual_top1", "") or "").strip()
-    actual_top2 = str((payload or {}).get("actual_top2", "") or "").strip()
-    actual_top3 = str((payload or {}).get("actual_top3", "") or "").strip()
-    if not job_id:
-        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
-    if not (actual_top1 and actual_top2 and actual_top3):
-        return JSONResponse({"ok": False, "error": "actual_top1-3 required"}, status_code=400)
-    try:
-        from race_job_runner import settle_race_job
-
-        summary = settle_race_job(BASE_DIR, job_id, [actual_top1, actual_top2, actual_top3])
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc), "job_id": job_id}, status_code=500)
-    return JSONResponse({"ok": True, "job_id": job_id, "summary": dict(summary or {})})
-
-
-@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/queue_settle")
-async def admin_jobs_queue_settle_api(request: Request):
-    supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
-        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
-    payload = await request.json()
-    job_id = str((payload or {}).get("job_id", "") or "").strip()
-    if not job_id:
-        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
-    job = apply_race_job_action(BASE_DIR, job_id, "queue_settle")
-    if job is None:
-        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
-    return JSONResponse({"ok": True, "job_id": job_id, "status": str(job.get("status", "") or "").strip()})
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/update")

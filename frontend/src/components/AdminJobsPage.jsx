@@ -302,45 +302,6 @@ function EditJobForm({ job, onSubmit, busy }) {
   );
 }
 
-function SettleJobForm({ onSubmit, busy }) {
-  const [form, setForm] = useState({ actual_top1: "", actual_top2: "", actual_top3: "" });
-
-  function updateField(key, value) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  return (
-    <details className="admin-inline-panel">
-      <summary>Settle</summary>
-      <form
-        className="admin-inline-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit(form);
-        }}
-      >
-        <label>
-          <span>Top1</span>
-          <input value={form.actual_top1} onChange={(event) => updateField("actual_top1", event.target.value)} />
-        </label>
-        <label>
-          <span>Top2</span>
-          <input value={form.actual_top2} onChange={(event) => updateField("actual_top2", event.target.value)} />
-        </label>
-        <label>
-          <span>Top3</span>
-          <input value={form.actual_top3} onChange={(event) => updateField("actual_top3", event.target.value)} />
-        </label>
-        <div className="admin-inline-form__actions">
-          <button type="submit" disabled={busy}>
-            {busy ? "Settling..." : "Settle Now"}
-          </button>
-        </div>
-      </form>
-    </details>
-  );
-}
-
 function OpsPanel({ busy, onReset }) {
   return (
     <article className="admin-tool-panel admin-tool-panel--compact">
@@ -399,9 +360,6 @@ function JobCard({ job, onAction, busyAction }) {
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
           {busy ? "Processing..." : "Process Now"}
         </button>
-        <button type="button" disabled={busy} onClick={() => onAction("queue_settle", job)}>
-          Queue Settle
-        </button>
         <button type="button" disabled={busy} onClick={() => onAction("delete", job)}>
           Delete
         </button>
@@ -409,7 +367,6 @@ function JobCard({ job, onAction, busyAction }) {
       </div>
 
       <EditJobForm job={job} busy={busy} onSubmit={(payload) => onAction("edit", job, payload)} />
-      <SettleJobForm busy={busy} onSubmit={(payload) => onAction("settle_now", job, payload)} />
       <ProcessLog entries={job.process_log} />
     </article>
   );
@@ -523,10 +480,8 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
       await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
       const messages = {
         process_now: `Task ${jobId} started.`,
-        queue_settle: `Task ${jobId} queued for settlement.`,
         delete: `Task ${jobId} deleted.`,
         edit: `Task ${jobId} updated.`,
-        settle_now: `Task ${jobId} settled.`,
       };
       setFlashMessage(messages[kind] || "Action completed.");
       setReloadTick((value) => value + 1);
