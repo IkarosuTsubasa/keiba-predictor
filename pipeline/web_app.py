@@ -82,7 +82,6 @@ from web_ui.stats_block import build_stats_block as ui_build_stats_block
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
-PUBLIC_FRONTEND_LEGACY_DIR = BASE_DIR / "public_frontend"
 PUBLIC_FRONTEND_DIST_DIR = BASE_DIR / "public_frontend_dist"
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
@@ -97,7 +96,6 @@ MAX_RUN_LIMIT = 500
 PUBLIC_BASE_PATH = "/keiba"
 CONSOLE_BASE_PATH = f"{PUBLIC_BASE_PATH}/console"
 PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
-PUBLIC_LEGACY_ASSET_BASE_PATH = f"{PUBLIC_BASE_PATH}/public"
 PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
@@ -113,13 +111,6 @@ load_local_env(BASE_DIR, override=False)
 app.mount("/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="public-assets")
 app.mount(f"{PUBLIC_BASE_PATH}/assets", StaticFiles(directory=PUBLIC_FRONTEND_DIST_DIR / "assets", check_dir=False), name="keiba-public-assets")
 
-
-def _active_public_frontend_dir():
-    if (PUBLIC_FRONTEND_DIST_DIR / "index.html").exists():
-        return PUBLIC_FRONTEND_DIST_DIR
-    return PUBLIC_FRONTEND_LEGACY_DIR
-
-
 def _prefix_public_html_routes(content=""):
     html_text = str(content or "")
     replacements = (
@@ -129,8 +120,6 @@ def _prefix_public_html_routes(content=""):
         ('action="/llm_today"', f'action="{PUBLIC_BASE_PATH}"'),
         ('href="/site-icon.png"', f'href="{PUBLIC_SITE_ICON_PATH}"'),
         ('href="/favicon.ico"', f'href="{PUBLIC_FAVICON_PATH}"'),
-        ('src="/public/', f'src="{PUBLIC_LEGACY_ASSET_BASE_PATH}/'),
-        ('href="/public/', f'href="{PUBLIC_LEGACY_ASSET_BASE_PATH}/'),
     )
     for source, target in replacements:
         html_text = html_text.replace(source, target)
@@ -138,7 +127,7 @@ def _prefix_public_html_routes(content=""):
 
 
 def _load_public_index_html():
-    index_path = _active_public_frontend_dir() / "index.html"
+    index_path = PUBLIC_FRONTEND_DIST_DIR / "index.html"
     for enc in ("utf-8", "utf-8-sig"):
         try:
             with open(index_path, "r", encoding=enc) as f:
@@ -546,7 +535,7 @@ def _inject_public_share_runtime(html_text):
 @app.get(PUBLIC_SITE_ICON_PATH)
 @app.get("/site-icon.png")
 def public_site_icon():
-    icon_path = _active_public_frontend_dir() / "site-icon.png"
+    icon_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
     if icon_path.exists():
         return FileResponse(icon_path)
     raise HTTPException(status_code=404, detail="site icon not found")
@@ -555,7 +544,7 @@ def public_site_icon():
 @app.get(PUBLIC_FAVICON_PATH)
 @app.get("/favicon.ico")
 def public_favicon():
-    icon_path = _active_public_frontend_dir() / "site-icon.png"
+    icon_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
     if icon_path.exists():
         return FileResponse(icon_path, media_type="image/png")
     raise HTTPException(status_code=404, detail="favicon not found")
@@ -566,8 +555,6 @@ def public_favicon():
 def public_og_image():
     candidates = [
         PUBLIC_FRONTEND_DIST_DIR / "og.png",
-        PUBLIC_FRONTEND_LEGACY_DIR / "og.png",
-        ROOT_DIR / "og.png",
     ]
     for path in candidates:
         if path.exists():
@@ -9285,18 +9272,6 @@ def ads_txt():
 @app.get("/api/public/board")
 def public_board_api(date: str = "", scope_key: str = ""):
     return JSONResponse(build_public_board_payload(date_text=date, scope_key=scope_key))
-
-
-@app.get(f"{PUBLIC_LEGACY_ASSET_BASE_PATH}/app.js")
-@app.get("/public/app.js")
-def public_frontend_app_js():
-    return FileResponse(PUBLIC_FRONTEND_LEGACY_DIR / "app.js", media_type="application/javascript")
-
-
-@app.get(f"{PUBLIC_LEGACY_ASSET_BASE_PATH}/styles.css")
-@app.get("/public/styles.css")
-def public_frontend_styles():
-    return FileResponse(PUBLIC_FRONTEND_LEGACY_DIR / "styles.css", media_type="text/css")
 
 
 @app.post(f"{CONSOLE_BASE_PATH}/tasks/create", response_class=HTMLResponse)
