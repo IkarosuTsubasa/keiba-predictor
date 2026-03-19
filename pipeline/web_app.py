@@ -1,4 +1,5 @@
 ﻿import csv
+import asyncio
 import html
 import json
 import math
@@ -15,7 +16,6 @@ import base64
 from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
-
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -69,15 +69,11 @@ from web_auth import (
     admin_token_valid as _admin_token_valid,
     verify_callback_hmac as _verify_callback_hmac,
 )
-from web_admin import console as web_admin_console
-from web_admin import jobs_page as web_admin_jobs
 from web_admin import operations as web_admin_ops
-from web_admin import remote_predictors as web_remote_predictors
 from web_admin import task_routes as web_admin_tasks
 from web_data import odds_service, run_resolver, run_store, summary_service, view_data
 from web_helpers import (
     extract_section,
-    extract_top5,
     format_path_mtime,
     get_env_timeout,
     is_run_id,
@@ -87,7 +83,6 @@ from web_helpers import (
     load_text_file,
     normalize_race_id,
     parse_horse_no,
-    parse_run_id,
     run_script,
     to_float,
     to_int_or_none,
@@ -106,7 +101,6 @@ from web_public import (
     register_public_static_routes,
 )
 from web_pages import public_llm as web_public_llm
-from web_pages import workspace as web_workspace
 from web_policy import engine as web_policy_engine
 from web_policy import html as web_policy_html
 from web_policy import payload as web_policy_payload
@@ -143,20 +137,11 @@ from web_report.helpers import (
     safe_text as report_safe_text,
     scope_display_name as report_scope_display_name,
 )
-from web_ui.components import (
-    build_daily_profit_chart_html as ui_build_daily_profit_chart_html,
-    build_metric_table as ui_build_metric_table,
-    build_table_html as ui_build_table_html,
-)
-from web_ui.template import page_template as ui_page_template
-from web_ui.stats_block import build_llm_compare_block as ui_build_llm_compare_block
-from web_ui.stats_block import build_stats_block as ui_build_stats_block
 
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
-RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 DEFAULT_RUN_LIMIT = 200
@@ -167,31 +152,11 @@ mount_public_assets(app)
 register_public_static_routes(app)
 
 
-def _pick_next_process_job_id():
-    return web_admin_tasks.pick_next_process_job_id(
-        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
-    )
-
-
-def _pick_next_settle_job_id():
-    return web_admin_tasks.pick_next_settle_job_id(
-        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
-    )
-
-
 def run_due_jobs_once():
     return web_admin_tasks.run_due_jobs_once(
         base_dir=BASE_DIR,
         scan_due_race_jobs=scan_due_race_jobs,
         load_race_jobs=load_race_jobs,
-    )
-
-
-def build_console_gate_page(admin_token="", error_text=""):
-    return web_admin_console.build_console_gate_page(
-        admin_token=admin_token,
-        error_text=error_text,
-        prefix_public_html_routes=_prefix_public_html_routes,
     )
 
 
@@ -206,24 +171,11 @@ def load_runs(scope_key):
                 reader = csv.DictReader(f)
                 rows = list(reader)
                 fieldnames = reader.fieldnames or []
-                rows, _ = normalize_csv_rows(rows, fieldnames)
+                rows, _ = run_store.normalize_csv_rows(rows, fieldnames)
                 return rows
         except UnicodeDecodeError:
             continue
     return []
-
-
-def normalize_csv_fieldnames(fieldnames):
-    return run_store.normalize_csv_fieldnames(fieldnames)
-
-
-def normalize_csv_rows(rows, fieldnames):
-    return run_store.normalize_csv_rows(rows, fieldnames)
-
-
-def load_runs_with_header(scope_key):
-    return run_store.load_runs_with_header(migrate_legacy_data, get_data_dir, BASE_DIR, scope_key)
-
 
 def get_recent_runs(scope_key, limit=DEFAULT_RUN_LIMIT, query=""):
     runs = load_runs(scope_key)
@@ -291,65 +243,12 @@ def update_run_row_fields(scope_key, run_row, updates):
     return run_store.update_run_row_fields(
         get_data_dir,
         BASE_DIR,
-        load_runs_with_header,
+        lambda resolved_scope_key: run_store.load_runs_with_header(migrate_legacy_data, get_data_dir, BASE_DIR, resolved_scope_key),
         normalize_race_id,
         scope_key,
         run_row,
         updates,
     )
-
-
-def remote_v5_enabled():
-    return web_remote_predictors.remote_v5_enabled()
-
-
-def remote_predictor_auto_continue_enabled():
-    return web_remote_predictors.remote_predictor_auto_continue_enabled()
-
-
-def _append_job_process_log_entry(row, step, code, output):
-    return web_remote_predictors.append_job_process_log_entry(row, step, code, output)
-
-
-def _remote_v5_bundle_zip_bytes(task):
-    return web_remote_predictors.remote_v5_bundle_zip_bytes(task)
-
-
-def _promote_job_after_remote_v5(job_id, run_id, task_id, log_output):
-    return web_remote_predictors.promote_job_after_remote_v5(
-        base_dir=BASE_DIR,
-        job_id=job_id,
-        run_id=run_id,
-        task_id=task_id,
-        log_output=log_output,
-        update_race_job=update_race_job,
-        initialize_race_job_step_fields=initialize_race_job_step_fields,
-        set_race_job_step_state=set_race_job_step_state,
-    )
-
-
-def _auto_continue_remote_policy(job_id):
-    return web_remote_predictors.auto_continue_remote_policy(base_dir=BASE_DIR, job_id=job_id)
-
-
-def strict_llm_odds_gate_enabled():
-    return web_policy_runtime.strict_llm_odds_gate_enabled()
-
-
-def expected_odds_output_names(scope_key):
-    return web_policy_runtime.expected_odds_output_names(scope_key)
-
-
-def capture_output_mtimes(root_dir, names):
-    return web_policy_runtime.capture_output_mtimes(root_dir, names)
-
-
-def is_fresh_output(path, previous_mtime, started_at):
-    return web_policy_runtime.is_fresh_output(path, previous_mtime, started_at)
-
-
-def copy_fresh_odds_output(tmp_path, dest_path, before_mtimes, started_at, warnings):
-    return web_policy_runtime.copy_fresh_odds_output(tmp_path, dest_path, before_mtimes, started_at, warnings)
 
 
 def refresh_odds_for_run(
@@ -410,14 +309,6 @@ def odds_sort_key(item):
 
 def format_odds_diff(prev_snapshot, curr_snapshot, limit=50):
     return odds_service.format_odds_diff(prev_snapshot, curr_snapshot, limit=limit)
-
-
-def build_table_html(rows, columns, title):
-    return ui_build_table_html(rows, columns, title)
-
-
-def build_metric_table(rows, title):
-    return ui_build_metric_table(rows, title)
 
 
 def load_top5_table(scope_key, run_id, run_row=None):
@@ -1178,113 +1069,6 @@ def load_ability_marks_table(scope_key, run_id, run_row=None):
     )
 
 
-def page_template(
-    output_text="",
-    error_text="",
-    run_options="",
-    view_run_options="",
-    view_selected_run_id="",
-    current_race_id="",
-    top5_text="",
-    top5_table_html="",
-    mark_table_html="",
-    llm_battle_html="",
-    llm_compare_html="",
-    gemini_policy_html="",
-    summary_table_html="",
-    stats_block="",
-    default_scope="central_dirt",
-    default_policy_engine="gemini",
-    default_policy_model="",
-    admin_token="",
-    admin_enabled=False,
-    admin_workspace_html="",
-):
-    return ui_page_template(
-        output_text=output_text,
-        error_text=error_text,
-        run_options=run_options,
-        view_run_options=view_run_options,
-        view_selected_run_id=view_selected_run_id,
-        current_race_id=current_race_id,
-        top5_text=top5_text,
-        top5_table_html=top5_table_html,
-        mark_table_html=mark_table_html,
-        llm_battle_html=llm_battle_html,
-        llm_compare_html=llm_compare_html,
-        gemini_policy_html=gemini_policy_html,
-        summary_table_html=summary_table_html,
-        stats_block=stats_block,
-        default_scope=default_scope,
-        default_policy_engine=default_policy_engine,
-        default_policy_model=default_policy_model,
-        admin_token=admin_token,
-        admin_enabled=admin_enabled,
-        admin_workspace_html=admin_workspace_html,
-    )
-
-
-def render_page(
-    scope_key="central_dirt",
-    output_text="",
-    error_text="",
-    top5_text="",
-    summary_run_id="",
-    selected_run_id="",
-    admin_token="",
-    admin_workspace_html="",
-):
-    return web_workspace.render_workspace_page(
-        scope_key=scope_key,
-        output_text=output_text,
-        error_text=error_text,
-        top5_text=top5_text,
-        summary_run_id=summary_run_id,
-        selected_run_id=selected_run_id,
-        admin_token=admin_token,
-        admin_workspace_html=admin_workspace_html,
-        build_run_options=build_run_options,
-        build_llm_compare_block=ui_build_llm_compare_block,
-        build_stats_block=ui_build_stats_block,
-        build_table_html=build_table_html,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        load_policy_daily_profit_summary=load_policy_daily_profit_summary,
-        build_daily_profit_chart_html=ui_build_daily_profit_chart_html,
-        resolve_run=resolve_run,
-        parse_run_id=parse_run_id,
-        normalize_race_id=normalize_race_id,
-        resolve_predictor_paths=resolve_predictor_paths,
-        load_top5_table=load_top5_table,
-        load_ability_marks_table=load_ability_marks_table,
-        load_mark_recommendation_table=load_mark_recommendation_table,
-        load_text_file=load_text_file,
-        load_prediction_summary=load_prediction_summary,
-        load_bet_engine_v3_cfg_summary=load_bet_engine_v3_cfg_summary,
-        load_policy_payloads=load_policy_payloads,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        build_policy_workspace_html=build_policy_workspace_html,
-        build_llm_battle_bundle=_build_llm_battle_bundle,
-        load_actual_result_map=_load_actual_result_map,
-        normalize_policy_engine=normalize_policy_engine,
-        resolve_policy_model=resolve_policy_model,
-        default_gemini_model=DEFAULT_GEMINI_MODEL,
-        prefix_public_html_routes=_prefix_public_html_routes,
-        page_template=page_template,
-        admin_token_enabled=_admin_token_enabled,
-        load_predictor_summary=load_predictor_summary,
-    )
-
-
-def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
-    return render_page(
-        scope_key,
-        error_text=str(message or "管理??行被拒?"),
-        selected_run_id=selected_run_id,
-        summary_run_id=summary_run_id,
-        admin_token=token,
-    )
-
-
 LLM_BATTLE_ORDER = ("openai", "gemini", "deepseek", "grok")
 LLM_BATTLE_LABELS = {
     "openai": "ChatGPT",
@@ -1511,35 +1295,6 @@ def _public_trend_series(days=10):
     del days
     return []
 
-
-def _policy_primary_choice(output):
-    return report_bundles._policy_primary_choice(output)
-
-
-def _llm_agreement_summary(outputs):
-    return report_bundles._llm_agreement_summary(outputs)
-
-
-def _difficulty_summary(outputs, agreement_score):
-    return report_bundles._difficulty_summary(outputs, agreement_score)
-
-
-def _build_llm_battle_bundle(scope_key, run_id, run_row, payloads, actual_result_map):
-    return report_bundles.build_llm_battle_bundle(
-        scope_key,
-        run_id,
-        run_row,
-        payloads,
-        actual_result_map,
-        normalize_policy_engine=normalize_policy_engine,
-        actual_result_snapshot=_actual_result_snapshot,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        summarize_ticket_rows=_summarize_ticket_rows,
-        marks_result_triplet=_marks_result_triplet,
-        format_triplet_text=_format_triplet_text,
-    )
-
-
 def _resolve_llm_today_target_date(target_date="", scope_key=""):
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = _llm_today_scope_keys(scope_norm)
@@ -1710,629 +1465,298 @@ def _race_job_process_log_html(row):
     """
 
 
-def _race_job_action_buttons_v2(job_id, status, admin_token=""):
-    buttons = []
-    status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing", "processing_policy"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">遶句叉螟・炊</button>
-            </form>
-            """
-        )
-    if status_text in ("ready", "queued_settle", "settling", "settled", "processing", "waiting_v5"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">驥肴眠謇ｧ陦・/button>
-            </form>
-            """
-        )
-    if status_text in ("failed", "settled", "ready", "queued_settle", "processing", "processing_policy", "settling", "queued_process", "queued_policy", "waiting_v5"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/update">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="force_reset">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">蠑ｺ蛻ｶ蝗樊彫</button>
-            </form>
-            """
-        )
-    if status_text in ("queued_process", "queued_policy", "processing", "processing_policy", "queued_settle", "settling", "waiting_v5"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/update">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="mark_failed">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">譬・ｮｰ螟ｱ雍･</button>
-            </form>
-            """
-        )
-    if status_text in ("failed", "settled", "ready", "queued_settle"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/update">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="reset_schedule">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">蝗槫芦謗堤ｨ・/button>
-            </form>
-            """
-        )
-    buttons.append(
-        f"""
-        <form method="post" action="/console/tasks/delete">
-          <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit">蛻髯､莉ｻ蜉｡</button>
-        </form>
-        """
-    )
-    return "".join(buttons)
+def _admin_supplied_token(request: Request, token: str = ""):
+    auth_header = str(request.headers.get("authorization", "") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+        if bearer_token:
+            return bearer_token
+    return str(token or "").strip()
 
 
-def _race_job_status_tone(status):
-    text = str(status or "").strip().lower()
-    if text in ("ready", "settled"):
-        return "good"
-    if text in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
-        return "active"
-    if text == "failed":
-        return "danger"
-    return "muted"
-
-
-def _race_job_status_label(status):
-    mapping = {
-        "uploaded": "已上传",
-        "scheduled": "已调度",
-        "queued_process": "等待处理",
-        "processing": "处理中",
-        "waiting_v5": "等待远程预测",
-        "queued_policy": "等待 LLM",
-        "processing_policy": "LLM 处理中",
-        "ready": "已完成",
-        "queued_settle": "等待结算",
-        "settling": "结算中",
-        "settled": "已结算",
-        "failed": "失败",
-    }
-    text = str(status or "").strip().lower()
-    return mapping.get(text, text or "-")
-
-
-def _race_job_action_buttons(job_id, status, admin_token=""):
-    buttons = []
-    status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing_policy"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">遶句叉謇ｧ陦悟､・炊</button>
-            </form>
-            """
-        )
-    if status_text in ("ready", "queued_settle", "settling", "settled", "waiting_v5"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">驥肴眠逕滓・鬚・ｵ・/button>
-            </form>
-            """
-        )
-    if status_text in ("failed", "settled", "ready", "queued_settle"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/update">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="reset_schedule">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">驥咲ｽｮ荳ｺ蠕・多</button>
-            </form>
-            """
-        )
-    return "".join(buttons)
-
-
-def _race_job_settle_form(row, admin_token=""):
-    current_run_id = str((row or {}).get("current_run_id", "") or "").strip()
-    if not current_run_id:
-        return ""
-    status_text = str((row or {}).get("status", "") or "").strip().lower()
-    if status_text not in ("ready", "queued_settle", "settling", "settled"):
-        return ""
-    return f"""
-    <section class="job-settle-panel">
-      <div class="job-settle-head">
-        <strong>隨ｬ荳画ｭ･・壼ｽ募・襍帶棡蟷ｶ扈鍋ｮ・/strong>
-        <span>謠蝉ｺ､ 1-3 逹蜷主庄逶ｴ謗･扈鍋ｮ暦ｼ御ｹ溷庄莉･蜈井ｿ晏ｭ伜芦扈鍋ｮ鈴弌蛻励・/span>
-      </div>
-      <div class="job-settle-actions">
-        <form method="post" action="/console/tasks/settle_now" class="job-settle-form">
-          <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1逹鬩ｬ蜷・>
-          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2逹鬩ｬ蜷・>
-          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3逹鬩ｬ蜷・>
-          <button type="submit">遶句叉扈鍋ｮ・/button>
-        </form>
-        <form method="post" action="/console/tasks/queue_settle" class="job-settle-form">
-          <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1逹鬩ｬ蜷・>
-          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2逹鬩ｬ蜷・>
-          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3逹鬩ｬ蜷・>
-          <button type="submit">菫晏ｭ伜ｹｶ蜉蜈･扈鍋ｮ鈴弌蛻・/button>
-        </form>
-      </div>
-    </section>
-    """
-
-
-def _admin_job_card_html(row, admin_token=""):
-    row = dict(row or {})
-    row, _ = _race_job_view(row)
-    job_id = str(row.get("job_id", "") or "").strip()
-    status = str(row.get("status", "") or "").strip()
-    current_run_id = str(row.get("current_run_id", "") or "").strip()
-    scope_key = str(row.get("scope_key", "") or "").strip()
-    race_date = str(row.get("race_date", "") or "").strip()
-    location = str(row.get("location", "") or "").strip()
-    race_id = str(row.get("race_id", "") or "").strip()
-    actual_top1 = str(row.get("actual_top1", "") or "").strip()
-    actual_top2 = str(row.get("actual_top2", "") or "").strip()
-    actual_top3 = str(row.get("actual_top3", "") or "").strip()
-    notes = str(row.get("notes", "") or "").strip()
-    artifacts = list(row.get("artifacts", []) or [])
-    artifact_map = {str(item.get("artifact_type", "")).strip().lower(): dict(item) for item in artifacts}
-    kachiuma_name = str((artifact_map.get("kachiuma") or {}).get("original_name", "") or "譛ｪ荳贋ｼ")
-    shutuba_name = str((artifact_map.get("shutuba") or {}).get("original_name", "") or "譛ｪ荳贋ｼ")
-    timing_items = []
-    for label, key in (
-        ("开赛", "scheduled_off_time"),
-        ("处理开始", "process_after_time"),
-        ("进入队列", "queued_process_at"),
-        ("完成预测", "ready_at"),
-        ("完成结算", "settled_at"),
-    ):
-        value = str(row.get(key, "") or "").strip()
-        if value:
-            timing_items.append(f"<span>{html.escape(label)} {html.escape(value)}</span>")
-    open_links = ""
-    if current_run_id:
-        open_links = f"""
-        <form method="post" action="/view_run" class="stack-form">
-          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
-          <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
-          <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">謇灘ｼ Run</button>
-        </form>
-        <form method="get" action="/llm_today" class="stack-form">
-          <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
-          <input type="hidden" name="date" value="{html.escape(race_date)}">
-          <button type="submit" class="secondary-button">謇灘ｼ逵区攸</button>
-        </form>
-        """
-    return f"""
-    <section class="panel panel--tight">
-      <div class="section-title">
-        <div>
-          <div class="eyebrow">莉ｻ蜉｡</div>
-          <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '譛ｪ蜻ｽ蜷堺ｻｻ蜉｡')}</h2>
-        </div>
-        <span class="section-chip">{html.escape(_race_job_display_label(row))}</span>
-      </div>
-      <div class="copy-row">
-        <span class="hero-pill">闌・峩: {html.escape(_scope_display_name(scope_key))}</span>
-        <span class="hero-pill">譌･譛・ {html.escape(race_date or '-')}</span>
-        <span class="hero-pill">Run: {html.escape(current_run_id or '-')}</span>
-        <span class="hero-pill">襍帶棡: {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '譛ｪ蠖募・')}</span>
-      </div>
-      <div class="copy-row">
-        <span class="hero-pill">kachiuma: {html.escape(kachiuma_name)}</span>
-        <span class="hero-pill">shutuba: {html.escape(shutuba_name)}</span>
-        {''.join(timing_items)}
-      </div>
-      <p class="helper-text">{html.escape(notes or '譌螟・ｳｨ')}</p>
-      <div class="copy-row">
-        {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
-        {open_links}
-      </div>
-      {_race_job_process_log_html(row)}
-      {_race_job_settle_form(row, admin_token=admin_token)}
-    </section>
-    """
-
-
-def build_admin_workspace_html(message_text="", error_text="", admin_token="", authorized=True):
-    if not authorized:
-        return f"""
-        <section class="content-cluster" id="admin-zone">
-          <section class="panel panel-error">
-            <div class="section-title">
-              <div>
-                <div class="eyebrow">Admin</div>
-                <h2>莉ｻ蜉｡蜷主床</h2>
-              </div>
-              <span class="section-chip">locked</span>
-            </div>
-            <p class="helper-text">{html.escape(error_text or '管理员权限不足')}</p>
-          </section>
-        </section>
-        """
-
+def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
     jobs = load_race_jobs(BASE_DIR)
     summary = {
         "total": len(jobs),
+        "uploaded": 0,
         "scheduled": 0,
         "processing": 0,
         "ready": 0,
         "settled": 0,
+        "failed": 0,
     }
-    for job in jobs:
-        status = str(job.get("status", "") or "").strip().lower()
-        if status == "scheduled":
+    items = []
+
+    for row in jobs:
+        hydrated, display = _race_job_view(row)
+        status = str(hydrated.get("status", "") or "").strip().lower()
+        if status == "uploaded":
+            summary["uploaded"] += 1
+        elif status == "scheduled":
             summary["scheduled"] += 1
-        elif status in ("queued_process", "processing", "queued_settle", "settling"):
+        elif status in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
             summary["processing"] += 1
         elif status == "ready":
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
+        elif status == "failed":
+            summary["failed"] += 1
 
-    cards_html = "".join(_admin_job_card_html(job, admin_token=admin_token) for job in jobs)
-    if not cards_html:
-        cards_html = """
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Tasks</div>
-              <h2>霑俶ｲ｡譛我ｻｻ蜉｡</h2>
-            </div>
-            <span class="section-chip">empty</span>
-          </div>
-          <p class="helper-text">蜈井ｸ贋ｼ `kachiuma.csv` 蜥・`shutuba.csv`・悟・謇句勘謇ｧ陦碁｢・ｵ句柱扈鍋ｮ励・/p>
-        </section>
-        """
+        if not show_settled and status == "settled":
+            continue
 
-    message_panel = ""
-    if message_text:
-        message_panel = f"""
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Result</div>
-              <h2>莉ｻ蜉｡蜿埼ｦ・/h2>
-            </div>
-            <span class="section-chip">ok</span>
-          </div>
-          <p class="helper-text">{html.escape(message_text)}</p>
-        </section>
-        """
-    error_panel = ""
-    if error_text:
-        error_panel = f"""
-        <section class="panel panel-error">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Error</div>
-              <h2>莉ｻ蜉｡蠑ょｸｸ</h2>
-            </div>
-            <span class="section-chip">error</span>
-          </div>
-          <pre>{html.escape(error_text)}</pre>
-        </section>
-        """
+        step_badges = []
+        for step_name in ("odds", "predictor", "policy", "settlement"):
+            state = str(hydrated.get(f"{step_name}_status", "idle") or "idle").strip().lower() or "idle"
+            step_badges.append(
+                {
+                    "step": step_name,
+                    "label": _JOB_STEP_LABELS.get(step_name, step_name),
+                    "state": state,
+                    "state_label": _JOB_STEP_STATE_LABELS.get(state, state),
+                    "tone": _JOB_STEP_STATE_TONES.get(state, "muted"),
+                }
+            )
 
-    default_dt = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%dT15:00")
-    default_date = _default_job_race_date_text()
-    default_date = _default_job_race_date_text()
-    return f"""
-    <section class="content-cluster" id="admin-zone">
-      <div class="cluster-head">
-        <div>
-          <div class="eyebrow">Manual Admin Flow</div>
-          <h2>莉ｻ蜉｡蜷主床</h2>
-        </div>
-        <p>蜷主床邇ｰ蝨ｨ謖我ｸ画ｭ･豬∝ｷ･菴懶ｼ壻ｸ贋ｼ荳､荳ｪ CSV・梧焔蜉ｨ謇ｧ陦碁｢・ｵ具ｼ悟ｽ募・襍帶棡蟷ｶ扈鍋ｮ励・/p>
-      </div>
-      <div class="cluster-grid cluster-grid--stack">
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Overview</div>
-              <h2>莉ｻ蜉｡讎りｧ・/h2>
-            </div>
-            <span class="section-chip">manual</span>
-          </div>
-          <div class="copy-row">
-            <span class="hero-pill">諤ｻ莉ｻ蜉｡: {summary['total']}</span>
-            <span class="hero-pill">蠕・､・炊: {summary['scheduled']}</span>
-            <span class="hero-pill">螟・炊荳ｭ: {summary['processing']}</span>
-            <span class="hero-pill">鬚・ｵ句ｷｲ逕滓・: {summary['ready']}</span>
-            <span class="hero-pill">蟾ｲ扈鍋ｮ・ {summary['settled']}</span>
-          </div>
-          <div class="copy-row">
-            <form method="post" action="/console/tasks/scan_due" class="stack-form">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">謖画慮髣ｴ遲幃我ｻｻ蜉｡</button>
-            </form>
-            <form method="post" action="/console/tasks/run_due_now" class="stack-form">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">謇ｧ陦悟ｷｲ蜈･髦滉ｻｻ蜉｡</button>
-            </form>
-            <a href="/llm_today" class="secondary-button">逵・LLM 逵区攸</a>
-          </div>
-          <p class="helper-text">蠑襍帶慮髣ｴ蜥梧署蜑榊・髓溷宵菴應ｸｺ隶ｰ蠖穂ｸ守ｭ幃牙盾閠・ｼ御ｸ堺ｼ夊・蜉ｨ蛻ｰ轤ｹ霑占｡後・/p>
-        </section>
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Bankroll</div>
-              <h2>扈滉ｸ霑ｽ蜉襍・≡</h2>
-            </div>
-            <span class="section-chip">budget</span>
-          </div>
-          <p class="helper-text">謖芽ｴｦ譛ｬ譌･譛溽ｻ吝屁荳ｪ LLM 蜷梧慮霑ｽ蜉蠖捺律鬚・ｮ暦ｼ・026蟷ｴ3譛・7譌･襍ｷ荳ｺ 50000・梧ｭ､蜑堺ｸｺ 10000縲・/p>
-          <div class="copy-row">
-            <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">謇譛鵜LM霑ｽ蜉蠖捺律鬚・ｮ・/button>
-            </form>
-          </div>
-        </section>
-        {message_panel}
-        {error_panel}
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Import</div>
-              <h2>蟇ｼ蜈･蜴・彰謨ｰ謐ｮ ZIP</h2>
-            </div>
-            <span class="section-chip">disk</span>
-          </div>
-          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div>
-              <label>蜴・彰謨ｰ謐ｮ ZIP</label>
-              <input type="file" name="archive_file" accept=".zip,application/zip">
-            </div>
-            <label class="radio-option">
-              <input type="checkbox" name="overwrite" value="1">
-              <span class="radio-text">隕・尠蜷悟錐譁・ｻｶ</span>
-            </label>
-            <p class="helper-text">謾ｯ謖・`pipeline/data/...`縲～data/...`・梧・閠・峩謗･蛹・性 `central_dirt`縲～central_turf`縲～local`縲～_shared` 逧・ZIP縲・/p>
-            <button type="submit">蟇ｼ蜈･蛻ｰ Render Disk</button>
-          </form>
-        </section>
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Import</div>
-              <h2>蟇ｼ蜈･蜴・彰謨ｰ謐ｮ ZIP</h2>
-            </div>
-            <span class="section-chip">disk</span>
-          </div>
-          <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div>
-              <label>蜴・彰謨ｰ謐ｮ ZIP</label>
-              <input type="file" name="archive_file" accept=".zip,application/zip">
-            </div>
-            <label class="radio-option">
-              <input type="checkbox" name="overwrite" value="1">
-              <span class="radio-text">隕・尠蜷悟錐譁・ｻｶ</span>
-            </label>
-            <p class="helper-text">謾ｯ謖∽ｸ贋ｼ `pipeline/data/...`縲～data/...`・梧・逶ｴ謗･莉･ `central_dirt`縲～central_turf`縲～local`縲～_shared` 蠑螟ｴ逧・ZIP縲・/p>
-            <button type="submit">蟇ｼ蜈･蛻ｰ Render Disk</button>
-          </form>
-        </section>
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Step 1</div>
-              <h2>荳贋ｼ荳､荳ｪ CSV</h2>
-            </div>
-            <span class="section-chip">upload</span>
-          </div>
-          <style>
-            .admin-upload-grid > div:nth-child(7) {{ display: none; }}
-          </style>
-          <form class="stack-form" method="post" action="/console/tasks/create" enctype="multipart/form-data">
-            <input type="hidden" name="token" value="{html.escape(admin_token)}">
-            <div class="field-grid admin-upload-grid">
-              <div>
-                <label>闌・峩</label>
-                <select name="scope_key">
-                  <option value="central_dirt">荳ｭ螟ｮ Dirt</option>
-                  <option value="central_turf">荳ｭ螟ｮ Turf</option>
-                  <option value="local">蝨ｰ譁ｹ</option>
-                </select>
-              </div>
-              <div>
-                <label>Race ID</label>
-                <input type="text" name="race_id" placeholder="202606010109">
-              </div>
-              <div>
-                <label>蝨ｺ蝨ｰ</label>
-                <input type="text" name="location" placeholder="荳ｭ螻ｱ">
-              </div>
-              <div>
-                <label>豈碑ｵ帶律譛滂ｼ亥ｱ慕､ｺ逕ｨ・・/label>
-                <input type="date" name="race_date" value="{html.escape(default_date)}">
-              </div>
-              <div>
-                <label>蠑襍帶慮髣ｴ・郁ｮｰ蠖慕畑・・/label>
-                <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
-              </div>
-              <div>
-                <label>謠仙燕螟壼ｰ大・髓滂ｼ域焔蜉ｨ遲幃牙盾閠・ｼ・/label>
-                <input type="number" name="lead_minutes" min="0" value="30">
-              </div>
-              <div>
-                <label>譛ｬ蝨ｺ霍晉ｦｻ</label>
-                <input type="number" name="target_distance" min="100" step="100" value="1600" placeholder="1600">
-              </div>
-              <div>
-                <label>譛ｬ蝨ｺ鬩ｬ蝨ｺ迥ｶ諤・/label>
-                <select name="target_track_condition">
-                  <option value="濶ｯ">濶ｯ</option>
-                  <option value="遞埼㍾">遞埼㍾</option>
-                  <option value="驥・>驥・/option>
-                  <option value="荳崎憶">荳崎憶</option>
-                </select>
-              </div>
-              <div>
-                <label>kachiuma.csv</label>
-                <input type="file" name="kachiuma_file" accept=".csv">
-              </div>
-              <div>
-                <label>shutuba.csv</label>
-                <input type="file" name="shutuba_file" accept=".csv">
-              </div>
-            </div>
-            <div>
-              <label>螟・ｳｨ</label>
-              <textarea name="notes" placeholder="萓句ｦゑｼ壼燕荳螟ｩ荳贋ｼ・梧ｯ碑ｵ帛燕謇句勘轤ｹ蜃ｻ謇ｧ陦碁｢・ｵ・></textarea>
-            </div>
-            <button type="submit">蛻帛ｻｺ莉ｻ蜉｡</button>
-          </form>
-        </section>
-        <section class="panel panel--tight">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Step 2 / Step 3</div>
-              <h2>鬚・ｵ倶ｸ守ｻ鍋ｮ嶺ｻｻ蜉｡</h2>
-            </div>
-            <span class="section-chip">jobs</span>
-          </div>
-          <div class="cluster-grid cluster-grid--stack">
-            {cards_html}
-          </div>
-        </section>
-      </div>
-    </section>
-    """
-
-
-def _race_job_status_label_clean(status):
-    return web_admin_jobs.race_job_status_label_clean(status)
-
-
-def _race_job_action_buttons_clean(job_id, status, admin_token=""):
-    buttons = []
-    status_text = str(status or "").strip().lower()
-    if status_text in ("scheduled", "queued_process", "queued_policy", "failed", "processing_policy"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">遶句叉謇ｧ陦碁｢・ｵ・/button>
-            </form>
-            """
+        items.append(
+            {
+                "job_id": str(hydrated.get("job_id", "") or "").strip(),
+                "status": status,
+                "status_label": str(display.get("label", "-") or "-"),
+                "status_tone": str(display.get("tone", "muted") or "muted"),
+                "scope_key": str(hydrated.get("scope_key", "") or "").strip(),
+                "scope_label": _scope_display_name(hydrated.get("scope_key", "")),
+                "race_id": str(hydrated.get("race_id", "") or "").strip(),
+                "race_date": str(hydrated.get("race_date", "") or "").strip(),
+                "location": str(hydrated.get("location", "") or "").strip(),
+                "scheduled_off_time": str(hydrated.get("scheduled_off_time", "") or "").strip(),
+                "process_after_time": str(hydrated.get("process_after_time", "") or "").strip(),
+                "current_run_id": str(hydrated.get("current_run_id", "") or "").strip(),
+                "actual_top1": str(hydrated.get("actual_top1", "") or "").strip(),
+                "actual_top2": str(hydrated.get("actual_top2", "") or "").strip(),
+                "actual_top3": str(hydrated.get("actual_top3", "") or "").strip(),
+                "notes": str(hydrated.get("notes", "") or "").strip(),
+                "step_badges": step_badges,
+                "process_log": _race_job_process_log_entries(hydrated),
+            }
         )
-    if status_text in ("ready", "queued_settle", "settling", "settled", "waiting_v5"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/process_now">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">驥肴眠逕滓・鬚・ｵ・/button>
-            </form>
-            """
+
+    return {
+        "authorized": True,
+        "admin_token": token,
+        "show_settled": bool(show_settled),
+        "summary": summary,
+        "jobs": items,
+    }
+
+
+def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id: str = ""):
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm:
+        scope_norm = "central_dirt"
+    if not run_row or not resolved_run_id:
+        raise LookupError("run not found")
+
+    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
+    name_to_no_map = load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
+    win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
+    place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
+    win_snapshot = list(load_odds_snapshot(odds_path).values()) if odds_path and Path(odds_path).exists() else []
+    place_snapshot = list(load_odds_snapshot(fuku_odds_path).values()) if fuku_odds_path and Path(fuku_odds_path).exists() else []
+    win_snapshot.sort(key=odds_sort_key)
+    place_snapshot.sort(key=odds_sort_key)
+
+    recent_runs = []
+    for item in get_recent_runs(scope_norm, limit=120):
+        recent_runs.append(
+            {
+                "run_id": str(item.get("run_id", "") or "").strip(),
+                "label": str(item.get("label", "") or item.get("run_id", "") or "").strip(),
+                "race_id": str(item.get("race_id", "") or "").strip(),
+                "timestamp": str(item.get("timestamp", "") or "").strip(),
+                "location": str(item.get("location", "") or "").strip(),
+                "date": str(item.get("date", "") or item.get("race_date", "") or "").strip(),
+                "status": str(item.get("status", "") or "").strip(),
+            }
         )
-    if status_text in ("failed", "settled", "ready", "queued_settle"):
-        buttons.append(
-            f"""
-            <form method="post" action="/console/tasks/update">
-              <input type="hidden" name="job_id" value="{html.escape(job_id)}">
-              <input type="hidden" name="action" value="reset_schedule">
-              <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">驥咲ｽｮ荳ｺ蠕・､・炊</button>
-            </form>
-            """
+
+    predictor_sections = []
+    for spec, pred_path in resolve_predictor_paths(scope_norm, resolved_run_id, run_row):
+        if not pred_path or not pred_path.exists():
+            continue
+        predictor_run_row = dict(run_row or {})
+        predictor_run_row["predictions_path"] = str(pred_path)
+        top_rows, _ = load_top5_table(scope_norm, resolved_run_id, predictor_run_row)
+        mark_rows, _ = load_ability_marks_table(scope_norm, resolved_run_id, predictor_run_row)
+        if not mark_rows:
+            mark_rows, _ = load_mark_recommendation_table(scope_norm, resolved_run_id, predictor_run_row)
+        summary_rows = load_prediction_summary(scope_norm, resolved_run_id, predictor_run_row)
+        predictor_sections.append(
+            {
+                "predictor_id": str(spec.get("id", "") or "").strip(),
+                "label": str(spec.get("label", "") or "").strip(),
+                "top5_rows": list(top_rows or []),
+                "mark_rows": list(mark_rows or []),
+                "summary_rows": list(summary_rows or []),
+            }
         )
-    return "".join(buttons)
 
+    actual_result_map = _load_actual_result_map(scope_norm)
+    actual_snapshot = _actual_result_snapshot(scope_norm, resolved_run_id, run_row, actual_result_map)
+    actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
 
-def _race_job_settle_form_clean(row, admin_token=""):
-    return web_admin_jobs.race_job_settle_form_clean(row, admin_token=admin_token)
+    policy_cards = []
+    for payload in load_policy_payloads(scope_norm, resolved_run_id, run_row):
+        engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
+        output = report_policy_primary_output(payload)
+        marks_map = report_policy_marks_map(payload)
+        ticket_rows = load_policy_run_ticket_rows(resolved_run_id, policy_engine=engine) or list(
+            report_policy_primary_budget(payload).get("tickets", []) or []
+        )
+        policy_cards.append(
+            {
+                "engine": engine,
+                "engine_label": REPORT_LLM_BATTLE_LABELS.get(engine, engine),
+                "model": str((payload or {}).get("policy_model", "") or (payload or {}).get("gemini_model", "") or "").strip(),
+                "bet_decision": str(output.get("bet_decision", "") or "").strip(),
+                "participation_level": str(output.get("participation_level", "") or "").strip(),
+                "enabled_bet_types": list(output.get("enabled_bet_types", []) or []),
+                "reason_codes": list(output.get("reason_codes", []) or []),
+                "marks": list(output.get("marks", []) or []),
+                "marks_text": report_format_marks_text(marks_map),
+                "ticket_rows": list(ticket_rows or []),
+                "ticket_plan_text": report_format_ticket_plan_text(ticket_rows, output),
+                "result_triplet_text": _format_triplet_text(_marks_result_triplet(marks_map, actual_horse_nos)),
+                "payload_preview_text": json.dumps(payload, ensure_ascii=False, indent=2)[:4000],
+            }
+        )
 
-
-def _race_job_edit_form_clean(row, admin_token="", default_job_race_date_text=None):
-    return web_admin_jobs.race_job_edit_form_clean(
-        row,
-        admin_token=admin_token,
-        default_job_race_date_text=default_job_race_date_text or _default_job_race_date_text,
+    predictor_overview = build_multi_predictor_context(
+        scope_norm,
+        resolved_run_id,
+        run_row,
+        name_to_no_map,
+        win_odds_map,
+        place_odds_map,
     )
 
+    ledger_date = extract_ledger_date(resolved_run_id, str((run_row or {}).get("timestamp", "") or "").strip())
+    portfolio_summaries = []
+    for engine in REPORT_LLM_BATTLE_ORDER:
+        bankroll = load_policy_bankroll_summary(
+            run_id=resolved_run_id,
+            timestamp=str((run_row or {}).get("timestamp", "") or "").strip(),
+            policy_engine=engine,
+        )
+        history = build_history_context(
+            BASE_DIR,
+            ledger_date,
+            lookback_days=14,
+            recent_ticket_limit=5,
+            policy_engine=engine,
+        )
+        portfolio_summaries.append(
+            {
+                "engine": engine,
+                "engine_label": REPORT_LLM_BATTLE_LABELS.get(engine, engine),
+                "today": dict(bankroll or {}),
+                "lookback_summary": dict((history or {}).get("lookback_summary", {}) or {}),
+                "recent_days": list((history or {}).get("recent_days", []) or [])[:7],
+                "bet_type_breakdown": list((history or {}).get("bet_type_breakdown", []) or [])[:6],
+                "recent_tickets": list((history or {}).get("recent_tickets", []) or [])[:5],
+            }
+        )
 
-def _admin_job_card_html_clean(row, admin_token=""):
-    return web_admin_jobs.admin_job_card_html_clean(
-        row,
-        admin_token=admin_token,
-        scope_display_name=_scope_display_name,
-        race_job_action_buttons_v2=_race_job_action_buttons_v2,
-        race_job_status_label_clean=_race_job_status_label_clean,
-        race_job_edit_form_clean=_race_job_edit_form_clean,
-        race_job_settle_form_clean=_race_job_settle_form_clean,
-        default_job_race_date_text=_default_job_race_date_text,
+    run_result_summary = summary_service.load_run_result_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_norm, resolved_run_id)
+    run_bet_type_summary = summary_service.load_run_bet_type_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_norm, resolved_run_id)
+    run_bet_ticket_summary = summary_service.load_run_bet_ticket_summary(get_data_dir, BASE_DIR, load_csv_rows, scope_norm, resolved_run_id)
+    run_predictor_summary = summary_service.load_run_predictor_summary(
+        get_data_dir,
+        BASE_DIR,
+        load_csv_rows,
+        to_float,
+        compute_top5_hit_count,
+        scope_norm,
+        resolved_run_id,
     )
+    run_context_rows = [
+        {
+            "scope_key": scope_norm,
+            "scope_label": _scope_display_name(scope_norm),
+            "run_id": resolved_run_id,
+            "race_id": normalize_race_id((run_row or {}).get("race_id", "")),
+            "location": str((run_row or {}).get("location", "") or "").strip(),
+            "race_date": str((run_row or {}).get("date", "") or (run_row or {}).get("race_date", "") or "").strip(),
+            "timestamp": str((run_row or {}).get("timestamp", "") or "").strip(),
+            "off_time": str((run_row or {}).get("scheduled_off_time", "") or "").strip(),
+        }
+    ]
+    run_asset_rows = []
+    for field_name, label in (
+        ("odds_path", "odds"),
+        ("fuku_odds_path", "place_odds"),
+        ("wide_odds_path", "wide_odds"),
+        ("quinella_odds_path", "quinella_odds"),
+        ("exacta_odds_path", "exacta_odds"),
+        ("trio_odds_path", "trio_odds"),
+        ("trifecta_odds_path", "trifecta_odds"),
+        ("predictions_path", "predictor_v1"),
+        ("predictions_v2_opus_path", "predictor_v2"),
+        ("predictions_v3_premium_path", "predictor_v3"),
+        ("predictions_v4_gemini_path", "predictor_v4"),
+        ("predictions_v5_stacking_path", "predictor_v5"),
+    ):
+        value = str((run_row or {}).get(field_name, "") or "").strip()
+        if not value:
+            continue
+        path_obj = Path(value)
+        run_asset_rows.append(
+            {
+                "asset": label,
+                "path": value,
+                "exists": "yes" if path_obj.exists() else "no",
+                "mtime": format_path_mtime(path_obj, label),
+            }
+        )
 
-
-def build_admin_filter_panel(admin_token="", show_settled=False):
-    return web_admin_jobs.build_admin_filter_panel(admin_token=admin_token, show_settled=show_settled)
-
-
-def build_admin_workspace_html_clean(message_text="", error_text="", admin_token="", authorized=True, show_settled=False):
-    return web_admin_jobs.build_admin_workspace_html_clean(
-        message_text=message_text,
-        error_text=error_text,
-        admin_token=admin_token,
-        authorized=authorized,
-        show_settled=show_settled,
-        load_race_jobs=lambda: load_race_jobs(BASE_DIR),
-        admin_job_card_html_clean=lambda row, admin_token="": _admin_job_card_html_clean(row, admin_token=admin_token),
-        default_job_race_date_text=_default_job_race_date_text,
-    )
-
-
-def render_console_page(message_text="", error_text="", admin_token="", show_settled=False):
-    return web_admin_console.render_console_page(
-        message_text=message_text,
-        error_text=error_text,
-        admin_token=admin_token,
-        show_settled=show_settled,
-        render_page=render_page,
-        build_import_archive_panel=build_import_archive_panel,
-        build_admin_filter_panel=build_admin_filter_panel,
-        build_admin_workspace_html_clean=build_admin_workspace_html_clean,
-        admin_token_valid=_admin_token_valid,
-    )
-
-
-def _resolve_console_run_state(scope_key="", selected_run_id="", summary_run_id="", output_text=""):
-    return web_admin_console.resolve_console_run_state(
-        scope_key=scope_key,
-        selected_run_id=selected_run_id,
-        summary_run_id=summary_run_id,
-        output_text=output_text,
-        resolve_run=resolve_run,
-        parse_run_id=parse_run_id,
-        normalize_race_id=normalize_race_id,
-    )
+    return {
+        "authorized": True,
+        "scope_key": scope_norm,
+        "scope_label": _scope_display_name(scope_norm),
+        "run_id": resolved_run_id,
+        "race_id": normalize_race_id((run_row or {}).get("race_id", "")),
+        "location": str((run_row or {}).get("location", "") or "").strip(),
+        "race_date": str((run_row or {}).get("date", "") or (run_row or {}).get("race_date", "") or "").strip(),
+        "timestamp": str((run_row or {}).get("timestamp", "") or "").strip(),
+        "actual_result": {
+            "actual_top1": str(actual_snapshot.get("actual_top1", "") or "").strip(),
+            "actual_top2": str(actual_snapshot.get("actual_top2", "") or "").strip(),
+            "actual_top3": str(actual_snapshot.get("actual_top3", "") or "").strip(),
+            "actual_horse_nos": actual_horse_nos,
+        },
+        "available_scopes": [
+            {"scope_key": "central_dirt", "label": _scope_display_name("central_dirt")},
+            {"scope_key": "central_turf", "label": _scope_display_name("central_turf")},
+            {"scope_key": "local", "label": _scope_display_name("local")},
+        ],
+        "available_runs": recent_runs,
+        "predictors": predictor_sections,
+        "predictor_overview": predictor_overview,
+        "policies": policy_cards,
+        "portfolio_summaries": portfolio_summaries,
+        "run_context_rows": run_context_rows,
+        "run_asset_rows": run_asset_rows,
+        "run_result_summary": run_result_summary,
+        "run_bet_type_summary": run_bet_type_summary,
+        "run_bet_ticket_summary": run_bet_ticket_summary,
+        "run_predictor_summary": run_predictor_summary,
+        "odds_snapshots": {
+            "win": win_snapshot[:12],
+            "place": place_snapshot[:12],
+        },
+    }
 
 
 def _target_surface_from_scope(scope_key):
@@ -2369,36 +1793,22 @@ def _import_history_zip(base_dir, archive_bytes, overwrite=False):
     )
 
 
-def build_import_archive_panel(admin_token=""):
-    return web_admin_jobs.build_import_archive_panel(admin_token=admin_token)
-
-
-def build_race_jobs_page(message_text="", error_text="", admin_token="", authorized=True):
-    return web_admin_jobs.build_race_jobs_page(
-        message_text=message_text,
-        error_text=error_text,
-        admin_token=admin_token,
-        authorized=authorized,
-        render_console_page=render_console_page,
-    )
-
-
 @app.get("/", include_in_schema=False)
 def index():
     return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
 
 
 @app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
-@app.get("/console", response_class=HTMLResponse)
-def console_index(token: str = "", show_settled: str = ""):
-    if _admin_token_enabled() and not _admin_token_valid(token):
-        return build_console_gate_page(admin_token=token, error_text="管理员口令无效")
-    show_settled_flag = str(show_settled or "").strip() in ("1", "true", "yes", "on")
-    return render_console_page(admin_token=token, show_settled=show_settled_flag)
+def console_spa():
+    return build_public_index_response()
+
+
+@app.get(f"{CONSOLE_BASE_PATH}/workspace", response_class=HTMLResponse)
+def console_workspace_spa():
+    return build_public_index_response()
 
 
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
-@app.get("/llm_today", response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
     return build_public_index_response()
 
@@ -2414,11 +1824,448 @@ def public_board_api(date: str = "", scope_key: str = ""):
     return JSONResponse(build_public_board_payload(date_text=date, scope_key=scope_key))
 
 
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/create", response_class=HTMLResponse)
-@app.post("/console/tasks/create", response_class=HTMLResponse)
-def create_race_job_view(
-    token: str = Form(""),
-    scope_key: str = Form("central_dirt"),
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/auth-check")
+def admin_auth_check(request: Request, token: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    enabled = _admin_token_enabled()
+    valid = _admin_token_valid(supplied)
+    return JSONResponse(
+        {
+            "enabled": enabled,
+            "valid": valid,
+            "console_url": f"{CONSOLE_BASE_PATH}?token={supplied}" if supplied else CONSOLE_BASE_PATH,
+        }
+    )
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/jobs")
+def admin_jobs_api(request: Request, token: str = "", show_settled: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
+    show_settled_flag = str(show_settled or "").strip().lower() in ("1", "true", "yes", "on")
+    return JSONResponse(_build_admin_jobs_payload(token=supplied, show_settled=show_settled_flag))
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/runs")
+def admin_runs_api(request: Request, token: str = "", scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
+    return JSONResponse(
+        {
+            "authorized": True,
+            "runs": web_admin_ops.api_runs_response(
+                scope_key=scope_key,
+                limit=limit,
+                query=q,
+                normalize_scope_key=normalize_scope_key,
+                default_limit=DEFAULT_RUN_LIMIT,
+                max_limit=MAX_RUN_LIMIT,
+                get_recent_runs=get_recent_runs,
+            ),
+        }
+    )
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/workspace")
+def admin_workspace_api(request: Request, token: str = "", scope_key: str = "", run_id: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
+    try:
+        payload = _build_admin_workspace_payload(token=supplied, scope_key=scope_key, run_id=run_id)
+    except LookupError:
+        return JSONResponse({"authorized": True, "error": "run not found"}, status_code=404)
+    return JSONResponse(payload)
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/ops/reset_llm_state")
+async def admin_reset_llm_state_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    reset_llm_state_files(BASE_DIR)
+    return JSONResponse({"ok": True, "output_text": "LLM state reset completed."})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_llm_buy")
+async def admin_workspace_run_llm_buy_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    scope_key = str((payload or {}).get("scope_key", "") or "").strip()
+    run_id = str((payload or {}).get("run_id", "") or "").strip()
+    policy_engine = normalize_policy_engine((payload or {}).get("policy_engine", "gemini"))
+    policy_model = str((payload or {}).get("policy_model", "") or "").strip()
+    refresh_enabled = bool((payload or {}).get("refresh_odds", True))
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    if not refresh_ok:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": build_llm_buy_output(
+                    load_policy_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine),
+                    refresh_ok,
+                    refresh_message,
+                    refresh_warnings,
+                    "[llm_buy][blocked] odds refresh failed; skip policy execution.",
+                    policy_engine=policy_engine,
+                ),
+            },
+            status_code=400,
+        )
+    try:
+        result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=policy_engine, policy_model=policy_model)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": build_llm_buy_output(
+                    load_policy_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""), policy_engine=policy_engine),
+                    refresh_ok,
+                    refresh_message,
+                    refresh_warnings,
+                    f"[llm_buy][error] {exc}",
+                    policy_engine=policy_engine,
+                ),
+            },
+            status_code=500,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "scope_key": scope_norm,
+            "run_id": resolved_run_id,
+            "engine": result["engine"],
+            "output_text": build_llm_buy_output(
+                result["summary_before"],
+                refresh_ok,
+                refresh_message,
+                refresh_warnings,
+                result["output_text"],
+                result["engine"],
+            ),
+        }
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_all_llm_buy")
+async def admin_workspace_run_all_llm_buy_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    scope_key = str((payload or {}).get("scope_key", "") or "").strip()
+    run_id = str((payload or {}).get("run_id", "") or "").strip()
+    refresh_enabled = bool((payload or {}).get("refresh_odds", True))
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
+    if not refresh_ok:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": build_llm_buy_output(
+                    load_policy_bankroll_summary(resolved_run_id, run_row.get("timestamp", ""), policy_engine="gemini"),
+                    refresh_ok,
+                    refresh_message,
+                    refresh_warnings,
+                    "[llm_buy][blocked] odds refresh failed; skip all policy engines.",
+                    policy_engine="all",
+                ),
+            },
+            status_code=400,
+        )
+    outputs = []
+    errors = []
+    for engine in ("gemini", "deepseek", "openai", "grok"):
+        try:
+            result = execute_policy_buy(scope_norm, run_row, resolved_run_id, policy_engine=engine, policy_model="")
+            outputs.append(
+                {
+                    "engine": result["engine"],
+                    "output_text": build_llm_buy_output(
+                        result["summary_before"],
+                        refresh_ok,
+                        refresh_message,
+                        refresh_warnings,
+                        result["output_text"],
+                        result["engine"],
+                    ),
+                }
+            )
+        except Exception as exc:
+            errors.append(f"[llm_buy][{engine}] {exc}")
+    if errors and not outputs:
+        return JSONResponse({"ok": False, "error": "\n\n".join(errors)}, status_code=500)
+    return JSONResponse({"ok": True, "scope_key": scope_norm, "run_id": resolved_run_id, "outputs": outputs, "errors": errors})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/topup_all_llm_budget")
+async def admin_workspace_topup_all_llm_budget_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    scope_key = str((payload or {}).get("scope_key", "") or "").strip()
+    run_id = str((payload or {}).get("run_id", "") or "").strip()
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    ledger_date = extract_ledger_date(resolved_run_id, run_row.get("timestamp", ""))
+    amount_yen = resolve_daily_bankroll_yen(ledger_date)
+    summaries = []
+    for engine in ("gemini", "deepseek", "openai", "grok"):
+        summary = add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine)
+        summaries.append(
+            {
+                "engine": engine,
+                "available_bankroll_yen": int(summary.get("available_bankroll_yen", 0) or 0),
+                "topup_yen": int(summary.get("topup_yen", 0) or 0),
+            }
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "scope_key": scope_norm,
+            "run_id": resolved_run_id,
+            "ledger_date": ledger_date,
+            "amount_yen": amount_yen,
+            "summaries": summaries,
+        }
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/record_predictor")
+async def admin_workspace_record_predictor_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    scope_key = str((payload or {}).get("scope_key", "") or "").strip()
+    run_id = str((payload or {}).get("run_id", "") or "").strip()
+    top1 = str((payload or {}).get("top1", "") or "").strip()
+    top2 = str((payload or {}).get("top2", "") or "").strip()
+    top3 = str((payload or {}).get("top3", "") or "").strip()
+    scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
+    if not scope_norm or run_row is None or not resolved_run_id:
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    if not top1 or not top2 or not top3:
+        return JSONResponse({"ok": False, "error": "top1/top2/top3 required"}, status_code=400)
+
+    refresh_ok = False
+    refresh_message = "run row missing for odds refresh."
+    refresh_warnings = []
+    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
+    quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
+    exacta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "exacta_odds_path", "exacta_odds")
+    trio_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trio_odds_path", "trio_odds")
+    trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
+    refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
+        run_row,
+        scope_norm,
+        odds_path,
+        wide_odds_path=wide_odds_path,
+        fuku_odds_path=fuku_odds_path,
+        quinella_odds_path=quinella_odds_path,
+        exacta_odds_path=exacta_odds_path,
+        trio_odds_path=trio_odds_path,
+        trifecta_odds_path=trifecta_odds_path,
+    )
+
+    code, output = run_script(
+        RECORD_PREDICTOR,
+        inputs=[resolved_run_id, top1, top2, top3],
+        extra_blanks=2,
+        extra_env={"SCOPE_KEY": scope_norm},
+    )
+    label = f"Exit code: {code}"
+    output_parts = [f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip()]
+    if refresh_warnings:
+        output_parts.append("[odds_update][warnings] " + "; ".join(str(x) for x in refresh_warnings))
+    output_parts.append(label)
+    output_parts.append(output)
+    return JSONResponse(
+        {
+            "ok": code == 0,
+            "scope_key": scope_norm,
+            "run_id": resolved_run_id,
+            "output_text": "\n".join(part for part in output_parts if str(part).strip()),
+        },
+        status_code=200 if code == 0 else 500,
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/process_now")
+async def admin_jobs_process_now_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    try:
+        from race_job_runner import process_race_job
+
+        summary = process_race_job(BASE_DIR, job_id)
+    except Exception as exc:
+        try:
+            from race_job_runner import fail_race_job
+
+            fail_race_job(BASE_DIR, job_id, str(exc))
+        except Exception:
+            pass
+        return JSONResponse({"ok": False, "error": str(exc), "job_id": job_id}, status_code=500)
+    return JSONResponse(
+        {
+            "ok": True,
+            "job_id": job_id,
+            "run_id": str((summary or {}).get("run_id", "") or "").strip(),
+            "remote_predictor_task_id": str(
+                (summary or {}).get("remote_predictor_task_id", "")
+                or (summary or {}).get("v5_remote_task_id", "")
+                or ""
+            ).strip(),
+        }
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/delete")
+async def admin_jobs_delete_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    deleted = delete_race_job(BASE_DIR, job_id)
+    if deleted is None:
+        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+    return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/edit")
+async def admin_jobs_edit_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+
+    race_id = normalize_race_id((payload or {}).get("race_id", ""))
+    location = str((payload or {}).get("location", "") or "").strip()
+    race_date = str((payload or {}).get("race_date", "") or "").strip() or _default_job_race_date_text()
+    scheduled_off_time = str((payload or {}).get("scheduled_off_time", "") or "").strip()
+    target_distance = str((payload or {}).get("target_distance", "") or "").strip()
+    target_track_condition = str((payload or {}).get("target_track_condition", "") or "").strip()
+    lead_minutes_text = str((payload or {}).get("lead_minutes", "30") or "30").strip() or "30"
+    notes = str((payload or {}).get("notes", "") or "").strip()
+
+    if not race_id:
+        return JSONResponse({"ok": False, "error": "race_id required"}, status_code=400)
+    if not scheduled_off_time:
+        return JSONResponse({"ok": False, "error": "scheduled_off_time required"}, status_code=400)
+    try:
+        target_distance_value = int(target_distance)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "target_distance must be integer"}, status_code=400)
+    if target_track_condition not in ("良", "稍重", "重", "不良"):
+        return JSONResponse({"ok": False, "error": "invalid target_track_condition"}, status_code=400)
+    try:
+        lead_value = int(lead_minutes_text)
+    except ValueError:
+        lead_value = 30
+
+    def _edit_job(row, now_text):
+        row["race_id"] = race_id
+        row["location"] = location
+        row["race_date"] = race_date
+        row["scheduled_off_time"] = scheduled_off_time
+        row["process_after_time"] = ""
+        row["target_distance"] = str(target_distance_value)
+        row["target_track_condition"] = target_track_condition
+        row["lead_minutes"] = lead_value
+        row["notes"] = notes
+        row["updated_at"] = now_text
+
+    job = update_race_job(BASE_DIR, job_id, _edit_job)
+    if job is None:
+        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+    return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/settle_now")
+async def admin_jobs_settle_now_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    actual_top1 = str((payload or {}).get("actual_top1", "") or "").strip()
+    actual_top2 = str((payload or {}).get("actual_top2", "") or "").strip()
+    actual_top3 = str((payload or {}).get("actual_top3", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    if not (actual_top1 and actual_top2 and actual_top3):
+        return JSONResponse({"ok": False, "error": "actual_top1-3 required"}, status_code=400)
+    try:
+        from race_job_runner import settle_race_job
+
+        summary = settle_race_job(BASE_DIR, job_id, [actual_top1, actual_top2, actual_top3])
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "job_id": job_id}, status_code=500)
+    return JSONResponse({"ok": True, "job_id": job_id, "summary": dict(summary or {})})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/queue_settle")
+async def admin_jobs_queue_settle_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    job = apply_race_job_action(BASE_DIR, job_id, "queue_settle")
+    if job is None:
+        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+    return JSONResponse({"ok": True, "job_id": job_id, "status": str(job.get("status", "") or "").strip()})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/update")
+async def admin_jobs_update_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    action = str((payload or {}).get("action", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    if not action:
+        return JSONResponse({"ok": False, "error": "action required"}, status_code=400)
+    job = apply_race_job_action(BASE_DIR, job_id, action)
+    if job is None:
+        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+    return JSONResponse({"ok": True, "job_id": job_id, "action": action, "status": str(job.get("status", "") or "").strip()})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/create")
+async def admin_jobs_create_api(
+    request: Request,
+    scope_key: str = Form(""),
     race_id: str = Form(""),
     location: str = Form(""),
     race_date: str = Form(""),
@@ -2430,69 +2277,153 @@ def create_race_job_view(
     kachiuma_file: UploadFile = File(None),
     shutuba_file: UploadFile = File(None),
 ):
-    return web_admin_tasks.create_race_job_response(
-        base_dir=BASE_DIR,
-        token=token,
-        scope_key=scope_key,
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+
+    race_id = normalize_race_id(race_id)
+    scope_norm = normalize_scope_key(scope_key)
+    race_date = str(race_date or "").strip() or _default_job_race_date_text()
+    if not scope_norm:
+        return JSONResponse({"ok": False, "error": "scope_key required"}, status_code=400)
+    if not race_id:
+        return JSONResponse({"ok": False, "error": "race_id required"}, status_code=400)
+    if not str(scheduled_off_time or "").strip():
+        return JSONResponse({"ok": False, "error": "scheduled_off_time required"}, status_code=400)
+    try:
+        target_distance_value = int(str(target_distance or "").strip())
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "target_distance must be integer"}, status_code=400)
+    if target_distance_value <= 0:
+        return JSONResponse({"ok": False, "error": "target_distance must be positive"}, status_code=400)
+    target_track_condition = str(target_track_condition or "").strip()
+    if target_track_condition not in ("良", "稍重", "重", "不良"):
+        return JSONResponse({"ok": False, "error": "invalid target_track_condition"}, status_code=400)
+    if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
+        return JSONResponse({"ok": False, "error": "kachiuma_file required"}, status_code=400)
+    if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
+        return JSONResponse({"ok": False, "error": "shutuba_file required"}, status_code=400)
+    try:
+        lead_value = int(str(lead_minutes or "30").strip() or "30")
+    except ValueError:
+        lead_value = 30
+
+    target_surface = _target_surface_from_scope(scope_norm)
+    artifact_payloads = []
+    job = create_race_job(
+        BASE_DIR,
         race_id=race_id,
+        scope_key=scope_norm,
         location=location,
         race_date=race_date,
         scheduled_off_time=scheduled_off_time,
-        target_distance=target_distance,
+        target_surface=target_surface,
+        target_distance=str(target_distance_value),
         target_track_condition=target_track_condition,
-        lead_minutes=lead_minutes,
+        lead_minutes=lead_value,
         notes=notes,
-        kachiuma_file=kachiuma_file,
-        shutuba_file=shutuba_file,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        normalize_race_id=normalize_race_id,
-        normalize_scope_key=normalize_scope_key,
-        default_job_race_date_text=_default_job_race_date_text,
-        target_surface_from_scope=_target_surface_from_scope,
-        create_race_job=create_race_job,
-        save_race_job_artifact=save_race_job_artifact,
-        update_race_job=update_race_job,
+        artifacts=[],
     )
+    try:
+        for artifact_type, upload in (("kachiuma", kachiuma_file), ("shutuba", shutuba_file)):
+            if upload is None:
+                continue
+            payload = await upload.read()
+            artifact_payloads.append(
+                save_race_job_artifact(
+                    BASE_DIR,
+                    job["job_id"],
+                    artifact_type,
+                    upload.filename or f"{artifact_type}.csv",
+                    payload,
+                )
+            )
 
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/import_archive", response_class=HTMLResponse)
-@app.post("/console/tasks/import_archive", response_class=HTMLResponse)
-async def import_history_archive(
-    token: str = Form(""),
+        def _attach_artifacts(row, now_text):
+            row["artifacts"] = artifact_payloads
+            row["status"] = "scheduled"
+            row["updated_at"] = now_text
+
+        update_race_job(BASE_DIR, job["job_id"], _attach_artifacts)
+    except Exception:
+        try:
+            delete_race_job(BASE_DIR, job["job_id"])
+        except Exception:
+            pass
+        raise
+
+    return JSONResponse({"ok": True, "job_id": str(job.get("job_id", "") or "").strip()})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/import_archive")
+async def admin_jobs_import_archive_api(
+    request: Request,
     overwrite: str = Form(""),
     archive_file: UploadFile = File(None),
 ):
-    return await web_admin_tasks.import_history_archive_response(
-        base_dir=BASE_DIR,
-        token=token,
-        overwrite=overwrite,
-        archive_file=archive_file,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    if archive_file is None or not str(getattr(archive_file, "filename", "") or "").strip():
+        return JSONResponse({"ok": False, "error": "archive_file required"}, status_code=400)
+    filename = str(archive_file.filename or "").strip()
+    if not filename.lower().endswith(".zip"):
+        return JSONResponse({"ok": False, "error": "archive_file must be zip"}, status_code=400)
+    try:
+        archive_bytes = await archive_file.read()
+        summary = _import_history_zip(BASE_DIR, archive_bytes, overwrite=str(overwrite or "").strip() == "1")
+    except zipfile.BadZipFile:
+        return JSONResponse({"ok": False, "error": "invalid zip archive"}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True, **summary})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/scan_due")
+async def admin_jobs_scan_due_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    changed = scan_due_race_jobs(BASE_DIR)
+    return JSONResponse(
+        {
+            "ok": True,
+            "queued_count": len(changed),
+            "queued_job_ids": [str(item.get("job_id", "") or "").strip() for item in changed],
+        }
     )
 
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/scan_due", response_class=HTMLResponse)
-@app.post("/console/tasks/scan_due", response_class=HTMLResponse)
-def scan_race_jobs_due(token: str = Form("")):
-    return web_admin_tasks.scan_due_race_jobs_response(
-        base_dir=BASE_DIR,
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        scan_due_race_jobs=scan_due_race_jobs,
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/run_due_now")
+async def admin_jobs_run_due_now_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    summary = run_due_jobs_once()
+    ok = not bool(list(summary.get("errors", []) or []))
+    return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/topup_today_all_llm")
+async def admin_jobs_topup_today_all_llm_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    ledger_date = datetime.now().strftime("%Y%m%d")
+    amount_yen = resolve_daily_bankroll_yen(ledger_date)
+    summaries = []
+    for engine in REPORT_LLM_BATTLE_ORDER:
+        summaries.append(add_bankroll_topup(BASE_DIR, ledger_date, amount_yen, policy_engine=engine))
+    return JSONResponse(
+        {
+            "ok": True,
+            "ledger_date": ledger_date,
+            "amount_yen": amount_yen,
+            "engines": list(REPORT_LLM_BATTLE_ORDER),
+            "summaries": summaries,
+        }
     )
 
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/run_due_now", response_class=HTMLResponse)
-@app.post("/console/tasks/run_due_now", response_class=HTMLResponse)
-def run_due_race_jobs_now(token: str = Form("")):
-    return web_admin_tasks.run_due_race_jobs_now_response(
-        base_dir=BASE_DIR,
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        scan_due_race_jobs=scan_due_race_jobs,
-        load_race_jobs=load_race_jobs,
-    )
 
 @app.get("/internal/run_due")
 @app.post("/internal/run_due")
@@ -2504,330 +2435,3 @@ def internal_run_due(token: str = ""):
         scan_due_race_jobs=scan_due_race_jobs,
         load_race_jobs=load_race_jobs,
     )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/topup_today_all_llm", response_class=HTMLResponse)
-@app.post("/console/tasks/topup_today_all_llm", response_class=HTMLResponse)
-def topup_today_all_llm_budget(token: str = Form("")):
-    return web_admin_tasks.topup_today_all_llm_budget_response(
-        base_dir=BASE_DIR,
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        render_console_page=render_console_page,
-        default_job_race_date_text=_default_job_race_date_text,
-        resolve_daily_bankroll_yen=resolve_daily_bankroll_yen,
-        add_bankroll_topup=add_bankroll_topup,
-    )
-
-
-@app.post("/console/tasks/edit", response_class=HTMLResponse)
-def edit_race_job_details(
-    token: str = Form(""),
-    job_id: str = Form(""),
-    race_id: str = Form(""),
-    location: str = Form(""),
-    race_date: str = Form(""),
-    scheduled_off_time: str = Form(""),
-    target_distance: str = Form(""),
-    target_track_condition: str = Form(""),
-    lead_minutes: str = Form("30"),
-    notes: str = Form(""),
-):
-    return web_admin_ops.edit_race_job_details_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        race_id=race_id,
-        location=location,
-        race_date=race_date,
-        scheduled_off_time=scheduled_off_time,
-        target_distance=target_distance,
-        target_track_condition=target_track_condition,
-        lead_minutes=lead_minutes,
-        notes=notes,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        normalize_race_id=normalize_race_id,
-        default_job_race_date_text=_default_job_race_date_text,
-        load_race_jobs=load_race_jobs,
-        render_console_page=render_console_page,
-        target_surface_from_scope=_target_surface_from_scope,
-        parse_job_dt_text=_parse_job_dt_text,
-        format_job_dt_text=_format_job_dt_text,
-        update_race_job=update_race_job,
-        compute_race_job_initial_status=compute_race_job_initial_status,
-    )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/update", response_class=HTMLResponse)
-@app.post("/console/tasks/update", response_class=HTMLResponse)
-def update_race_job_view(
-    token: str = Form(""),
-    job_id: str = Form(""),
-    action: str = Form(""),
-):
-    return web_admin_tasks.update_race_job_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        action=action,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        apply_race_job_action=apply_race_job_action,
-    )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/delete", response_class=HTMLResponse)
-@app.post("/console/tasks/delete", response_class=HTMLResponse)
-def delete_race_job_view(
-    token: str = Form(""),
-    job_id: str = Form(""),
-):
-    return web_admin_tasks.delete_race_job_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        delete_race_job=delete_race_job,
-    )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/process_now", response_class=HTMLResponse)
-@app.post("/console/tasks/process_now", response_class=HTMLResponse)
-def process_race_job_now(
-    token: str = Form(""),
-    job_id: str = Form(""),
-):
-    return web_admin_tasks.process_race_job_now_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-    )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/queue_settle", response_class=HTMLResponse)
-@app.post("/console/tasks/queue_settle", response_class=HTMLResponse)
-def queue_race_job_settle(
-    token: str = Form(""),
-    job_id: str = Form(""),
-    actual_top1: str = Form(""),
-    actual_top2: str = Form(""),
-    actual_top3: str = Form(""),
-):
-    return web_admin_tasks.queue_race_job_settle_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        actual_top1=actual_top1,
-        actual_top2=actual_top2,
-        actual_top3=actual_top3,
-        admin_token_valid=_admin_token_valid,
-        build_race_jobs_page=build_race_jobs_page,
-        initialize_race_job_step_fields=initialize_race_job_step_fields,
-        set_race_job_step_state=set_race_job_step_state,
-        update_race_job=update_race_job,
-    )
-
-@app.post(f"{CONSOLE_BASE_PATH}/tasks/settle_now", response_class=HTMLResponse)
-@app.post("/console/tasks/settle_now", response_class=HTMLResponse)
-def settle_race_job_now(
-    token: str = Form(""),
-    job_id: str = Form(""),
-    actual_top1: str = Form(""),
-    actual_top2: str = Form(""),
-    actual_top3: str = Form(""),
-):
-    return web_admin_tasks.settle_race_job_now_response(
-        base_dir=BASE_DIR,
-        token=token,
-        job_id=job_id,
-        actual_top1=actual_top1,
-        actual_top2=actual_top2,
-        actual_top3=actual_top3,
-        admin_token_valid=_admin_token_valid,
-        render_console_page=render_console_page,
-        initialize_race_job_step_fields=initialize_race_job_step_fields,
-        set_race_job_step_state=set_race_job_step_state,
-        update_race_job=update_race_job,
-    )
-
-@app.post("/view_run", response_class=HTMLResponse)
-def view_run(
-    run_id: str = Form(""),
-    scope_key: str = Form(""),
-    token: str = Form(""),
-):
-    return web_admin_ops.view_run_response(
-        run_id=run_id,
-        scope_key=scope_key,
-        token=token,
-        normalize_scope_key=normalize_scope_key,
-        infer_scope_and_run=infer_scope_and_run,
-        render_page=render_page,
-        resolve_run=resolve_run,
-        normalize_race_id=normalize_race_id,
-        resolve_latest_run_by_race_id=resolve_latest_run_by_race_id,
-        infer_run_id_from_row=infer_run_id_from_row,
-        update_run_row_fields=update_run_row_fields,
-    )
-
-@app.get("/api/runs")
-def api_runs(scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q: str = ""):
-    return web_admin_ops.api_runs_response(
-        scope_key=scope_key,
-        limit=limit,
-        query=q,
-        normalize_scope_key=normalize_scope_key,
-        default_limit=DEFAULT_RUN_LIMIT,
-        max_limit=MAX_RUN_LIMIT,
-        get_recent_runs=get_recent_runs,
-    )
-
-@app.post("/run_pipeline", response_class=HTMLResponse)
-def run_pipeline(
-    token: str = Form(""),
-    race_id: str = Form(""),
-    race_url: str = Form(""),
-    history_url: str = Form(""),
-    scope_key: str = Form(""),
-    location: str = Form(""),
-    race_date: str = Form(""),
-    surface: str = Form(""),
-    distance: str = Form(""),
-    track_cond: str = Form(""),
-):
-    return web_admin_ops.run_pipeline_response(
-        token=token,
-        race_id=race_id,
-        race_url=race_url,
-        history_url=history_url,
-        scope_key=scope_key,
-        location=location,
-        race_date=race_date,
-        surface=surface,
-        distance=distance,
-        track_cond=track_cond,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        normalize_scope_key=normalize_scope_key,
-        render_page=render_page,
-        normalize_race_id=normalize_race_id,
-        run_script=run_script,
-        run_pipeline_path=RUN_PIPELINE,
-        extract_top5=extract_top5,
-        parse_run_id=parse_run_id,
-    )
-
-@app.post("/record_predictor", response_class=HTMLResponse)
-def record_predictor(
-    token: str = Form(""),
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-    top1: str = Form(""),
-    top2: str = Form(""),
-    top3: str = Form(""),
-):
-    return web_admin_ops.record_predictor_response(
-        token=token,
-        scope_key=scope_key,
-        run_id=run_id,
-        top1=top1,
-        top2=top2,
-        top3=top3,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        normalize_scope_key=normalize_scope_key,
-        infer_scope_and_run=infer_scope_and_run,
-        resolve_run=resolve_run,
-        normalize_race_id=normalize_race_id,
-        resolve_latest_run_by_race_id=resolve_latest_run_by_race_id,
-        render_page=render_page,
-        resolve_run_asset_path=resolve_run_asset_path,
-        refresh_odds_for_run=refresh_odds_for_run,
-        run_script=run_script,
-        record_predictor_path=RECORD_PREDICTOR,
-    )
-
-@app.post("/run_llm_buy", response_class=HTMLResponse)
-def run_llm_buy(
-    token: str = Form(""),
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-    policy_engine: str = Form("gemini"),
-    policy_model: str = Form(""),
-    refresh_odds: str = Form("1"),
-):
-    return web_admin_ops.run_llm_buy_response(
-        token=token,
-        scope_key=scope_key,
-        run_id=run_id,
-        policy_engine=policy_engine,
-        policy_model=policy_model,
-        refresh_odds=refresh_odds,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        resolve_run_selection=resolve_run_selection,
-        render_page=render_page,
-        maybe_refresh_run_odds=maybe_refresh_run_odds,
-        build_llm_buy_output=build_llm_buy_output,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        normalize_policy_engine=normalize_policy_engine,
-        execute_policy_buy=execute_policy_buy,
-    )
-
-@app.post("/run_all_llm_buy", response_class=HTMLResponse)
-def run_all_llm_buy(
-    token: str = Form(""),
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-    refresh_odds: str = Form("1"),
-):
-    return web_admin_ops.run_all_llm_buy_response(
-        token=token,
-        scope_key=scope_key,
-        run_id=run_id,
-        refresh_odds=refresh_odds,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        resolve_run_selection=resolve_run_selection,
-        render_page=render_page,
-        maybe_refresh_run_odds=maybe_refresh_run_odds,
-        build_llm_buy_output=build_llm_buy_output,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        execute_policy_buy=execute_policy_buy,
-    )
-
-@app.post("/topup_all_llm_budget", response_class=HTMLResponse)
-def topup_all_llm_budget(
-    token: str = Form(""),
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-):
-    return web_admin_ops.topup_all_llm_budget_response(
-        base_dir=BASE_DIR,
-        token=token,
-        scope_key=scope_key,
-        run_id=run_id,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        resolve_run_selection=resolve_run_selection,
-        render_page=render_page,
-        extract_ledger_date=extract_ledger_date,
-        resolve_daily_bankroll_yen=resolve_daily_bankroll_yen,
-        add_bankroll_topup=add_bankroll_topup,
-    )
-
-@app.post("/reset_llm_state", response_class=HTMLResponse)
-def reset_llm_state(token: str = Form("")):
-    return web_admin_ops.reset_llm_state_response(
-        base_dir=BASE_DIR,
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        render_page=render_page,
-        reset_llm_state_files=reset_llm_state_files,
-    )
-
-
-
-
-
-

@@ -192,6 +192,612 @@ select {
   cursor: pointer;
 }
 
+.admin-login-page {
+  min-height: 100vh;
+  padding: 32px 16px;
+  display: grid;
+  place-items: center;
+}
+
+.admin-login-card {
+  width: min(560px, 100%);
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 16px;
+}
+
+.admin-login-card__eyebrow {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-login-card h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.05;
+}
+
+.admin-login-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.admin-login-form {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-login-form__field {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-login-form__field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-login-form__field input {
+  min-height: 46px;
+  padding: 0 14px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(17, 25, 37, 0.95);
+}
+
+.admin-login-form__error {
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 122, 122, 0.28);
+  border-radius: 12px;
+  color: #ffd4d4;
+  background: rgba(140, 31, 31, 0.2);
+}
+
+.admin-login-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-login-form__actions button,
+.admin-login-form__link {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.admin-login-form__actions button {
+  border: 1px solid rgba(199, 166, 109, 0.44);
+  background: linear-gradient(135deg, rgba(199, 166, 109, 0.98), rgba(144, 107, 52, 0.98));
+  color: #0b1015;
+  cursor: pointer;
+}
+
+.admin-login-form__actions button:disabled {
+  opacity: 0.68;
+  cursor: wait;
+}
+
+.admin-login-form__link {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: rgba(16, 25, 37, 0.78);
+}
+
+.admin-login-form__link--ghost {
+  color: var(--muted);
+}
+
+.admin-jobs-page {
+  min-height: 100vh;
+  padding: 24px 12px 80px;
+}
+
+.admin-jobs-page__shell {
+  width: min(1440px, calc(100vw - 24px));
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-toolbar button,
+.admin-toolbar a,
+.admin-job-card__actions button,
+.admin-inline-form__actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(199, 166, 109, 0.26);
+  background: rgba(17, 25, 37, 0.92);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.admin-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.admin-tool-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.admin-tool-panel,
+.admin-inline-panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  box-shadow: var(--shadow);
+}
+
+.admin-tool-panel > summary,
+.admin-inline-panel > summary {
+  padding: 16px 18px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.admin-tool-panel--primary {
+  border-color: rgba(199, 166, 109, 0.34);
+  background:
+    linear-gradient(180deg, rgba(31, 24, 13, 0.55), rgba(10, 17, 26, 0.98)),
+    linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+}
+
+.admin-tool-panel--primary > summary {
+  font-size: 20px;
+}
+
+.admin-tool-panel--secondary {
+  background: rgba(12, 18, 28, 0.82);
+}
+
+.admin-tool-panel--secondary > summary {
+  color: var(--muted);
+}
+
+.admin-tool-panel--compact .admin-tool-panel__body {
+  gap: 10px;
+}
+
+.admin-inline-form {
+  padding: 0 18px 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.admin-inline-form--primary {
+  padding-top: 0;
+}
+
+.admin-inline-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-inline-form label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-inline-form input,
+.admin-inline-form select,
+.admin-inline-form textarea {
+  min-height: 42px;
+  padding: 10px 12px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(17, 25, 37, 0.95);
+}
+
+.admin-inline-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.admin-inline-form__wide {
+  grid-column: 1 / -1;
+}
+
+.admin-inline-form__checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-inline-form__checkbox input {
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.admin-inline-form__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.admin-workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.admin-workspace-column {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.admin-workspace-section-title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.admin-workspace-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+}
+
+.admin-workspace-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.admin-workspace-card__head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.admin-workspace-card__empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.admin-workspace-table {
+  overflow: auto;
+}
+
+.admin-workspace-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-workspace-table th,
+.admin-workspace-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-workspace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-workspace-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-workspace-copy p,
+.admin-workspace-copy code {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.admin-workspace-subtable {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-workspace-subtable h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--gold);
+}
+
+.admin-tool-panel__body {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.admin-tool-panel__body--primary {
+  padding-bottom: 0;
+}
+
+.admin-tool-panel__body--primary p,
+.admin-tool-panel--compact .admin-tool-panel__body p {
+  display: none;
+}
+
+.admin-tool-panel__eyebrow {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-tool-panel__intro {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-tool-panel__body h3,
+.admin-tool-panel__body p {
+  margin: 0;
+}
+
+.admin-workspace-output {
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+  color: var(--text);
+}
+
+.admin-toolbar__field {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-toolbar__field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-toolbar__field select {
+  min-height: 42px;
+  padding: 0 12px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(17, 25, 37, 0.95);
+}
+
+.admin-toolbar__field--wide {
+  min-width: min(480px, 100%);
+}
+
+.admin-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.admin-summary-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.96));
+  display: grid;
+  gap: 10px;
+}
+
+.admin-summary-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-summary-card strong {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.admin-summary-card--active strong {
+  color: var(--orange);
+}
+
+.admin-summary-card--good strong {
+  color: var(--green);
+}
+
+.admin-summary-card--danger strong {
+  color: var(--red);
+}
+
+.admin-job-list {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-job-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+}
+
+.admin-job-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.admin-job-card__eyebrow {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-job-card__head h3 {
+  margin: 6px 0 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.admin-job-card__status {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(155, 167, 184, 0.14);
+  color: var(--muted);
+  border: 1px solid rgba(155, 167, 184, 0.22);
+}
+
+.admin-job-card__status--good {
+  color: var(--green);
+  border-color: rgba(107, 211, 155, 0.28);
+  background: rgba(107, 211, 155, 0.12);
+}
+
+.admin-job-card__status--danger {
+  color: var(--red);
+  border-color: rgba(255, 122, 122, 0.3);
+  background: rgba(255, 122, 122, 0.12);
+}
+
+.admin-job-card__status--active {
+  color: var(--orange);
+  border-color: rgba(240, 164, 91, 0.3);
+  background: rgba(240, 164, 91, 0.12);
+}
+
+.admin-job-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-job-card__meta--stack {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-job-card__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-step-badge {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border: 1px solid rgba(155, 167, 184, 0.2);
+  color: var(--muted);
+  background: rgba(155, 167, 184, 0.1);
+}
+
+.admin-step-badge--good {
+  color: var(--green);
+  border-color: rgba(107, 211, 155, 0.24);
+  background: rgba(107, 211, 155, 0.1);
+}
+
+.admin-step-badge--danger {
+  color: var(--red);
+  border-color: rgba(255, 122, 122, 0.28);
+  background: rgba(255, 122, 122, 0.1);
+}
+
+.admin-step-badge--active {
+  color: var(--orange);
+  border-color: rgba(240, 164, 91, 0.28);
+  background: rgba(240, 164, 91, 0.1);
+}
+
+.admin-job-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-job-card__actions a {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(199, 166, 109, 0.22);
+  background: rgba(17, 25, 37, 0.82);
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-job-card__log {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-job-card__log-item {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(155, 167, 184, 0.14);
+  background: rgba(8, 13, 20, 0.55);
+  display: grid;
+  gap: 6px;
+}
+
+.admin-job-card__log-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.admin-job-card__log-item p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .today-races-section,
 .secondary-stats-panel,
 .race-card,
@@ -768,6 +1374,10 @@ select {
 }
 
 @media (max-width: 900px) {
+  .admin-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-header {
     top: 8px;
     width: calc(100vw - 20px);

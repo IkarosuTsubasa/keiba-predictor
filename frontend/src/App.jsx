@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import AdminJobsPage from "./components/AdminJobsPage";
+import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
 import EmptyRaceState from "./components/EmptyRaceState";
 import PageSectionHeader from "./components/PageSectionHeader";
@@ -6,6 +8,8 @@ import RaceGrid, { sortRacesForDisplay } from "./components/RaceGrid";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 
 const APP_BASE_PATH = "/keiba";
+const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
+const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
 
 function buildQuery(search) {
@@ -18,14 +22,19 @@ function navigateWithSearch(nextSearch) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-function useBoardData(search) {
+function useBoardData(search, enabled = true) {
   const [state, setState] = useState({
-    loading: true,
+    loading: enabled,
     error: "",
     data: null,
   });
 
   useEffect(() => {
+    if (!enabled) {
+      setState({ loading: false, error: "", data: null });
+      return;
+    }
+
     let alive = true;
     setState({ loading: true, error: "", data: null });
 
@@ -46,7 +55,7 @@ function useBoardData(search) {
         if (!alive) return;
         setState({
           loading: false,
-          error: error?.message || "データの読み込みに失敗しました。",
+          error: error?.message || "公開データの取得に失敗しました。",
           data: null,
         });
       });
@@ -54,7 +63,7 @@ function useBoardData(search) {
     return () => {
       alive = false;
     };
-  }, [search]);
+  }, [enabled, search]);
 
   return state;
 }
@@ -64,8 +73,8 @@ function LoadingState() {
     <main className="public-screen-state">
       <section className="public-screen-state__panel">
         <span className="public-screen-state__eyebrow">Loading</span>
-        <h1>本日の予想一覧を読み込み中</h1>
-        <p>公開中のレースと AI 予想を取得しています。</p>
+        <h1>本日の公開予想を読込中</h1>
+        <p>公開 board API から最新データを取得しています。</p>
       </section>
     </main>
   );
@@ -76,10 +85,10 @@ function ErrorState({ error, onRetry }) {
     <main className="public-screen-state">
       <section className="public-screen-state__panel public-screen-state__panel--error">
         <span className="public-screen-state__eyebrow">Error</span>
-        <h1>公開データを表示できませんでした</h1>
-        <p>{error || "時間をおいてから再読み込みしてください。"}</p>
+        <h1>公開予想を表示できません</h1>
+        <p>{error || "再試行してください。"}</p>
         <button type="button" onClick={onRetry}>
-          再読み込み
+          再読込
         </button>
       </section>
     </main>
@@ -87,20 +96,42 @@ function ErrorState({ error, onRetry }) {
 }
 
 export default function App() {
+  const [pathname, setPathname] = useState(window.location.pathname);
   const [search, setSearch] = useState(window.location.search.replace(/^\?/, ""));
 
   useEffect(() => {
-    document.title = "いかいも競馬AI";
-  }, []);
-
-  useEffect(() => {
-    const onPop = () => setSearch(window.location.search.replace(/^\?/, ""));
+    const onPop = () => {
+      setPathname(window.location.pathname);
+      setSearch(window.location.search.replace(/^\?/, ""));
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const { loading, error, data } = useBoardData(search);
+  const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
+  const isAdminWorkspace = normalizedPath === ADMIN_WORKSPACE_PATH;
+  const isAdminConsole = normalizedPath === ADMIN_CONSOLE_PATH;
+
+  useEffect(() => {
+    if (isAdminWorkspace) {
+      document.title = "Workspace | いかいもAI競馬";
+    } else if (isAdminConsole) {
+      document.title = "管理画面 | いかいもAI競馬";
+    } else {
+      document.title = "いかいもAI競馬";
+    }
+  }, [isAdminConsole, isAdminWorkspace]);
+
+  const { loading, error, data } = useBoardData(search, !isAdminConsole && !isAdminWorkspace);
   const races = useMemo(() => sortRacesForDisplay(data?.races || []), [data]);
+
+  if (isAdminWorkspace) {
+    return <AdminWorkspacePage appBasePath={APP_BASE_PATH} />;
+  }
+
+  if (isAdminConsole) {
+    return <AdminJobsPage appBasePath={APP_BASE_PATH} />;
+  }
 
   if (loading) {
     return <LoadingState />;
@@ -118,12 +149,12 @@ export default function App() {
         <section className="today-races-section">
           <PageSectionHeader
             kicker="Today Races"
-            title="今日のAI競馬予想"
-            subtitle="複数 AI の本命と買い目を一覧で確認"
+            title="本日の AI 予想"
+            subtitle="公開ページでは各レースの印と買い目を一覧で確認できます。"
             meta={[
               data?.target_date_label || "-",
               `${races.length} レース`,
-              data?.generated_at_label ? `最終更新 ${data.generated_at_label}` : "",
+              data?.generated_at_label ? `更新 ${data.generated_at_label}` : "",
             ]}
           />
 
@@ -131,7 +162,6 @@ export default function App() {
 
           {races.length ? <RaceGrid races={races} /> : <EmptyRaceState />}
         </section>
-
       </div>
 
       <SecondaryStatsPanel data={data} />

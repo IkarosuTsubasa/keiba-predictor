@@ -114,7 +114,10 @@ def resolve_run_prediction_path(run_row, data_dir, root_dir, run_id="", race_id=
         else:
             candidates.append(Path(data_dir) / f"{spec['snapshot_prefix']}_{run_id}.csv")
     latest_path = latest_prediction_path(root_dir, predictor_id)
-    if latest_path is not None and last_run_id and run_id == last_run_id:
+    # For explicit historical/current run resolution, do not fall back to the
+    # root-level latest file. That file may belong to a different race and can
+    # leak stale predictions into workspace/admin views.
+    if latest_path is not None and not run_id:
         candidates.append(latest_path)
     for path in candidates:
         if path and path.exists():

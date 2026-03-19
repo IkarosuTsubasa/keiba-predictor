@@ -1,7 +1,7 @@
-import os
+import asyncio
+import json
 import os
 import sys
-from pathlib import Path
 
 import web_app
 
@@ -11,66 +11,173 @@ def assert_true(cond, message):
         raise AssertionError(message)
 
 
-def pick_latest_run_id():
+def make_json_request(payload, headers=None):
+    body = json.dumps(payload).encode("utf-8")
+    header_pairs = list(headers or [])
+    header_pairs.append((b"content-type", b"application/json"))
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "headers": header_pairs,
+    }
+    sent = {"done": False}
+
+    async def receive():
+        if sent["done"]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent["done"] = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return web_app.Request(scope=scope, receive=receive)
+
+
+def pick_latest_run():
     for scope in ("central_turf", "central_dirt", "local"):
         row = web_app.resolve_run("", scope)
         if row and row.get("run_id"):
-            return row["run_id"]
-    return ""
+            return scope, row["run_id"]
+    return "", ""
 
 
 def main():
     body = web_app.index()
-    assert_true(getattr(body, "status_code", 0) in (302, 307), "index should redirect to /keiba")
+    assert_true(getattr(body, "status_code", 0) in (302, 307), "index should redirect")
     assert_true(getattr(body, "headers", {}).get("location") == web_app.PUBLIC_BASE_PATH, "index should redirect to /keiba")
 
-    keiba_home = web_app.llm_today()
-    keiba_html = getattr(keiba_home, "body", b"").decode("utf-8", errors="ignore")
-    assert_true(getattr(keiba_home, "status_code", 0) == 200, "keiba home should return 200")
-    assert_true("<!doctype html" in keiba_html.lower(), "keiba home should render public frontend html")
-    assert_true("twitter:card" in keiba_html, "keiba home should inject public meta tags")
-    assert_true("Xlogo-white.png" in keiba_html, "keiba home should inject share runtime")
+    public_home = web_app.llm_today()
+    public_html = getattr(public_home, "body", b"").decode("utf-8", errors="ignore")
+    assert_true(getattr(public_home, "status_code", 0) == 200, "public home should return 200")
+    assert_true("<!doctype html" in public_html.lower(), "public home should render frontend html")
+    assert_true("twitter:card" in public_html, "public home should inject meta tags")
 
-    llm_today_html = web_app.llm_today()
-    llm_today_body = getattr(llm_today_html, "body", b"").decode("utf-8", errors="ignore")
-    assert_true(getattr(llm_today_html, "status_code", 0) == 200, "llm_today should return 200")
-    assert_true("</html>" in llm_today_body.lower(), "llm_today should render public frontend file")
+    console_spa = web_app.console_spa()
+    assert_true(getattr(console_spa, "status_code", 0) == 200, "console spa should return 200")
+    workspace_spa = web_app.console_workspace_spa()
+    assert_true(getattr(workspace_spa, "status_code", 0) == 200, "workspace spa should return 200")
+
     board_payload = web_app.public_board_api()
-    assert_true(getattr(board_payload, "status_code", 200) == 200, "public board api should return JSON")
-
-    console_html = web_app.console_index()
-    assert_true("Run Pipeline" in console_html, "console missing Run Pipeline block")
-    assert_true('action="/view_run"' in console_html, "console missing view_run form")
-    assert_true('id="admin-zone"' in console_html, "console missing admin workspace")
-    assert_true(f'action="{web_app.CONSOLE_BASE_PATH}/tasks/create"' in console_html, "console missing merged task create form")
-    assert_true(f'action="{web_app.CONSOLE_BASE_PATH}/tasks/import_archive"' in console_html, "console missing import archive form")
+    assert_true(getattr(board_payload, "status_code", 200) == 200, "board api should return json")
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"
     try:
-        locked_console = web_app.console_index()
-        assert_true("Protected" in locked_console and "ADMIN_TOKEN" in locked_console, "console should show gate without token")
-        unlocked_console = web_app.console_index(token="smoke-token")
-        assert_true("后台访问" in unlocked_console or "任务后台" in unlocked_console, "console missing admin access panel")
-        assert_true("上传输入文件" in unlocked_console and "预测与结算任务" in unlocked_console, "console missing merged admin workspace")
-        denied_buy = web_app.run_llm_buy(token="bad-token", scope_key="central_dirt", run_id="missing")
-        assert_true("LLM buy" in denied_buy and "Error" in denied_buy, "run_llm_buy should be denied by admin token")
+        auth_denied = web_app.admin_auth_check(web_app.Request(scope={"type": "http", "headers": []}), token="bad-token")
+        auth_denied_body = json.loads(getattr(auth_denied, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(auth_denied_body.get("valid") is False, "auth-check should reject bad token")
+
+        auth_ok = web_app.admin_auth_check(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer smoke-token")]}),
+        )
+        auth_ok_body = json.loads(getattr(auth_ok, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(auth_ok_body.get("valid") is True, "auth-check should accept bearer token")
+        assert_true(
+            str(auth_ok_body.get("console_url") or "").startswith(web_app.CONSOLE_BASE_PATH),
+            "auth-check should point to react console",
+        )
+
+        jobs_denied = web_app.admin_jobs_api(web_app.Request(scope={"type": "http", "headers": []}), token="bad-token")
+        assert_true(getattr(jobs_denied, "status_code", 0) == 403, "admin jobs api should reject wrong token")
+
+        jobs_ok = web_app.admin_jobs_api(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer smoke-token")]}),
+        )
+        jobs_ok_body = json.loads(getattr(jobs_ok, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(isinstance(jobs_ok_body.get("jobs"), list), "admin jobs api should return jobs")
+        assert_true(isinstance(jobs_ok_body.get("summary"), dict), "admin jobs api should return summary")
+
+        admin_runs_denied = web_app.admin_runs_api(web_app.Request(scope={"type": "http", "headers": []}), token="bad-token")
+        assert_true(getattr(admin_runs_denied, "status_code", 0) == 403, "admin runs api should reject wrong token")
+
+        admin_runs_ok = web_app.admin_runs_api(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer smoke-token")]}),
+            scope_key="local",
+        )
+        admin_runs_ok_body = json.loads(getattr(admin_runs_ok, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(isinstance(admin_runs_ok_body.get("runs"), list), "admin runs api should return runs list")
+
+        admin_reset_denied = asyncio.run(
+            web_app.admin_reset_llm_state_api(
+                make_json_request({}, [(b"authorization", b"Bearer bad-token")]),
+            ),
+        )
+        assert_true(getattr(admin_reset_denied, "status_code", 0) == 403, "admin reset api should reject wrong token")
+
+        latest_scope, latest_run_id = pick_latest_run()
+        assert_true(bool(latest_scope and latest_run_id), "workspace smoke requires latest run")
+
+        workspace_ok = web_app.admin_workspace_api(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer smoke-token")]}),
+            scope_key=latest_scope,
+            run_id=latest_run_id,
+        )
+        workspace_ok_body = json.loads(getattr(workspace_ok, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(getattr(workspace_ok, "status_code", 0) == 200, "workspace api should return 200")
+        assert_true(isinstance(workspace_ok_body.get("predictors"), list), "workspace api should return predictors")
+        assert_true(isinstance(workspace_ok_body.get("policies"), list), "workspace api should return policies")
+        assert_true(isinstance(workspace_ok_body.get("predictor_overview"), dict), "workspace api should return predictor overview")
+        assert_true(isinstance(workspace_ok_body.get("portfolio_summaries"), list), "workspace api should return portfolio summaries")
+        assert_true(isinstance(workspace_ok_body.get("run_result_summary"), list), "workspace api should return run result summary")
+        assert_true(isinstance(workspace_ok_body.get("odds_snapshots"), dict), "workspace api should return odds snapshots")
+
+        workspace_run_llm_denied = asyncio.run(
+            web_app.admin_workspace_run_llm_buy_api(
+                make_json_request({"scope_key": latest_scope, "run_id": latest_run_id}, [(b"authorization", b"Bearer bad-token")]),
+            ),
+        )
+        assert_true(getattr(workspace_run_llm_denied, "status_code", 0) == 403, "workspace run_llm should reject wrong token")
+
+        workspace_run_all_denied = asyncio.run(
+            web_app.admin_workspace_run_all_llm_buy_api(
+                make_json_request({"scope_key": latest_scope, "run_id": latest_run_id}, [(b"authorization", b"Bearer bad-token")]),
+            ),
+        )
+        assert_true(getattr(workspace_run_all_denied, "status_code", 0) == 403, "workspace run_all_llm should reject wrong token")
+
+        workspace_topup_denied = asyncio.run(
+            web_app.admin_workspace_topup_all_llm_budget_api(
+                make_json_request({"scope_key": latest_scope, "run_id": latest_run_id}, [(b"authorization", b"Bearer bad-token")]),
+            ),
+        )
+        assert_true(getattr(workspace_topup_denied, "status_code", 0) == 403, "workspace topup should reject wrong token")
+
+        workspace_record_denied = asyncio.run(
+            web_app.admin_workspace_record_predictor_api(
+                make_json_request(
+                    {"scope_key": latest_scope, "run_id": latest_run_id, "top1": "1", "top2": "2", "top3": "3"},
+                    [(b"authorization", b"Bearer bad-token")],
+                ),
+            ),
+        )
+        assert_true(getattr(workspace_record_denied, "status_code", 0) == 403, "workspace record_predictor should reject wrong token")
+
+        workspace_record_missing = asyncio.run(
+            web_app.admin_workspace_record_predictor_api(
+                make_json_request({"scope_key": latest_scope, "run_id": latest_run_id}, [(b"authorization", b"Bearer smoke-token")]),
+            ),
+        )
+        assert_true(getattr(workspace_record_missing, "status_code", 0) == 400, "workspace record_predictor should require top1-3")
+
+        workspace_missing_run = asyncio.run(
+            web_app.admin_workspace_run_llm_buy_api(
+                make_json_request({"scope_key": latest_scope, "run_id": "missing-run"}, [(b"authorization", b"Bearer smoke-token")]),
+            ),
+        )
+        assert_true(getattr(workspace_missing_run, "status_code", 0) == 404, "workspace run_llm should return 404 for missing run")
+
         denied_run_due = web_app.internal_run_due(token="bad-token")
         assert_true(getattr(denied_run_due, "status_code", 0) == 403, "internal_run_due should reject wrong token")
         ok_run_due = web_app.internal_run_due(token="smoke-token")
-        assert_true(getattr(ok_run_due, "status_code", 0) in (200, 500), "internal_run_due should return JSON response")
+        assert_true(getattr(ok_run_due, "status_code", 0) in (200, 500), "internal_run_due should return json response")
     finally:
         if prev_admin_token is None:
             os.environ.pop("ADMIN_TOKEN", None)
         else:
             os.environ["ADMIN_TOKEN"] = prev_admin_token
 
-    run_id = pick_latest_run_id()
+    scope_key, run_id = pick_latest_run()
     assert_true(bool(run_id), "no run_id found in any scope")
-    view_html = web_app.view_run(run_id=run_id, scope_key="")
-    assert_true("Top5 Predictions" in view_html or "Gemini Policy" in view_html, "view_run did not render run blocks")
-    predictor_env = web_app.build_predictor_env("central_turf", run_id, web_app.resolve_run(run_id, "central_turf") or {})
-    assert_true(isinstance(predictor_env, dict), "build_predictor_env did not return dict")
+    predictor_env = web_app.build_predictor_env(scope_key, run_id, web_app.resolve_run(run_id, scope_key) or {})
+    assert_true(isinstance(predictor_env, dict), "build_predictor_env should return dict")
 
     print("smoke_web_app: OK")
 

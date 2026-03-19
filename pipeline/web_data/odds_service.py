@@ -24,6 +24,17 @@ def load_odds_snapshot(normalize_name, path):
                     horse_no = str(row.get("horse_no", "")).strip()
                     name = str(row.get("name", "")).strip()
                     odds_raw = str(row.get("odds", "")).strip()
+                    odds_mid_raw = str(row.get("odds_mid", "")).strip()
+                    odds_low_raw = str(row.get("odds_low", "")).strip()
+                    odds_high_raw = str(row.get("odds_high", "")).strip()
+                    if not odds_raw:
+                        if odds_low_raw and odds_high_raw:
+                            odds_raw = f"{odds_low_raw}-{odds_high_raw}"
+                        else:
+                            odds_raw = odds_mid_raw or odds_low_raw or odds_high_raw
+                    odds_val = parse_odds_value(odds_mid_raw or row.get("odds", ""))
+                    if odds_val is None:
+                        odds_val = parse_odds_value(odds_low_raw)
                     key = ""
                     if horse_no:
                         key = f"no:{horse_no}"
@@ -35,7 +46,7 @@ def load_odds_snapshot(normalize_name, path):
                         "horse_no": horse_no,
                         "name": name,
                         "odds_raw": odds_raw,
-                        "odds_val": parse_odds_value(odds_raw),
+                        "odds_val": odds_val,
                     }
                 return out
         except UnicodeDecodeError:
