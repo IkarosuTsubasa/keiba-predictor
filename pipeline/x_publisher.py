@@ -1,5 +1,4 @@
 import asyncio
-import asyncio
 import os
 from pathlib import Path
 
@@ -28,6 +27,13 @@ def _preferred_engine():
 
 def _twikit_language():
     return str(os.environ.get("TWIKIT_LANGUAGE", "ja-JP") or "ja-JP").strip() or "ja-JP"
+
+
+def _has_saved_cookies(path):
+    try:
+        return path.exists() and path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
 
 
 def _select_payload(payloads):
@@ -93,19 +99,42 @@ async def _post_with_twikit_async(base_dir, text):
     cookies_file = _cookies_file(base_dir)
     cookies_file.parent.mkdir(parents=True, exist_ok=True)
     client = Client(language=_twikit_language())
-    # Twikit will load and reuse cookies from cookies_file when available,
-    # which avoids a full interactive login on every publish attempt.
-    await client.login(
-        auth_info_1=username,
-        auth_info_2=email or None,
-        password=password,
-        totp_secret=totp_secret or None,
-        cookies_file=str(cookies_file),
-        enable_ui_metrics=True,
-    )
+
+    cookie_error = None
+    if _has_saved_cookies(cookies_file):
+        try:
+            client.load_cookies(str(cookies_file))
+            tweet = await client.create_tweet(text=str(text or ""))
+            tweet_id = str(getattr(tweet, "id", "") or "").strip()
+            return {"tweet_id": tweet_id, "auth_mode": "cookies"}
+        except Exception as exc:
+            cookie_error = exc
+
+    login_error = None
+    try:
+        await client.login(
+            auth_info_1=username,
+            auth_info_2=email or None,
+            password=password,
+            totp_secret=totp_secret or None,
+            cookies_file=str(cookies_file),
+            enable_ui_metrics=False,
+        )
+        try:
+            client.save_cookies(str(cookies_file))
+        except Exception:
+            pass
+    except Exception as exc:
+        login_error = exc
+
+    if login_error is not None:
+        if cookie_error is not None:
+            raise RuntimeError(f"twikit cookie login failed: {cookie_error}; fresh login failed: {login_error}") from login_error
+        raise RuntimeError(str(login_error)) from login_error
+
     tweet = await client.create_tweet(text=str(text or ""))
     tweet_id = str(getattr(tweet, "id", "") or "").strip()
-    return {"tweet_id": tweet_id}
+    return {"tweet_id": tweet_id, "auth_mode": "login"}
 
 
 def post_ready_run(base_dir, scope_key, run_id):
@@ -120,5 +149,6 @@ def post_ready_run(base_dir, scope_key, run_id):
         "race_id": payload["race_id"],
         "engine": payload["engine"],
         "tweet_id": str((result or {}).get("tweet_id", "") or "").strip(),
+        "auth_mode": str((result or {}).get("auth_mode", "") or "").strip(),
         "text": payload["text"],
     }

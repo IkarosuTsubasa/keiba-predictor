@@ -281,7 +281,9 @@ def _public_share_runtime_html():
     button.setAttribute("aria-label", "\\u30b7\\u30a7\\u30a2");
     button.setAttribute("title", "\\u30b7\\u30a7\\u30a2");
     button.innerHTML =
-      '<img src="/keiba/assets/Xlogo-white.png" alt="" aria-hidden="true">';
+      '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true" focusable="false">' +
+      '<path d="M18.901 1.153h3.68l-8.04 9.19L24 22.847h-7.406l-5.8-7.584-6.636 7.584H.478l8.6-9.83L0 1.153h7.594l5.243 6.932 6.064-6.932Zm-1.29 19.494h2.04L6.486 3.24H4.298l13.313 17.407Z"/>' +
+      "</svg>";
     return button;
   };
 
