@@ -73,7 +73,7 @@ function LoadingState() {
     <main className="public-screen-state">
       <section className="public-screen-state__panel">
         <span className="public-screen-state__eyebrow">Loading</span>
-        <h1>本日の公開予想を読込中</h1>
+        <h1>本日の公開レースを読み込み中</h1>
         <p>公開 board API から最新データを取得しています。</p>
       </section>
     </main>
@@ -86,9 +86,9 @@ function ErrorState({ error, onRetry }) {
       <section className="public-screen-state__panel public-screen-state__panel--error">
         <span className="public-screen-state__eyebrow">Error</span>
         <h1>公開予想を表示できません</h1>
-        <p>{error || "再試行してください。"}</p>
+        <p>{error || "再読み込みしてください。"}</p>
         <button type="button" onClick={onRetry}>
-          再読込
+          再読み込み
         </button>
       </section>
     </main>
@@ -116,7 +116,7 @@ export default function App() {
     if (isAdminWorkspace) {
       document.title = "Workspace | いかいもAI競馬";
     } else if (isAdminConsole) {
-      document.title = "管理画面 | いかいもAI競馬";
+      document.title = "管理コンソール | いかいもAI競馬";
     } else {
       document.title = "いかいもAI競馬";
     }
@@ -148,12 +148,12 @@ export default function App() {
       <div className="racing-intel-page__shell">
         <section className="today-races-section">
           <PageSectionHeader
-            kicker="Today Races"
-            title="本日の AI 予想"
+            kicker="TODAY'S RACES"
+            title="本日のAI予想"
             subtitle="公開ページでは各レースの印と買い目を一覧で確認できます。"
             meta={[
               data?.target_date_label || "-",
-              `${races.length} レース`,
+              `${races.length}レース`,
               data?.generated_at_label ? `更新 ${data.generated_at_label}` : "",
             ]}
           />

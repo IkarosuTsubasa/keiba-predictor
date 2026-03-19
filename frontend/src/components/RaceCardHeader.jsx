@@ -1,7 +1,5 @@
 import React from "react";
 
-const RESULT_MEDALS = ["🥇", "🥈", "🥉"];
-
 function formatOffTime(text) {
   const source = String(text || "").trim();
   if (!source) return "";
@@ -25,7 +23,7 @@ function parseResultEntries(text) {
       const body = String(match?.[2] || item).trim();
       return {
         key: `${rank}-${body}`,
-        medal: RESULT_MEDALS[rank - 1] || "🏅",
+        rank,
         body,
       };
     })
@@ -37,7 +35,7 @@ function resolveStatus(race) {
   if (actual && !actual.includes("未")) {
     return { label: "結果確定", tone: "settled" };
   }
-  return { label: "予想公開中", tone: "open" };
+  return { label: "予想中", tone: "open" };
 }
 
 export default function RaceCardHeader({ race, actions = null }) {
@@ -64,14 +62,14 @@ export default function RaceCardHeader({ race, actions = null }) {
 
       <div className="race-card-header__result-row">
         <div className="race-card-header__result">
-          <span className="race-card-header__result-label">着順</span>
+          <span className="race-card-header__result-label">結果</span>
           <div className="race-card-header__result-body">
             {resultEntries.length ? (
               <ul className="race-card-header__result-list">
                 {resultEntries.map((entry) => (
                   <li key={entry.key}>
                     <span className="race-card-header__result-medal" aria-hidden="true">
-                      {entry.medal}
+                      {entry.rank}着
                     </span>
                     <span>{entry.body}</span>
                   </li>

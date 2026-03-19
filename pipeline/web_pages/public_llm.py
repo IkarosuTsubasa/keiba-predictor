@@ -24,16 +24,29 @@ from web_report.helpers import (
 )
 
 
+BET_TYPE_TEXT_MAP = {
+    "win": "単勝",
+    "place": "複勝",
+    "wide": "ワイド",
+    "quinella": "馬連",
+    "exacta": "馬単",
+    "trio": "三連複",
+    "trifecta": "三連単",
+}
+
+MARK_ORDER = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
+
+
 def public_status_meta_ja(ticket_summary, actual_names):
     status = safe_text((ticket_summary or {}).get("status", "")).lower()
     actual_ready = any(safe_text(name) for name in list(actual_names or []))
     if status == "settled":
-        return "结果确定", "settled"
+        return "結果確定", "settled"
     if status == "pending":
-        return "结果待定", "pending"
+        return "精算待ち", "pending"
     if actual_ready:
-        return "已有结果", "result"
-    return "未购买", "planned"
+        return "結果確定", "result"
+    return "予想中", "planned"
 
 
 def public_yen_text(value):
@@ -46,21 +59,13 @@ def public_yen_text(value):
 
 
 def public_ticket_plan_text(ticket_rows):
-    bet_type_map = {
-        "win": "单胜",
-        "place": "复胜",
-        "wide": "ワイド",
-        "quinella": "马连",
-        "exacta": "马单",
-        "trio": "三连复",
-        "trifecta": "三连单",
-    }
     rows = list(ticket_rows or [])
     if not rows:
-        return "无买目"
+        return "買い目なし"
     lines = []
     for row in rows:
-        bet_type = bet_type_map.get(safe_text(row.get("bet_type")).lower(), safe_text(row.get("bet_type")) or "-")
+        bet_type_key = safe_text(row.get("bet_type")).lower()
+        bet_type = BET_TYPE_TEXT_MAP.get(bet_type_key, safe_text(row.get("bet_type")) or "-")
         horse_no = safe_text(row.get("horse_no")) or "-"
         amount = public_yen_text(row.get("amount_yen") or row.get("stake_yen") or 0)
         lines.append(f"{bet_type} {horse_no} {amount}")
@@ -83,18 +88,10 @@ def _share_hashtag_race_label(run_row):
 
 
 def _share_ticket_lines(ticket_rows, *, to_int_or_none):
-    bet_type_map = {
-        "win": "单胜",
-        "place": "复胜",
-        "wide": "ワイド",
-        "quinella": "马连",
-        "exacta": "马单",
-        "trio": "三连复",
-        "trifecta": "三连单",
-    }
     lines = []
     for row in list(ticket_rows or []):
-        bet_type = bet_type_map.get(safe_text(row.get("bet_type")).lower(), safe_text(row.get("bet_type")) or "-")
+        bet_type_key = safe_text(row.get("bet_type")).lower()
+        bet_type = BET_TYPE_TEXT_MAP.get(bet_type_key, safe_text(row.get("bet_type")) or "-")
         horse_no = safe_text(row.get("horse_no")) or "-"
         amount = to_int_or_none(row.get("amount_yen"))
         if amount is None:
@@ -107,10 +104,9 @@ def _share_ticket_lines(ticket_rows, *, to_int_or_none):
 def _share_marks_text(marks_map, *, to_int_or_none):
     if not marks_map:
         return "印なし"
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
     ordered = []
     for horse_no, symbol in dict(marks_map or {}).items():
-        ordered.append((symbol_order.get(safe_text(symbol), 99), to_int_or_none(horse_no) or 999, safe_text(horse_no), safe_text(symbol)))
+        ordered.append((MARK_ORDER.get(safe_text(symbol), 99), to_int_or_none(horse_no) or 999, safe_text(horse_no), safe_text(symbol)))
     ordered.sort(key=lambda item: (item[0], item[1], item[2]))
     parts = [f"{symbol}{horse_no}" for _, _, horse_no, symbol in ordered if horse_no and symbol]
     return " ".join(parts) if parts else "印なし"
@@ -132,7 +128,7 @@ def build_public_share_text(
     header = _share_hashtag_race_label(run_row)
     marks_text = _share_marks_text(marks_map, to_int_or_none=to_int_or_none)
     tail_lines = [share_detail_label, share_url, share_hashtag]
-    base_lines = [header, "", marks_text, "", "買い目（一部）"]
+    base_lines = [header, "", marks_text, "", "買い目"]
     ticket_lines = _share_ticket_lines(ticket_rows, to_int_or_none=to_int_or_none)
     lines = list(base_lines)
     for ticket_line in ticket_lines:
@@ -154,14 +150,14 @@ def build_public_share_text(
         return text
     tail_len = len("\n".join(["", *tail_lines]))
     compact_marks = marks_text[: max(0, int(max_chars) - len(header) - tail_len - 4)]
-    compact_lines = [header, "", compact_marks or "印", "", *tail_lines]
+    compact_lines = [header, "", compact_marks or "印なし", "", *tail_lines]
     return "\n".join(compact_lines)
 
 
 def public_result_triplet_text(actual_names):
     names = [safe_text(name) for name in list(actual_names or [])[:3] if safe_text(name)]
     if not names:
-        return "结果未确定"
+        return "結果未確定"
     return " / ".join(f"{idx + 1}着 {name}" for idx, name in enumerate(names))
 
 
@@ -290,7 +286,7 @@ def build_public_board_payload(
             ticket_summary = summarize_ticket_rows(ticket_rows)
             status_label, status_tone = public_status_meta_ja(ticket_summary, actual_names)
             result_triplet = format_triplet_text(marks_result_triplet(marks_map, actual_horse_nos))
-            result_triplet_text = result_triplet if any(safe_text(x) for x in actual_horse_nos) else "结果未确定"
+            result_triplet_text = result_triplet if any(safe_text(x) for x in actual_horse_nos) else "結果未確定"
             decision_text = safe_text(output.get("bet_decision")) or "-"
             confidence_value = ai_summary.get("confidence_score", "")
             confidence_text = format_confidence_text(confidence_value)
@@ -411,7 +407,7 @@ def build_public_board_payload(
         "target_date_label": public_date_label(target_date, parse_run_date=parse_run_date),
         "generated_at_label": generated_at_label,
         "scope_key": scope_norm or "",
-        "scope_options": [{"value": "", "label": "全部场地"}]
+        "scope_options": [{"value": "", "label": "全場"}]
         + [{"value": key, "label": public_scope_label_ja(key)} for key in LLM_REPORT_SCOPE_KEYS],
         "fallback_notice": fallback_notice,
         "all_time_roi": public_all_time_roi_summary(),
@@ -453,8 +449,8 @@ def build_public_llm_page(
             f"""
             <article class="card">
               <h3>{html.escape(safe_text(item.get('label')) or '-')}</h3>
-              <p>収支 {html.escape(public_yen_text(item.get('profit_yen', 0)))}</p>
-              <p>回収率 {html.escape(safe_text(item.get('roi_text')) or '-')}</p>
+              <p>利益 {html.escape(public_yen_text(item.get('profit_yen', 0)))}</p>
+              <p>ROI {html.escape(safe_text(item.get('roi_text')) or '-')}</p>
               <p>的中 {int(item.get('hit_races', 0) or 0)} / {int(item.get('races', 0) or 0)}</p>
             </article>
             """
@@ -483,7 +479,7 @@ def build_public_llm_page(
                   <h2>{html.escape(safe_text(race.get('race_title')) or '-')}</h2>
                   <p>{html.escape(safe_text(race.get('date_label')) or '-')}</p>
                 </div>
-                <div class="actual">{html.escape(safe_text(race.get('actual_text')) or '结果未确定')}</div>
+                <div class="actual">{html.escape(safe_text(race.get('actual_text')) or '結果未確定')}</div>
               </div>
               <div class="grid">{''.join(cards_html)}</div>
             </section>
@@ -563,8 +559,8 @@ def build_public_llm_page(
     <section class="hero">
       <div class="eyebrow">Legacy Public LLM Page</div>
       <h1>{html.escape(target_date_label)}</h1>
-      <p>レース数 {int(totals.get('race_count', 0) or 0)} / 総収支 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
-      <p>総投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 総払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / 回収率 {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>
+      <p>レース数 {int(totals.get('race_count', 0) or 0)} / 利益 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
+      <p>投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / ROI {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>
     </section>
     {notice_html}
     <section class="summary">{''.join(summary_html)}</section>

@@ -12,9 +12,9 @@ export default function RaceCard({ race }) {
       <RaceCardHeader
         race={race}
         actions={
-        <button type="button" className="race-card__toggle" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? "閉じる" : "詳細を見る"}
-        </button>
+          <button type="button" className="race-card__toggle" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "閉じる" : "詳細を見る"}
+          </button>
         }
       />
 

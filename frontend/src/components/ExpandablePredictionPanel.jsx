@@ -24,7 +24,7 @@ export default function ExpandablePredictionPanel({ cards }) {
           <div className="expandable-prediction-panel__top">
             <strong>{card.label}</strong>
             <div className="expandable-prediction-panel__meta">
-              <ModelMetaBadge label="回収率" value={card.roi_text || "-"} tone="subtle" />
+              <ModelMetaBadge label="ROI" value={card.roi_text || "-"} tone="subtle" />
             </div>
           </div>
 
@@ -32,11 +32,12 @@ export default function ExpandablePredictionPanel({ cards }) {
             {parseMarks(card?.marks_text).length ? (
               parseMarks(card?.marks_text).map((mark) => (
                 <span key={`${card.engine}-${mark.symbol}-${mark.horseNo}`} className="expandable-prediction-panel__mark">
-                  {mark.symbol}{mark.horseNo}
+                  {mark.symbol}
+                  {mark.horseNo}
                 </span>
               ))
             ) : (
-              <span className="expandable-prediction-panel__empty">印未生成</span>
+              <span className="expandable-prediction-panel__empty">印なし</span>
             )}
           </div>
 
@@ -44,7 +45,7 @@ export default function ExpandablePredictionPanel({ cards }) {
 
           <div className={`expandable-prediction-panel__result expandable-prediction-panel__result--${resultTone(card)}`}>
             <span>結果</span>
-            <strong>{card?.result_triplet_text || "未確定"}</strong>
+            <strong>{card?.result_triplet_text || "結果未確定"}</strong>
           </div>
         </section>
       ))}
