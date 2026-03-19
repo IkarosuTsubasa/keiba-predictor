@@ -1,5 +1,4 @@
-import html
-from urllib.parse import quote_plus
+﻿import html
 
 
 def _scope_label(scope_key):
@@ -78,15 +77,9 @@ def page_template(
     top5_text="",
     top5_table_html="",
     mark_table_html="",
-    mark_note_text="",
     llm_battle_html="",
-    llm_note_text="",
     llm_compare_html="",
     gemini_policy_html="",
-    daily_report_html="",
-    daily_report_text="",
-    weekly_report_html="",
-    weekly_report_text="",
     summary_table_html="",
     stats_block="",
     default_scope="central_dirt",
@@ -95,7 +88,6 @@ def page_template(
     admin_token="",
     admin_enabled=False,
     admin_workspace_html="",
-    show_note_panel=False,
 ):
     scope_value = str(default_scope or "central_dirt").strip() or "central_dirt"
     scope_label = _scope_label(scope_value)
@@ -103,17 +95,8 @@ def page_template(
     current_race = str(current_race_id or "").strip()
     recent_options = view_run_options or run_options or ""
     admin_token_value = str(admin_token or "").strip()
-    encoded_admin_token = quote_plus(admin_token_value) if admin_token_value else ""
-    console_href = f"/console?token={encoded_admin_token}" if encoded_admin_token else "/console"
+    console_href = f"/console?token={admin_token_value}" if admin_token_value else "/console"
     admin_zone_href = f"{console_href}#admin-zone"
-    note_query = [f"scope_key={quote_plus(scope_value)}"]
-    if current_run:
-        note_query.append(f"run_id={quote_plus(current_run)}")
-    elif current_race:
-        note_query.append(f"run_id={quote_plus(current_race)}")
-    if encoded_admin_token:
-        note_query.append(f"token={encoded_admin_token}")
-    note_page_href = f"/console/note?{'&'.join(note_query)}"
 
     output_panel = ""
     if output_text:
@@ -150,122 +133,6 @@ def page_template(
         </section>
         """
 
-    primary_note_text = llm_note_text or mark_note_text
-    primary_note_label = "単レース note" if llm_note_text else "Note"
-    primary_note_button = "単レース note をコピー" if llm_note_text else "Note をコピー"
-    note_copy_blocks = []
-    hidden_copy_sources = []
-    if primary_note_text:
-        note_copy_blocks.append(
-            f"""
-            <section class="copy-block">
-              <div class="copy-block-head">
-                <div class="copy-block-title">
-                  <strong>{html.escape(primary_note_label)}</strong>
-                  <span>単レース note 用。公開部分と有料部分の Strategy を分けてコピーできます。</span>
-                </div>
-                <span class="section-chip">single race</span>
-              </div>
-              <div class="copy-row">
-                <button
-                  type="button"
-                  class="secondary-button"
-                  data-copy-target="primary-note-text"
-                  data-copy-status="primary-note-status"
-                  data-copy-empty="No note text available."
-                >{html.escape(primary_note_button)}</button>
-                <span id="primary-note-status" class="copy-status"></span>
-              </div>
-              <details class="mini-fold">
-                <summary>{html.escape(primary_note_label)} をプレビュー</summary>
-                <pre>{html.escape(primary_note_text)}</pre>
-              </details>
-            </section>
-            """
-        )
-        hidden_copy_sources.append(
-            f'<textarea id="primary-note-text" class="hidden-copy-source" readonly>{html.escape(primary_note_text)}</textarea>'
-        )
-    if daily_report_text:
-        note_copy_blocks.append(
-            f"""
-            <section class="copy-block">
-              <div class="copy-block-head">
-                <div class="copy-block-title">
-                  <strong>日報テキスト</strong>
-                  <span>レース別対戦、ROI、ランキングをまとめた日報用テキストです。</span>
-                </div>
-                <span class="section-chip">daily</span>
-              </div>
-              <div class="copy-row">
-                <button
-                  type="button"
-                  class="secondary-button"
-                  data-copy-target="daily-report-text"
-                  data-copy-status="daily-report-status"
-                  data-copy-empty="No daily report text available."
-                >日報をコピー</button>
-                <span id="daily-report-status" class="copy-status"></span>
-              </div>
-              <details class="mini-fold">
-                <summary>日報テキストをプレビュー</summary>
-                <pre>{html.escape(daily_report_text)}</pre>
-              </details>
-            </section>
-            """
-        )
-        hidden_copy_sources.append(
-            f'<textarea id="daily-report-text" class="hidden-copy-source" readonly>{html.escape(daily_report_text)}</textarea>'
-        )
-    if weekly_report_text:
-        note_copy_blocks.append(
-            f"""
-            <section class="copy-block">
-              <div class="copy-block-head">
-                <div class="copy-block-title">
-                  <strong>週報テキスト</strong>
-                  <span>週間の投資、回収、収支、回収率、的中率と今週のベストをまとめた週報用テキストです。</span>
-                </div>
-                <span class="section-chip">weekly</span>
-              </div>
-              <div class="copy-row">
-                <button
-                  type="button"
-                  class="secondary-button"
-                  data-copy-target="weekly-report-text"
-                  data-copy-status="weekly-report-status"
-                  data-copy-empty="No weekly report text available."
-                >週報をコピー</button>
-                <span id="weekly-report-status" class="copy-status"></span>
-              </div>
-              <details class="mini-fold">
-                <summary>週報テキストをプレビュー</summary>
-                <pre>{html.escape(weekly_report_text)}</pre>
-              </details>
-            </section>
-            """
-        )
-        hidden_copy_sources.append(
-            f'<textarea id="weekly-report-text" class="hidden-copy-source" readonly>{html.escape(weekly_report_text)}</textarea>'
-        )
-    note_copy_panel = ""
-    if note_copy_blocks:
-        note_copy_panel = f"""
-        <section class="panel panel-note-copy">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Utility</div>
-              <h2>コピーパネル</h2>
-            </div>
-            <span class="section-chip">clipboard</span>
-          </div>
-          <div class="copy-stack">
-            {''.join(note_copy_blocks)}
-          </div>
-          {''.join(hidden_copy_sources)}
-        </section>
-        """
-
     mark_block = mark_table_html or ""
 
     analysis_cluster = _cluster(
@@ -279,8 +146,8 @@ def page_template(
     battle_cluster = _cluster(
         "battle-zone",
         "LLM Battle",
-        "単レース note",
-        "公開部分を先に、有料部分の Strategy を最後に置く note 用レイアウトです。",
+        "蜊倥Ξ繝ｼ繧ｹ note",
+        "保留公开战报展示区。",
         llm_battle_html or "",
         "cluster-grid--stack",
     )
@@ -300,22 +167,8 @@ def page_template(
         gemini_policy_html or "",
         "cluster-grid--stack",
     )
-    daily_cluster = _cluster(
-        "daily-zone",
-        "Daily Report",
-        "日報まとめ",
-        "選択日の全レースをまとめて、そのまま日報へ転記できる構成です。",
-        daily_report_html or "",
-        "cluster-grid--stack",
-    )
-    weekly_cluster = _cluster(
-        "weekly-zone",
-        "Weekly Report",
-        "週報まとめ",
-        "週単位の総合成績と今週のベストを確認できる構成です。",
-        weekly_report_html or "",
-        "cluster-grid--stack",
-    )
+    daily_cluster = ""
+    weekly_cluster = ""
     stats_cluster = _fold_cluster(
         "stats-zone",
         "Performance",
@@ -337,28 +190,24 @@ def page_template(
     if analysis_cluster:
         jump_links.append(_section_link("analysis-zone", "Analysis"))
     if admin_workspace_html:
-        jump_links.append(_section_link("admin-zone", "任务后台"))
+        jump_links.append(_section_link("admin-zone", "莉ｻ蜉｡蜷主床"))
     if battle_cluster:
         jump_links.append(_section_link("battle-zone", "Battle"))
     if compare_cluster:
         jump_links.append(_section_link("compare-zone", "Compare"))
     if policy_cluster:
         jump_links.append(_section_link("policy-zone", "Policy"))
-    if daily_cluster:
-        jump_links.append(_section_link("daily-zone", "Daily"))
-    if weekly_cluster:
-        jump_links.append(_section_link("weekly-zone", "Weekly"))
     if stats_cluster:
         jump_links.append(_section_link("stats-zone", "Stats"))
     if console_cluster:
-        jump_links.append(_section_link("console-zone", "运行日志"))
+        jump_links.append(_section_link("console-zone", "Console"))
 
     hero_metrics = "".join(
         [
             _metric_card("范围", scope_label),
             _metric_card("当前 Run", current_run or "未选择"),
-            _metric_card("面板数", str(len(jump_links)) if jump_links else "仅控制区"),
-            _metric_card("状态", "错误" if error_text else ("有输出" if output_text else "就绪")),
+            _metric_card("区块数", str(len(jump_links)) if jump_links else "无可用区块"),
+            _metric_card("状态", "异常" if error_text else ("有输出" if output_text else "空闲")),
         ]
     )
 
@@ -369,18 +218,18 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Quick Access</div>
-              <h2>最近 Runs</h2>
+              <h2>譛霑・Runs</h2>
             </div>
-            <span class="section-chip" id="recent-run-status">范围: {html.escape(scope_label)}</span>
+            <span class="section-chip" id="recent-run-status">闌・峩: {html.escape(scope_label)}</span>
           </div>
           <form action="/view_run" method="post" class="stack-form">
             <input type="hidden" name="scope_key" id="recent_scope_key" value="{html.escape(scope_value)}">
             <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
-            <label>最近运行快照</label>
+            <label>譛霑題ｿ占｡悟ｿｫ辣ｧ</label>
             <select name="run_id" id="recent_run_select">
               {recent_options}
             </select>
-            <button type="submit">打开所选 Run</button>
+            <button type="submit">謇灘ｼ謇騾・Run</button>
           </form>
         </section>
         """
@@ -390,7 +239,7 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Inspection</div>
-              <h2>Run / Race を開く</h2>
+              <h2>Run / Race 繧帝幕縺・/h2>
             </div>
             <span class="section-chip">view</span>
           </div>
@@ -398,11 +247,11 @@ def page_template(
             <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
             <div>
               <label>Run ID / Race ID</label>
-              <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="例: 202501010101 または 20250101_123456">
+              <input id="action_id_input" inputmode="text" pattern="[0-9_]*" placeholder="萓・ 202501010101 縺ｾ縺溘・ 20250101_123456">
               <input type="hidden" id="action_run_id" name="run_id">
             </div>
-            <p class="helper-text">`race_id` でも `run_id` でも入力できます。該当する最新の run を開きます。</p>
-            <button type="submit" id="action-submit">開く</button>
+            <p class="helper-text">`race_id` 縺ｧ繧・`run_id` 縺ｧ繧ょ・蜉帙〒縺阪∪縺吶りｩｲ蠖薙☆繧区怙譁ｰ縺ｮ run 繧帝幕縺阪∪縺吶・/p>
+            <button type="submit" id="action-submit">髢九￥</button>
           </form>
         </section>
         """
@@ -429,22 +278,6 @@ def page_template(
         </section>
         """
 
-    note_nav_panel = f"""
-        <section class="panel panel-compact">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Note</div>
-              <h2>Open Note Page</h2>
-            </div>
-            <span class="section-chip">copy</span>
-          </div>
-          <p class="helper-text">Open a dedicated page for note copy and preview. The current scope and run will be carried over automatically.</p>
-          <div class="copy-row" style="margin-top:12px;">
-            <a href="{html.escape(note_page_href)}" class="secondary-button">Go To Note Page</a>
-          </div>
-        </section>
-        """
-
     if admin_enabled:
         admin_state = "Unlocked" if admin_token_value else "Locked"
         admin_note = (
@@ -457,22 +290,22 @@ def page_template(
           <div class="section-title">
             <div>
               <div class="eyebrow">Admin</div>
-                <h2>后台访问</h2>
+                <h2>蜷主床隶ｿ髣ｮ</h2>
             </div>
             <span class="section-chip">{html.escape(admin_state)}</span>
           </div>
           <form action="/console" method="get" class="stack-form">
             <div>
               <label>ADMIN_TOKEN</label>
-              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="执行操作时必填">
+              <input type="password" name="token" value="{html.escape(admin_token_value)}" placeholder="謇ｧ陦梧桃菴懈慮蠢・｡ｫ">
             </div>
             <p class="helper-text">{html.escape(admin_note)}</p>
-            <button type="submit">进入控制台</button>
+            <button type="submit">霑帛・謗ｧ蛻ｶ蜿ｰ</button>
           </form>
           <div class="copy-row" style="margin-top:12px;">
-            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
-            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
-            <a href="/llm_today" class="secondary-button">用户前台</a>
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">莉ｻ蜉｡蜷主床</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">謗ｧ蛻ｶ蜿ｰ荳ｻ鬘ｵ</a>
+            <a href="/llm_today" class="secondary-button">逕ｨ謌ｷ蜑榊床</a>
           </div>
         </section>
         """
@@ -486,11 +319,11 @@ def page_template(
             </div>
             <span class="section-chip">local</span>
           </div>
-          <p class="helper-text">未设置 ADMIN_TOKEN，当前是本地开发模式。</p>
+          <p class="helper-text">譛ｪ隶ｾ鄂ｮ ADMIN_TOKEN・悟ｽ灘燕譏ｯ譛ｬ蝨ｰ蠑蜿第ｨ｡蠑上・/p>
           <div class="copy-row" style="margin-top:12px;">
-            <a href="{html.escape(admin_zone_href)}" class="secondary-button">任务后台</a>
-            <a href="{html.escape(console_href)}" class="secondary-button">控制台主页</a>
-            <a href="/llm_today" class="secondary-button">用户前台</a>
+            <a href="{html.escape(admin_zone_href)}" class="secondary-button">莉ｻ蜉｡蜷主床</a>
+            <a href="{html.escape(console_href)}" class="secondary-button">謗ｧ蛻ｶ蜿ｰ荳ｻ鬘ｵ</a>
+            <a href="/llm_today" class="secondary-button">逕ｨ謌ｷ蜑榊床</a>
           </div>
         </section>
         """
@@ -518,7 +351,7 @@ def page_template(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Keiba 控制台</title>
+  <title>Keiba 謗ｧ蛻ｶ蜿ｰ</title>
   <style>
     :root {{
       --bg: #f3efe7;
@@ -1149,7 +982,7 @@ def page_template(
       font-size: 20px;
       flex: none;
     }}
-    .fold-panel[open] summary::after {{ content: "−"; }}
+    .fold-panel[open] summary::after {{ content: "竏・; }}
     .fold-copy {{ display: grid; gap: 6px; }}
     pre {{
       margin: 0;
@@ -1193,8 +1026,8 @@ def page_template(
     <header class="hero">
       <div class="hero-copy">
         <div class="eyebrow">Keiba Console</div>
-        <h1>Keiba 管理控制台</h1>
-        <p>这里只保留当前还在使用的后台能力：任务管理、Run 查看、结果页面与日志。历史遗留的左侧操作栏已收起。</p>
+        <h1>Keiba 邂｡逅・而蛻ｶ蜿ｰ</h1>
+        <p>霑咎㈹蜿ｪ菫晉蕗蠖灘燕霑伜惠菴ｿ逕ｨ逧・錘蜿ｰ閭ｽ蜉幢ｼ壻ｻｻ蜉｡邂｡逅・ヽun 譟･逵九∫ｻ捺棡鬘ｵ髱｢荳取律蠢励ょ紙蜿ｲ驕礼蕗逧・ｷｦ萓ｧ謫堺ｽ懈丞ｷｲ謾ｶ襍ｷ縲・/p>
         <div class="hero-subline">
           <span class="hero-pill" id="scope-pill">Current scope: {html.escape(scope_label)}</span>
           <span class="hero-pill">{html.escape("Recent runs ready" if recent_options else "Open a scope to load run history")}</span>
@@ -1228,7 +1061,7 @@ def page_template(
             <div class="field-grid">
               <div>
                 <label>Location</label>
-                <input name="location" placeholder="e.g. 中山">
+                <input name="location" placeholder="e.g. 荳ｭ螻ｱ">
               </div>
               <div>
                 <label>Race Date</label>
@@ -1258,7 +1091,7 @@ def page_template(
                 </div>
               </div>
             </div>
-            <p class="helper-text">Pipeline は複数 predictor の出力を生成し、V5 に必要な場別・日付別コンテキストも併せて保存します。</p>
+            <p class="helper-text">Pipeline 縺ｯ隍・焚 predictor 縺ｮ蜃ｺ蜉帙ｒ逕滓・縺励〃5 縺ｫ蠢・ｦ√↑蝣ｴ蛻･繝ｻ譌･莉伜挨繧ｳ繝ｳ繝・く繧ｹ繝医ｂ菴ｵ縺帙※菫晏ｭ倥＠縺ｾ縺吶・/p>
             <button type="submit">Run Pipeline</button>
           </form>
         </section>
@@ -1358,15 +1191,12 @@ def page_template(
             <button type="submit">Record Predictor</button>
           </form>
         </section>
-        {note_copy_panel if show_note_panel else ""}
         {recent_runs_panel}
       </aside>
       <main class="content-stage">
         {admin_panel}
         {console_open_run_panel}
-        {note_nav_panel}
         {recent_runs_panel}
-        {note_copy_panel if show_note_panel else ""}
         {admin_workspace_html}
         {analysis_cluster}
         {battle_cluster}
@@ -1532,3 +1362,6 @@ def page_template(
 </body>
 </html>
 """
+
+
+

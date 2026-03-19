@@ -15,7 +15,6 @@ import base64
 from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote_plus
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -93,7 +92,6 @@ from web_helpers import (
     to_float,
     to_int_or_none,
 )
-from web_note import build_mark_note_text
 from web_public import (
     CONSOLE_BASE_PATH,
     PUBLIC_API_BASE_PATH,
@@ -108,7 +106,6 @@ from web_public import (
     register_public_static_routes,
 )
 from web_pages import public_llm as web_public_llm
-from web_pages import llm_today as web_llm_today
 from web_pages import workspace as web_workspace
 from web_policy import engine as web_policy_engine
 from web_policy import html as web_policy_html
@@ -577,12 +574,6 @@ def load_policy_bankroll_summary(run_id="", timestamp="", policy_engine="gemini"
         extract_ledger_date=extract_ledger_date,
         summarize_bankroll=summarize_bankroll,
     )
-
-
-def load_gemini_bankroll_summary(run_id="", timestamp=""):
-    return load_policy_bankroll_summary(run_id, timestamp, policy_engine="gemini")
-
-
 def load_policy_daily_profit_summary(days=30, policy_engine="gemini"):
     return web_policy_runtime.load_policy_daily_profit_summary(
         base_dir=BASE_DIR,
@@ -592,10 +583,6 @@ def load_policy_daily_profit_summary(days=30, policy_engine="gemini"):
     )
 
 
-def load_gemini_daily_profit_summary(days=30):
-    return load_policy_daily_profit_summary(days=days, policy_engine="gemini")
-
-
 def load_policy_run_ticket_rows(run_id, policy_engine="gemini"):
     return web_policy_runtime.load_policy_run_ticket_rows(
         base_dir=BASE_DIR,
@@ -603,12 +590,6 @@ def load_policy_run_ticket_rows(run_id, policy_engine="gemini"):
         policy_engine=policy_engine,
         load_run_tickets=load_run_tickets,
     )
-
-
-def load_gemini_run_ticket_rows(run_id):
-    return load_policy_run_ticket_rows(run_id, policy_engine="gemini")
-
-
 def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output, policy_engine=""):
     return web_policy_runtime.build_llm_buy_output(
         summary_before,
@@ -618,10 +599,6 @@ def build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_wa
         script_output,
         policy_engine,
     )
-
-
-def build_gemini_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output):
-    return build_llm_buy_output(summary_before, refresh_ok, refresh_message, refresh_warnings, script_output, "gemini")
 
 
 
@@ -1046,18 +1023,12 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
                 "kelly_f": 0.0,
                 "score": round(float(candidate.get("score", 0.0) or 0.0), 6),
                 "stake_yen": stake_yen,
-                "notes": "policy_pool=shared;policy={buy_style};decision={decision};construction={construction};reasons={reasons}".format(
-                    buy_style=str(output_dict.get("buy_style", "") or ""),
+                "notes": "policy_pool=shared;decision={decision};reasons={reasons}".format(
                     decision=str(output_dict.get("bet_decision", "") or ""),
-                    construction=str(output_dict.get("strategy_mode", "") or ""),
                     reasons=",".join(str(x) for x in list(output_dict.get("reason_codes", []) or [])),
                 ),
-                "strategy_text_ja": str(output_dict.get("strategy_text_ja", "") or ""),
-                "bet_tendency_ja": str(output_dict.get("bet_tendency_ja", "") or ""),
                 "policy_engine": policy_engine,
-                "policy_buy_style": str(output_dict.get("buy_style", "") or ""),
                 "policy_bet_decision": str(output_dict.get("bet_decision", "") or ""),
-                "policy_construction_style": str(output_dict.get("strategy_mode", "") or ""),
             }
         )
     return tickets
@@ -1179,12 +1150,6 @@ def load_policy_payloads(scope_key, run_id, run_row=None):
         load_json_file=load_json_file,
         normalize_policy_engine=normalize_policy_engine,
     )
-
-
-def load_gemini_policy_payload(scope_key, run_id, run_row=None):
-    return load_policy_payload(scope_key, run_id, run_row)
-
-
 def _policy_chip_row(label, values, tone=""):
     return web_policy_html._policy_chip_row(label, values, tone=tone)
 
@@ -1203,12 +1168,6 @@ def _policy_ticket_html(rows):
 
 def build_policy_html(payload):
     return web_policy_html.build_policy_html(payload, to_float=to_float)
-
-
-def build_gemini_policy_html(payload):
-    return web_policy_html.build_gemini_policy_html(payload, to_float=to_float)
-
-
 def build_policy_workspace_html(payloads):
     return web_policy_html.build_policy_workspace_html(payloads, to_float=to_float)
 
@@ -1235,15 +1194,9 @@ def page_template(
     top5_text="",
     top5_table_html="",
     mark_table_html="",
-    mark_note_text="",
     llm_battle_html="",
-    llm_note_text="",
     llm_compare_html="",
     gemini_policy_html="",
-    daily_report_html="",
-    daily_report_text="",
-    weekly_report_html="",
-    weekly_report_text="",
     summary_table_html="",
     stats_block="",
     default_scope="central_dirt",
@@ -1263,15 +1216,9 @@ def page_template(
         top5_text=top5_text,
         top5_table_html=top5_table_html,
         mark_table_html=mark_table_html,
-        mark_note_text=mark_note_text,
         llm_battle_html=llm_battle_html,
-        llm_note_text=llm_note_text,
         llm_compare_html=llm_compare_html,
         gemini_policy_html=gemini_policy_html,
-        daily_report_html=daily_report_html,
-        daily_report_text=daily_report_text,
-        weekly_report_html=weekly_report_html,
-        weekly_report_text=weekly_report_text,
         summary_table_html=summary_table_html,
         stats_block=stats_block,
         default_scope=default_scope,
@@ -1317,15 +1264,12 @@ def render_page(
         load_ability_marks_table=load_ability_marks_table,
         load_mark_recommendation_table=load_mark_recommendation_table,
         load_text_file=load_text_file,
-        build_mark_note_text=build_mark_note_text,
         load_prediction_summary=load_prediction_summary,
         load_bet_engine_v3_cfg_summary=load_bet_engine_v3_cfg_summary,
         load_policy_payloads=load_policy_payloads,
         load_policy_run_ticket_rows=load_policy_run_ticket_rows,
         build_policy_workspace_html=build_policy_workspace_html,
         build_llm_battle_bundle=_build_llm_battle_bundle,
-        build_llm_daily_report_bundle=_build_llm_daily_report_bundle,
-        build_llm_weekly_report_bundle=_build_llm_weekly_report_bundle,
         load_actual_result_map=_load_actual_result_map,
         normalize_policy_engine=normalize_policy_engine,
         resolve_policy_model=resolve_policy_model,
@@ -1583,7 +1527,6 @@ def _has_llm_policy_assets(run_row):
     return bool(
         _safe_text(row.get("gemini_policy_path"))
         or _safe_text(row.get("deepseek_policy_path"))
-        or _safe_text(row.get("siliconflow_policy_path"))
         or _safe_text(row.get("openai_policy_path"))
         or _safe_text(row.get("grok_policy_path"))
     )
@@ -1842,45 +1785,6 @@ def _build_llm_battle_bundle(scope_key, run_id, run_row, payloads, actual_result
         format_triplet_text=_format_triplet_text,
     )
 
-def _build_llm_daily_report_bundle(scope_key, current_run_row, actual_result_map):
-    return report_bundles.build_llm_daily_report_bundle(
-        scope_key,
-        current_run_row,
-        actual_result_map,
-        load_actual_result_map=_load_actual_result_map,
-        load_combined_llm_report_runs=_load_combined_llm_report_runs,
-        load_policy_payloads=load_policy_payloads,
-        normalize_policy_engine=normalize_policy_engine,
-        actual_result_snapshot=_actual_result_snapshot,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        summarize_ticket_rows=_summarize_ticket_rows,
-        marks_result_triplet=_marks_result_triplet,
-        format_triplet_text=_format_triplet_text,
-        ratio_text=_ratio_text,
-        percent_text_from_ratio=_percent_text_from_ratio,
-        build_table_html=build_table_html,
-    )
-
-def _build_llm_weekly_report_bundle(scope_key, current_run_row, actual_result_map):
-    return report_bundles.build_llm_weekly_report_bundle(
-        scope_key,
-        current_run_row,
-        actual_result_map,
-        load_actual_result_map=_load_actual_result_map,
-        load_combined_llm_report_runs=_load_combined_llm_report_runs,
-        load_policy_payloads=load_policy_payloads,
-        normalize_policy_engine=normalize_policy_engine,
-        actual_result_snapshot=_actual_result_snapshot,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        summarize_ticket_rows=_summarize_ticket_rows,
-        marks_result_triplet=_marks_result_triplet,
-        format_triplet_text=_format_triplet_text,
-        percent_text_from_ratio=_percent_text_from_ratio,
-        parse_run_date=_parse_run_date,
-        build_table_html=build_table_html,
-    )
-
-
 def _jst_today_text():
     return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
 
@@ -1895,59 +1799,28 @@ def _normalize_report_date_text(date_text=""):
     if parsed:
         return parsed.strftime("%Y-%m-%d")
     return _jst_today_text()
-
-
-def _llm_today_scope_keys(scope_key=""):
-    scope_norm = normalize_scope_key(scope_key)
-    if scope_norm:
-        return [scope_norm]
-    return list(LLM_REPORT_SCOPE_KEYS)
-
-
-def _llm_today_page_context():
-    return {
-        "_normalize_report_date_text": _normalize_report_date_text,
-        "normalize_scope_key": normalize_scope_key,
-        "_llm_today_scope_keys": _llm_today_scope_keys,
-        "_load_actual_result_map": _load_actual_result_map,
-        "_load_combined_llm_report_runs": _load_combined_llm_report_runs,
-        "_report_scope_key_for_row": _report_scope_key_for_row,
-        "_run_date_key": _run_date_key,
-        "_safe_text": _safe_text,
-        "LLM_BATTLE_LABELS": LLM_BATTLE_LABELS,
-        "LLM_BATTLE_ORDER": LLM_BATTLE_ORDER,
-        "LLM_REPORT_SCOPE_KEYS": LLM_REPORT_SCOPE_KEYS,
-        "load_policy_payloads": load_policy_payloads,
-        "normalize_policy_engine": normalize_policy_engine,
-        "_actual_result_snapshot": _actual_result_snapshot,
-        "_policy_primary_output": _policy_primary_output,
-        "_policy_marks_map": _policy_marks_map,
-        "_payload_run_id": _payload_run_id,
-        "load_policy_run_ticket_rows": load_policy_run_ticket_rows,
-        "_policy_primary_budget": _policy_primary_budget,
-        "_summarize_ticket_rows": _summarize_ticket_rows,
-        "_llm_today_status_meta": _llm_today_status_meta,
-        "_format_ticket_plan_text": _format_ticket_plan_text,
-        "_format_marks_text": _format_marks_text,
-        "_format_triplet_text": _format_triplet_text,
-        "_marks_result_triplet": _marks_result_triplet,
-        "_build_public_share_text": _build_public_share_text,
-        "_format_race_label": _format_race_label,
-        "_scope_display_name": _scope_display_name,
-        "_format_jp_date_text": _format_jp_date_text,
-        "_format_yen_text": _format_yen_text,
-        "_format_percent_text": _format_percent_text,
-        "_resolve_llm_today_target_date": _resolve_llm_today_target_date,
-        "_llm_today_status_meta_ja": _llm_today_status_meta_ja,
-        "_format_ticket_plan_text_ja": _format_ticket_plan_text_ja,
-        "_format_result_triplet_text_ja": _format_result_triplet_text_ja,
-        "_format_confidence_text": _format_confidence_text,
-        "_llm_today_scope_label_ja": _llm_today_scope_label_ja,
-    }
-
-
 def _resolve_llm_today_target_date(target_date="", scope_key=""):
-    return web_llm_today.resolve_llm_today_target_date(target_date, scope_key, ctx=_llm_today_page_context())
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    scoped_rows = []
+    available_dates = []
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        scoped_rows.append(row)
+        date_key = _run_date_key(row)
+        if date_key:
+            available_dates.append(date_key)
+    available_dates = sorted(set(available_dates), reverse=True)
+    if target_date and target_date in available_dates:
+        return target_date, "", scoped_rows
+    if available_dates:
+        fallback_date = available_dates[0]
+        if target_date and target_date != fallback_date:
+            return fallback_date, f"{target_date} 不存在，已切换到最近日期 {fallback_date}", scoped_rows
+        return fallback_date, "", scoped_rows
+    return target_date, "", scoped_rows
 
 
 def _llm_today_status_meta(ticket_summary, actual_names):
@@ -1978,34 +1851,6 @@ def _format_percent_text(value):
         return f"{float(value) * 100:.1f}%"
     except (TypeError, ValueError):
         return "-"
-
-
-def build_llm_today_page(date_text="", scope_key=""):
-    return web_llm_today.build_llm_today_page(date_text, scope_key, ctx=_llm_today_page_context())
-
-
-def _llm_today_scope_label_ja(scope_key):
-    return web_llm_today.llm_today_scope_label_ja(scope_key)
-
-
-def _llm_today_status_meta_ja(ticket_summary, actual_names):
-    return web_llm_today.llm_today_status_meta_ja(ticket_summary, actual_names, safe_text=_safe_text)
-
-
-def _format_yen_text_ja(value):
-    return web_llm_today.format_yen_text_ja(value)
-
-
-def _format_ticket_plan_text_ja(ticket_rows):
-    return web_llm_today.format_ticket_plan_text_ja(ticket_rows, safe_text=_safe_text)
-
-
-def _format_result_triplet_text_ja(actual_names):
-    return web_llm_today.format_result_triplet_text_ja(actual_names, safe_text=_safe_text)
-
-
-def build_llm_today_page_clean(date_text="", scope_key=""):
-    return web_llm_today.build_llm_today_page_clean(date_text, scope_key, ctx=_llm_today_page_context())
 
 
 def _public_scope_label_ja(scope_key):
@@ -2900,39 +2745,6 @@ def _resolve_console_run_state(scope_key="", selected_run_id="", summary_run_id=
     )
 
 
-def _load_note_workspace(scope_key="", run_id="", run_row=None):
-    return web_admin_console.load_note_workspace(
-        scope_key=scope_key,
-        run_id=run_id,
-        run_row=run_row,
-        load_bet_engine_v3_cfg_summary=load_bet_engine_v3_cfg_summary,
-        load_actual_result_map=_load_actual_result_map,
-        load_policy_payloads=load_policy_payloads,
-        normalize_policy_engine=normalize_policy_engine,
-        load_policy_bankroll_summary=load_policy_bankroll_summary,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        build_llm_battle_bundle=_build_llm_battle_bundle,
-        build_llm_daily_report_bundle=_build_llm_daily_report_bundle,
-        build_llm_weekly_report_bundle=_build_llm_weekly_report_bundle,
-        resolve_predictor_paths=resolve_predictor_paths,
-        load_ability_marks_table=load_ability_marks_table,
-        load_mark_recommendation_table=load_mark_recommendation_table,
-        load_text_file=load_text_file,
-        build_mark_note_text=build_mark_note_text,
-    )
-
-
-def build_note_workspace_page(scope_key="", run_id="", admin_token=""):
-    return web_admin_console.build_note_workspace_page(
-        scope_key=scope_key,
-        run_id=run_id,
-        admin_token=admin_token,
-        resolve_console_run_state=_resolve_console_run_state,
-        load_note_workspace=_load_note_workspace,
-        prefix_public_html_routes=_prefix_public_html_routes,
-    )
-
-
 def _target_surface_from_scope(scope_key):
     return "turf" if str(scope_key or "").strip() == "central_turf" else "dirt"
 
@@ -2993,14 +2805,6 @@ def console_index(token: str = "", show_settled: str = ""):
         return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
     show_settled_flag = str(show_settled or "").strip() in ("1", "true", "yes", "on")
     return render_console_page(admin_token=token, show_settled=show_settled_flag)
-
-
-@app.get(f"{CONSOLE_BASE_PATH}/note", response_class=HTMLResponse)
-@app.get("/console/note", response_class=HTMLResponse)
-def console_note(scope_key: str = "central_dirt", run_id: str = "", token: str = ""):
-    if _admin_token_enabled() and not _admin_token_valid(token):
-        return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
-    return build_note_workspace_page(scope_key=scope_key, run_id=run_id, admin_token=token)
 
 
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
@@ -3378,24 +3182,6 @@ def run_llm_buy(
         normalize_policy_engine=normalize_policy_engine,
         execute_policy_buy=execute_policy_buy,
     )
-
-@app.post("/run_gemini_buy", response_class=HTMLResponse)
-def run_gemini_buy(
-    token: str = Form(""),
-    scope_key: str = Form(""),
-    run_id: str = Form(""),
-    policy_model: str = Form(""),
-    refresh_odds: str = Form("1"),
-):
-    return run_llm_buy(
-        token=token,
-        scope_key=scope_key,
-        run_id=run_id,
-        policy_engine="gemini",
-        policy_model=policy_model,
-        refresh_odds=refresh_odds,
-    )
-
 
 @app.post("/run_all_llm_buy", response_class=HTMLResponse)
 def run_all_llm_buy(

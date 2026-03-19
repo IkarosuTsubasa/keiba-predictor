@@ -147,13 +147,13 @@ def main():
 
     print("OK: smoke_policy_runtime passed")
     print(
-        "gemini_cache={g} deepseek_cache={s} grok_cache={k} gemini_style={gs} deepseek_style={ss} grok_style={ks}".format(
+        "gemini_cache={g} deepseek_cache={s} grok_cache={k} gemini_construction={gs} deepseek_construction={ss} grok_construction={ks}".format(
             g=gemini_key[:12],
             s=deepseek_key[:12],
             k=grok_key[:12],
-            gs=str(gemini_output.buy_style),
-            ss=str(deepseek_output.buy_style),
-            ks=str(grok_output.buy_style),
+            gs=str(gemini_output.construction_style),
+            ss=str(deepseek_output.construction_style),
+            ks=str(grok_output.construction_style),
         )
     )
 

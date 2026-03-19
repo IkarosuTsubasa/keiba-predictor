@@ -50,18 +50,12 @@ def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_
                 "kelly_f": 0.0,
                 "score": round(float(candidate.get("score", 0.0) or 0.0), 6),
                 "stake_yen": stake_yen,
-                "notes": "policy_pool=shared;policy={buy_style};decision={decision};construction={construction};reasons={reasons}".format(
-                    buy_style=str(output_dict.get("buy_style", "") or ""),
+                "notes": "policy_pool=shared;decision={decision};reasons={reasons}".format(
                     decision=str(output_dict.get("bet_decision", "") or ""),
-                    construction=str(output_dict.get("strategy_mode", "") or ""),
                     reasons=",".join(str(x) for x in list(output_dict.get("reason_codes", []) or [])),
                 ),
-                "strategy_text_ja": str(output_dict.get("strategy_text_ja", "") or ""),
-                "bet_tendency_ja": str(output_dict.get("bet_tendency_ja", "") or ""),
                 "policy_engine": policy_engine,
-                "policy_buy_style": str(output_dict.get("buy_style", "") or ""),
                 "policy_bet_decision": str(output_dict.get("bet_decision", "") or ""),
-                "policy_construction_style": str(output_dict.get("strategy_mode", "") or ""),
             }
         )
     return tickets
@@ -91,8 +85,6 @@ def append_output_warning(output_dict, code):
 def set_output_no_bet(output_dict):
     output_dict["bet_decision"] = "no_bet"
     output_dict["participation_level"] = "no_bet"
-    output_dict["buy_style"] = "no_bet"
-    output_dict["strategy_mode"] = "no_bet"
     output_dict["enabled_bet_types"] = []
     output_dict["key_horses"] = []
     output_dict["secondary_horses"] = []
@@ -245,11 +237,10 @@ def execute_policy_buy(
         f"[llm_buy] run_id={run_id} engine={engine} model={resolved_model}",
         f"[policy_save] path={path}" if path else "[policy_save] path=",
         (
-            "[tickets] count={count} amount_yen={amount} decision={decision} buy_style={buy_style}".format(
+            "[tickets] count={count} amount_yen={amount} decision={decision}".format(
                 count=len(tickets),
                 amount=sum(int(ticket.get("amount_yen", 0) or 0) for ticket in tickets),
                 decision=str(output_dict.get("bet_decision", "") or ""),
-                buy_style=str(output_dict.get("buy_style", "") or ""),
             )
         ),
         (

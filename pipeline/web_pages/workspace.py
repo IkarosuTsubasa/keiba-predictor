@@ -29,15 +29,12 @@ def render_workspace_page(
     load_ability_marks_table,
     load_mark_recommendation_table,
     load_text_file,
-    build_mark_note_text,
     load_prediction_summary,
     load_bet_engine_v3_cfg_summary,
     load_policy_payloads,
     load_policy_run_ticket_rows,
     build_policy_workspace_html,
     build_llm_battle_bundle,
-    build_llm_daily_report_bundle,
-    build_llm_weekly_report_bundle,
     load_actual_result_map,
     normalize_policy_engine,
     resolve_policy_model,
@@ -92,20 +89,13 @@ def render_workspace_page(
     view_run_options = build_run_options(scope_norm or scope_key, view_selected_run_id)
     top5_table_html = ""
     mark_table_html = ""
-    mark_note_text = ""
     llm_battle_html = ""
-    llm_note_text = ""
     gemini_policy_html = ""
-    daily_report_html = ""
-    daily_report_text = ""
-    weekly_report_html = ""
-    weekly_report_text = ""
     summary_table_html = ""
     if run_id:
         predictor_top_sections = []
         predictor_mark_sections = []
         predictor_summary_sections = []
-        predictor_note_texts = []
         bet_engine_v3_summary = load_bet_engine_v3_cfg_summary(scope_norm or scope_key, run_id)
         policy_payloads = []
         actual_result_map = load_actual_result_map(scope_norm or scope_key)
@@ -140,13 +130,6 @@ def render_workspace_page(
             actual_result_map,
         )
         llm_battle_html = battle_bundle.get("html", "")
-        llm_note_text = battle_bundle.get("note_text", "")
-        daily_bundle = build_llm_daily_report_bundle(scope_norm or scope_key, run_row, actual_result_map)
-        daily_report_html = daily_bundle.get("html", "")
-        daily_report_text = daily_bundle.get("text", "")
-        weekly_bundle = build_llm_weekly_report_bundle(scope_norm or scope_key, run_row, actual_result_map)
-        weekly_report_html = weekly_bundle.get("html", "")
-        weekly_report_text = weekly_bundle.get("text", "")
         for spec, pred_path in resolve_predictor_paths(scope_norm or scope_key, run_id, run_row):
             if not pred_path or not pred_path.exists():
                 continue
@@ -169,16 +152,6 @@ def render_workspace_page(
                     predictor_mark_sections.append(
                         build_table_html(mark_rows, mark_cols, f"Integrated Marks - {spec['label']}")
                     )
-            pred_csv_text = load_text_file(pred_path)
-            note_text = build_mark_note_text(
-                ability_rows if ability_rows else [],
-                pred_path.name if pred_path else "",
-                pred_csv_text,
-                bet_engine_v3_summary=bet_engine_v3_summary,
-                gemini_policy_payload=primary_policy_payload,
-            ).strip()
-            if note_text:
-                predictor_note_texts.append(f"[{spec['label']}]\n{note_text}")
             summary_rows = load_prediction_summary(scope_norm or scope_key, run_id, predictor_run_row)
             if summary_rows:
                 predictor_summary_sections.append(
@@ -188,8 +161,6 @@ def render_workspace_page(
             top5_table_html = "".join(predictor_top_sections)
         if predictor_mark_sections:
             mark_table_html = "".join(predictor_mark_sections)
-        if predictor_note_texts:
-            mark_note_text = "\n\n".join(predictor_note_texts)
         if predictor_summary_sections:
             summary_table_html = "".join(predictor_summary_sections)
     return prefix_public_html_routes(
@@ -203,15 +174,9 @@ def render_workspace_page(
             top5_text=top5_text if not top5_table_html else "",
             top5_table_html=top5_table_html,
             mark_table_html=mark_table_html,
-            mark_note_text=mark_note_text,
             llm_battle_html=llm_battle_html,
-            llm_note_text=llm_note_text,
             llm_compare_html=llm_compare_html,
             gemini_policy_html=gemini_policy_html,
-            daily_report_html=daily_report_html,
-            daily_report_text=daily_report_text,
-            weekly_report_html=weekly_report_html,
-            weekly_report_text=weekly_report_text,
             summary_table_html=summary_table_html,
             stats_block=stats_block,
             default_scope=default_scope,

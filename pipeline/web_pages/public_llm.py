@@ -291,8 +291,6 @@ def build_public_board_payload(
             status_label, status_tone = public_status_meta_ja(ticket_summary, actual_names)
             result_triplet = format_triplet_text(marks_result_triplet(marks_map, actual_horse_nos))
             result_triplet_text = result_triplet if any(safe_text(x) for x in actual_horse_nos) else "结果未确定"
-            strategy_text = safe_text(output.get("strategy_text_ja")) or safe_text(output.get("strategy_mode")) or "策略信息缺失"
-            tendency_text = safe_text(output.get("bet_tendency_ja")) or safe_text(output.get("buy_style")) or "买目倾向缺失"
             decision_text = safe_text(output.get("bet_decision")) or "-"
             confidence_value = ai_summary.get("confidence_score", "")
             confidence_text = format_confidence_text(confidence_value)
@@ -318,8 +316,6 @@ def build_public_board_payload(
                     "status_label": status_label,
                     "status_tone": status_tone,
                     "ticket_plan_text": public_ticket_plan_text(ticket_rows),
-                    "strategy_text": strategy_text,
-                    "tendency_text": tendency_text,
                     "marks_text": format_marks_text(marks_map),
                     "result_triplet_text": result_triplet_text,
                     "ticket_count": int(ticket_summary.get("ticket_count", 0) or 0),

@@ -14,7 +14,6 @@ def load_policy_payload(
         ("policy_path", "policy"),
         ("gemini_policy_path", "gemini_policy"),
         ("deepseek_policy_path", "deepseek_policy"),
-        ("siliconflow_policy_path", "siliconflow_policy"),
         ("openai_policy_path", "openai_policy"),
         ("grok_policy_path", "grok_policy"),
     ]
@@ -47,7 +46,6 @@ def load_policy_payloads(
     candidates = [
         ("gemini", "gemini_policy_path", "gemini_policy"),
         ("deepseek", "deepseek_policy_path", "deepseek_policy"),
-        ("deepseek", "siliconflow_policy_path", "siliconflow_policy"),
         ("openai", "openai_policy_path", "openai_policy"),
         ("grok", "grok_policy_path", "grok_policy"),
         ("", "policy_path", "policy"),
@@ -187,13 +185,12 @@ def build_policy_html(payload, *, to_float):
         header = "[shared]" if is_shared else f"[{budget}]"
         decision = str(output.get("bet_decision", "") or "")
         participation = str(output.get("participation_level", "") or "")
-        buy_style = str(output.get("buy_style", "") or "")
         portfolio = dict(item.get("portfolio", {}) or {})
         portfolio_before = dict(portfolio.get("before", {}) or {})
         portfolio_after = dict(portfolio.get("after", {}) or {})
         summary_tags = "".join(
             f'<span class="policy-meta-tag">{html.escape(tag)}</span>'
-            for tag in [header, decision, participation, buy_style]
+            for tag in [header, decision, participation]
             if str(tag or "").strip()
         )
         bankroll_cards = ""
@@ -231,41 +228,24 @@ def build_policy_html(payload, *, to_float):
         )
         mark_block = _policy_mark_html(list(output.get("marks", []) or []))
         ticket_block = _policy_ticket_html(list(item.get("tickets", []) or []))
-        strategy_text = str(output.get("strategy_text_ja", "") or "").strip()
-        tendency = str(output.get("bet_tendency_ja", "") or "").strip()
         text_cards = ""
         fallback_reason = str(meta.get("fallback_reason", "") or "").strip()
         error_detail = str(meta.get("error_detail", "") or "").strip()
-        if strategy_text or tendency or fallback_reason or error_detail:
-            if fallback_reason:
-                error_lines = [fallback_reason]
-                if error_detail:
-                    error_lines.append(error_detail)
-                for warn in list(output.get("warnings", []) or []):
-                    text = str(warn or "").strip()
-                    if text and text not in error_lines:
-                        error_lines.append(text)
-                error_html = (
-                    '<article class="policy-text-card policy-text-card--primary">'
-                    '<div class="policy-label">Error</div>'
-                    f"<p>{html.escape(' | '.join(error_lines))}</p>"
-                    "</article>"
-                )
-                text_cards = f'<div class="policy-text-grid">{error_html}</div>'
-            else:
-                strategy_html = (
-                    '<article class="policy-text-card policy-text-card--primary">'
-                    '<div class="policy-label">Strategy</div>'
-                    f"<p>{html.escape(strategy_text or 'No strategy text.')}</p>"
-                    "</article>"
-                )
-                tendency_html = (
-                    '<article class="policy-text-card">'
-                    '<div class="policy-label">Bet Tendency</div>'
-                    f"<p>{html.escape(tendency or 'No tendency text.')}</p>"
-                    "</article>"
-                )
-                text_cards = f'<div class="policy-text-grid">{strategy_html}{tendency_html}</div>'
+        if fallback_reason or error_detail:
+            error_lines = [fallback_reason] if fallback_reason else []
+            if error_detail:
+                error_lines.append(error_detail)
+            for warn in list(output.get("warnings", []) or []):
+                text = str(warn or "").strip()
+                if text and text not in error_lines:
+                    error_lines.append(text)
+            error_html = (
+                '<article class="policy-text-card policy-text-card--primary">'
+                '<div class="policy-label">Error</div>'
+                f"<p>{html.escape(' | '.join(error_lines))}</p>"
+                "</article>"
+            )
+            text_cards = f'<div class="policy-text-grid">{error_html}</div>'
         detail_rows = []
         detail_rows.append(
             _policy_detail_row(
@@ -277,9 +257,7 @@ def build_policy_html(payload, *, to_float):
         detail_rows.append(
             _policy_detail_row("reason_codes", json.dumps(output.get("reason_codes", []), ensure_ascii=False), code=True)
         )
-        detail_rows.append(_policy_detail_row("buy_style", output.get("buy_style", "")))
         detail_rows.append(_policy_detail_row("bet_decision", output.get("bet_decision", "")))
-        detail_rows.append(_policy_detail_row("strategy_mode", output.get("strategy_mode", "")))
         detail_rows.append(_policy_detail_row("participation_level", output.get("participation_level", "")))
         detail_rows.append(_policy_detail_row("ticket_summary", json.dumps(output.get("ticket_summary", {}), ensure_ascii=False), code=True))
         detail_rows.append(_policy_detail_row("notes", json.dumps(meta, ensure_ascii=False), code=True))
@@ -295,12 +273,6 @@ def build_policy_html(payload, *, to_float):
             "</section>"
         )
     return "".join(budget_sections)
-
-
-def build_gemini_policy_html(payload, *, to_float):
-    return build_policy_html(payload, to_float=to_float)
-
-
 def build_policy_workspace_html(payloads, *, to_float):
     blocks = []
     for payload in list(payloads or []):

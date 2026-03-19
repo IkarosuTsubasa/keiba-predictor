@@ -199,7 +199,6 @@ def has_llm_policy_assets(run_row):
     return bool(
         safe_text(row.get("gemini_policy_path"))
         or safe_text(row.get("deepseek_policy_path"))
-        or safe_text(row.get("siliconflow_policy_path"))
         or safe_text(row.get("openai_policy_path"))
         or safe_text(row.get("grok_policy_path"))
     )

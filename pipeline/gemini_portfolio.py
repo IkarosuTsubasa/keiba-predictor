@@ -40,8 +40,6 @@ def _shared_dir(base_dir):
 def normalize_policy_engine(policy_engine="gemini"):
     text = str(policy_engine or "").strip().lower()
     text = re.sub(r"[^a-z0-9_]+", "_", text).strip("_")
-    if text == "siliconflow":
-        text = "deepseek"
     return text or DEFAULT_POLICY_ENGINE
 
 

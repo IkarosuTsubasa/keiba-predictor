@@ -135,18 +135,6 @@ class PolicyTicketPlan(BaseModel):
 class RacePolicyOutput(BaseModel):
     bet_decision: Literal["bet", "no_bet"]
     participation_level: Literal["no_bet", "small_bet", "normal_bet"]
-    buy_style: Literal["no_bet", "place_only", "place_focus", "balanced", "win_focus", "pair_focus", "conservative"]
-    strategy_mode: Literal[
-        "no_bet",
-        "place_only",
-        "place_focus",
-        "balanced",
-        "win_focus",
-        "pair_focus",
-        "spread",
-        "conservative_single",
-        "small_probe",
-    ]
     enabled_bet_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]] = Field(default_factory=list)
     construction_style: Optional[Literal["single_axis", "pair_spread", "value_hunt", "conservative_single"]] = None
     key_horses: List[str] = Field(default_factory=list)
@@ -154,8 +142,6 @@ class RacePolicyOutput(BaseModel):
     longshot_horses: List[str] = Field(default_factory=list)
     max_ticket_count: int
     risk_tilt: Literal["low", "medium", "high"]
-    strategy_text_ja: str
-    bet_tendency_ja: str
     reason_codes: List[str]
     warnings: Optional[List[str]] = None
     marks: List[PolicyMark] = Field(default_factory=list)
@@ -192,7 +178,6 @@ _LAST_CALL_META = {
     "llm_latency_ms": 0,
     "fallback_reason": "",
     "picked_count": 0,
-    "buy_style": "",
     "requested_budget_yen": 0,
     "requested_race_budget_yen": 0,
     "reused": False,
@@ -397,77 +382,69 @@ def _derive_construction_style(strategy_mode: str, buy_style: str, participation
     return "single_axis"
 
 
-def _render_strategy_text(
+def _infer_internal_policy_style(
+    *,
     bet_decision: str,
     participation_level: str,
-    buy_style: str,
-    strategy_mode: str,
-    has_longshot: bool,
     enabled_bet_types: Optional[List[str]] = None,
+    construction_style: str = "",
 ) -> Dict[str, str]:
-    type_labels = {
-        "win": "単勝",
-        "place": "複勝",
-        "wide": "ワイド",
-        "quinella": "馬連",
-        "exacta": "馬単",
-        "trio": "三連複",
-        "trifecta": "三連単",
-    }
-    ordered_types = []
-    seen_types = set()
-    for value in list(enabled_bet_types or []):
-        text = str(value or "").strip().lower()
-        if (not text) or (text in seen_types):
-            continue
-        seen_types.add(text)
-        ordered_types.append(text)
-    labels = [type_labels.get(item, item) for item in ordered_types]
-    if not labels:
-        labels = ["券種未設定"]
-    if len(labels) == 1:
-        type_text = labels[0]
-    elif len(labels) == 2:
-        type_text = f"{labels[0]}・{labels[1]}"
-    else:
-        type_text = "・".join(labels[:-1]) + f" を中心に、{labels[-1]}も候補に入れる形"
+    decision = str(bet_decision or "").strip().lower() or "no_bet"
+    level = str(participation_level or "").strip().lower() or "no_bet"
+    if decision == "no_bet" or level == "no_bet":
+        return {"buy_style": "no_bet", "strategy_mode": "no_bet"}
 
-    if bet_decision == "no_bet":
-        return {
-            "strategy_text_ja": "優位性が薄く、軽く入る形も作りにくいため、今回は見送りとします。\n券種を絞っても買う根拠が弱く、無理に参加しない判断を優先します。",
-            "bet_tendency_ja": "買い目傾向：見送り",
-        }
-    if participation_level == "small_bet":
-        strategy_text = (
-            "混戦寄りで断定しにくい面はありますが、完全に見送るほどではないと判断しました。\n"
-            f"今回は点数を絞り、{type_text}を中心に小さく参加する方針です。"
-        )
-    elif buy_style == "win_focus":
-        strategy_text = (
-            "上位の軸は比較的見えており、通常参加できるレースと見ています。\n"
-            f"今回は{type_text}を主軸に、期待値と配分のバランスを取りながら組み立てます。"
-        )
-    elif strategy_mode in ("pair_focus", "spread"):
-        strategy_text = (
-            "単独の軸だけでなく、組み合わせや並びまで含めて妙味を取りにいけるレースと見ています。\n"
-            f"今回は{type_text}を中心に、候補の中から合理的な組み合わせを選ぶ方針です。"
-        )
+    enabled = []
+    seen = set()
+    for item in list(enabled_bet_types or []):
+        text = str(item or "").strip().lower()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        enabled.append(text)
+
+    multi_leg_types = {"wide", "quinella", "exacta", "trio", "trifecta"}
+    top_type = enabled[0] if enabled else ""
+    only_place = enabled == ["place"]
+    only_win = enabled == ["win"]
+    combo_only = bool(enabled) and all(item in multi_leg_types for item in enabled)
+
+    if only_place and level == "small_bet":
+        buy_style = "place_only"
+        strategy_mode = "place_only"
+    elif only_win:
+        buy_style = "win_focus"
+        strategy_mode = "win_focus"
+    elif combo_only or top_type in multi_leg_types:
+        buy_style = "pair_focus"
+        strategy_mode = "pair_focus" if level == "normal_bet" else "small_probe"
+    elif level == "small_bet":
+        buy_style = "conservative"
+        strategy_mode = "small_probe"
+    elif "place" in enabled and len(enabled) <= 2 and "win" not in enabled and not combo_only:
+        buy_style = "place_focus"
+        strategy_mode = "place_focus"
     else:
-        strategy_text = (
-            "上位の信頼は極端ではありませんが、参加の根拠は十分にあると判断しました。\n"
-            f"今回は{type_text}を中心に、無理のない範囲で期待値を取りにいく方針です。"
-        )
-    if has_longshot:
-        strategy_text += "\n高配当側に妙味がある候補もあるため、本線を崩さない範囲で補助的に評価します。"
-    return {
-        "strategy_text_ja": strategy_text,
-        "bet_tendency_ja": f"買い目傾向：{type_text}",
-    }
+        buy_style = "balanced"
+        strategy_mode = "balanced"
+
+    construction = str(construction_style or "").strip().lower()
+    if construction == "pair_spread":
+        buy_style = "pair_focus"
+        strategy_mode = "pair_focus" if level == "normal_bet" else "small_probe"
+    elif construction == "conservative_single":
+        if only_place:
+            buy_style = "place_only" if level == "small_bet" else "place_focus"
+            strategy_mode = "place_only" if level == "small_bet" else "place_focus"
+        else:
+            buy_style = "conservative"
+            strategy_mode = "small_probe" if level != "normal_bet" else "balanced"
+
+    return {"buy_style": buy_style, "strategy_mode": strategy_mode}
 
 
 def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = "") -> RacePolicyOutput:
     ai = input_obj.ai
-    text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
     warnings: List[str] = []
     if fallback_reason:
         warnings.append(f"FALLBACK_{str(fallback_reason).upper()}")
@@ -476,8 +453,6 @@ def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = ""
         {
             "bet_decision": "no_bet",
             "participation_level": "no_bet",
-            "buy_style": "no_bet",
-            "strategy_mode": "no_bet",
             "enabled_bet_types": [],
             "construction_style": "conservative_single",
             "key_horses": [],
@@ -487,8 +462,6 @@ def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = ""
             "focus_points": [{"type": "concept", "value": "fallback_no_bet"}],
             "max_ticket_count": 0,
             "risk_tilt": "low",
-            "strategy_text_ja": text["strategy_text_ja"],
-            "bet_tendency_ja": text["bet_tendency_ja"],
             "reason_codes": _reason_codes_for(
                 ai,
                 int(input_obj.field_size or 0),
@@ -532,7 +505,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     third_key = str(predictions[2].horse_no) if len(predictions) >= 3 else ""
 
     if not candidates:
-        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
         warnings = ["NO_POSITIVE_EV"] if not has_value else []
         if float(ai.stability_score) < 0.45:
             warnings.append("HIGH_UNCERTAINTY")
@@ -543,8 +515,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             {
                 "bet_decision": "no_bet",
                 "participation_level": "no_bet",
-                "buy_style": "no_bet",
-                "strategy_mode": "no_bet",
                 "enabled_bet_types": [],
                 "construction_style": "conservative_single",
                 "key_horses": [],
@@ -552,8 +522,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                 "longshot_horses": [],
                 "max_ticket_count": 0,
                 "risk_tilt": "low",
-                "strategy_text_ja": text["strategy_text_ja"],
-                "bet_tendency_ja": text["bet_tendency_ja"],
                 "reason_codes": _reason_codes_for(
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
@@ -565,7 +533,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
 
     no_bet_case = (not has_value) and float(ai.confidence_score) < 0.34 and float(ai.stability_score) < 0.32
     if no_bet_case:
-        text = _render_strategy_text("no_bet", "no_bet", "no_bet", "no_bet", False, [])
         warnings = ["NO_POSITIVE_EV"]
         if fallback_reason:
             warnings.append(f"FALLBACK_{str(fallback_reason).upper()}")
@@ -574,8 +541,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             {
                 "bet_decision": "no_bet",
                 "participation_level": "no_bet",
-                "buy_style": "no_bet",
-                "strategy_mode": "no_bet",
                 "enabled_bet_types": [],
                 "construction_style": "conservative_single",
                 "key_horses": [],
@@ -583,8 +548,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                 "longshot_horses": [],
                 "max_ticket_count": 0,
                 "risk_tilt": "low",
-                "strategy_text_ja": text["strategy_text_ja"],
-                "bet_tendency_ja": text["bet_tendency_ja"],
                 "reason_codes": _reason_codes_for(
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
@@ -661,14 +624,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             risk_tilt = "medium"
 
     construction_style = _derive_construction_style(strategy_mode, buy_style, participation_level)
-    text = _render_strategy_text(
-        "bet",
-        participation_level,
-        buy_style,
-        strategy_mode,
-        bool(longshot_horses),
-        enabled,
-    )
     warnings: List[str] = []
     if float(ai.stability_score) < 0.45:
         warnings.append("HIGH_UNCERTAINTY")
@@ -687,8 +642,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
         {
             "bet_decision": "bet",
             "participation_level": participation_level,
-            "buy_style": buy_style,
-            "strategy_mode": strategy_mode,
             "enabled_bet_types": enabled,
             "construction_style": construction_style,
             "key_horses": key_horses,
@@ -699,8 +652,6 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                 max(1, int(constraints.max_tickets_per_race or max_ticket_count)),
             ),
             "risk_tilt": risk_tilt,
-            "strategy_text_ja": text["strategy_text_ja"],
-            "bet_tendency_ja": text["bet_tendency_ja"],
             "reason_codes": _reason_codes_for(
                 ai,
                 int(input_obj.field_size or 0),
@@ -779,21 +730,17 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- ticket_plan の合計金額は race_budget_yen 以下\n"
         "- stake_yen は 100円単位\n"
         "- bet_decision が bet なら ticket_plan を必ず記入\n"
-        "- JSON のみ出力。説明は strategy_text_ja / bet_tendency_ja に収める\n\n"
+        "- JSON のみ出力\n\n"
 
         "== 出力フィールド説明 ==\n"
         "- bet_decision: bet（購入）/ no_bet（見送り）\n"
         "- participation_level: no_bet / small_bet / normal_bet\n"
-        "- buy_style: no_bet / place_only / place_focus / balanced / win_focus / pair_focus / conservative\n"
-        "- strategy_mode: no_bet / place_only / place_focus / balanced / win_focus / pair_focus / spread / conservative_single / small_probe\n"
         "- enabled_bet_types: 今回使う券種リスト（odds_full に存在するもののみ）\n"
         "- key_horses: 注目馬 / secondary_horses: 次点馬 / longshot_horses: 穴馬（全て任意、無理に埋めなくてよい）\n"
         "- marks: ◎○▲△☆（必要な分だけ）\n"
         "- focus_points: type=horse/pair/bet_type/concept, value=内容\n"
         "- max_ticket_count: 購入点数\n"
         "- risk_tilt: low / medium / high\n"
-        "- strategy_text_ja: 判断理由（2〜4文、日本語）\n"
-        "- bet_tendency_ja: 買い目傾向を1行で\n"
         "- reason_codes: MIXED_FIELD / NORMAL_FIELD / STRONG_FAVORITE / LOW_CONFIDENCE / LOW_STABILITY / VALUE_PRESENT / NO_VALUE / HIGH_ODDS_ONE_SHOT / PLACE_FOCUS / PAIR_FOCUS / WIN_TILT / CONSERVATIVE / SMALL_BET / NO_BET から該当するものを選択\n"
         "- ticket_plan: [{\"bet_type\": \"券種\", \"legs\": [\"馬番\",...], \"stake_yen\": 金額}] ← これが実際の購入指示\n"
         "- pick_ids: 補助情報（空でも可）\n"
@@ -968,8 +915,14 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()
     bet_decision = str(output.bet_decision or "no_bet").strip().lower()
-    buy_style = str(output.buy_style or "no_bet").strip().lower()
-    strategy_mode = str(output.strategy_mode or "no_bet").strip().lower()
+    derived_style = _infer_internal_policy_style(
+        bet_decision=bet_decision,
+        participation_level=participation_level,
+        enabled_bet_types=enabled_bet_types,
+        construction_style=str(output.construction_style or "").strip(),
+    )
+    buy_style = str(derived_style.get("buy_style") or "no_bet").strip().lower()
+    strategy_mode = str(derived_style.get("strategy_mode") or "no_bet").strip().lower()
     if bet_decision == "bet" and not ticket_plan:
         warnings.append("MISSING_TICKET_PLAN")
     if bet_decision == "no_bet" or buy_style == "no_bet":
@@ -1014,8 +967,6 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
             "longshot_horses": longshot_horses,
             "max_ticket_count": max_ticket_count,
             "risk_tilt": str(output.risk_tilt or "low").strip().lower(),
-            "strategy_text_ja": str(output.strategy_text_ja or "").strip(),
-            "bet_tendency_ja": str(output.bet_tendency_ja or "").strip(),
             "reason_codes": [str(x) for x in list(output.reason_codes or []) if str(x).strip()],
             "warnings": warnings or None,
             "marks": marks,
@@ -1033,7 +984,6 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput) -> None:
         "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
         "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
-        "buy_style": str(output.buy_style or ""),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
         "requested_race_budget_yen": int(meta.get("requested_race_budget_yen", 0) or 0),
         "reused": bool(meta.get("reused", False)),
@@ -1042,14 +992,13 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput) -> None:
     }
     print(
         "[gemini_policy] cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} "
-        "fallback_reason={fallback_reason} picked_count={picked_count} buy_style={buy_style} "
+        "fallback_reason={fallback_reason} picked_count={picked_count} "
         "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
         "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}".format(
             cache_hit=int(_LAST_CALL_META["cache_hit"]),
             llm_latency_ms=_LAST_CALL_META["llm_latency_ms"],
             fallback_reason=_LAST_CALL_META["fallback_reason"],
             picked_count=_LAST_CALL_META["picked_count"],
-            buy_style=_LAST_CALL_META["buy_style"],
             requested_budget_yen=_LAST_CALL_META["requested_budget_yen"],
             requested_race_budget_yen=_LAST_CALL_META["requested_race_budget_yen"],
             reused=int(bool(_LAST_CALL_META["reused"])),

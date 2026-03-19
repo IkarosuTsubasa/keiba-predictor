@@ -46,7 +46,6 @@ _LAST_CALL_META = {
     "fallback_reason": "",
     "error_detail": "",
     "picked_count": 0,
-    "buy_style": "",
     "requested_budget_yen": 0,
     "requested_race_budget_yen": 0,
     "reused": False,
@@ -62,8 +61,6 @@ _GROK_BUCKET = _gemini._TokenBucket(rpm=int(os.environ.get("GROK_POLICY_RPM", "1
 
 def normalize_policy_engine(value: str) -> str:
     engine = str(value or "").strip().lower()
-    if engine == "siliconflow":
-        return "deepseek"
     if engine in ("gemini", "deepseek", "openai", "grok"):
         return engine
     return "none"
@@ -79,7 +76,7 @@ def resolve_policy_model(policy_engine: str, model: str = "", gemini_model_compa
         return compat
     env_model_map = {
         "gemini": ["GEMINI_MODEL", "GEMINI_POLICY_MODEL"],
-        "deepseek": ["DEEPSEEK_POLICY_MODEL", "DEEPSEEK_MODEL", "SILICONFLOW_POLICY_MODEL"],
+        "deepseek": ["DEEPSEEK_POLICY_MODEL", "DEEPSEEK_MODEL"],
         "openai": ["OPENAI_POLICY_MODEL", "OPENAI_MODEL"],
         "grok": ["GROK_POLICY_MODEL", "XAI_MODEL"],
     }
@@ -123,7 +120,6 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
         "error_detail": str(meta.get("error_detail", "") or ""),
         "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
-        "buy_style": str(output.buy_style or ""),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
         "requested_race_budget_yen": int(meta.get("requested_race_budget_yen", 0) or 0),
         "reused": bool(meta.get("reused", False)),
@@ -136,7 +132,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
         "[policy_runtime] engine={policy_engine} model={policy_model} cache_hit={cache_hit} "
         "llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} error_detail={error_detail} "
         "picked_count={picked_count} "
-        "buy_style={buy_style} requested_budget_yen={requested_budget_yen} "
+        "requested_budget_yen={requested_budget_yen} "
         "requested_race_budget_yen={requested_race_budget_yen} reused={reused} "
         "source_budget_yen={source_budget_yen} policy_version={policy_version}".format(**_LAST_CALL_META)
     )

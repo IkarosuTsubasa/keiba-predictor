@@ -345,17 +345,6 @@ def main():
     assert out1 is not None, "output should not be None"
     assert str(out1.bet_decision) in ("bet", "no_bet"), "bet_decision should be valid"
     assert str(out1.participation_level) in ("no_bet", "small_bet", "normal_bet"), "participation_level should be valid"
-    assert str(out1.strategy_mode) in (
-        "no_bet",
-        "place_only",
-        "place_focus",
-        "balanced",
-        "win_focus",
-        "pair_focus",
-        "spread",
-        "conservative_single",
-        "small_probe",
-    )
     assert str(out1.construction_style) in ("single_axis", "pair_spread", "value_hunt", "conservative_single")
     assert isinstance(out1.pick_ids, list), "pick_ids should be list"
     assert isinstance(out1.ticket_plan, list), "ticket_plan should be list"
@@ -409,10 +398,10 @@ def main():
 
     print("OK: smoke_gemini_policy passed")
     print(
-        "first_cache_hit={a} second_cache_hit={b} buy_style={style} picks={n} key_2000={k1} key_50000={k2}".format(
+        "first_cache_hit={a} second_cache_hit={b} construction={style} picks={n} key_2000={k1} key_50000={k2}".format(
             a=int(bool(meta1.get("cache_hit", False))),
             b=int(bool(meta2.get("cache_hit", False))),
-            style=str(out2.buy_style),
+            style=str(out2.construction_style),
             n=int(out2.max_ticket_count or 0),
             k1=key_2000[:12],
             k2=key_50000[:12],
