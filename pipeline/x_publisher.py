@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import os
 from pathlib import Path
 
@@ -63,7 +64,7 @@ def build_ready_post_payload(base_dir, scope_key, run_id):
     ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=engine) or list(
         primary_budget.get("tickets", []) or []
     )
-    share_text = web_app._build_public_share_text(run_row, engine, marks_map, ticket_rows)
+    share_text = web_app.build_public_share_text(run_row, engine, marks_map, ticket_rows)
     share_text = str(share_text or "").strip()
     if not share_text:
         raise RuntimeError(f"share text not built for x auto post: {run_id}")
@@ -92,6 +93,8 @@ async def _post_with_twikit_async(base_dir, text):
     cookies_file = _cookies_file(base_dir)
     cookies_file.parent.mkdir(parents=True, exist_ok=True)
     client = Client(language=_twikit_language())
+    # Twikit will load and reuse cookies from cookies_file when available,
+    # which avoids a full interactive login on every publish attempt.
     await client.login(
         auth_info_1=username,
         auth_info_2=email or None,

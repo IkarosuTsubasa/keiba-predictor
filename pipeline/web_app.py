@@ -1047,6 +1047,17 @@ def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=
         to_int_or_none=to_int_or_none,
     )
 
+
+def build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=PUBLIC_SHARE_MAX_CHARS):
+    return _build_public_share_text(
+        run_row,
+        engine,
+        marks_map,
+        ticket_rows,
+        max_chars=max_chars,
+    )
+
+
 def _public_result_triplet_text(actual_names):
     return web_public_llm.public_result_triplet_text(actual_names)
 
@@ -2257,7 +2268,7 @@ async def admin_jobs_scan_due_api(request: Request):
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/run_due_now")
-async def admin_jobs_run_due_now_api(request: Request):
+def admin_jobs_run_due_now_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)

@@ -29,8 +29,6 @@ def main():
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
             print(body)
-            if resp.status >= 400:
-                raise RuntimeError(f"run_due trigger failed: http {resp.status}")
             try:
                 payload = json.loads(body or "{}")
             except Exception:
