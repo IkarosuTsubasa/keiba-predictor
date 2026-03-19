@@ -164,9 +164,13 @@ def main():
         )
         assert_true(getattr(workspace_missing_run, "status_code", 0) == 404, "workspace run_llm should return 404 for missing run")
 
-        denied_run_due = web_app.internal_run_due(token="bad-token")
+        denied_run_due = web_app.internal_run_due(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer bad-token")]}),
+        )
         assert_true(getattr(denied_run_due, "status_code", 0) == 403, "internal_run_due should reject wrong token")
-        ok_run_due = web_app.internal_run_due(token="smoke-token")
+        ok_run_due = web_app.internal_run_due(
+            web_app.Request(scope={"type": "http", "headers": [(b"authorization", b"Bearer smoke-token")]}),
+        )
         assert_true(getattr(ok_run_due, "status_code", 0) in (200, 500), "internal_run_due should return json response")
     finally:
         if prev_admin_token is None:

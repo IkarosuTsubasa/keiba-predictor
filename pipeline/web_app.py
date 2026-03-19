@@ -1502,7 +1502,6 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
 
     return {
         "authorized": True,
-        "admin_token": token,
         "show_settled": bool(show_settled),
         "summary": summary,
         "jobs": items,
@@ -2385,10 +2384,11 @@ async def admin_jobs_topup_today_all_llm_api(request: Request):
 
 @app.get("/internal/run_due")
 @app.post("/internal/run_due")
-def internal_run_due(token: str = ""):
+def internal_run_due(request: Request):
+    supplied = _admin_supplied_token(request)
     return web_admin_tasks.internal_run_due_response(
         base_dir=BASE_DIR,
-        token=token,
+        token=supplied,
         admin_token_valid=_admin_token_valid,
         scan_due_race_jobs=scan_due_race_jobs,
         load_race_jobs=load_race_jobs,
