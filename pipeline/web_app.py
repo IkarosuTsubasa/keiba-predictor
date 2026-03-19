@@ -1263,7 +1263,7 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
     if available_dates:
         fallback_date = available_dates[0]
         if target_date and target_date != fallback_date:
-            return fallback_date, f"{target_date} 不可用，已回退到最新日期 {fallback_date}", scoped_rows
+            return fallback_date, f"{target_date} は利用できないため、最新日付 {fallback_date} に切り替えました", scoped_rows
         return fallback_date, "", scoped_rows
     return target_date, "", scoped_rows
 
@@ -1293,17 +1293,17 @@ def build_public_board_payload(date_text="", scope_key=""):
     )
 
 _JOB_STEP_LABELS = {
-    "odds": "赔率",
-    "predictor": "预测",
+    "odds": "オッズ",
+    "predictor": "予測",
     "policy": "LLM",
-    "settlement": "结算",
+    "settlement": "精算",
 }
 _JOB_STEP_STATE_LABELS = {
-    "idle": "未开始",
-    "queued": "排队中",
-    "running": "执行中",
+    "idle": "未開始",
+    "queued": "待機中",
+    "running": "実行中",
     "succeeded": "成功",
-    "failed": "失败",
+    "failed": "失敗",
 }
 _JOB_STEP_STATE_TONES = {
     "idle": "muted",
