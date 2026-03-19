@@ -1,3 +1,6 @@
+import json
+
+
 def view_run_response(
     *,
     run_id,
@@ -18,7 +21,7 @@ def view_run_response(
     if not scope_key:
         scope_key, run_row = infer_scope_and_run(run_id)
     if not scope_key:
-        return render_page("", error_text="请输入 Run ID 或 Race ID。", admin_token=token)
+        return render_page("", error_text="无法识别 Run ID 或 Race ID。", admin_token=token)
     if run_row is None:
         run_row = resolve_run(run_id, scope_key)
     if run_row is None:
@@ -41,7 +44,7 @@ def view_run_response(
     if not resolved_run_id:
         return render_page(
             scope_key,
-            error_text="Run 存在，但缺少 run_id，无法定位产物文件。",
+            error_text="Run 记录存在，但缺少 run_id。",
             selected_run_id=run_id,
             admin_token=token,
         )
@@ -89,7 +92,7 @@ def run_pipeline_response(
         return admin_execution_denied("管理员令牌无效，不能执行 Pipeline。", scope_key=scope_key, token=token)
     scope_key = normalize_scope_key(scope_key)
     if not scope_key:
-        return render_page("", error_text="请选择数据范围。", admin_token=token)
+        return render_page("", error_text="缺少数据范围。", admin_token=token)
     race_id = normalize_race_id(race_id or race_url)
     history_url = str(history_url or "").strip()
     location = str(location or "").strip()
@@ -97,7 +100,7 @@ def run_pipeline_response(
     if not race_id or not history_url or not location:
         return render_page(
             scope_key,
-            error_text="Race ID、History URL 和 Location 都是必填项。",
+            error_text="Race ID、History URL、Location 为必填项。",
             admin_token=token,
         )
     if scope_key == "local":
@@ -155,7 +158,7 @@ def record_predictor_response(
 ):
     if not admin_token_valid(token):
         return admin_execution_denied(
-            "管理员令牌无效，不能记录 Predictor 结果。",
+            "管理员令牌无效，不能执行 Predictor 结果记录。",
             scope_key=scope_key,
             token=token,
             selected_run_id=str(run_id or "").strip(),
@@ -175,12 +178,12 @@ def record_predictor_response(
     if not top1 or not top2 or not top3:
         return render_page(
             scope_norm or scope_key,
-            error_text="Top1/Top2/Top3 都是必填项。",
+            error_text="Top1/Top2/Top3 为必填项。",
             selected_run_id=resolved_run_id,
             admin_token=token,
         )
     refresh_ok = False
-    refresh_message = "缺少 run row，无法刷新赔率。"
+    refresh_message = "缺少 run row，未刷新赔率。"
     refresh_warnings = []
     if run_row is not None and scope_norm:
         odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
@@ -241,7 +244,7 @@ def run_llm_buy_response(
 ):
     if not admin_token_valid(token):
         return admin_execution_denied(
-            "管理员令牌无效，不能执行单模型 LLM 买入。",
+            "管理员令牌无效，不能执行单引擎 LLM 买入。",
             scope_key=scope_key,
             token=token,
             selected_run_id=str(run_id or "").strip(),
@@ -250,7 +253,7 @@ def run_llm_buy_response(
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
-            error_text="未找到用于 LLM 买入的 Run ID / Race ID。",
+            error_text="未找到可用于 LLM 买入的 Run ID / Race ID。",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
             admin_token=token,
         )
@@ -324,7 +327,7 @@ def run_all_llm_buy_response(
 ):
     if not admin_token_valid(token):
         return admin_execution_denied(
-            "管理员令牌无效，不能执行全部 LLM 买入。",
+            "管理员令牌无效，不能执行全引擎 LLM 买入。",
             scope_key=scope_key,
             token=token,
             selected_run_id=str(run_id or "").strip(),
@@ -333,7 +336,7 @@ def run_all_llm_buy_response(
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
-            error_text="未找到用于 LLM 买入的 Run ID / Race ID。",
+            error_text="未找到可用于 LLM 买入的 Run ID / Race ID。",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
             admin_token=token,
         )
@@ -404,7 +407,7 @@ def topup_all_llm_budget_response(
 ):
     if not admin_token_valid(token):
         return admin_execution_denied(
-            "管理员令牌无效，不能为全部 LLM 追加预算。",
+            "管理员令牌无效，不能为全引擎 LLM 追加预算。",
             scope_key=scope_key,
             token=token,
             selected_run_id=str(run_id or "").strip(),
@@ -413,7 +416,7 @@ def topup_all_llm_budget_response(
     if not scope_norm or run_row is None or not resolved_run_id:
         return render_page(
             scope_norm or scope_key,
-            error_text="未找到用于 LLM 预算追加的 Run ID / Race ID。",
+            error_text="未找到可用于 LLM 预算追加的 Run ID / Race ID。",
             selected_run_id=resolved_run_id or str(run_id or "").strip(),
             admin_token=token,
         )
@@ -442,70 +445,6 @@ def reset_llm_state_response(*, base_dir, token, admin_token_valid, admin_execut
         return admin_execution_denied("管理员令牌无效，不能重置 LLM 状态。", token=token)
     summary = reset_llm_state_files(base_dir)
     return render_page("", output_text=json.dumps(summary, ensure_ascii=False, indent=2), admin_token=token)
-
-
-def optimize_params_response(
-    *,
-    token,
-    admin_token_valid,
-    admin_execution_denied,
-    run_script,
-    optimize_params_path,
-    render_page,
-):
-    if not admin_token_valid(token):
-        return admin_execution_denied("管理员令牌无效，不能执行 optimize_params。", token=token)
-    code, output = run_script(optimize_params_path, inputs=[""], extra_blanks=1)
-    return render_page("", output_text=f"Exit code: {code}\n{output}", admin_token=token)
-
-
-def optimize_predictor_response(
-    *,
-    token,
-    admin_token_valid,
-    admin_execution_denied,
-    run_script,
-    optimize_predictor_path,
-    render_page,
-):
-    if not admin_token_valid(token):
-        return admin_execution_denied("管理员令牌无效，不能执行 optimize_predictor。", token=token)
-    code, output = run_script(optimize_predictor_path, inputs=[""], extra_blanks=1)
-    return render_page("", output_text=f"Exit code: {code}\n{output}", admin_token=token)
-
-
-def offline_eval_response(
-    *,
-    token,
-    window,
-    admin_token_valid,
-    admin_execution_denied,
-    run_script,
-    offline_eval_path,
-    render_page,
-):
-    if not admin_token_valid(token):
-        return admin_execution_denied("管理员令牌无效，不能执行 offline_eval。", token=token)
-    code, output = run_script(offline_eval_path, inputs=[window, ""], extra_blanks=1)
-    return render_page("", output_text=f"Exit code: {code}\n{output}", admin_token=token)
-
-
-def init_update_response(
-    *,
-    token,
-    reset,
-    admin_token_valid,
-    admin_execution_denied,
-    run_script,
-    init_update_path,
-    render_page,
-):
-    if not admin_token_valid(token):
-        suffix = " --reset" if reset else ""
-        return admin_execution_denied(f"管理员令牌无效，不能执行 init_update{suffix}。", token=token)
-    args = ["--reset"] if reset else None
-    code, output = run_script(init_update_path, inputs=[""], args=args or [], extra_blanks=1)
-    return render_page("", output_text=f"Exit code: {code}\n{output}", admin_token=token)
 
 
 def edit_race_job_details_response(
@@ -545,7 +484,7 @@ def edit_race_job_details_response(
     try:
         target_distance_value = int(str(target_distance or "").strip())
     except ValueError:
-        return build_race_jobs_page(admin_token=token, error_text="距离必须是整数，例如 1200 或 1800。")
+        return build_race_jobs_page(admin_token=token, error_text="距离必须是数字，例如 1200 或 1800。")
     if target_distance_value <= 0:
         return build_race_jobs_page(admin_token=token, error_text="距离必须大于 0。")
     target_track_condition = str(target_track_condition or "").strip()
@@ -561,7 +500,7 @@ def edit_race_job_details_response(
         None,
     )
     if current is None:
-        return build_race_jobs_page(admin_token=token, error_text="未找到要编辑的任务。")
+        return build_race_jobs_page(admin_token=token, error_text="未找到对应任务。")
     current_run_id = str(current.get("current_run_id", "") or "").strip()
     current_race_date = str(current.get("race_date", "") or "").strip()
     if current_run_id and race_date != current_race_date:
@@ -570,7 +509,7 @@ def edit_race_job_details_response(
             locked_date = f"{current_run_id[:4]}-{current_run_id[4:6]}-{current_run_id[6:8]}"
         return render_console_page(
             admin_token=token,
-            error_text=f"该任务已经生成过 Run，不能跨比赛日改动。当前绑定日期: {locked_date or '未知'}",
+            error_text=f"该任务已有运行记录，不能修改比赛日期。当前锁定日期：{locked_date or '未知'}",
         )
 
     target_surface = target_surface_from_scope(str(current.get("scope_key", "") or "").strip())
@@ -582,6 +521,7 @@ def edit_race_job_details_response(
     process_after_dt = off_dt - timedelta(minutes=lead_value) if off_dt else None
 
     def _edit_job(row, now_text):
+        del now_text
         row["race_id"] = race_id
         row["location"] = str(location or "").strip()
         row["race_date"] = race_date
@@ -597,6 +537,5 @@ def edit_race_job_details_response(
 
     job = update_race_job(base_dir, job_id, _edit_job)
     if job is None:
-        return build_race_jobs_page(admin_token=token, error_text="未找到要编辑的任务。")
+        return build_race_jobs_page(admin_token=token, error_text="未找到对应任务。")
     return build_race_jobs_page(admin_token=token, message_text=f"{job_id} 已更新。")
-import json

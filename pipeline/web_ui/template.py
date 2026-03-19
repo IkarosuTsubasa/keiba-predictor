@@ -213,26 +213,7 @@ def page_template(
 
     recent_runs_panel = ""
     if recent_options:
-        recent_runs_panel = f"""
-        <section class="panel panel-compact">
-          <div class="section-title">
-            <div>
-              <div class="eyebrow">Quick Access</div>
-              <h2>譛霑・Runs</h2>
-            </div>
-            <span class="section-chip" id="recent-run-status">闌・峩: {html.escape(scope_label)}</span>
-          </div>
-          <form action="/view_run" method="post" class="stack-form">
-            <input type="hidden" name="scope_key" id="recent_scope_key" value="{html.escape(scope_value)}">
-            <input type="hidden" name="token" value="{html.escape(admin_token_value)}">
-            <label>譛霑題ｿ占｡悟ｿｫ辣ｧ</label>
-            <select name="run_id" id="recent_run_select">
-              {recent_options}
-            </select>
-            <button type="submit">謇灘ｼ謇騾・Run</button>
-          </form>
-        </section>
-        """
+        recent_runs_panel = ""
 
     open_run_panel = f"""
         <section class="panel panel-compact">
@@ -1191,12 +1172,10 @@ def page_template(
             <button type="submit">Record Predictor</button>
           </form>
         </section>
-        {recent_runs_panel}
       </aside>
       <main class="content-stage">
         {admin_panel}
         {console_open_run_panel}
-        {recent_runs_panel}
         {admin_workspace_html}
         {analysis_cluster}
         {battle_cluster}

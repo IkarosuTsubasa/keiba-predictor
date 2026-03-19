@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import html
 import json
 import math
@@ -131,14 +131,12 @@ from web_report.helpers import (
     has_llm_policy_assets as report_has_llm_policy_assets,
     jst_today_text as report_jst_today_text,
     llm_today_scope_keys as report_llm_today_scope_keys,
-    llm_today_scope_label_ja as report_llm_today_scope_label_ja,
     normalize_report_date_text as report_normalize_report_date_text,
     parse_run_date as report_parse_run_date,
     payload_run_id as report_payload_run_id,
     policy_marks_map as report_policy_marks_map,
     policy_primary_budget as report_policy_primary_budget,
     policy_primary_output as report_policy_primary_output,
-    public_scope_label_ja as report_public_scope_label_ja,
     race_no_text as report_race_no_text,
     report_scope_key_for_row as report_scope_key_for_row,
     run_date_key as report_run_date_key,
@@ -161,10 +159,6 @@ ADS_TXT_PATH = BASE_DIR / "ads.txt"
 RUN_PIPELINE = BASE_DIR / "run_pipeline.py"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
-OPTIMIZE_PARAMS = BASE_DIR / "optimize_params.py"
-OPTIMIZE_PREDICTOR = BASE_DIR / "optimize_predictor_params.py"
-OFFLINE_EVAL = BASE_DIR / "offline_eval.py"
-INIT_UPDATE = BASE_DIR / "init_update.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
 app = FastAPI()
@@ -744,9 +738,9 @@ def build_predictor_performance_context(scope_key, run_id, run_row, predictor_id
     path = get_data_dir(BASE_DIR, scope_key) / "predictor_results.csv"
     predictor_rows = load_csv_rows(path)
     scope_label_map = {
-        "central_turf": "中央草地",
-        "central_dirt": "中央泥地",
-        "local": "地方",
+        "central_turf": "荳ｭ螟ｮ闕牙慍",
+        "central_dirt": "荳ｭ螟ｮ豕･蝨ｰ",
+        "local": "蝨ｰ譁ｹ",
     }
     filtered_rows = []
     for row in predictor_rows:
@@ -1284,7 +1278,7 @@ def render_page(
 def _admin_execution_denied(message, scope_key="", token="", selected_run_id="", summary_run_id=""):
     return render_page(
         scope_key,
-        error_text=str(message or "管理员执行被拒绝。"),
+        error_text=str(message or "管理??行被拒?"),
         selected_run_id=selected_run_id,
         summary_run_id=summary_run_id,
         admin_token=token,
@@ -1322,13 +1316,6 @@ BET_TYPE_TEXT_MAP = {
 }
 
 
-def _scope_display_name(scope_key):
-    mapping = {
-        "central_dirt": "中央ダート",
-        "central_turf": "中央芝",
-        "local": "地方",
-    }
-    return mapping.get(str(scope_key or "").strip(), str(scope_key or "").strip() or "-")
 
 
 def _safe_text(value):
@@ -1358,566 +1345,6 @@ def _policy_marks_map(payload):
     return marks
 
 
-def _format_bet_type_text(value):
-    text = _safe_text(value).lower()
-    return BET_TYPE_TEXT_MAP.get(text, text or "-")
-
-
-def _format_ticket_target_text(bet_type, target):
-    bet_type_text = _safe_text(bet_type).lower()
-    text = _safe_text(target)
-    if not text:
-        return "-"
-    parts = [part.strip() for part in text.split("-") if part.strip()]
-    if bet_type_text == "exacta" and len(parts) == 2:
-        return f"{parts[0]}→{parts[1]}"
-    if bet_type_text == "trifecta" and len(parts) == 3:
-        return f"{parts[0]}→{parts[1]}→{parts[2]}"
-    return "-".join(parts) if parts else text
-
-
-def _format_ticket_plan_text(ticket_rows, output):
-    rows = list(ticket_rows or [])
-    grouped = {}
-    for row in rows:
-        bet_type_key = _safe_text(row.get("bet_type")).lower()
-        bet_type = _format_bet_type_text(bet_type_key)
-        horse_no = _format_ticket_target_text(bet_type_key, row.get("horse_no"))
-        amount = to_int_or_none(row.get("amount_yen"))
-        if amount is None:
-            amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"{amount}円" if amount is not None else "-"
-        grouped.setdefault(bet_type, []).append(f"{horse_no}　{amount_text}")
-    if grouped:
-        lines = []
-        for bet_type in [BET_TYPE_TEXT_MAP[key] for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place") if BET_TYPE_TEXT_MAP.get(key) in grouped]:
-            lines.append(bet_type)
-            lines.extend(grouped.get(bet_type, []))
-            lines.append("")
-        for bet_type, items in grouped.items():
-            if bet_type in lines:
-                continue
-            lines.append(bet_type)
-            lines.extend(items)
-            lines.append("")
-        return "\n".join(lines).strip()
-    plan_rows = list(output.get("ticket_plan", []) or [])
-    grouped = {}
-    for row in plan_rows:
-        ticket_id = _safe_text(row.get("id"))
-        amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"{amount}円" if amount is not None else "-"
-        if ticket_id:
-            bet_type, _, target = ticket_id.partition(":")
-        else:
-            bet_type = _safe_text(row.get("bet_type")).lower()
-            legs = [_safe_text(x) for x in list(row.get("legs", []) or []) if _safe_text(x)]
-            if not bet_type or not legs:
-                continue
-            target = "-".join(legs)
-        bet_type_label = _format_bet_type_text(bet_type)
-        target_text = _format_ticket_target_text(bet_type, target or "-")
-        grouped.setdefault(bet_type_label, []).append(f"{target_text}　{amount_text}")
-    if grouped:
-        lines = []
-        for bet_type in [BET_TYPE_TEXT_MAP[key] for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place") if BET_TYPE_TEXT_MAP.get(key) in grouped]:
-            lines.append(bet_type)
-            lines.extend(grouped.get(bet_type, []))
-            lines.append("")
-        for bet_type, items in grouped.items():
-            if bet_type in lines:
-                continue
-            lines.append(bet_type)
-            lines.extend(items)
-            lines.append("")
-        return "\n".join(lines).strip()
-    return "未生成"
-
-
-def _format_marks_text(marks_map):
-    if not marks_map:
-        return "未生成"
-    ordered = []
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
-    for horse_no, symbol in marks_map.items():
-        ordered.append((symbol_order.get(symbol, 99), horse_no, symbol))
-    ordered.sort(key=lambda item: (item[0], to_int_or_none(item[1]) or 999, item[1]))
-    return " ".join(f"{symbol}{horse_no}" for _, horse_no, symbol in ordered)
-
-
-def _ticket_row_amount(row):
-    amount = to_int_or_none(row.get("amount_yen"))
-    if amount is None:
-        amount = to_int_or_none(row.get("stake_yen"))
-    return amount or 0
-
-
-def _ticket_row_payout(row):
-    payout = to_int_or_none(row.get("payout_yen"))
-    if payout is None:
-        payout = to_int_or_none(row.get("est_payout_yen"))
-    return payout or 0
-
-
-def _ticket_row_profit(row):
-    profit = to_int_or_none(row.get("profit_yen"))
-    if profit is not None:
-        return profit
-    return _ticket_row_payout(row) - _ticket_row_amount(row)
-
-
-def _ticket_row_hit(row):
-    text = _safe_text(row.get("hit"))
-    return text in ("1", "true", "True", "yes", "Yes")
-
-
-def _summarize_ticket_rows(ticket_rows):
-    rows = list(ticket_rows or [])
-    stake_yen = sum(_ticket_row_amount(row) for row in rows)
-    payout_yen = sum(_ticket_row_payout(row) for row in rows)
-    profit_yen = sum(_ticket_row_profit(row) for row in rows)
-    hit_count = sum(1 for row in rows if _ticket_row_hit(row))
-    status_values = {_safe_text(row.get("status")).lower() for row in rows if _safe_text(row.get("status"))}
-    pending_count = sum(1 for value in status_values if value == "pending")
-    settled_count = sum(1 for value in status_values if value == "settled")
-    if rows and pending_count == 0 and (settled_count > 0 or not status_values):
-        status = "settled"
-    elif rows:
-        status = "pending"
-    else:
-        status = "planned"
-    roi = round(payout_yen / stake_yen, 4) if stake_yen > 0 else ""
-    return {
-        "stake_yen": stake_yen,
-        "payout_yen": payout_yen,
-        "profit_yen": profit_yen,
-        "hit_count": hit_count,
-        "ticket_count": len(rows),
-        "status": status,
-        "roi": roi,
-    }
-
-
-def _run_date_key(run_row):
-    race_date = _safe_text((run_row or {}).get("race_date"))
-    if race_date:
-        return race_date
-    timestamp = _safe_text((run_row or {}).get("timestamp"))
-    return timestamp[:10] if len(timestamp) >= 10 else ""
-
-
-def _parse_run_date(date_text):
-    text = _safe_text(date_text)
-    if not text:
-        return None
-    try:
-        return datetime.strptime(text[:10], "%Y-%m-%d").date()
-    except ValueError:
-        return None
-
-
-def _format_jp_date_value(date_value):
-    if not date_value:
-        return ""
-    return f"{date_value.year}年{date_value.month}月{date_value.day}日"
-
-
-def _has_llm_policy_assets(run_row):
-    row = dict(run_row or {})
-    return bool(
-        _safe_text(row.get("gemini_policy_path"))
-        or _safe_text(row.get("deepseek_policy_path"))
-        or _safe_text(row.get("openai_policy_path"))
-        or _safe_text(row.get("grok_policy_path"))
-    )
-
-
-def _report_scope_key_for_row(run_row, fallback_scope=""):
-    row = dict(run_row or {})
-    return normalize_scope_key(row.get("_report_scope_key") or row.get("scope_key") or fallback_scope) or ""
-
-
-def _load_combined_llm_report_runs():
-    return report_data.load_combined_llm_report_runs(load_runs, LLM_REPORT_SCOPE_KEYS)
-
-
-def _payload_run_id(payload, fallback_run_id=""):
-    return _safe_text((payload or {}).get("run_id")) or _safe_text(fallback_run_id)
-
-
-def _race_no_text(race_id):
-    digits = normalize_race_id(race_id)
-    if len(digits) >= 2:
-        try:
-            return f"{int(digits[-2:])}R"
-        except (TypeError, ValueError):
-            return ""
-    return ""
-
-
-def _format_race_label(run_row):
-    row = dict(run_row or {})
-    venue = _safe_text(row.get("location")) or _safe_text(row.get("trigger_race"))
-    race_no = _race_no_text(row.get("race_id"))
-    if venue and race_no:
-        return f"{venue}{race_no}"
-    if venue:
-        return venue
-    if race_no:
-        return race_no
-    return _safe_text(row.get("race_id")) or _safe_text(row.get("run_id")) or "-"
-
-
-def _format_jp_date_text(run_row):
-    date_text = _safe_text((run_row or {}).get("race_date"))
-    if not date_text:
-        timestamp = _safe_text((run_row or {}).get("timestamp"))
-        if len(timestamp) >= 10:
-            date_text = timestamp[:10]
-    if not date_text:
-        return ""
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", date_text)
-    if not m:
-        return date_text
-    return f"{int(m.group(1))}年{int(m.group(2))}月{int(m.group(3))}日"
-
-
-def _build_battle_title(run_row):
-    race_label = _format_race_label(run_row)
-    date_label = _format_jp_date_text(run_row)
-    race_name = _safe_text((run_row or {}).get("trigger_race"))
-    parts = ["第1回 いかいもAI競馬対決杯"]
-    if date_label or race_label:
-        detail = " ".join(part for part in [date_label, race_label] if part)
-        if race_name:
-            detail = f"{detail}（{race_name}）" if detail else f"（{race_name}）"
-        if detail:
-            parts.append(detail)
-    return "｜".join(parts)
-
-
-def _load_actual_result_map(scope_key):
-    return report_data.load_actual_result_map(
-        BASE_DIR,
-        scope_key,
-        get_data_dir=get_data_dir,
-        load_csv_rows=load_csv_rows,
-        canonical_predictor_id=canonical_predictor_id,
-        load_race_jobs=load_race_jobs,
-    )
-
-
-def _find_actual_result_from_jobs(scope_key, run_id, run_row=None):
-    return report_data.find_actual_result_from_jobs(
-        BASE_DIR,
-        scope_key,
-        run_id,
-        run_row,
-        load_race_jobs=load_race_jobs,
-    )
-
-
-def _find_job_meta_for_run(scope_key, run_id, run_row=None):
-    return report_data.find_job_meta_for_run(
-        BASE_DIR,
-        scope_key,
-        run_id,
-        run_row,
-        load_race_jobs=load_race_jobs,
-    )
-
-
-def _load_name_to_no_map_for_run(scope_key, run_id, run_row):
-    return report_data.load_name_to_no_map_for_run(
-        scope_key,
-        run_id,
-        run_row,
-        resolve_run_asset_path=resolve_run_asset_path,
-        load_name_to_no=load_name_to_no,
-        normalize_name=normalize_name,
-        normalize_horse_no_text=normalize_horse_no_text,
-    )
-
-
-def _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map):
-    return report_data.actual_result_snapshot(
-        BASE_DIR,
-        scope_key,
-        run_id,
-        run_row,
-        actual_result_map,
-        load_race_jobs=load_race_jobs,
-        resolve_run_asset_path=resolve_run_asset_path,
-        load_name_to_no=load_name_to_no,
-        normalize_name=normalize_name,
-        normalize_horse_no_text=normalize_horse_no_text,
-    )
-
-
-def _marks_result_triplet(marks_map, actual_horse_nos):
-    triplet = []
-    for horse_no in list(actual_horse_nos or [])[:3]:
-        triplet.append(marks_map.get(horse_no, "-") if horse_no else "-")
-    while len(triplet) < 3:
-        triplet.append("-")
-    return triplet
-
-
-def _format_triplet_text(triplet):
-    values = [str(item or "-").strip() or "-" for item in list(triplet or [])[:3]]
-    while len(values) < 3:
-        values.append("-")
-    return " ".join(values)
-
-
-def _ratio_text(numerator, denominator):
-    if not denominator:
-        return "-"
-    return f"{(float(numerator) / float(denominator)) * 100:.1f}%"
-
-
-def _percent_text_from_ratio(value):
-    if value in ("", None):
-        return "-"
-    try:
-        return f"{float(value) * 100:.1f}%"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def _format_distance_label(value):
-    text = _safe_text(value)
-    if not text:
-        return ""
-    digits = "".join(ch for ch in text if ch.isdigit())
-    return f"{digits}m" if digits else text
-
-
-def _format_confidence_text(value):
-    try:
-        ratio = float(value)
-    except (TypeError, ValueError):
-        return "N/A"
-    pct = max(0.0, min(100.0, ratio * 100.0))
-    if pct >= 72.0:
-        level = "HIGH"
-    elif pct >= 58.0:
-        level = "MID"
-    else:
-        level = "LOW"
-    return f"{level} {pct:.0f}%"
-
-
-def _public_trend_series(days=10):
-    date_map = {}
-    series = []
-    for engine in LLM_BATTLE_ORDER:
-        rows = load_policy_daily_profit_summary(days=days, policy_engine=engine)
-        per_engine = {}
-        for row in rows:
-            date_text = _safe_text(row.get("date"))
-            if not date_text:
-                continue
-            roi_ratio = row.get("roi", "")
-            try:
-                roi_value = round(float(roi_ratio or 0.0) * 100.0, 1)
-            except (TypeError, ValueError):
-                roi_value = None
-            entry = {
-                "date": date_text,
-                "roi_value": roi_value,
-                "roi_text": _percent_text_from_ratio(roi_ratio),
-                "profit_yen": int(row.get("profit_yen", 0) or 0),
-                "runs": int(row.get("runs", 0) or 0),
-            }
-            per_engine[date_text] = entry
-            date_map[date_text] = True
-        series.append(
-            {
-                "engine": engine,
-                "label": LLM_BATTLE_LABELS.get(engine, engine),
-                "points": per_engine,
-            }
-        )
-    labels = sorted(date_map.keys())
-    return {
-        "labels": labels,
-        "series": [
-            {
-                "engine": item["engine"],
-                "label": item["label"],
-                "points": [item["points"].get(label, {"date": label, "roi_value": None, "roi_text": "-", "profit_yen": 0, "runs": 0}) for label in labels],
-            }
-            for item in series
-        ],
-    }
-
-
-def _public_all_time_roi_summary():
-    return report_bundles.public_all_time_roi_summary(
-        BASE_DIR,
-        ledger_path=ledger_path,
-        load_rows=load_rows,
-    )
-
-
-def _policy_primary_choice(output):
-    return report_bundles._policy_primary_choice(output)
-
-def _llm_agreement_summary(outputs):
-    return report_bundles._llm_agreement_summary(outputs)
-
-def _difficulty_summary(outputs, agreement_score):
-    return report_bundles._difficulty_summary(outputs, agreement_score)
-
-def _build_llm_battle_bundle(scope_key, run_id, run_row, payloads, actual_result_map):
-    return report_bundles.build_llm_battle_bundle(
-        scope_key,
-        run_id,
-        run_row,
-        payloads,
-        actual_result_map,
-        normalize_policy_engine=normalize_policy_engine,
-        actual_result_snapshot=_actual_result_snapshot,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        summarize_ticket_rows=_summarize_ticket_rows,
-        marks_result_triplet=_marks_result_triplet,
-        format_triplet_text=_format_triplet_text,
-    )
-
-def _jst_today_text():
-    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
-
-
-def _normalize_report_date_text(date_text=""):
-    text = _safe_text(date_text)
-    if not text:
-        return _jst_today_text()
-    if re.fullmatch(r"\d{8}", text):
-        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
-    parsed = _parse_run_date(text)
-    if parsed:
-        return parsed.strftime("%Y-%m-%d")
-    return _jst_today_text()
-def _resolve_llm_today_target_date(target_date="", scope_key=""):
-    scope_norm = normalize_scope_key(scope_key)
-    scope_keys = _llm_today_scope_keys(scope_norm)
-    scoped_rows = []
-    available_dates = []
-    for row in _load_combined_llm_report_runs():
-        report_scope_key = _report_scope_key_for_row(row, scope_norm)
-        if report_scope_key not in scope_keys:
-            continue
-        scoped_rows.append(row)
-        date_key = _run_date_key(row)
-        if date_key:
-            available_dates.append(date_key)
-    available_dates = sorted(set(available_dates), reverse=True)
-    if target_date and target_date in available_dates:
-        return target_date, "", scoped_rows
-    if available_dates:
-        fallback_date = available_dates[0]
-        if target_date and target_date != fallback_date:
-            return fallback_date, f"{target_date} 不存在，已切换到最近日期 {fallback_date}", scoped_rows
-        return fallback_date, "", scoped_rows
-    return target_date, "", scoped_rows
-
-
-def _llm_today_status_meta(ticket_summary, actual_names):
-    status = _safe_text((ticket_summary or {}).get("status", "")).lower()
-    actual_ready = any(_safe_text(name) for name in list(actual_names or []))
-    if status == "settled":
-        return "已结算", "settled"
-    if status == "pending":
-        return "待结算", "pending"
-    if actual_ready:
-        return "已录入结果", "result"
-    return "待录入结果", "planned"
-
-
-def _format_yen_text(value):
-    try:
-        amount = int(value or 0)
-    except (TypeError, ValueError):
-        amount = 0
-    sign = "-" if amount < 0 else ""
-    return f"{sign}{abs(amount):,}円"
-
-
-def _format_percent_text(value):
-    if value in ("", None):
-        return "-"
-    try:
-        return f"{float(value) * 100:.1f}%"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def _public_scope_label_ja(scope_key):
-    mapping = {
-        "central_dirt": "中央ダート",
-        "central_turf": "中央芝",
-        "local": "地方",
-    }
-    return mapping.get(str(scope_key or "").strip(), str(scope_key or "").strip() or "-")
-
-
-def _public_status_meta_ja(ticket_summary, actual_names):
-    return web_public_llm.public_status_meta_ja(ticket_summary, actual_names)
-
-def _public_yen_text(value):
-    return web_public_llm.public_yen_text(value)
-
-def _public_ticket_plan_text(ticket_rows):
-    return web_public_llm.public_ticket_plan_text(ticket_rows)
-
-def _share_hashtag_race_label(run_row):
-    venue = _safe_text((run_row or {}).get("location")) or _safe_text((run_row or {}).get("trigger_race"))
-    race_no = _race_no_text((run_row or {}).get("race_id")) or ""
-    venue = re.sub(r"\s+", "", venue)
-    if venue and not venue.endswith("競馬"):
-        venue = f"{venue}競馬"
-    if venue and race_no:
-        return f"#{venue} {race_no}"
-    if venue:
-        return f"#{venue}"
-    if race_no:
-        return race_no
-    return "#競馬AI"
-
-
-def _share_ticket_lines(ticket_rows):
-    bet_type_map = {
-        "win": "単勝",
-        "place": "複勝",
-        "wide": "ワイド",
-        "quinella": "馬連",
-        "exacta": "馬単",
-        "trio": "三連複",
-        "trifecta": "三連単",
-    }
-    lines = []
-    for row in list(ticket_rows or []):
-        bet_type = bet_type_map.get(_safe_text(row.get("bet_type")).lower(), _safe_text(row.get("bet_type")) or "-")
-        horse_no = _safe_text(row.get("horse_no")) or "-"
-        amount = to_int_or_none(row.get("amount_yen"))
-        if amount is None:
-            amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"¥{int(amount)}" if amount is not None else "-"
-        lines.append(f"{bet_type} {horse_no} {amount_text}")
-    return lines
-
-
-def _share_marks_text(marks_map):
-    if not marks_map:
-        return "印なし"
-    symbol_order = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
-    ordered = []
-    for horse_no, symbol in dict(marks_map or {}).items():
-        ordered.append((symbol_order.get(_safe_text(symbol), 99), to_int_or_none(horse_no) or 999, _safe_text(horse_no), _safe_text(symbol)))
-    ordered.sort(key=lambda item: (item[0], item[1], item[2]))
-    parts = [f"{symbol}{horse_no}" for _, _, horse_no, symbol in ordered if horse_no and symbol]
-    return " ".join(parts) if parts else "印なし"
 
 
 def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=PUBLIC_SHARE_MAX_CHARS):
@@ -1970,8 +1397,171 @@ _normalize_report_date_text = report_normalize_report_date_text
 _llm_today_scope_keys = report_llm_today_scope_keys
 _format_yen_text = report_format_yen_text
 _format_percent_text = report_format_percent_text
-_llm_today_scope_label_ja = report_llm_today_scope_label_ja
-_public_scope_label_ja = report_public_scope_label_ja
+
+
+def _load_combined_llm_report_runs():
+    return report_data.load_combined_llm_report_runs(load_runs, LLM_REPORT_SCOPE_KEYS)
+
+
+def _load_actual_result_map(scope_key):
+    return report_data.load_actual_result_map(
+        BASE_DIR,
+        scope_key,
+        get_data_dir=get_data_dir,
+        load_csv_rows=load_csv_rows,
+        canonical_predictor_id=canonical_predictor_id,
+        load_race_jobs=load_race_jobs,
+    )
+
+
+def _find_job_meta_for_run(scope_key, run_id, run_row=None):
+    return report_data.find_job_meta_for_run(
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        load_race_jobs=load_race_jobs,
+    )
+
+
+def _actual_result_snapshot(scope_key, run_id, run_row, actual_result_map):
+    return report_data.actual_result_snapshot(
+        BASE_DIR,
+        scope_key,
+        run_id,
+        run_row,
+        actual_result_map,
+        load_race_jobs=load_race_jobs,
+        resolve_run_asset_path=resolve_run_asset_path,
+        load_name_to_no=load_name_to_no,
+        normalize_name=normalize_name,
+        normalize_horse_no_text=normalize_horse_no_text,
+    )
+
+
+def _summarize_ticket_rows(rows):
+    rows = list(rows or [])
+    ticket_count = len(rows)
+    stake_yen = sum(to_int_or_none(row.get("amount_yen")) or to_int_or_none(row.get("stake_yen")) or 0 for row in rows)
+    payout_yen = sum(to_int_or_none(row.get("payout_yen")) or to_int_or_none(row.get("est_payout_yen")) or 0 for row in rows)
+    profit_yen = sum(to_int_or_none(row.get("profit_yen")) or 0 for row in rows)
+    hit_count = sum(1 for row in rows if (to_int_or_none(row.get("payout_yen")) or to_int_or_none(row.get("est_payout_yen")) or 0) > 0)
+    statuses = {str(row.get("status", "") or "").strip().lower() for row in rows if str(row.get("status", "") or "").strip()}
+    status = "pending"
+    if statuses:
+        if statuses == {"settled"}:
+            status = "settled"
+        elif "pending" in statuses:
+            status = "pending"
+        else:
+            status = sorted(statuses)[0]
+    roi = round(float(payout_yen) / float(stake_yen), 4) if stake_yen > 0 else ""
+    return {
+        "status": status,
+        "ticket_count": ticket_count,
+        "stake_yen": stake_yen,
+        "payout_yen": payout_yen,
+        "profit_yen": profit_yen,
+        "hit_count": hit_count,
+        "roi": roi,
+    }
+
+
+def _format_triplet_text(values):
+    parts = [str(value or "").strip() for value in list(values or []) if str(value or "").strip()]
+    return " / ".join(parts) if parts else "-"
+
+
+def _marks_result_triplet(marks_map, actual_horse_nos):
+    result = []
+    for horse_no in list(actual_horse_nos or [])[:3]:
+        text_no = str(horse_no or "").strip()
+        if not text_no:
+            continue
+        symbol = str((marks_map or {}).get(text_no, "") or "").strip()
+        result.append(f"{symbol}{text_no}" if symbol else text_no)
+    return result
+
+
+def _format_confidence_text(value):
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _format_distance_label(value):
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    if text.endswith("m"):
+        return text
+    return f"{text}m"
+
+
+def _public_all_time_roi_summary():
+    return report_bundles.public_all_time_roi_summary(
+        BASE_DIR,
+        ledger_path=ledger_path,
+        load_rows=load_rows,
+    )
+
+
+def _public_trend_series(days=10):
+    del days
+    return []
+
+
+def _policy_primary_choice(output):
+    return report_bundles._policy_primary_choice(output)
+
+
+def _llm_agreement_summary(outputs):
+    return report_bundles._llm_agreement_summary(outputs)
+
+
+def _difficulty_summary(outputs, agreement_score):
+    return report_bundles._difficulty_summary(outputs, agreement_score)
+
+
+def _build_llm_battle_bundle(scope_key, run_id, run_row, payloads, actual_result_map):
+    return report_bundles.build_llm_battle_bundle(
+        scope_key,
+        run_id,
+        run_row,
+        payloads,
+        actual_result_map,
+        normalize_policy_engine=normalize_policy_engine,
+        actual_result_snapshot=_actual_result_snapshot,
+        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
+        summarize_ticket_rows=_summarize_ticket_rows,
+        marks_result_triplet=_marks_result_triplet,
+        format_triplet_text=_format_triplet_text,
+    )
+
+
+def _resolve_llm_today_target_date(target_date="", scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    scoped_rows = []
+    available_dates = []
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        scoped_rows.append(row)
+        date_key = _run_date_key(row)
+        if date_key:
+            available_dates.append(date_key)
+    available_dates = sorted(set(available_dates), reverse=True)
+    if target_date and target_date in available_dates:
+        return target_date, "", scoped_rows
+    if available_dates:
+        fallback_date = available_dates[0]
+        if target_date and target_date != fallback_date:
+            return fallback_date, f"{target_date} 不可用，已回退到最新日期 {fallback_date}", scoped_rows
+        return fallback_date, "", scoped_rows
+    return target_date, "", scoped_rows
 
 
 def build_public_board_payload(date_text="", scope_key=""):
@@ -2014,8 +1604,8 @@ _JOB_STEP_LABELS = {
 _JOB_STEP_STATE_LABELS = {
     "idle": "未开始",
     "queued": "排队中",
-    "running": "进行中",
-    "succeeded": "完成",
+    "running": "执行中",
+    "succeeded": "成功",
     "failed": "失败",
 }
 _JOB_STEP_STATE_TONES = {
@@ -2129,7 +1719,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">立即处理</button>
+              <button type="submit">遶句叉螟・炊</button>
             </form>
             """
         )
@@ -2139,7 +1729,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">重新执行</button>
+              <button type="submit">驥肴眠謇ｧ陦・/button>
             </form>
             """
         )
@@ -2150,7 +1740,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="action" value="force_reset">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">强制回撤</button>
+              <button type="submit">蠑ｺ蛻ｶ蝗樊彫</button>
             </form>
             """
         )
@@ -2161,7 +1751,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="action" value="mark_failed">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">标记失败</button>
+              <button type="submit">譬・ｮｰ螟ｱ雍･</button>
             </form>
             """
         )
@@ -2172,7 +1762,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="action" value="reset_schedule">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">回到排程</button>
+              <button type="submit">蝗槫芦謗堤ｨ・/button>
             </form>
             """
         )
@@ -2181,7 +1771,7 @@ def _race_job_action_buttons_v2(job_id, status, admin_token=""):
         <form method="post" action="/console/tasks/delete">
           <input type="hidden" name="job_id" value="{html.escape(job_id)}">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit">删除任务</button>
+          <button type="submit">蛻髯､莉ｻ蜉｡</button>
         </form>
         """
     )
@@ -2202,14 +1792,14 @@ def _race_job_status_tone(status):
 def _race_job_status_label(status):
     mapping = {
         "uploaded": "已上传",
-        "scheduled": "待处理",
-        "queued_process": "待执行",
+        "scheduled": "已调度",
+        "queued_process": "等待处理",
         "processing": "处理中",
         "waiting_v5": "等待远程预测",
         "queued_policy": "等待 LLM",
         "processing_policy": "LLM 处理中",
-        "ready": "预测已生成",
-        "queued_settle": "已入结算队列",
+        "ready": "已完成",
+        "queued_settle": "等待结算",
         "settling": "结算中",
         "settled": "已结算",
         "failed": "失败",
@@ -2227,7 +1817,7 @@ def _race_job_action_buttons(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">立即执行处理</button>
+              <button type="submit">遶句叉謇ｧ陦悟､・炊</button>
             </form>
             """
         )
@@ -2237,7 +1827,7 @@ def _race_job_action_buttons(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">重新生成预测</button>
+              <button type="submit">驥肴眠逕滓・鬚・ｵ・/button>
             </form>
             """
         )
@@ -2248,7 +1838,7 @@ def _race_job_action_buttons(job_id, status, admin_token=""):
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="action" value="reset_schedule">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">重置为待命</button>
+              <button type="submit">驥咲ｽｮ荳ｺ蠕・多</button>
             </form>
             """
         )
@@ -2265,25 +1855,25 @@ def _race_job_settle_form(row, admin_token=""):
     return f"""
     <section class="job-settle-panel">
       <div class="job-settle-head">
-        <strong>第三步：录入赛果并结算</strong>
-        <span>提交 1-3 着后可直接结算，也可以先保存到结算队列。</span>
+        <strong>隨ｬ荳画ｭ･・壼ｽ募・襍帶棡蟷ｶ扈鍋ｮ・/strong>
+        <span>謠蝉ｺ､ 1-3 逹蜷主庄逶ｴ謗･扈鍋ｮ暦ｼ御ｹ溷庄莉･蜈井ｿ晏ｭ伜芦扈鍋ｮ鈴弌蛻励・/span>
       </div>
       <div class="job-settle-actions">
         <form method="post" action="/console/tasks/settle_now" class="job-settle-form">
           <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1着马名">
-          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2着马名">
-          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3着马名">
-          <button type="submit">立即结算</button>
+          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1逹鬩ｬ蜷・>
+          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2逹鬩ｬ蜷・>
+          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3逹鬩ｬ蜷・>
+          <button type="submit">遶句叉扈鍋ｮ・/button>
         </form>
         <form method="post" action="/console/tasks/queue_settle" class="job-settle-form">
           <input type="hidden" name="job_id" value="{html.escape(str((row or {}).get('job_id', '') or ''))}">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1着马名">
-          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2着马名">
-          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3着马名">
-          <button type="submit">保存并加入结算队列</button>
+          <input type="text" name="actual_top1" value="{html.escape(str((row or {}).get('actual_top1', '') or ''))}" placeholder="1逹鬩ｬ蜷・>
+          <input type="text" name="actual_top2" value="{html.escape(str((row or {}).get('actual_top2', '') or ''))}" placeholder="2逹鬩ｬ蜷・>
+          <input type="text" name="actual_top3" value="{html.escape(str((row or {}).get('actual_top3', '') or ''))}" placeholder="3逹鬩ｬ蜷・>
+          <button type="submit">菫晏ｭ伜ｹｶ蜉蜈･扈鍋ｮ鈴弌蛻・/button>
         </form>
       </div>
     </section>
@@ -2306,15 +1896,15 @@ def _admin_job_card_html(row, admin_token=""):
     notes = str(row.get("notes", "") or "").strip()
     artifacts = list(row.get("artifacts", []) or [])
     artifact_map = {str(item.get("artifact_type", "")).strip().lower(): dict(item) for item in artifacts}
-    kachiuma_name = str((artifact_map.get("kachiuma") or {}).get("original_name", "") or "未上传")
-    shutuba_name = str((artifact_map.get("shutuba") or {}).get("original_name", "") or "未上传")
+    kachiuma_name = str((artifact_map.get("kachiuma") or {}).get("original_name", "") or "譛ｪ荳贋ｼ")
+    shutuba_name = str((artifact_map.get("shutuba") or {}).get("original_name", "") or "譛ｪ荳贋ｼ")
     timing_items = []
     for label, key in (
         ("开赛", "scheduled_off_time"),
-        ("筛选时间", "process_after_time"),
-        ("已入队", "queued_process_at"),
-        ("已出预测", "ready_at"),
-        ("已结算", "settled_at"),
+        ("处理开始", "process_after_time"),
+        ("进入队列", "queued_process_at"),
+        ("完成预测", "ready_at"),
+        ("完成结算", "settled_at"),
     ):
         value = str(row.get(key, "") or "").strip()
         if value:
@@ -2326,35 +1916,35 @@ def _admin_job_card_html(row, admin_token=""):
           <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
           <input type="hidden" name="run_id" value="{html.escape(current_run_id)}">
           <input type="hidden" name="token" value="{html.escape(admin_token)}">
-          <button type="submit" class="secondary-button">打开 Run</button>
+          <button type="submit" class="secondary-button">謇灘ｼ Run</button>
         </form>
         <form method="get" action="/llm_today" class="stack-form">
           <input type="hidden" name="scope_key" value="{html.escape(scope_key)}">
           <input type="hidden" name="date" value="{html.escape(race_date)}">
-          <button type="submit" class="secondary-button">打开看板</button>
+          <button type="submit" class="secondary-button">謇灘ｼ逵区攸</button>
         </form>
         """
     return f"""
     <section class="panel panel--tight">
       <div class="section-title">
         <div>
-          <div class="eyebrow">任务</div>
-          <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '未命名任务')}</h2>
+          <div class="eyebrow">莉ｻ蜉｡</div>
+          <h2>{html.escape((location + ' ' + race_id).strip() or job_id or '譛ｪ蜻ｽ蜷堺ｻｻ蜉｡')}</h2>
         </div>
         <span class="section-chip">{html.escape(_race_job_display_label(row))}</span>
       </div>
       <div class="copy-row">
-        <span class="hero-pill">范围: {html.escape(_scope_display_name(scope_key))}</span>
-        <span class="hero-pill">日期: {html.escape(race_date or '-')}</span>
+        <span class="hero-pill">闌・峩: {html.escape(_scope_display_name(scope_key))}</span>
+        <span class="hero-pill">譌･譛・ {html.escape(race_date or '-')}</span>
         <span class="hero-pill">Run: {html.escape(current_run_id or '-')}</span>
-        <span class="hero-pill">赛果: {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '未录入')}</span>
+        <span class="hero-pill">襍帶棡: {html.escape(' / '.join(x for x in [actual_top1, actual_top2, actual_top3] if x) or '譛ｪ蠖募・')}</span>
       </div>
       <div class="copy-row">
         <span class="hero-pill">kachiuma: {html.escape(kachiuma_name)}</span>
         <span class="hero-pill">shutuba: {html.escape(shutuba_name)}</span>
         {''.join(timing_items)}
       </div>
-      <p class="helper-text">{html.escape(notes or '无备注')}</p>
+      <p class="helper-text">{html.escape(notes or '譌螟・ｳｨ')}</p>
       <div class="copy-row">
         {_race_job_action_buttons_v2(job_id, status, admin_token=admin_token)}
         {open_links}
@@ -2373,11 +1963,11 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
             <div class="section-title">
               <div>
                 <div class="eyebrow">Admin</div>
-                <h2>任务后台</h2>
+                <h2>莉ｻ蜉｡蜷主床</h2>
               </div>
               <span class="section-chip">locked</span>
             </div>
-            <p class="helper-text">{html.escape(error_text or '管理口令错误。')}</p>
+            <p class="helper-text">{html.escape(error_text or '管理员权限不足')}</p>
           </section>
         </section>
         """
@@ -2408,11 +1998,11 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
           <div class="section-title">
             <div>
               <div class="eyebrow">Tasks</div>
-              <h2>还没有任务</h2>
+              <h2>霑俶ｲ｡譛我ｻｻ蜉｡</h2>
             </div>
             <span class="section-chip">empty</span>
           </div>
-          <p class="helper-text">先上传 `kachiuma.csv` 和 `shutuba.csv`，再手动执行预测和结算。</p>
+          <p class="helper-text">蜈井ｸ贋ｼ `kachiuma.csv` 蜥・`shutuba.csv`・悟・謇句勘謇ｧ陦碁｢・ｵ句柱扈鍋ｮ励・/p>
         </section>
         """
 
@@ -2423,7 +2013,7 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
           <div class="section-title">
             <div>
               <div class="eyebrow">Result</div>
-              <h2>任务反馈</h2>
+              <h2>莉ｻ蜉｡蜿埼ｦ・/h2>
             </div>
             <span class="section-chip">ok</span>
           </div>
@@ -2437,7 +2027,7 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
           <div class="section-title">
             <div>
               <div class="eyebrow">Error</div>
-              <h2>任务异常</h2>
+              <h2>莉ｻ蜉｡蠑ょｸｸ</h2>
             </div>
             <span class="section-chip">error</span>
           </div>
@@ -2453,52 +2043,52 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
       <div class="cluster-head">
         <div>
           <div class="eyebrow">Manual Admin Flow</div>
-          <h2>任务后台</h2>
+          <h2>莉ｻ蜉｡蜷主床</h2>
         </div>
-        <p>后台现在按三步流工作：上传两个 CSV，手动执行预测，录入赛果并结算。</p>
+        <p>蜷主床邇ｰ蝨ｨ謖我ｸ画ｭ･豬∝ｷ･菴懶ｼ壻ｸ贋ｼ荳､荳ｪ CSV・梧焔蜉ｨ謇ｧ陦碁｢・ｵ具ｼ悟ｽ募・襍帶棡蟷ｶ扈鍋ｮ励・/p>
       </div>
       <div class="cluster-grid cluster-grid--stack">
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
               <div class="eyebrow">Overview</div>
-              <h2>任务概览</h2>
+              <h2>莉ｻ蜉｡讎りｧ・/h2>
             </div>
             <span class="section-chip">manual</span>
           </div>
           <div class="copy-row">
-            <span class="hero-pill">总任务: {summary['total']}</span>
-            <span class="hero-pill">待处理: {summary['scheduled']}</span>
-            <span class="hero-pill">处理中: {summary['processing']}</span>
-            <span class="hero-pill">预测已生成: {summary['ready']}</span>
-            <span class="hero-pill">已结算: {summary['settled']}</span>
+            <span class="hero-pill">諤ｻ莉ｻ蜉｡: {summary['total']}</span>
+            <span class="hero-pill">蠕・､・炊: {summary['scheduled']}</span>
+            <span class="hero-pill">螟・炊荳ｭ: {summary['processing']}</span>
+            <span class="hero-pill">鬚・ｵ句ｷｲ逕滓・: {summary['ready']}</span>
+            <span class="hero-pill">蟾ｲ扈鍋ｮ・ {summary['settled']}</span>
           </div>
           <div class="copy-row">
             <form method="post" action="/console/tasks/scan_due" class="stack-form">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">按时间筛选任务</button>
+              <button type="submit" class="secondary-button">謖画慮髣ｴ遲幃我ｻｻ蜉｡</button>
             </form>
             <form method="post" action="/console/tasks/run_due_now" class="stack-form">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">执行已入队任务</button>
+              <button type="submit" class="secondary-button">謇ｧ陦悟ｷｲ蜈･髦滉ｻｻ蜉｡</button>
             </form>
-            <a href="/llm_today" class="secondary-button">看 LLM 看板</a>
+            <a href="/llm_today" class="secondary-button">逵・LLM 逵区攸</a>
           </div>
-          <p class="helper-text">开赛时间和提前分钟只作为记录与筛选参考，不会自动到点运行。</p>
+          <p class="helper-text">蠑襍帶慮髣ｴ蜥梧署蜑榊・髓溷宵菴應ｸｺ隶ｰ蠖穂ｸ守ｭ幃牙盾閠・ｼ御ｸ堺ｼ夊・蜉ｨ蛻ｰ轤ｹ霑占｡後・/p>
         </section>
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
               <div class="eyebrow">Bankroll</div>
-              <h2>统一追加资金</h2>
+              <h2>扈滉ｸ霑ｽ蜉襍・≡</h2>
             </div>
             <span class="section-chip">budget</span>
           </div>
-          <p class="helper-text">按账本日期给四个 LLM 同时追加当日预算，2026年3月17日起为 50000，此前为 10000。</p>
+          <p class="helper-text">謖芽ｴｦ譛ｬ譌･譛溽ｻ吝屁荳ｪ LLM 蜷梧慮霑ｽ蜉蠖捺律鬚・ｮ暦ｼ・026蟷ｴ3譛・7譌･襍ｷ荳ｺ 50000・梧ｭ､蜑堺ｸｺ 10000縲・/p>
           <div class="copy-row">
             <form method="post" action="/console/tasks/topup_today_all_llm" class="stack-form">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit" class="secondary-button">所有LLM追加当日预算</button>
+              <button type="submit" class="secondary-button">謇譛鵜LM霑ｽ蜉蠖捺律鬚・ｮ・/button>
             </form>
           </div>
         </section>
@@ -2508,51 +2098,51 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
           <div class="section-title">
             <div>
               <div class="eyebrow">Import</div>
-              <h2>导入历史数据 ZIP</h2>
+              <h2>蟇ｼ蜈･蜴・彰謨ｰ謐ｮ ZIP</h2>
             </div>
             <span class="section-chip">disk</span>
           </div>
           <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
             <input type="hidden" name="token" value="{html.escape(admin_token)}">
             <div>
-              <label>历史数据 ZIP</label>
+              <label>蜴・彰謨ｰ謐ｮ ZIP</label>
               <input type="file" name="archive_file" accept=".zip,application/zip">
             </div>
             <label class="radio-option">
               <input type="checkbox" name="overwrite" value="1">
-              <span class="radio-text">覆盖同名文件</span>
+              <span class="radio-text">隕・尠蜷悟錐譁・ｻｶ</span>
             </label>
-            <p class="helper-text">支持 `pipeline/data/...`、`data/...`，或者直接包含 `central_dirt`、`central_turf`、`local`、`_shared` 的 ZIP。</p>
-            <button type="submit">导入到 Render Disk</button>
+            <p class="helper-text">謾ｯ謖・`pipeline/data/...`縲～data/...`・梧・閠・峩謗･蛹・性 `central_dirt`縲～central_turf`縲～local`縲～_shared` 逧・ZIP縲・/p>
+            <button type="submit">蟇ｼ蜈･蛻ｰ Render Disk</button>
           </form>
         </section>
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
               <div class="eyebrow">Import</div>
-              <h2>导入历史数据 ZIP</h2>
+              <h2>蟇ｼ蜈･蜴・彰謨ｰ謐ｮ ZIP</h2>
             </div>
             <span class="section-chip">disk</span>
           </div>
           <form class="stack-form" method="post" action="/console/tasks/import_archive" enctype="multipart/form-data">
             <input type="hidden" name="token" value="{html.escape(admin_token)}">
             <div>
-              <label>历史数据 ZIP</label>
+              <label>蜴・彰謨ｰ謐ｮ ZIP</label>
               <input type="file" name="archive_file" accept=".zip,application/zip">
             </div>
             <label class="radio-option">
               <input type="checkbox" name="overwrite" value="1">
-              <span class="radio-text">覆盖同名文件</span>
+              <span class="radio-text">隕・尠蜷悟錐譁・ｻｶ</span>
             </label>
-            <p class="helper-text">支持上传 `pipeline/data/...`、`data/...`，或直接以 `central_dirt`、`central_turf`、`local`、`_shared` 开头的 ZIP。</p>
-            <button type="submit">导入到 Render Disk</button>
+            <p class="helper-text">謾ｯ謖∽ｸ贋ｼ `pipeline/data/...`縲～data/...`・梧・逶ｴ謗･莉･ `central_dirt`縲～central_turf`縲～local`縲～_shared` 蠑螟ｴ逧・ZIP縲・/p>
+            <button type="submit">蟇ｼ蜈･蛻ｰ Render Disk</button>
           </form>
         </section>
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
               <div class="eyebrow">Step 1</div>
-              <h2>上传两个 CSV</h2>
+              <h2>荳贋ｼ荳､荳ｪ CSV</h2>
             </div>
             <span class="section-chip">upload</span>
           </div>
@@ -2563,11 +2153,11 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
             <input type="hidden" name="token" value="{html.escape(admin_token)}">
             <div class="field-grid admin-upload-grid">
               <div>
-                <label>范围</label>
+                <label>闌・峩</label>
                 <select name="scope_key">
-                  <option value="central_dirt">中央 Dirt</option>
-                  <option value="central_turf">中央 Turf</option>
-                  <option value="local">地方</option>
+                  <option value="central_dirt">荳ｭ螟ｮ Dirt</option>
+                  <option value="central_turf">荳ｭ螟ｮ Turf</option>
+                  <option value="local">蝨ｰ譁ｹ</option>
                 </select>
               </div>
               <div>
@@ -2575,32 +2165,32 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
                 <input type="text" name="race_id" placeholder="202606010109">
               </div>
               <div>
-                <label>场地</label>
-                <input type="text" name="location" placeholder="中山">
+                <label>蝨ｺ蝨ｰ</label>
+                <input type="text" name="location" placeholder="荳ｭ螻ｱ">
               </div>
               <div>
-                <label>比赛日期（展示用）</label>
+                <label>豈碑ｵ帶律譛滂ｼ亥ｱ慕､ｺ逕ｨ・・/label>
                 <input type="date" name="race_date" value="{html.escape(default_date)}">
               </div>
               <div>
-                <label>开赛时间（记录用）</label>
+                <label>蠑襍帶慮髣ｴ・郁ｮｰ蠖慕畑・・/label>
                 <input type="datetime-local" name="scheduled_off_time" value="{html.escape(default_dt)}">
               </div>
               <div>
-                <label>提前多少分钟（手动筛选参考）</label>
+                <label>謠仙燕螟壼ｰ大・髓滂ｼ域焔蜉ｨ遲幃牙盾閠・ｼ・/label>
                 <input type="number" name="lead_minutes" min="0" value="30">
               </div>
               <div>
-                <label>本场距离</label>
+                <label>譛ｬ蝨ｺ霍晉ｦｻ</label>
                 <input type="number" name="target_distance" min="100" step="100" value="1600" placeholder="1600">
               </div>
               <div>
-                <label>本场马场状态</label>
+                <label>譛ｬ蝨ｺ鬩ｬ蝨ｺ迥ｶ諤・/label>
                 <select name="target_track_condition">
-                  <option value="良">良</option>
-                  <option value="稍重">稍重</option>
-                  <option value="重">重</option>
-                  <option value="不良">不良</option>
+                  <option value="濶ｯ">濶ｯ</option>
+                  <option value="遞埼㍾">遞埼㍾</option>
+                  <option value="驥・>驥・/option>
+                  <option value="荳崎憶">荳崎憶</option>
                 </select>
               </div>
               <div>
@@ -2613,17 +2203,17 @@ def build_admin_workspace_html(message_text="", error_text="", admin_token="", a
               </div>
             </div>
             <div>
-              <label>备注</label>
-              <textarea name="notes" placeholder="例如：前一天上传，比赛前手动点击执行预测"></textarea>
+              <label>螟・ｳｨ</label>
+              <textarea name="notes" placeholder="萓句ｦゑｼ壼燕荳螟ｩ荳贋ｼ・梧ｯ碑ｵ帛燕謇句勘轤ｹ蜃ｻ謇ｧ陦碁｢・ｵ・></textarea>
             </div>
-            <button type="submit">创建任务</button>
+            <button type="submit">蛻帛ｻｺ莉ｻ蜉｡</button>
           </form>
         </section>
         <section class="panel panel--tight">
           <div class="section-title">
             <div>
               <div class="eyebrow">Step 2 / Step 3</div>
-              <h2>预测与结算任务</h2>
+              <h2>鬚・ｵ倶ｸ守ｻ鍋ｮ嶺ｻｻ蜉｡</h2>
             </div>
             <span class="section-chip">jobs</span>
           </div>
@@ -2649,7 +2239,7 @@ def _race_job_action_buttons_clean(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">立即执行预测</button>
+              <button type="submit">遶句叉謇ｧ陦碁｢・ｵ・/button>
             </form>
             """
         )
@@ -2659,7 +2249,7 @@ def _race_job_action_buttons_clean(job_id, status, admin_token=""):
             <form method="post" action="/console/tasks/process_now">
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">重新生成预测</button>
+              <button type="submit">驥肴眠逕滓・鬚・ｵ・/button>
             </form>
             """
         )
@@ -2670,7 +2260,7 @@ def _race_job_action_buttons_clean(job_id, status, admin_token=""):
               <input type="hidden" name="job_id" value="{html.escape(job_id)}">
               <input type="hidden" name="action" value="reset_schedule">
               <input type="hidden" name="token" value="{html.escape(admin_token)}">
-              <button type="submit">重置为待处理</button>
+              <button type="submit">驥咲ｽｮ荳ｺ蠕・､・炊</button>
             </form>
             """
         )
@@ -2802,7 +2392,7 @@ def index():
 @app.get("/console", response_class=HTMLResponse)
 def console_index(token: str = "", show_settled: str = ""):
     if _admin_token_enabled() and not _admin_token_valid(token):
-        return build_console_gate_page(admin_token=token, error_text="管理口令无效。")
+        return build_console_gate_page(admin_token=token, error_text="管理员口令无效")
     show_settled_flag = str(show_settled or "").strip() in ("1", "true", "yes", "on")
     return render_console_page(admin_token=token, show_settled=show_settled_flag)
 
@@ -3236,60 +2826,8 @@ def reset_llm_state(token: str = Form("")):
         reset_llm_state_files=reset_llm_state_files,
     )
 
-@app.post("/optimize_params", response_class=HTMLResponse)
-def optimize_params(token: str = Form("")):
-    return web_admin_ops.optimize_params_response(
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        run_script=run_script,
-        optimize_params_path=OPTIMIZE_PARAMS,
-        render_page=render_page,
-    )
 
-@app.post("/optimize_predictor", response_class=HTMLResponse)
-def optimize_predictor(token: str = Form("")):
-    return web_admin_ops.optimize_predictor_response(
-        token=token,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        run_script=run_script,
-        optimize_predictor_path=OPTIMIZE_PREDICTOR,
-        render_page=render_page,
-    )
 
-@app.post("/offline_eval", response_class=HTMLResponse)
-def offline_eval(token: str = Form(""), window: str = Form("")):
-    return web_admin_ops.offline_eval_response(
-        token=token,
-        window=window,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        run_script=run_script,
-        offline_eval_path=OFFLINE_EVAL,
-        render_page=render_page,
-    )
 
-@app.post("/init_update", response_class=HTMLResponse)
-def init_update(token: str = Form("")):
-    return web_admin_ops.init_update_response(
-        token=token,
-        reset=False,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        run_script=run_script,
-        init_update_path=INIT_UPDATE,
-        render_page=render_page,
-    )
 
-@app.post("/init_update_reset", response_class=HTMLResponse)
-def init_update_reset(token: str = Form("")):
-    return web_admin_ops.init_update_response(
-        token=token,
-        reset=True,
-        admin_token_valid=_admin_token_valid,
-        admin_execution_denied=_admin_execution_denied,
-        run_script=run_script,
-        init_update_path=INIT_UPDATE,
-        render_page=render_page,
-    )
+
