@@ -1,8 +1,9 @@
 import React from "react";
 
 const FOOTER_LINKS = [
-  { href: "/keiba", label: "予想ボード" },
+  { href: "/keiba", label: "公開ボード" },
   { href: "/keiba/about", label: "このサイトについて" },
+  { href: "/keiba/guide", label: "ガイド" },
   { href: "/keiba/privacy", label: "プライバシーポリシー" },
   { href: "/keiba/terms", label: "利用規約" },
   { href: "/keiba/disclaimer", label: "免責事項" },
@@ -21,7 +22,7 @@ export default function SiteFooter() {
           ))}
         </nav>
         <p className="site-footer__note">
-          本サイトの掲載内容は情報提供を目的としたものであり、投票結果や利益を保証するものではありません。
+          当サイトの競馬分析は情報提供を目的とした参考コンテンツです。最終的な判断と投票行動は、利用者ご自身の責任でお願いします。
         </p>
       </div>
     </footer>

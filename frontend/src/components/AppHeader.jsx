@@ -8,7 +8,7 @@ export default function AppHeader({ data, search, onApplyFilters, showFilters = 
         <a className="app-header__brand-link" href="/keiba">
           <img className="app-header__logo" src="/keiba/site-icon.png" alt="いかいもAI競馬" />
           <div className="app-header__brand-copy">
-            <span className="app-header__tag">Public Board</span>
+            <span className="app-header__tag">Racing Intelligence</span>
             <strong className="app-header__title">いかいもAI競馬</strong>
           </div>
         </a>

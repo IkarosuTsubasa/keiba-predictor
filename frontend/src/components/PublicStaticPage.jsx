@@ -6,7 +6,7 @@ export default function PublicStaticPage({ page }) {
   return (
     <section className="public-static-page">
       <div className="public-static-page__hero">
-        <span className="public-static-page__eyebrow">Information</span>
+        <span className="public-static-page__eyebrow">Guide & Policy</span>
         <h1>{page?.title || ""}</h1>
         {page?.lead ? <p>{page.lead}</p> : null}
       </div>
