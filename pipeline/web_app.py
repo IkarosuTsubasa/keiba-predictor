@@ -2168,7 +2168,14 @@ def sitemap_xml():
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
 @app.get("/api/public/board")
 def public_board_api(date: str = "", scope_key: str = ""):
-    return JSONResponse(build_public_board_payload(date_text=date, scope_key=scope_key))
+    return JSONResponse(
+        build_public_board_payload(date_text=date, scope_key=scope_key),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/auth-check")

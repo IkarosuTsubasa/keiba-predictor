@@ -310,6 +310,7 @@ function useBoardData(search, enabled = true) {
 
     fetch(`${PUBLIC_BOARD_API_PATH}${buildQuery(search)}`, {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     })
       .then((response) => {
         if (!response.ok) {
