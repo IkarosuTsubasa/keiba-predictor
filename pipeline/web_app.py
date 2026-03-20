@@ -1357,6 +1357,32 @@ def _build_public_placeholder_races(target_date="", scope_key=""):
     return placeholder_rows
 
 
+def _public_race_sort_key(item):
+    row = dict(item or {})
+    is_placeholder = bool(row.get("is_placeholder"))
+    scheduled_off_time = str(row.get("scheduled_off_time", "") or "").strip()
+    off_match = re.search(r"T?(\d{2}):(\d{2})", scheduled_off_time)
+    off_minutes = (int(off_match.group(1)) * 60 + int(off_match.group(2))) if off_match else 9999
+    race_title = str(row.get("race_title", "") or "").strip()
+    rank_match = re.search(r"(\d+)R", race_title, flags=re.IGNORECASE)
+    race_rank = int(rank_match.group(1)) if rank_match else 0
+    if is_placeholder:
+        return (1, off_minutes, race_title)
+    return (0, -race_rank, race_title)
+
+
+def _with_public_display_sort_fields(items):
+    out = []
+    for item in list(items or []):
+        row = dict(item or {})
+        sort_key = _public_race_sort_key(row)
+        row["display_sort_group"] = int(sort_key[0])
+        row["display_sort_value"] = int(sort_key[1])
+        row["display_sort_label"] = str(sort_key[2] or "")
+        out.append(row)
+    return out
+
+
 def build_public_board_payload(date_text="", scope_key=""):
     payload = web_public_llm.build_public_board_payload(
         date_text=date_text,
@@ -1388,7 +1414,8 @@ def build_public_board_payload(date_text="", scope_key=""):
     payload = dict(payload or {})
     target_date = str(payload.get("target_date", "") or "").strip()
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
-    payload["races"] = list(payload.get("races", []) or []) + placeholder_races
+    sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
+    payload["races"] = _with_public_display_sort_fields(sorted_races)
     payload["placeholder_race_count"] = len(placeholder_races)
     return payload
 

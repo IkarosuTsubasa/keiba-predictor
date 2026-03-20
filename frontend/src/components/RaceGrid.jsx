@@ -13,8 +13,25 @@ function extractOffTimeValue(text) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+function toFiniteNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
 export function sortRacesForDisplay(races) {
   return [...(races || [])].sort((a, b) => {
+    const aGroup = toFiniteNumber(a?.display_sort_group, Number.NaN);
+    const bGroup = toFiniteNumber(b?.display_sort_group, Number.NaN);
+    const aValue = toFiniteNumber(a?.display_sort_value, Number.NaN);
+    const bValue = toFiniteNumber(b?.display_sort_value, Number.NaN);
+    const aLabel = String(a?.display_sort_label || "");
+    const bLabel = String(b?.display_sort_label || "");
+    if (Number.isFinite(aGroup) && Number.isFinite(bGroup)) {
+      if (aGroup !== bGroup) return aGroup - bGroup;
+      if (Number.isFinite(aValue) && Number.isFinite(bValue) && aValue !== bValue) return aValue - bValue;
+      if (aLabel || bLabel) return aLabel.localeCompare(bLabel, "ja");
+    }
+
     const aPlaceholder = Boolean(a?.is_placeholder);
     const bPlaceholder = Boolean(b?.is_placeholder);
     if (aPlaceholder !== bPlaceholder) return aPlaceholder ? 1 : -1;
