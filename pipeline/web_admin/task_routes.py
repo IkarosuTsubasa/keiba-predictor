@@ -117,25 +117,55 @@ def _fetch_official_result_payload_for_job(job):
     return None
 
 
-def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
+def _auto_settle_diagnostics(*, load_race_jobs, now_dt=None):
     current_dt = now_dt or datetime.now()
-    out = []
+    rows = []
     for job in load_race_jobs():
         status = str(job.get("status", "") or "").strip().lower()
-        if status != "ready":
+        if status not in ("ready", "settling"):
             continue
-        if any(str(job.get(name, "") or "").strip() for name in ("actual_top1", "actual_top2", "actual_top3")):
-            continue
-        off_dt = _parse_dt_text(job.get("scheduled_off_time", ""))
-        if off_dt is None:
-            continue
-        if current_dt < off_dt + timedelta(minutes=AUTO_SETTLE_DELAY_MINUTES):
-            continue
+        job_id = str(job.get("job_id", "") or "").strip()
         race_id = str(job.get("race_id", "") or "").strip()
         run_id = str(job.get("current_run_id", "") or "").strip()
-        if not race_id or not run_id:
-            continue
-        out.append(dict(job))
+        scheduled_off_time = str(job.get("scheduled_off_time", "") or "").strip()
+        reason = "eligible"
+        if str(job.get("settled_at", "") or "").strip():
+            reason = "already_settled"
+        else:
+            off_dt = _parse_dt_text(scheduled_off_time)
+            if off_dt is None:
+                reason = "missing_off_time"
+            elif current_dt < off_dt + timedelta(minutes=AUTO_SETTLE_DELAY_MINUTES):
+                reason = "wait_20min"
+            elif not race_id:
+                reason = "missing_race_id"
+            elif not run_id:
+                reason = "missing_run_id"
+        rows.append(
+            {
+                "job_id": job_id,
+                "status": status,
+                "race_id": race_id,
+                "run_id": run_id,
+                "scheduled_off_time": scheduled_off_time,
+                "reason": reason,
+            }
+        )
+    return rows
+
+
+def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
+    diagnostics = _auto_settle_diagnostics(load_race_jobs=load_race_jobs, now_dt=now_dt)
+    eligible_ids = {
+        str(item.get("job_id", "") or "").strip()
+        for item in diagnostics
+        if str(item.get("reason", "") or "").strip() == "eligible"
+    }
+    out = []
+    for job in load_race_jobs():
+        job_id = str(job.get("job_id", "") or "").strip()
+        if job_id and job_id in eligible_ids:
+            out.append(dict(job))
     return out
 
 
@@ -144,6 +174,26 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
     process_results = []
     settle_results = []
     errors = []
+    auto_settle_skipped = []
+    auto_settle_attempted = []
+    auto_settle_now = datetime.now()
+    auto_settle_candidates = _auto_settle_diagnostics(
+        load_race_jobs=lambda: load_race_jobs(base_dir),
+        now_dt=auto_settle_now,
+    )
+    print(
+        "[web_app] "
+        + json.dumps(
+            {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "event": "auto_settle_candidates",
+                "count": len(auto_settle_candidates),
+                "items": auto_settle_candidates,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
     while True:
         job_id = pick_next_process_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
@@ -223,29 +273,99 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
 
     for job in list_auto_settle_jobs(
         load_race_jobs=lambda: load_race_jobs(base_dir),
-        now_dt=datetime.now(),
+        now_dt=auto_settle_now,
     ):
         job_id = str((job or {}).get("job_id", "") or "").strip()
         if not job_id:
             continue
         try:
+            auto_settle_attempted.append(job_id)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "auto_settle_start",
+                        "job_id": job_id,
+                        "race_id": str((job or {}).get("race_id", "") or "").strip(),
+                        "run_id": str((job or {}).get("current_run_id", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             official_payload = _fetch_official_result_payload_for_job(job)
             if not official_payload:
+                auto_settle_skipped.append({"job_id": job_id, "reason": "result_not_available"})
+                print(
+                    "[web_app] "
+                    + json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "event": "auto_settle_skipped",
+                            "job_id": job_id,
+                            "reason": "result_not_available",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
                 continue
             actual_top3 = [str(item.get("horse_name", "") or "").strip() for item in list(official_payload.get("top3", []) or [])[:3]]
             if len(actual_top3) < 3 or not all(actual_top3[:3]):
+                auto_settle_skipped.append({"job_id": job_id, "reason": "top3_incomplete", "top3": actual_top3})
+                print(
+                    "[web_app] "
+                    + json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "event": "auto_settle_skipped",
+                            "job_id": job_id,
+                            "reason": "top3_incomplete",
+                            "top3": actual_top3,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
                 continue
             from race_job_runner import settle_race_job
 
-            settle_results.append(
-                settle_race_job(
-                    base_dir,
-                    job_id,
-                    actual_top3,
-                    official_result_payload=official_payload,
-                )
+            result = settle_race_job(
+                base_dir,
+                job_id,
+                actual_top3,
+                official_result_payload=official_payload,
+            )
+            settle_results.append(result)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "auto_settle_done",
+                        "job_id": job_id,
+                        "run_id": str((result or {}).get("run_id", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
             )
         except Exception as exc:
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "auto_settle_error",
+                        "job_id": job_id,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             errors.append({"kind": "auto_settle", "job_id": job_id, "error": str(exc)})
 
     return {
@@ -255,6 +375,10 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
         "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
         "settled_count": len(settle_results),
         "settled_job_ids": [str(item.get("job_id", "") or "").strip() for item in settle_results],
+        "auto_settle_candidate_count": len(auto_settle_candidates),
+        "auto_settle_candidates": auto_settle_candidates,
+        "auto_settle_attempted": auto_settle_attempted,
+        "auto_settle_skipped": auto_settle_skipped,
         "errors": errors,
     }
 
