@@ -1420,7 +1420,7 @@ def _daily_summary_best_ticket(target_date):
                     "stake_yen": stake_yen,
                     "payout_yen": payout_yen,
                     "return_ratio": float(payout_yen) / float(stake_yen),
-                    "multiplier": float(to_float(row.get("odds_used")) or 0.0) if float(to_float(row.get("odds_used")) or 0.0) > 0 else (float(payout_yen) / float(stake_yen)),
+                    "multiplier": float(payout_yen) / float(stake_yen),
                     "marks_map": dict(marks_map or {}),
                 }
                 if not best:
