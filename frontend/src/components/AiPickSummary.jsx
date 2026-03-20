@@ -27,7 +27,10 @@ export default function AiPickSummary({ card }) {
     .filter((item) => item.horseNo);
 
   return (
-    <article className={`ai-pick-summary ai-pick-summary--${card?.engine || "generic"}`}>
+    <article
+      className={`ai-pick-summary ai-pick-summary--${card?.engine || "generic"}`}
+      data-share-text={card?.share_text || ""}
+    >
       <div className="ai-pick-summary__head">
         <strong className="ai-pick-summary__model">{card?.label || "-"}</strong>
         <ModelMetaBadge label="ROI" value={card?.roi_text || "-"} tone="subtle" />

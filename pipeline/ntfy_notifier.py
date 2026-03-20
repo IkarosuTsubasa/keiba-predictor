@@ -1,0 +1,199 @@
+import base64
+import json
+import os
+import urllib.error
+import urllib.request
+from pathlib import Path
+from urllib.parse import quote
+
+from local_env import load_local_env
+
+
+BASE_DIR = Path(__file__).resolve().parent
+load_local_env(BASE_DIR, override=False)
+
+
+def ntfy_notify_enabled():
+    raw = str(os.environ.get("PIPELINE_NTFY_NOTIFY_ENABLED", "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def ntfy_server_url():
+    value = str(os.environ.get("PIPELINE_NTFY_SERVER_URL", "https://ntfy.sh") or "").strip()
+    return (value or "https://ntfy.sh").rstrip("/")
+
+
+def ntfy_topic():
+    return str(os.environ.get("PIPELINE_NTFY_TOPIC", "") or "").strip().strip("/")
+
+
+def preferred_ntfy_engine():
+    return str(os.environ.get("PIPELINE_NTFY_ENGINE", "") or "").strip().lower()
+
+
+def _public_site_url():
+    value = str(os.environ.get("PIPELINE_PUBLIC_SITE_URL", "https://www.ikaimo-ai.com") or "").strip()
+    return (value or "https://www.ikaimo-ai.com").rstrip("/")
+
+
+def _public_base_path():
+    value = str(os.environ.get("PIPELINE_PUBLIC_BASE_PATH", "/keiba") or "").strip()
+    if not value:
+        return "/keiba"
+    if not value.startswith("/"):
+        value = "/" + value
+    return value.rstrip("/") or "/keiba"
+
+
+def build_workspace_url(scope_key, run_id):
+    scope_text = quote(str(scope_key or "").strip())
+    run_text = quote(str(run_id or "").strip())
+    return f"{_public_site_url()}{_public_base_path()}/console/workspace?scope_key={scope_text}&run_id={run_text}"
+
+
+def build_x_intent_url(share_text):
+    return f"https://x.com/intent/post?text={quote(str(share_text or ''), safe='')}"
+
+
+def _basic_auth_header(username, password):
+    raw = f"{username}:{password}".encode("utf-8")
+    return "Basic " + base64.b64encode(raw).decode("ascii")
+
+
+def _build_auth_header():
+    token = str(os.environ.get("PIPELINE_NTFY_TOKEN", "") or "").strip()
+    if token:
+        return "Bearer " + token
+    username = str(os.environ.get("PIPELINE_NTFY_USERNAME", "") or "").strip()
+    password = str(os.environ.get("PIPELINE_NTFY_PASSWORD", "") or "").strip()
+    if username and password:
+        return _basic_auth_header(username, password)
+    return ""
+
+
+def _select_share_candidate(scope_key, run_id):
+    import web_app  # local import to avoid circular imports
+
+    run_row = web_app.resolve_run(run_id, scope_key)
+    if run_row is None:
+        raise LookupError(f"run row not found for run_id={run_id}")
+    preferred_engine = preferred_ntfy_engine()
+    payload_map = {}
+    for payload in web_app.load_policy_payloads(scope_key, run_id, run_row):
+        engine = web_app.normalize_policy_engine((payload or {}).get("policy_engine", ""))
+        if engine:
+            payload_map[engine] = payload
+    if not payload_map:
+        raise LookupError(f"policy payloads not found for run_id={run_id}")
+    ordered_engines = list(getattr(web_app, "REPORT_LLM_BATTLE_ORDER", ("gemini", "deepseek", "openai", "grok")))
+    candidate_engines = [engine for engine in ordered_engines if engine in payload_map]
+    if preferred_engine and preferred_engine in payload_map:
+        candidate_engines = [preferred_engine] + [engine for engine in candidate_engines if engine != preferred_engine]
+    chosen_engine = ""
+    chosen_payload = None
+    chosen_ticket_rows = []
+    chosen_marks_map = {}
+    for engine in candidate_engines:
+        payload = payload_map.get(engine)
+        if payload is None:
+            continue
+        ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=engine) or list(
+            web_app.report_policy_primary_budget(payload).get("tickets", []) or []
+        )
+        if ticket_rows:
+            chosen_engine = engine
+            chosen_payload = payload
+            chosen_ticket_rows = list(ticket_rows)
+            chosen_marks_map = web_app.report_policy_marks_map(payload)
+            break
+    if not chosen_engine:
+        chosen_engine = candidate_engines[0]
+        chosen_payload = payload_map.get(chosen_engine) or {}
+        chosen_ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=chosen_engine) or list(
+            web_app.report_policy_primary_budget(chosen_payload).get("tickets", []) or []
+        )
+        chosen_marks_map = web_app.report_policy_marks_map(chosen_payload)
+    share_text = web_app.build_public_share_text(run_row, chosen_engine, chosen_marks_map, chosen_ticket_rows)
+    return {
+        "engine": chosen_engine,
+        "run_row": dict(run_row or {}),
+        "share_text": str(share_text or "").strip(),
+    }
+
+
+def build_ntfy_share_notification(scope_key, run_id):
+    candidate = _select_share_candidate(scope_key, run_id)
+    run_row = dict(candidate.get("run_row", {}) or {})
+    race_id = str(run_row.get("race_id", "") or "").strip()
+    location = str(run_row.get("location", "") or "").strip()
+    race_date = str(run_row.get("date", "") or run_row.get("race_date", "") or "").strip()
+    title_parts = [part for part in (location, race_id) if part]
+    title = " ".join(title_parts) if title_parts else f"予想完了 {run_id}"
+    if race_date:
+        title = f"{title} {race_date}"
+    share_text = str(candidate.get("share_text", "") or "").strip()
+    if not share_text:
+        raise ValueError(f"share text not available for run_id={run_id}")
+    return {
+        "engine": str(candidate.get("engine", "") or "").strip(),
+        "share_text": share_text,
+        "intent_url": build_x_intent_url(share_text),
+        "workspace_url": build_workspace_url(scope_key, run_id),
+        "title": title,
+    }
+
+
+def publish_ntfy_share_notification(scope_key, run_id):
+    if not ntfy_notify_enabled():
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "disabled",
+        }
+    topic = ntfy_topic()
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
+    notification = build_ntfy_share_notification(scope_key, run_id)
+    body = notification["share_text"].encode("utf-8")
+    request = urllib.request.Request(
+        url=f"{ntfy_server_url()}/{quote(topic, safe='')}",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "Title": notification["title"],
+            "Click": notification["intent_url"],
+            "Tags": "horse_racing,signal_strength",
+            "Actions": f"view,Workspace,{notification['workspace_url']}",
+        },
+    )
+    auth_header = _build_auth_header()
+    if auth_header:
+        request.add_header("Authorization", auth_header)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ntfy http {exc.code}: {detail or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"ntfy request failed: {exc}") from exc
+    payload = {}
+    if raw.strip():
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+    return {
+        "ok": True,
+        "engine": notification["engine"],
+        "share_text": notification["share_text"],
+        "intent_url": notification["intent_url"],
+        "workspace_url": notification["workspace_url"],
+        "topic": topic,
+        "message_id": str(payload.get("id", "") or "").strip(),
+    }

@@ -51,6 +51,29 @@ function MetaRow({ items }) {
   );
 }
 
+function notifyMeta(data) {
+  const status = String(data?.ntfy_notify_status || "").trim().toLowerCase();
+  if (status === "notified") {
+    return {
+      label: "已发送",
+      tone: "good",
+      detail: data?.ntfy_notify_engine ? `engine=${data.ntfy_notify_engine}` : data?.ntfy_notified_at || "",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: "失败",
+      tone: "danger",
+      detail: data?.ntfy_notify_error || "",
+    };
+  }
+  return {
+    label: "未发送",
+    tone: "neutral",
+    detail: "",
+  };
+}
+
 function PredictorOverviewCard({ overview }) {
   if (!overview) return null;
   const meta = overview.meta || {};
@@ -467,6 +490,7 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
   const oddsSnapshots = state.data?.odds_snapshots || null;
   const runContextRows = state.data?.run_context_rows || [];
   const runAssetRows = state.data?.run_asset_rows || [];
+  const notify = notifyMeta(state.data);
 
   const summaryMeta = useMemo(() => {
     if (!state.data) return [];
@@ -533,6 +557,9 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
         </section>
 
         {state.error ? <section className="notice-strip">{state.error}</section> : null}
+        {!state.error && state.data?.ntfy_notify_status === "failed" && state.data?.ntfy_notify_error ? (
+          <section className="notice-strip">{`ntfy 推送失败: ${state.data.ntfy_notify_error}`}</section>
+        ) : null}
 
         {state.loading ? (
           <section className="public-screen-state__panel">
@@ -564,6 +591,11 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
               <article className="admin-summary-card admin-summary-card--active">
                 <span>Policies</span>
                 <strong>{policyCards.length}</strong>
+              </article>
+              <article className={`admin-summary-card${notify.tone === "good" ? " admin-summary-card--good" : notify.tone === "danger" ? " admin-summary-card--danger" : ""}`}>
+                <span>ntfy</span>
+                <strong>{notify.label}</strong>
+                {notify.detail ? <small>{notify.detail}</small> : null}
               </article>
             </section>
 

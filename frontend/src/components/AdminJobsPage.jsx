@@ -63,6 +63,26 @@ function stepClass(tone) {
   return "admin-step-badge";
 }
 
+function notifyMeta(job) {
+  const status = String(job?.ntfy_notify_status || "").trim().toLowerCase();
+  if (status === "notified") {
+    return {
+      label: `通知 已发送${job?.ntfy_notify_engine ? ` (${job.ntfy_notify_engine})` : ""}`,
+      tone: "good",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: `通知 失败${job?.ntfy_notify_error ? `: ${job.ntfy_notify_error}` : ""}`,
+      tone: "danger",
+    };
+  }
+  return {
+    label: "通知 未发送",
+    tone: "muted",
+  };
+}
+
 function SummaryCard({ label, value, tone = "neutral" }) {
   return (
     <article className={`admin-summary-card admin-summary-card--${tone}`}>
@@ -326,6 +346,7 @@ function JobCard({ job, onAction, busyAction }) {
       ? `/keiba/console/workspace?scope_key=${encodeURIComponent(job.scope_key)}&run_id=${encodeURIComponent(job.current_run_id)}`
       : "";
   const busy = busyAction === job.job_id;
+  const notify = notifyMeta(job);
 
   return (
     <article className="admin-job-card">
@@ -353,6 +374,7 @@ function JobCard({ job, onAction, busyAction }) {
 
       <div className="admin-job-card__meta admin-job-card__meta--stack">
         <span>Actual {actualText}</span>
+        <span className={statusClass(notify.tone)}>{notify.label}</span>
         {job.notes ? <span>Notes {job.notes}</span> : null}
       </div>
 

@@ -1293,6 +1293,11 @@ def build_public_board_payload(date_text="", scope_key=""):
         public_all_time_roi_summary=_public_all_time_roi_summary,
         public_trend_series=_public_trend_series,
         parse_run_date=_parse_run_date,
+        share_detail_label=PUBLIC_SHARE_DETAIL_LABEL,
+        share_url=PUBLIC_SHARE_URL,
+        share_hashtag=PUBLIC_SHARE_HASHTAG,
+        share_max_chars=PUBLIC_SHARE_MAX_CHARS,
+        to_int_or_none=to_int_or_none,
     )
 
 _JOB_STEP_LABELS = {
@@ -1435,6 +1440,11 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "actual_top1": str(hydrated.get("actual_top1", "") or "").strip(),
                 "actual_top2": str(hydrated.get("actual_top2", "") or "").strip(),
                 "actual_top3": str(hydrated.get("actual_top3", "") or "").strip(),
+                "ntfy_notify_status": str(hydrated.get("ntfy_notify_status", "") or "").strip(),
+                "ntfy_notify_run_id": str(hydrated.get("ntfy_notify_run_id", "") or "").strip(),
+                "ntfy_notify_engine": str(hydrated.get("ntfy_notify_engine", "") or "").strip(),
+                "ntfy_notified_at": str(hydrated.get("ntfy_notified_at", "") or "").strip(),
+                "ntfy_notify_error": str(hydrated.get("ntfy_notify_error", "") or "").strip(),
                 "notes": str(hydrated.get("notes", "") or "").strip(),
                 "step_badges": step_badges,
                 "process_log": _race_job_process_log_entries(hydrated),
@@ -1623,6 +1633,11 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
     return {
         "authorized": True,
         "job_id": str(job_meta.get("job_id", "") or "").strip(),
+        "ntfy_notify_status": str(job_meta.get("ntfy_notify_status", "") or "").strip(),
+        "ntfy_notify_run_id": str(job_meta.get("ntfy_notify_run_id", "") or "").strip(),
+        "ntfy_notify_engine": str(job_meta.get("ntfy_notify_engine", "") or "").strip(),
+        "ntfy_notified_at": str(job_meta.get("ntfy_notified_at", "") or "").strip(),
+        "ntfy_notify_error": str(job_meta.get("ntfy_notify_error", "") or "").strip(),
         "scope_key": scope_norm,
         "scope_label": _scope_display_name(scope_norm),
         "run_id": resolved_run_id,
@@ -2022,49 +2037,27 @@ async def admin_workspace_record_predictor_api(request: Request):
         return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
     if not top1 or not top2 or not top3:
         return JSONResponse({"ok": False, "error": "top1/top2/top3 required"}, status_code=400)
+    job_meta = _find_job_meta_for_run(scope_norm, resolved_run_id, run_row) or {}
+    job_id = str(job_meta.get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job not found for run"}, status_code=404)
+    try:
+        from race_job_runner import settle_race_job
 
-    refresh_ok = False
-    refresh_message = "run row missing for odds refresh."
-    refresh_warnings = []
-    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
-    wide_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "wide_odds_path", "wide_odds")
-    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-    quinella_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "quinella_odds_path", "quinella_odds")
-    exacta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "exacta_odds_path", "exacta_odds")
-    trio_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trio_odds_path", "trio_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "trifecta_odds_path", "trifecta_odds")
-    refresh_ok, refresh_message, refresh_warnings = refresh_odds_for_run(
-        run_row,
-        scope_norm,
-        odds_path,
-        wide_odds_path=wide_odds_path,
-        fuku_odds_path=fuku_odds_path,
-        quinella_odds_path=quinella_odds_path,
-        exacta_odds_path=exacta_odds_path,
-        trio_odds_path=trio_odds_path,
-        trifecta_odds_path=trifecta_odds_path,
-    )
-
-    code, output = run_script(
-        RECORD_PREDICTOR,
-        inputs=[resolved_run_id, top1, top2, top3],
-        extra_blanks=2,
-        extra_env={"SCOPE_KEY": scope_norm},
-    )
-    label = f"Exit code: {code}"
-    output_parts = [f"[odds_update] status={'ok' if refresh_ok else 'fail'} message={refresh_message or ''}".strip()]
-    if refresh_warnings:
-        output_parts.append("[odds_update][warnings] " + "; ".join(str(x) for x in refresh_warnings))
-    output_parts.append(label)
-    output_parts.append(output)
+        summary = settle_race_job(BASE_DIR, job_id, [top1, top2, top3])
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
     return JSONResponse(
         {
-            "ok": code == 0,
+            "ok": True,
+            "job_id": job_id,
             "scope_key": scope_norm,
             "run_id": resolved_run_id,
-            "output_text": "\n".join(part for part in output_parts if str(part).strip()),
+            "actual_top3": [top1, top2, top3],
+            "summary": summary or {},
+            "output_text": str((summary or {}).get("output", "") or ""),
         },
-        status_code=200 if code == 0 else 500,
+        status_code=200,
     )
 
 

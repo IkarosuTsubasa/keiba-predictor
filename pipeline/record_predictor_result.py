@@ -220,6 +220,11 @@ def load_official_result_payload():
         return None
 
 
+def auto_optimize_after_settlement_enabled():
+    raw = str(os.environ.get("PIPELINE_AUTO_OPTIMIZE_AFTER_SETTLEMENT", "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def main():
     init_scope()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -384,7 +389,7 @@ def main():
                 "available_bankroll_yen={available_bankroll_yen}".format(**settlement)
             )
     optimizer = BASE_DIR / "optimize_predictor_params.py"
-    if optimizer.exists():
+    if auto_optimize_after_settlement_enabled() and optimizer.exists():
         subprocess.run([sys.executable, str(optimizer)], check=False)
 
 

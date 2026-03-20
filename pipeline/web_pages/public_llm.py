@@ -211,6 +211,11 @@ def build_public_board_payload(
     public_all_time_roi_summary,
     public_trend_series,
     parse_run_date,
+    share_detail_label,
+    share_url,
+    share_hashtag,
+    share_max_chars,
+    to_int_or_none,
 ):
     requested_date = normalize_report_date_text(date_text)
     scope_norm = normalize_scope_key(scope_key)
@@ -322,6 +327,17 @@ def build_public_board_payload(
                     "roi_text": format_percent_text(ticket_summary.get("roi", "")),
                     "confidence_text": confidence_text,
                     "confidence_value": confidence_value,
+                    "share_text": build_public_share_text(
+                        run_row,
+                        engine,
+                        marks_map,
+                        ticket_rows,
+                        max_chars=share_max_chars,
+                        share_detail_label=share_detail_label,
+                        share_url=share_url,
+                        share_hashtag=share_hashtag,
+                        to_int_or_none=to_int_or_none,
+                    ),
                 }
             )
 

@@ -32,6 +32,11 @@ def _job_step_field(step_name, suffix):
 
 def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
+    row.setdefault("ntfy_notify_status", "")
+    row.setdefault("ntfy_notify_run_id", "")
+    row.setdefault("ntfy_notify_engine", "")
+    row.setdefault("ntfy_notified_at", "")
+    row.setdefault("ntfy_notify_error", "")
     for step_name in JOB_STEP_NAMES:
         row.setdefault(_job_step_field(step_name, "status"), "idle")
         row.setdefault(_job_step_field(step_name, "started_at"), "")
@@ -363,18 +368,17 @@ def create_job(
         "settled_at": "",
         "current_run_id": "",
         "current_v5_task_id": "",
-        "x_post_status": "",
-        "x_post_run_id": "",
-        "x_post_engine": "",
-        "x_posted_at": "",
-        "x_post_tweet_id": "",
-        "x_post_error": "",
         "actual_top1": "",
         "actual_top2": "",
         "actual_top3": "",
         "error_message": "",
         "last_process_output": "",
         "last_settlement_output": "",
+        "ntfy_notify_status": "",
+        "ntfy_notify_run_id": "",
+        "ntfy_notify_engine": "",
+        "ntfy_notified_at": "",
+        "ntfy_notify_error": "",
     }
     job = initialize_job_step_fields(job)
     job["status"] = compute_initial_status(job)

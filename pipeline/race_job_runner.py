@@ -142,6 +142,66 @@ def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_j
     set_job_step_state(row, "policy", "succeeded", now_text)
 
 
+def _mark_ntfy_notified(row, now_text, run_id, engine):
+    row.update(initialize_job_step_fields(row))
+    row["ntfy_notify_status"] = "notified"
+    row["ntfy_notify_run_id"] = str(run_id or "").strip()
+    row["ntfy_notify_engine"] = str(engine or "").strip()
+    row["ntfy_notified_at"] = now_text
+    row["ntfy_notify_error"] = ""
+
+
+def _mark_ntfy_notify_failed(row, now_text, run_id, error_text):
+    row.update(initialize_job_step_fields(row))
+    row["ntfy_notify_status"] = "failed"
+    row["ntfy_notify_run_id"] = str(run_id or "").strip()
+    row["ntfy_notified_at"] = now_text
+    row["ntfy_notify_error"] = str(error_text or "").strip()
+
+
+def _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id):
+    from ntfy_notifier import publish_ntfy_share_notification
+
+    job = get_job(base_path, job_id) or {}
+    if str(job.get("ntfy_notify_status", "") or "").strip().lower() == "notified":
+        if str(job.get("ntfy_notify_run_id", "") or "").strip() == str(run_id or "").strip():
+            _log_runner_event("ntfy_notify_skipped", job_id=job_id, run_id=run_id, reason="already_notified")
+            return None
+    try:
+        result = publish_ntfy_share_notification(scope_key, run_id)
+    except Exception as exc:
+        error_text = str(exc or "").strip()
+        update_job(
+            base_path,
+            job_id,
+            lambda row, now_text: _mark_ntfy_notify_failed(row, now_text, run_id, error_text),
+        )
+        _log_runner_event("ntfy_notify_failed", job_id=job_id, run_id=run_id, error=error_text)
+        return None
+    if result.get("skipped"):
+        _log_runner_event(
+            "ntfy_notify_skipped",
+            job_id=job_id,
+            run_id=run_id,
+            reason=str(result.get("reason", "") or "skipped"),
+        )
+        return result
+    update_job(
+        base_path,
+        job_id,
+        lambda row, now_text: _mark_ntfy_notified(row, now_text, run_id, result.get("engine", "")),
+    )
+    _log_runner_event(
+        "ntfy_notify_sent",
+        job_id=job_id,
+        run_id=run_id,
+        engine=str(result.get("engine", "") or "").strip(),
+        topic=str(result.get("topic", "") or "").strip(),
+        message_id=str(result.get("message_id", "") or "").strip(),
+    )
+    return result
+
+
 def _mark_job_failed(row, now_text, message):
     row.update(initialize_job_step_fields(row))
     error_text = str(message or "")
@@ -623,6 +683,7 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
             row, now_text, run_id, summary, refreshed_job
         ),
     )
+    _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id)
     _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, engine_count=len(engines))
     return summary
 

@@ -248,6 +248,10 @@ def _public_share_runtime_html():
       .filter(Boolean);
 
   const buildShareText = (raceTitle, card) => {
+    const presetText = String(card?.dataset?.shareText || "").trim();
+    if (presetText) {
+      return presetText;
+    }
     let ticketText = "";
     let marksText = "\\u5370\\u306a\\u3057";
     if (card.matches(".model-card")) {
@@ -561,4 +565,7 @@ def register_public_static_routes(app: FastAPI) -> None:
         og_path = PUBLIC_FRONTEND_DIST_DIR / "og.png"
         if og_path.exists():
             return FileResponse(og_path, media_type="image/png")
+        fallback_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
+        if fallback_path.exists():
+            return FileResponse(fallback_path, media_type="image/png")
         raise HTTPException(status_code=404, detail="og image not found")
