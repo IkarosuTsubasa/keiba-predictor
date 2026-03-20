@@ -74,13 +74,72 @@ def load_public_index_html():
         return f.read()
 
 
-def inject_public_meta_tags(content=""):
+PUBLIC_PAGE_META = {
+    PUBLIC_BASE_PATH: {
+        "title": "いかいもAI競馬",
+        "description": "複数のAI視点を重ねて競馬分析を公開する競馬分析サイト",
+    },
+    f"{PUBLIC_BASE_PATH}/about": {
+        "title": "このサイトについて | いかいもAI競馬",
+        "description": "いかいもAI競馬の考え方と、複数の視点を重ねる競馬分析の方針を紹介します。",
+    },
+    f"{PUBLIC_BASE_PATH}/guide": {
+        "title": "ガイド | いかいもAI競馬",
+        "description": "印、ROI、買い目、見送り判断など、サイト内で表示される情報の見方を案内します。",
+    },
+    f"{PUBLIC_BASE_PATH}/methodology": {
+        "title": "分析方法 | いかいもAI競馬",
+        "description": "多面的な評価、比較、オッズとの整合、見送り判断など、本サイトの分析フレームを紹介します。",
+    },
+    f"{PUBLIC_BASE_PATH}/privacy": {
+        "title": "プライバシーポリシー | いかいもAI競馬",
+        "description": "Cookie、アクセス情報、広告配信に関する当サイトのプライバシーポリシーです。",
+    },
+    f"{PUBLIC_BASE_PATH}/terms": {
+        "title": "利用規約 | いかいもAI競馬",
+        "description": "いかいもAI競馬の利用条件、禁止事項、免責範囲を記載した利用規約です。",
+    },
+    f"{PUBLIC_BASE_PATH}/disclaimer": {
+        "title": "免責事項 | いかいもAI競馬",
+        "description": "予想情報、投票判断、情報の正確性、責任範囲に関する免責事項を案内します。",
+    },
+    f"{PUBLIC_BASE_PATH}/contact": {
+        "title": "お問い合わせ | いかいもAI競馬",
+        "description": "掲載内容や運営に関する連絡先と、お問い合わせ時の案内を掲載しています。",
+    },
+    CONSOLE_BASE_PATH: {
+        "title": "管理コンソール | いかいもAI競馬",
+        "description": "管理者向けコンソールです。",
+        "noindex": True,
+    },
+    f"{CONSOLE_BASE_PATH}/workspace": {
+        "title": "Workspace | いかいもAI競馬",
+        "description": "管理者向けワークスペースです。",
+        "noindex": True,
+    },
+}
+
+
+def _public_page_meta(path=""):
+    normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
+    meta = PUBLIC_PAGE_META.get(normalized_path, PUBLIC_PAGE_META[PUBLIC_BASE_PATH]).copy()
+    meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
+    return meta
+
+
+def inject_public_meta_tags(content="", path=""):
     html_text = str(content or "")
     if not html_text:
         return html_text
 
-    title_tag = f"<title>{html.escape(PUBLIC_META_TITLE)}</title>"
-    description_tag = f'<meta name="description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />'
+    page_meta = _public_page_meta(path)
+    meta_title = page_meta["title"]
+    meta_description = page_meta["description"]
+    canonical_url = page_meta["canonical_url"]
+    robots_tag = '<meta name="robots" content="noindex, nofollow" />' if page_meta.get("noindex") else ""
+
+    title_tag = f"<title>{html.escape(meta_title)}</title>"
+    description_tag = f'<meta name="description" content="{html.escape(meta_description)}" />'
     html_text = re.sub(r"<title>.*?</title>", title_tag, html_text, count=1, flags=re.IGNORECASE | re.DOTALL)
     html_text = re.sub(
         r'<meta\s+name=["\']description["\'][^>]*>',
@@ -94,18 +153,19 @@ def inject_public_meta_tags(content=""):
     html_text = re.sub(r'\s*<meta\s+name=["\']twitter:[^>]*>\s*', "\n", html_text, flags=re.IGNORECASE)
 
     meta_block = f"""
-    <link rel="canonical" href="{html.escape(PUBLIC_CANONICAL_URL)}" />
+    <link rel="canonical" href="{html.escape(canonical_url)}" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta property="og:title" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta property="og:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
-    <meta property="og:url" content="{html.escape(PUBLIC_CANONICAL_URL)}" />
+    <meta property="og:site_name" content="いかいもAI競馬" />
+    <meta property="og:title" content="{html.escape(meta_title)}" />
+    <meta property="og:description" content="{html.escape(meta_description)}" />
+    <meta property="og:url" content="{html.escape(canonical_url)}" />
     <meta property="og:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
-    <meta property="og:image:alt" content="{html.escape(PUBLIC_META_TITLE)}" />
+    <meta property="og:image:alt" content="{html.escape(meta_title)}" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="{html.escape(PUBLIC_META_TITLE)}" />
-    <meta name="twitter:description" content="{html.escape(PUBLIC_META_DESCRIPTION)}" />
+    <meta name="twitter:title" content="{html.escape(meta_title)}" />
+    <meta name="twitter:description" content="{html.escape(meta_description)}" />
     <meta name="twitter:image" content="{html.escape(PUBLIC_OG_IMAGE_URL)}" />
+    {robots_tag}
     """.strip()
     return re.sub(r"</head>", f"{meta_block}\n  </head>", html_text, count=1, flags=re.IGNORECASE)
 
@@ -470,10 +530,10 @@ def inject_public_share_runtime(html_text):
     return content + runtime
 
 
-def build_public_index_response():
+def build_public_index_response(path=""):
     html_text = load_public_index_html()
     html_text = prefix_public_html_routes(html_text)
-    html_text = inject_public_meta_tags(html_text)
+    html_text = inject_public_meta_tags(html_text, path=path)
     html_text = inject_public_share_runtime(html_text)
     return HTMLResponse(html_text)
 

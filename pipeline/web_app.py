@@ -1704,17 +1704,17 @@ def index():
 
 @app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
 def console_spa():
-    return build_public_index_response()
+    return build_public_index_response(CONSOLE_BASE_PATH)
 
 
 @app.get(f"{CONSOLE_BASE_PATH}/workspace", response_class=HTMLResponse)
 def console_workspace_spa():
-    return build_public_index_response()
+    return build_public_index_response(f"{CONSOLE_BASE_PATH}/workspace")
 
 
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
-    return build_public_index_response()
+    return build_public_index_response(PUBLIC_BASE_PATH)
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/about", response_class=HTMLResponse)
@@ -1724,8 +1724,8 @@ def llm_today(date: str = "", scope_key: str = ""):
 @app.get(f"{PUBLIC_BASE_PATH}/terms", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/disclaimer", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/contact", response_class=HTMLResponse)
-def public_static_pages():
-    return build_public_index_response()
+def public_static_pages(request: Request):
+    return build_public_index_response(request.url.path)
 
 
 @app.get("/ads.txt")
