@@ -39,7 +39,7 @@ export default function RaceGrid({ races }) {
           すべて
         </button>
         <button type="button" className={tab === "open" ? "is-active" : ""} onClick={() => setTab("open")}>
-          予想中
+          出走待ち
         </button>
         <button type="button" className={tab === "settled" ? "is-active" : ""} onClick={() => setTab("settled")}>
           結果確定

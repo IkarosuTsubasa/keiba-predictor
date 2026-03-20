@@ -35,7 +35,7 @@ function resolveStatus(race) {
   if (actual && !actual.includes("未")) {
     return { label: "結果確定", tone: "settled" };
   }
-  return { label: "予想中", tone: "open" };
+  return { label: "出走待ち", tone: "open" };
 }
 
 export default function RaceCardHeader({ race, actions = null }) {

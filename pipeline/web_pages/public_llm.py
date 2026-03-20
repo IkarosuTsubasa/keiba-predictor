@@ -46,7 +46,7 @@ def public_status_meta_ja(ticket_summary, actual_names):
         return "精算待ち", "pending"
     if actual_ready:
         return "結果確定", "result"
-    return "予想中", "planned"
+    return "出走待ち", "planned"
 
 
 def public_yen_text(value):
