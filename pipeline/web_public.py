@@ -306,7 +306,7 @@ def _public_share_runtime_html():
   };
 
   const openShare = async (text) => {
-    const shareUrl = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+    const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     const isMobileShare =
       /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
       (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) ||

@@ -52,7 +52,7 @@ def build_workspace_url(scope_key, run_id):
 
 
 def build_x_intent_url(share_text):
-    return f"https://x.com/intent/post?text={quote(str(share_text or ''), safe='')}"
+    return f"https://twitter.com/intent/tweet?text={quote(str(share_text or ''), safe='')}"
 
 
 def _basic_auth_header(username, password):
@@ -166,9 +166,12 @@ def publish_ntfy_share_notification(scope_key, run_id):
         headers={
             "Content-Type": "text/plain; charset=utf-8",
             "Title": notification["title"],
-            "Click": notification["intent_url"],
+            "Click": notification["workspace_url"],
             "Tags": "horse_racing,signal_strength",
-            "Actions": f"view,Workspace,{notification['workspace_url']}",
+            "Actions": (
+                f"view,发布到X,{notification['intent_url']}; "
+                f"view,Workspace,{notification['workspace_url']}"
+            ),
         },
     )
     auth_header = _build_auth_header()
