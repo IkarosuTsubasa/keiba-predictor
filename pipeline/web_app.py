@@ -1463,7 +1463,7 @@ def _daily_summary_best_ticket_lines(best_ticket):
         horse_text = "的中"
     if not multiplier_text:
         multiplier_text = f"{int(item.get('payout_yen', 0) or 0):,}円"
-    return ["🔥 今日の神", race_title, f"{horse_text} → {bet_label}{multiplier_text}"]
+    return ["🔥 本日最大ヒット", race_title, f"{horse_text} → {bet_label}{multiplier_text}"]
 
 
 def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best_ticket, max_chars=140):
@@ -1489,6 +1489,7 @@ def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best
             "【いかいもAI競馬 本日結果】",
             "",
             f"🎯 的中：{hit_races} / {race_count}レース",
+            "※推奨買い目ベース",
             "",
         ]
         hero_lines = _daily_summary_best_ticket_lines(best_ticket)
