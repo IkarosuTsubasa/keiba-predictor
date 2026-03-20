@@ -1,9 +1,23 @@
 import csv
+import re
 from pathlib import Path
 
 
 def normalize_name(value):
     return "".join(str(value or "").split())
+
+
+_INTEGER_LIKE_NUMBER_RE = re.compile(r"^\s*([0-9]+)(?:\.0+)?\s*$")
+
+
+def normalize_horse_no(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    matched = _INTEGER_LIKE_NUMBER_RE.match(text)
+    if matched:
+        return str(int(matched.group(1)))
+    return text
 
 
 def load_entry_sets(path, name_fields, no_fields):
@@ -26,7 +40,7 @@ def load_entry_sets(path, name_fields, no_fields):
                 if name:
                     names.add(name)
             if no_field:
-                horse_no = str(row.get(no_field, "") or "").strip()
+                horse_no = normalize_horse_no(row.get(no_field, ""))
                 if horse_no:
                     numbers.add(horse_no)
     if not names and not numbers:
