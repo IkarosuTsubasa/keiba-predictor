@@ -84,6 +84,9 @@ def build_ready_post_payload(base_dir, scope_key, run_id):
 
 
 async def _post_with_twikit_async(base_dir, text):
+    from twikit_compat import apply_twikit_patches
+
+    apply_twikit_patches()
     try:
         from twikit import Client
     except Exception as exc:
