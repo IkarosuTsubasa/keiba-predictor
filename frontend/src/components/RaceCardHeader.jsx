@@ -8,9 +8,17 @@ function formatOffTime(text) {
   return source.slice(0, 5);
 }
 
+function buildBadges(race) {
+  const items = [formatOffTime(race?.scheduled_off_time), race?.distance_label];
+  if (!race?.is_placeholder && race?.track_condition) {
+    items.push(race.track_condition);
+  }
+  return items.filter(Boolean);
+}
+
 function parseResultEntries(text) {
   const source = String(text || "").trim();
-  if (!source || source.includes("未")) return [];
+  if (!source || source.includes("未") || source.includes("待ち")) return [];
 
   return source
     .split("/")
@@ -31,6 +39,9 @@ function parseResultEntries(text) {
 }
 
 function resolveStatus(race) {
+  if (race?.is_placeholder) {
+    return { label: race?.placeholder_status || "予測中", tone: "open" };
+  }
   const actual = String(race?.actual_text || "");
   if (actual && !actual.includes("未")) {
     return { label: "結果確定", tone: "settled" };
@@ -40,7 +51,7 @@ function resolveStatus(race) {
 
 export default function RaceCardHeader({ race, actions = null }) {
   const status = resolveStatus(race);
-  const badges = [formatOffTime(race?.scheduled_off_time), race?.distance_label].filter(Boolean);
+  const badges = buildBadges(race);
   const resultText = race?.actual_text || "結果未確定";
   const resultEntries = parseResultEntries(resultText);
 
@@ -60,28 +71,30 @@ export default function RaceCardHeader({ race, actions = null }) {
         <span className={`race-card-header__status race-card-header__status--${status.tone}`}>{status.label}</span>
       </div>
 
-      <div className="race-card-header__result-row">
-        <div className="race-card-header__result">
-          <span className="race-card-header__result-label">結果</span>
-          <div className="race-card-header__result-body">
-            {resultEntries.length ? (
-              <ul className="race-card-header__result-list">
-                {resultEntries.map((entry) => (
-                  <li key={entry.key}>
-                    <span className="race-card-header__result-medal" aria-hidden="true">
-                      {entry.rank}着
-                    </span>
-                    <span>{entry.body}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>{resultText}</p>
-            )}
+      {!race?.is_placeholder ? (
+        <div className="race-card-header__result-row">
+          <div className="race-card-header__result">
+            <span className="race-card-header__result-label">結果</span>
+            <div className="race-card-header__result-body">
+              {resultEntries.length ? (
+                <ul className="race-card-header__result-list">
+                  {resultEntries.map((entry) => (
+                    <li key={entry.key}>
+                      <span className="race-card-header__result-medal" aria-hidden="true">
+                        {entry.rank}着
+                      </span>
+                      <span>{entry.body}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>{resultText}</p>
+              )}
+            </div>
           </div>
+          {actions ? <div className="race-card-header__actions">{actions}</div> : null}
         </div>
-        {actions ? <div className="race-card-header__actions">{actions}</div> : null}
-      </div>
+      ) : null}
     </header>
   );
 }

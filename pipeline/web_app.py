@@ -1251,7 +1251,7 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = _llm_today_scope_keys(scope_norm)
     scoped_rows = []
-    available_dates = []
+    available_dates = set()
     for row in _load_combined_llm_report_runs():
         report_scope_key = _report_scope_key_for_row(row, scope_norm)
         if report_scope_key not in scope_keys:
@@ -1259,8 +1259,20 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
         scoped_rows.append(row)
         date_key = _run_date_key(row)
         if date_key:
-            available_dates.append(date_key)
-    available_dates = sorted(set(available_dates), reverse=True)
+            available_dates.add(date_key)
+
+    for job in load_race_jobs(BASE_DIR):
+        job_scope_key = normalize_scope_key(str(job.get("scope_key", "") or "").strip())
+        if job_scope_key not in scope_keys:
+            continue
+        status = str(job.get("status", "") or "").strip().lower()
+        if status in ("settled", "failed", "deleted"):
+            continue
+        race_date = str(job.get("race_date", "") or "").strip()
+        if race_date:
+            available_dates.add(race_date)
+
+    available_dates = sorted(available_dates, reverse=True)
     if target_date and target_date in available_dates:
         return target_date, "", scoped_rows
     if available_dates:
@@ -1271,8 +1283,82 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
     return target_date, "", scoped_rows
 
 
+def _published_public_race_keys(target_date="", scope_key=""):
+    target_date = str(target_date or "").strip()
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    out = set()
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        run_id = str((row or {}).get("run_id", "") or "").strip()
+        if not run_id:
+            continue
+        if not list(load_policy_payloads(report_scope_key, run_id, row) or []):
+            continue
+        race_id = normalize_race_id((row or {}).get("race_id", ""))
+        if not race_id:
+            continue
+        out.add((report_scope_key, target_date, race_id))
+    return out
+
+
+def _build_public_placeholder_races(target_date="", scope_key=""):
+    target_date = str(target_date or "").strip()
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    published_keys = _published_public_race_keys(target_date=target_date, scope_key=scope_norm)
+    placeholder_rows = []
+    for job in load_race_jobs(BASE_DIR):
+        job_scope_key = normalize_scope_key(str(job.get("scope_key", "") or "").strip())
+        if job_scope_key not in scope_keys:
+            continue
+        status = str(job.get("status", "") or "").strip().lower()
+        if status in ("settled", "failed", "deleted"):
+            continue
+        race_date = str(job.get("race_date", "") or "").strip()
+        race_id = normalize_race_id((job or {}).get("race_id", ""))
+        if not race_id or race_date != target_date:
+            continue
+        key = (job_scope_key, target_date, race_id)
+        if key in published_keys:
+            continue
+        location = str(job.get("location", "") or "").strip()
+        race_no = _race_no_text(race_id)
+        race_title = f"{location}{race_no}".strip() if location else (race_no or race_id)
+        placeholder_rows.append(
+            {
+                "scope_key": job_scope_key,
+                "scope_label": _scope_display_name(job_scope_key),
+                "race_id": race_id,
+                "race_title": race_title or race_id,
+                "date_label": _public_date_label(race_date),
+                "actual_text": "予測中",
+                "location": location,
+                "scheduled_off_time": str(job.get("scheduled_off_time", "") or "").strip(),
+                "distance_label": _format_distance_label(job.get("target_distance")),
+                "track_condition": str(job.get("target_track_condition", "") or "").strip() or "良",
+                "run_id": f"task:{str(job.get('job_id', '') or '').strip() or race_id}",
+                "cards": [],
+                "is_placeholder": True,
+                "placeholder_status": "予測中",
+            }
+        )
+    placeholder_rows.sort(
+        key=lambda item: (
+            str(item.get("scheduled_off_time", "") or ""),
+            str(item.get("location", "") or ""),
+            str(item.get("race_id", "") or ""),
+        )
+    )
+    return placeholder_rows
+
+
 def build_public_board_payload(date_text="", scope_key=""):
-    return web_public_llm.build_public_board_payload(
+    payload = web_public_llm.build_public_board_payload(
         date_text=date_text,
         scope_key=scope_key,
         normalize_report_date_text=_normalize_report_date_text,
@@ -1299,6 +1385,12 @@ def build_public_board_payload(date_text="", scope_key=""):
         share_max_chars=PUBLIC_SHARE_MAX_CHARS,
         to_int_or_none=to_int_or_none,
     )
+    payload = dict(payload or {})
+    target_date = str(payload.get("target_date", "") or "").strip()
+    placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
+    payload["races"] = list(payload.get("races", []) or []) + placeholder_races
+    payload["placeholder_race_count"] = len(placeholder_races)
+    return payload
 
 
 _DAILY_SUMMARY_BET_TYPE_LABELS = {

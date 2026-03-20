@@ -1184,6 +1184,10 @@ select {
   gap: 12px;
 }
 
+.race-card--placeholder .race-card__summary-grid {
+  grid-template-columns: 1fr;
+}
+
 .ai-pick-summary {
   padding: 14px;
   display: grid;
@@ -1191,6 +1195,30 @@ select {
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+}
+
+.race-card--placeholder .ai-pick-summary--generic {
+  width: 100%;
+  min-height: 0;
+  align-content: center;
+}
+
+.race-card--placeholder .ai-pick-summary__head {
+  justify-content: center;
+}
+
+.race-card__placeholder-time {
+  margin: 0;
+  text-align: center;
+  font-size: 28px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+@media (max-width: 680px) {
+  .race-card__placeholder-time {
+    font-size: 22px;
+  }
 }
 
 .ai-pick-summary__head {
