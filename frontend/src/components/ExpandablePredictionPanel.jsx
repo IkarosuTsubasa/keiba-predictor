@@ -24,7 +24,7 @@ export default function ExpandablePredictionPanel({ cards }) {
           <div className="expandable-prediction-panel__top">
             <strong>{card.label}</strong>
             <div className="expandable-prediction-panel__meta">
-              <ModelMetaBadge label="ROI" value={card.roi_text || "-"} tone="subtle" />
+              <ModelMetaBadge label="回収率" value={card.roi_text || "-"} tone="subtle" />
             </div>
           </div>
 

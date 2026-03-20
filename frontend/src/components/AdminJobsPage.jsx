@@ -525,6 +525,15 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         setFlashMessage(`Processed due tasks. processed=${data.processed_count || 0}, settled=${data.settled_count || 0}`);
       } else if (kind === "topup_today_all_llm") {
         setFlashMessage(`Topped up all LLM bankrolls by ${data.amount_yen || 0} yen.`);
+      } else if (kind === "daily_summary_share") {
+        const intentUrl = String(data?.intent_url || "").trim();
+        if (intentUrl) {
+          const popup = window.open(intentUrl, "_blank", "noopener,noreferrer");
+          if (!popup) {
+            window.location.href = intentUrl;
+          }
+        }
+        setFlashMessage(`Opened daily summary share for ${data.target_date_label || data.target_date || "today"}.`);
       } else if (kind === "create") {
         setFlashMessage(`Created task ${data.job_id || ""}.`);
       } else if (kind === "import_archive") {
@@ -585,6 +594,13 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
             onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
           >
             {busyAction === "topup_today_all_llm" ? "Applying..." : "Top Up All LLM"}
+          </button>
+          <button
+            type="button"
+            disabled={busyAction === "daily_summary_share"}
+            onClick={() => runToolbarAction("daily_summary_share", () => postJson("/api/admin/jobs/daily_summary_share", {}))}
+          >
+            {busyAction === "daily_summary_share" ? "Preparing..." : "Daily Summary Tweet"}
           </button>
         </section>
 

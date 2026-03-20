@@ -1300,6 +1300,219 @@ def build_public_board_payload(date_text="", scope_key=""):
         to_int_or_none=to_int_or_none,
     )
 
+
+_DAILY_SUMMARY_BET_TYPE_LABELS = {
+    "win": "単勝",
+    "place": "複勝",
+    "wide": "ワイド",
+    "quinella": "馬連",
+    "exacta": "馬単",
+    "trio": "3連複",
+    "trifecta": "3連単",
+}
+
+
+def _daily_summary_jst_date_text():
+    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
+def _daily_summary_intent_url(text):
+    from urllib.parse import quote
+
+    return f"https://twitter.com/intent/tweet?text={quote(str(text or ''), safe='')}"
+
+
+def _daily_summary_roi_value(item):
+    stake_yen = int(item.get("stake_yen", 0) or 0)
+    payout_yen = int(item.get("payout_yen", 0) or 0)
+    return (float(payout_yen) / float(stake_yen)) if stake_yen > 0 else -1.0
+
+
+def _daily_summary_ranked_cards(summary_cards):
+    rows = [dict(item or {}) for item in list(summary_cards or []) if int((item or {}).get("races", 0) or 0) > 0]
+    rows.sort(
+        key=lambda item: (
+            -_daily_summary_roi_value(item),
+            -int(item.get("profit_yen", 0) or 0),
+            -int(item.get("hit_races", 0) or 0),
+            str(item.get("engine", "") or ""),
+        )
+    )
+    return rows
+
+
+def _daily_summary_parse_horse_nos(value):
+    text = str(value or "").strip()
+    if not text:
+        return []
+    out = []
+    for part in re.split(r"[^0-9.]+", text):
+        part = str(part or "").strip()
+        if not part:
+            continue
+        normalized = normalize_horse_no_text(part)
+        if normalized:
+            out.append(normalized)
+    return out
+
+
+def _daily_summary_best_ticket(target_date):
+    target_date = str(target_date or "").strip()
+    if not target_date:
+        return {}
+    best = {}
+    for run_row in _load_combined_llm_report_runs():
+        if _run_date_key(run_row) != target_date:
+            continue
+        run_id = _safe_text((run_row or {}).get("run_id"))
+        report_scope_key = _report_scope_key_for_row(run_row, "")
+        if not run_id or report_scope_key not in LLM_REPORT_SCOPE_KEYS:
+            continue
+        for payload in load_policy_payloads(report_scope_key, run_id, run_row):
+            engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
+            if not engine:
+                continue
+            marks_map = report_policy_marks_map(payload)
+            ticket_run_id = report_payload_run_id(payload, run_id)
+            ticket_rows = load_policy_run_ticket_rows(ticket_run_id, policy_engine=engine) or list(
+                report_policy_primary_budget(payload).get("tickets", []) or []
+            )
+            for row in list(ticket_rows or []):
+                payout_yen = to_int_or_none(row.get("payout_yen")) or 0
+                stake_yen = to_int_or_none(row.get("stake_yen")) or to_int_or_none(row.get("amount_yen")) or 0
+                hit = to_int_or_none(row.get("hit")) or 0
+                status = str(row.get("status", "") or "").strip().lower()
+                if payout_yen <= 0:
+                    continue
+                if status and status != "settled" and hit <= 0:
+                    continue
+                if stake_yen <= 0:
+                    continue
+                horse_nos = _daily_summary_parse_horse_nos(row.get("horse_nos", "")) or _daily_summary_parse_horse_nos(row.get("horse_no", ""))
+                if not horse_nos:
+                    continue
+                candidate = {
+                    "engine": engine,
+                    "race_title": _format_race_label(run_row),
+                    "bet_type": str(row.get("bet_type", "") or "").strip().lower(),
+                    "horse_nos": horse_nos,
+                    "stake_yen": stake_yen,
+                    "payout_yen": payout_yen,
+                    "return_ratio": float(payout_yen) / float(stake_yen),
+                    "marks_map": dict(marks_map or {}),
+                }
+                if not best:
+                    best = candidate
+                    continue
+                if candidate["return_ratio"] > float(best.get("return_ratio", 0.0) or 0.0):
+                    best = candidate
+                    continue
+                if candidate["return_ratio"] == float(best.get("return_ratio", 0.0) or 0.0) and candidate["payout_yen"] > int(best.get("payout_yen", 0) or 0):
+                    best = candidate
+    return best
+
+
+def _daily_summary_best_ticket_lines(best_ticket):
+    item = dict(best_ticket or {})
+    if not item:
+        return []
+    race_title = str(item.get("race_title", "") or "").strip() or "-"
+    horse_nos = [str(x or "").strip() for x in list(item.get("horse_nos", []) or []) if str(x or "").strip()]
+    marks_map = dict(item.get("marks_map", {}) or {})
+    head_no = horse_nos[0] if horse_nos else ""
+    head_mark = str(marks_map.get(head_no, "") or "").strip() if head_no else ""
+    horse_text = "-".join(horse_nos) if len(horse_nos) > 1 else (f"{head_mark}{head_no}" if head_mark and head_no else head_no)
+    bet_label = _DAILY_SUMMARY_BET_TYPE_LABELS.get(str(item.get("bet_type", "") or "").strip().lower(), str(item.get("bet_type", "") or "").strip() or "的中")
+    payout_text = f"{int(item.get('payout_yen', 0) or 0):,}円"
+    if not horse_text:
+        horse_text = "的中"
+    return ["🔥 今日の神", race_title, f"{horse_text} → {bet_label}{payout_text}"]
+
+
+def _build_daily_summary_text(*, target_date, ranked_cards, best_ticket, max_chars=140):
+    rows = list(ranked_cards or [])
+    if not rows:
+        raise ValueError("daily summary cards not available")
+    best = dict(rows[0] or {})
+    best_label = str(best.get("label", "") or best.get("engine", "") or "ベストモデル").strip()
+    settled_races = int(best.get("settled_races", 0) or 0)
+    race_count = settled_races if settled_races > 0 else int(best.get("races", 0) or 0)
+    hit_races = int(best.get("hit_races", 0) or 0)
+    roi_pct = int(round(_daily_summary_roi_value(best) * 100.0)) if _daily_summary_roi_value(best) >= 0 else 0
+    profit_yen = int(best.get("profit_yen", 0) or 0)
+    profit_prefix = "+" if profit_yen > 0 else ""
+
+    def compose(model_limit):
+        medals = ["🏅", "🥈", "🥉"]
+        model_lines = ["🤖 モデル別成績"]
+        for index, item in enumerate(rows[:model_limit]):
+            icon = medals[index] if index < len(medals) else ""
+            roi_text = f"{int(round(_daily_summary_roi_value(item) * 100.0))}%" if _daily_summary_roi_value(item) >= 0 else "-"
+            model_lines.append(f"{icon}{str(item.get('label', '') or item.get('engine', '') or '-').strip()}：{roi_text}")
+
+        lines = [
+            "【いかいもAI競馬 本日結果】",
+            "",
+            f"🎯 的中：{hit_races} / {race_count}レース（{best_label}）",
+            "",
+            f"💰 回収率：{roi_pct}%（{best_label}）",
+            f"{profit_prefix}{profit_yen:,}円",
+            "",
+        ]
+        hero_lines = _daily_summary_best_ticket_lines(best_ticket)
+        if hero_lines:
+            lines.extend(hero_lines)
+            lines.append("")
+        lines.extend(model_lines)
+        lines.extend(["", "👉 全モデル・全買い目は無料公開中", PUBLIC_SHARE_URL])
+        return "\n".join(lines)
+
+    text = compose(4 if len(rows) >= 4 else len(rows))
+    if len(text) <= int(max_chars):
+        return text
+    if len(rows) >= 4:
+        text = compose(3)
+        if len(text) <= int(max_chars):
+            return text
+    return text
+
+
+def build_daily_summary_share_payload(date_text=""):
+    requested_date = _normalize_report_date_text(date_text) or _daily_summary_jst_date_text()
+    payload = build_public_board_payload(date_text=requested_date, scope_key="")
+    target_date = str(payload.get("target_date", "") or "").strip()
+    if not target_date:
+        raise ValueError("daily target date not available")
+    ranked_cards = _daily_summary_ranked_cards(payload.get("summary_cards", []))
+    if not ranked_cards:
+        raise ValueError("daily summary not available")
+    summary_text = _build_daily_summary_text(
+        target_date=target_date,
+        ranked_cards=ranked_cards,
+        best_ticket=_daily_summary_best_ticket(target_date),
+        max_chars=140,
+    )
+    return {
+        "requested_date": requested_date,
+        "target_date": target_date,
+        "target_date_label": str(payload.get("target_date_label", "") or "").strip(),
+        "fallback_notice": str(payload.get("fallback_notice", "") or "").strip(),
+        "summary_text": summary_text,
+        "intent_url": _daily_summary_intent_url(summary_text),
+        "best_engine": str((ranked_cards[0] or {}).get("engine", "") or "").strip(),
+        "model_rankings": [
+            {
+                "engine": str(item.get("engine", "") or "").strip(),
+                "label": str(item.get("label", "") or item.get("engine", "") or "").strip(),
+                "roi_percent": int(round(_daily_summary_roi_value(item) * 100.0)) if _daily_summary_roi_value(item) >= 0 else None,
+                "profit_yen": int(item.get("profit_yen", 0) or 0),
+                "hit_races": int(item.get("hit_races", 0) or 0),
+                "race_count": int(item.get("settled_races", 0) or item.get("races", 0) or 0),
+            }
+            for item in ranked_cards
+        ],
+    }
+
 _JOB_STEP_LABELS = {
     "odds": "オッズ",
     "predictor": "予測",
@@ -2363,6 +2576,20 @@ def admin_jobs_run_due_now_api(request: Request):
     summary = run_due_jobs_once()
     ok = not bool(list(summary.get("errors", []) or []))
     return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/daily_summary_share")
+async def admin_jobs_daily_summary_share_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    date_text = str((payload or {}).get("date_text", "") or "").strip()
+    try:
+        summary = build_daily_summary_share_payload(date_text=date_text)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, **summary})
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/topup_today_all_llm")

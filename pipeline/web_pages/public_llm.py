@@ -46,7 +46,7 @@ def public_status_meta_ja(ticket_summary, actual_names):
         return "精算待ち", "pending"
     if actual_ready:
         return "結果確定", "result"
-    return "出走待ち", "planned"
+    return "確定待ち", "planned"
 
 
 def public_yen_text(value):
@@ -466,7 +466,7 @@ def build_public_llm_page(
             <article class="card">
               <h3>{html.escape(safe_text(item.get('label')) or '-')}</h3>
               <p>利益 {html.escape(public_yen_text(item.get('profit_yen', 0)))}</p>
-              <p>ROI {html.escape(safe_text(item.get('roi_text')) or '-')}</p>
+              <p>回収率 {html.escape(safe_text(item.get('roi_text')) or '-')}</p>
               <p>的中 {int(item.get('hit_races', 0) or 0)} / {int(item.get('races', 0) or 0)}</p>
             </article>
             """
@@ -576,7 +576,7 @@ def build_public_llm_page(
       <div class="eyebrow">Legacy Public LLM Page</div>
       <h1>{html.escape(target_date_label)}</h1>
       <p>レース数 {int(totals.get('race_count', 0) or 0)} / 利益 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
-      <p>投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / ROI {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>
+      <p>投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / 回収率 {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>
     </section>
     {notice_html}
     <section class="summary">{''.join(summary_html)}</section>

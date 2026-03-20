@@ -33,7 +33,7 @@ export default function AiPickSummary({ card }) {
     >
       <div className="ai-pick-summary__head">
         <strong className="ai-pick-summary__model">{card?.label || "-"}</strong>
-        <ModelMetaBadge label="ROI" value={card?.roi_text || "-"} tone="subtle" />
+        <ModelMetaBadge label="回収率" value={card?.roi_text || "-"} tone="subtle" />
       </div>
 
       <div className="ai-pick-summary__marks">

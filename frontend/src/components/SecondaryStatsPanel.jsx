@@ -38,14 +38,14 @@ function RoiRow({ title, items }) {
 }
 
 export default function SecondaryStatsPanel({ data }) {
-  const allTimeItems = buildRowItems("通算", data?.all_time_roi?.totals?.roi_text, data?.all_time_roi?.cards || []);
+  const allTimeItems = buildRowItems("累計", data?.all_time_roi?.totals?.roi_text, data?.all_time_roi?.cards || []);
   const dailyItems = buildRowItems("合計", data?.totals?.roi_text, data?.summary_cards || []);
 
   return (
-    <section className="secondary-stats-panel" aria-label="ROIサマリー">
+    <section className="secondary-stats-panel" aria-label="回収率サマリー">
       <div className="secondary-stats-panel__compact">
-        <RoiRow title="累計ROI" items={allTimeItems} />
-        <RoiRow title="本日ROI" items={dailyItems} />
+        <RoiRow title="累計回収率" items={allTimeItems} />
+        <RoiRow title="本日回収率" items={dailyItems} />
       </div>
     </section>
   );
