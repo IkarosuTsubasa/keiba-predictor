@@ -1476,11 +1476,10 @@ def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best
     settled_races = int(best.get("settled_races", 0) or 0)
     race_count = settled_races if settled_races > 0 else int(best.get("races", 0) or 0)
     hit_races = int(best.get("hit_races", 0) or 0)
-    roi_pct = int(round(_daily_summary_roi_value(best) * 100.0)) if _daily_summary_roi_value(best) >= 0 else 0
 
     def compose(model_limit):
         medals = ["🏅", "🥈", "🥉"]
-        model_lines = ["🤖 モデル別成績"]
+        model_lines = ["🤖 モデル別回収率"]
         for index, item in enumerate(roi_rows[:model_limit]):
             icon = medals[index] if index < len(medals) else ""
             roi_text = f"{int(round(_daily_summary_roi_value(item) * 100.0))}%" if _daily_summary_roi_value(item) >= 0 else "-"
@@ -1490,8 +1489,6 @@ def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best
             "【いかいもAI競馬 本日結果】",
             "",
             f"🎯 的中：{hit_races} / {race_count}レース",
-            "",
-            f"💰 回収率：{roi_pct}%",
             "",
         ]
         hero_lines = _daily_summary_best_ticket_lines(best_ticket)
