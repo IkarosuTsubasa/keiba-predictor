@@ -1341,6 +1341,27 @@ def _daily_summary_ranked_cards(summary_cards):
     return rows
 
 
+def _daily_summary_hit_rate_value(item):
+    settled_races = int(item.get("settled_races", 0) or 0)
+    race_count = settled_races if settled_races > 0 else int(item.get("races", 0) or 0)
+    hit_races = int(item.get("hit_races", 0) or 0)
+    return (float(hit_races) / float(race_count)) if race_count > 0 else -1.0
+
+
+def _daily_summary_headline_cards(summary_cards):
+    rows = [dict(item or {}) for item in list(summary_cards or []) if int((item or {}).get("races", 0) or 0) > 0]
+    rows.sort(
+        key=lambda item: (
+            -int(item.get("hit_races", 0) or 0),
+            -_daily_summary_hit_rate_value(item),
+            -_daily_summary_roi_value(item),
+            -int(item.get("profit_yen", 0) or 0),
+            str(item.get("engine", "") or ""),
+        )
+    )
+    return rows
+
+
 def _daily_summary_parse_horse_nos(value):
     text = str(value or "").strip()
     if not text:
@@ -1399,17 +1420,31 @@ def _daily_summary_best_ticket(target_date):
                     "stake_yen": stake_yen,
                     "payout_yen": payout_yen,
                     "return_ratio": float(payout_yen) / float(stake_yen),
+                    "multiplier": float(to_float(row.get("odds_used")) or 0.0) if float(to_float(row.get("odds_used")) or 0.0) > 0 else (float(payout_yen) / float(stake_yen)),
                     "marks_map": dict(marks_map or {}),
                 }
                 if not best:
                     best = candidate
                     continue
-                if candidate["return_ratio"] > float(best.get("return_ratio", 0.0) or 0.0):
+                if candidate["multiplier"] > float(best.get("multiplier", 0.0) or 0.0):
                     best = candidate
                     continue
-                if candidate["return_ratio"] == float(best.get("return_ratio", 0.0) or 0.0) and candidate["payout_yen"] > int(best.get("payout_yen", 0) or 0):
+                if candidate["multiplier"] == float(best.get("multiplier", 0.0) or 0.0) and candidate["payout_yen"] > int(best.get("payout_yen", 0) or 0):
                     best = candidate
     return best
+
+
+def _daily_summary_format_multiplier(value):
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        number = 0.0
+    if number <= 0:
+        return ""
+    rounded = round(number, 1)
+    if abs(rounded - round(rounded)) < 1e-9:
+        return f"{int(round(rounded))}倍"
+    return f"{rounded:.1f}倍"
 
 
 def _daily_summary_best_ticket_lines(best_ticket):
@@ -1423,29 +1458,30 @@ def _daily_summary_best_ticket_lines(best_ticket):
     head_mark = str(marks_map.get(head_no, "") or "").strip() if head_no else ""
     horse_text = "-".join(horse_nos) if len(horse_nos) > 1 else (f"{head_mark}{head_no}" if head_mark and head_no else head_no)
     bet_label = _DAILY_SUMMARY_BET_TYPE_LABELS.get(str(item.get("bet_type", "") or "").strip().lower(), str(item.get("bet_type", "") or "").strip() or "的中")
-    payout_text = f"{int(item.get('payout_yen', 0) or 0):,}円"
+    multiplier_text = _daily_summary_format_multiplier(item.get("multiplier"))
     if not horse_text:
         horse_text = "的中"
-    return ["🔥 今日の神", race_title, f"{horse_text} → {bet_label}{payout_text}"]
+    if not multiplier_text:
+        multiplier_text = f"{int(item.get('payout_yen', 0) or 0):,}円"
+    return ["🔥 今日の神", race_title, f"{horse_text} → {bet_label}{multiplier_text}"]
 
 
-def _build_daily_summary_text(*, target_date, ranked_cards, best_ticket, max_chars=140):
-    rows = list(ranked_cards or [])
-    if not rows:
+def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best_ticket, max_chars=140):
+    del target_date
+    roi_rows = list(ranked_cards or [])
+    headline_rows = list(headline_cards or [])
+    if not roi_rows or not headline_rows:
         raise ValueError("daily summary cards not available")
-    best = dict(rows[0] or {})
-    best_label = str(best.get("label", "") or best.get("engine", "") or "ベストモデル").strip()
+    best = dict(headline_rows[0] or {})
     settled_races = int(best.get("settled_races", 0) or 0)
     race_count = settled_races if settled_races > 0 else int(best.get("races", 0) or 0)
     hit_races = int(best.get("hit_races", 0) or 0)
     roi_pct = int(round(_daily_summary_roi_value(best) * 100.0)) if _daily_summary_roi_value(best) >= 0 else 0
-    profit_yen = int(best.get("profit_yen", 0) or 0)
-    profit_prefix = "+" if profit_yen > 0 else ""
 
     def compose(model_limit):
         medals = ["🏅", "🥈", "🥉"]
         model_lines = ["🤖 モデル別成績"]
-        for index, item in enumerate(rows[:model_limit]):
+        for index, item in enumerate(roi_rows[:model_limit]):
             icon = medals[index] if index < len(medals) else ""
             roi_text = f"{int(round(_daily_summary_roi_value(item) * 100.0))}%" if _daily_summary_roi_value(item) >= 0 else "-"
             model_lines.append(f"{icon}{str(item.get('label', '') or item.get('engine', '') or '-').strip()}：{roi_text}")
@@ -1453,10 +1489,9 @@ def _build_daily_summary_text(*, target_date, ranked_cards, best_ticket, max_cha
         lines = [
             "【いかいもAI競馬 本日結果】",
             "",
-            f"🎯 的中：{hit_races} / {race_count}レース（{best_label}）",
+            f"🎯 的中：{hit_races} / {race_count}レース",
             "",
-            f"💰 回収率：{roi_pct}%（{best_label}）",
-            f"{profit_prefix}{profit_yen:,}円",
+            f"💰 回収率：{roi_pct}%",
             "",
         ]
         hero_lines = _daily_summary_best_ticket_lines(best_ticket)
@@ -1467,10 +1502,10 @@ def _build_daily_summary_text(*, target_date, ranked_cards, best_ticket, max_cha
         lines.extend(["", "👉 全モデル・全買い目は無料公開中", PUBLIC_SHARE_URL])
         return "\n".join(lines)
 
-    text = compose(4 if len(rows) >= 4 else len(rows))
+    text = compose(4 if len(roi_rows) >= 4 else len(roi_rows))
     if len(text) <= int(max_chars):
         return text
-    if len(rows) >= 4:
+    if len(roi_rows) >= 4:
         text = compose(3)
         if len(text) <= int(max_chars):
             return text
@@ -1484,10 +1519,12 @@ def build_daily_summary_share_payload(date_text=""):
     if not target_date:
         raise ValueError("daily target date not available")
     ranked_cards = _daily_summary_ranked_cards(payload.get("summary_cards", []))
-    if not ranked_cards:
+    headline_cards = _daily_summary_headline_cards(payload.get("summary_cards", []))
+    if not ranked_cards or not headline_cards:
         raise ValueError("daily summary not available")
     summary_text = _build_daily_summary_text(
         target_date=target_date,
+        headline_cards=headline_cards,
         ranked_cards=ranked_cards,
         best_ticket=_daily_summary_best_ticket(target_date),
         max_chars=140,
@@ -1499,7 +1536,7 @@ def build_daily_summary_share_payload(date_text=""):
         "fallback_notice": str(payload.get("fallback_notice", "") or "").strip(),
         "summary_text": summary_text,
         "intent_url": _daily_summary_intent_url(summary_text),
-        "best_engine": str((ranked_cards[0] or {}).get("engine", "") or "").strip(),
+        "best_engine": str((headline_cards[0] or {}).get("engine", "") or "").strip(),
         "model_rankings": [
             {
                 "engine": str(item.get("engine", "") or "").strip(),
