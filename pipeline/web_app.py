@@ -1719,6 +1719,7 @@ def llm_today(date: str = "", scope_key: str = ""):
 
 @app.get(f"{PUBLIC_BASE_PATH}/about", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/guide", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/methodology", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/privacy", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/terms", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/disclaimer", response_class=HTMLResponse)
@@ -1757,6 +1758,7 @@ def sitemap_xml():
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/about",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/guide",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/methodology",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/privacy",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/terms",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/disclaimer",

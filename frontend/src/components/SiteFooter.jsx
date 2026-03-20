@@ -4,6 +4,7 @@ const FOOTER_LINKS = [
   { href: "/keiba", label: "公開ボード" },
   { href: "/keiba/about", label: "このサイトについて" },
   { href: "/keiba/guide", label: "ガイド" },
+  { href: "/keiba/methodology", label: "分析方法" },
   { href: "/keiba/privacy", label: "プライバシーポリシー" },
   { href: "/keiba/terms", label: "利用規約" },
   { href: "/keiba/disclaimer", label: "免責事項" },
