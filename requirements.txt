@@ -10,4 +10,3 @@ scikit-learn
 selenium
 uvicorn
 xai-sdk
-twikit

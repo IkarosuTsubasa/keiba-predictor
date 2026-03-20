@@ -141,76 +141,6 @@ def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_j
     set_job_step_state(row, "policy", "succeeded", now_text)
 
 
-def _maybe_auto_post_x(base_path, job_id, scope_key, run_id):
-    import x_publisher
-
-    if not x_publisher.auto_post_x_enabled():
-        return {"status": "disabled"}
-    current_job = get_job(base_path, job_id) or {}
-    if (
-        str(current_job.get("x_post_status", "") or "").strip().lower() == "succeeded"
-        and str(current_job.get("x_post_run_id", "") or "").strip() == str(run_id or "").strip()
-    ):
-        return {
-            "status": "skipped",
-            "reason": "already_posted",
-            "tweet_id": str(current_job.get("x_post_tweet_id", "") or "").strip(),
-        }
-    try:
-        result = x_publisher.post_ready_run(base_path, scope_key, run_id)
-    except Exception as exc:
-        error_text = str(exc or "").strip()
-        update_job(
-            base_path,
-            job_id,
-            lambda row, now_text: row.update(
-                {
-                    "x_post_status": "failed",
-                    "x_post_run_id": str(run_id or "").strip(),
-                    "x_post_engine": "",
-                    "x_posted_at": "",
-                    "x_post_tweet_id": "",
-                    "x_post_error": error_text,
-                }
-            ),
-        )
-        _log_runner_event("x_post_failed", job_id=job_id, run_id=run_id, error=error_text)
-        return {"status": "failed", "error": error_text}
-    status = str((result or {}).get("status", "") or "").strip().lower()
-    if status == "succeeded":
-        update_job(
-            base_path,
-            job_id,
-            lambda row, now_text: row.update(
-                {
-                    "x_post_status": "succeeded",
-                    "x_post_run_id": str(run_id or "").strip(),
-                    "x_post_engine": str((result or {}).get("engine", "") or "").strip(),
-                    "x_posted_at": now_text,
-                    "x_post_tweet_id": str((result or {}).get("tweet_id", "") or "").strip(),
-                    "x_post_error": "",
-                }
-            ),
-        )
-        _log_runner_event(
-            "x_post_succeeded",
-            job_id=job_id,
-            run_id=run_id,
-            engine=str((result or {}).get("engine", "") or "").strip(),
-            tweet_id=str((result or {}).get("tweet_id", "") or "").strip(),
-        )
-    elif status == "disabled":
-        _log_runner_event("x_post_disabled", job_id=job_id, run_id=run_id)
-    else:
-        _log_runner_event(
-            "x_post_skipped",
-            job_id=job_id,
-            run_id=run_id,
-            reason=str((result or {}).get("reason", "") or "").strip(),
-        )
-    return result or {"status": "skipped"}
-
-
 def _mark_job_failed(row, now_text, message):
     row.update(initialize_job_step_fields(row))
     error_text = str(message or "")
@@ -722,9 +652,6 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
             row, now_text, run_id, summary, refreshed_job
         ),
     )
-    x_post_result = _maybe_auto_post_x(base_path, job_id, scope_key, run_id)
-    if str((x_post_result or {}).get("status", "") or "").strip():
-        summary["x_post"] = dict(x_post_result or {})
     _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, engine_count=len(engines))
     return summary
 

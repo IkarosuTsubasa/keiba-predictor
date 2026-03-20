@@ -1435,11 +1435,6 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "actual_top2": str(hydrated.get("actual_top2", "") or "").strip(),
                 "actual_top3": str(hydrated.get("actual_top3", "") or "").strip(),
                 "notes": str(hydrated.get("notes", "") or "").strip(),
-                "x_post_status": str(hydrated.get("x_post_status", "") or "").strip(),
-                "x_post_engine": str(hydrated.get("x_post_engine", "") or "").strip(),
-                "x_posted_at": str(hydrated.get("x_posted_at", "") or "").strip(),
-                "x_post_tweet_id": str(hydrated.get("x_post_tweet_id", "") or "").strip(),
-                "x_post_error": str(hydrated.get("x_post_error", "") or "").strip(),
                 "step_badges": step_badges,
                 "process_log": _race_job_process_log_entries(hydrated),
             }
@@ -1638,13 +1633,6 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
             race_id=normalize_race_id((run_row or {}).get("race_id", "")),
             source=_official_result_source_for_scope(scope_norm),
         ),
-        "x_post": {
-            "status": str(job_meta.get("x_post_status", "") or "").strip(),
-            "engine": str(job_meta.get("x_post_engine", "") or "").strip(),
-            "posted_at": str(job_meta.get("x_posted_at", "") or "").strip(),
-            "tweet_id": str(job_meta.get("x_post_tweet_id", "") or "").strip(),
-            "error": str(job_meta.get("x_post_error", "") or "").strip(),
-        },
         "actual_result": {
             "actual_top1": str(actual_snapshot.get("actual_top1", "") or "").strip(),
             "actual_top2": str(actual_snapshot.get("actual_top2", "") or "").strip(),
