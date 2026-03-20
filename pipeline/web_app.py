@@ -1371,15 +1371,94 @@ def _public_race_sort_key(item):
     return (0, -race_rank, race_title)
 
 
+def _public_placeholder_ready_text(scheduled_off_time, minutes_before=25):
+    text = str(scheduled_off_time or "").strip()
+    if not text:
+        return "予測完了見込みを準備中です。"
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            dt = dt - timedelta(minutes=int(minutes_before))
+            return f"予測完了見込み {dt.strftime('%H:%M')}ごろ"
+        except ValueError:
+            continue
+    match = re.search(r"T?(\d{2}):(\d{2})", text)
+    if not match:
+        return "予測完了見込みを準備中です。"
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    total_minutes = max(0, hour * 60 + minute - int(minutes_before))
+    return f"予測完了見込み {total_minutes // 60:02d}:{total_minutes % 60:02d}ごろ"
+
+
+def _public_display_variant(row):
+    if bool((row or {}).get("is_placeholder")):
+        return "placeholder"
+    actual = str((row or {}).get("actual_text", "") or "").strip()
+    if actual and "未" not in actual and "待ち" not in actual:
+        return "settled"
+    return "open"
+
+
+def _public_display_status(row, variant):
+    if variant == "placeholder":
+        return {
+            "label": str((row or {}).get("placeholder_status", "") or "").strip() or "予測中",
+            "tone": "open",
+        }
+    if variant == "settled":
+        return {"label": "結果確定", "tone": "settled"}
+    return {"label": "確定待ち", "tone": "open"}
+
+
+def _public_display_header(row, variant):
+    badges = []
+    scheduled_off_time = str((row or {}).get("scheduled_off_time", "") or "").strip()
+    off_match = re.search(r"T?(\d{2}):(\d{2})", scheduled_off_time)
+    if off_match:
+        badges.append(f"{off_match.group(1)}:{off_match.group(2)}")
+    distance_label = str((row or {}).get("distance_label", "") or "").strip()
+    if distance_label:
+        badges.append(distance_label)
+    if variant != "placeholder":
+        track_condition = str((row or {}).get("track_condition", "") or "").strip()
+        if track_condition:
+            badges.append(track_condition)
+    return {
+        "title": str((row or {}).get("race_title", "") or "").strip() or "-",
+        "badges": badges,
+    }
+
+
+def _public_display_body(row, variant):
+    if variant == "placeholder":
+        return {
+            "kind": "placeholder_eta",
+            "title": "予測中",
+            "message": _public_placeholder_ready_text((row or {}).get("scheduled_off_time")),
+        }
+    actual_text = str((row or {}).get("actual_text", "") or "").strip() or "結果未確定"
+    return {
+        "kind": "cards",
+        "result_text": actual_text,
+    }
+
+
 def _with_public_display_sort_fields(items):
     out = []
     for index, item in enumerate(list(items or [])):
         row = dict(item or {})
         sort_key = _public_race_sort_key(row)
+        variant = _public_display_variant(row)
         row["display_sort_index"] = int(index)
         row["display_sort_group"] = int(sort_key[0])
         row["display_sort_value"] = int(sort_key[1])
         row["display_sort_label"] = str(sort_key[2] or "")
+        row["display_order"] = int(index)
+        row["display_variant"] = variant
+        row["display_status"] = _public_display_status(row, variant)
+        row["display_header"] = _public_display_header(row, variant)
+        row["display_body"] = _public_display_body(row, variant)
         out.append(row)
     return out
 
