@@ -17,7 +17,7 @@ function estimateReadyTime(text, minutesBefore = 25) {
   return `${hh}:${mm}`;
 }
 
-export default function RaceCard({ race }) {
+export default function RaceCard({ race, style = undefined }) {
   const [expanded, setExpanded] = useState(false);
   const cards = race?.cards || [];
   const isPlaceholder = Boolean(race?.is_placeholder);
@@ -25,7 +25,10 @@ export default function RaceCard({ race }) {
   const estimatedReadyTime = estimateReadyTime(race?.scheduled_off_time, 25);
 
   return (
-    <article className={`race-card${expanded ? " race-card--expanded" : ""}${isPlaceholder ? " race-card--placeholder" : ""}`}>
+    <article
+      className={`race-card${expanded ? " race-card--expanded" : ""}${isPlaceholder ? " race-card--placeholder" : ""}`}
+      style={style}
+    >
       <RaceCardHeader
         race={race}
         actions={

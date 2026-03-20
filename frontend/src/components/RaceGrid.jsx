@@ -18,6 +18,18 @@ function toFiniteNumber(value, fallback) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function displayOrderValue(race) {
+  const index = toFiniteNumber(race?.display_sort_index, Number.NaN);
+  if (Number.isFinite(index)) return index;
+
+  const isPlaceholder = Boolean(race?.is_placeholder);
+  if (isPlaceholder) {
+    return 10000 + extractOffTimeValue(race?.scheduled_off_time);
+  }
+
+  return -extractRaceRank(race?.race_title);
+}
+
 export function sortRacesForDisplay(races) {
   return [...(races || [])].sort((a, b) => {
     const aIndex = toFiniteNumber(a?.display_sort_index, Number.NaN);
@@ -89,7 +101,11 @@ export default function RaceGrid({ races }) {
 
       <div className="race-grid">
         {filtered.map((race) => (
-          <RaceCard key={`${race.run_id}-${race.race_title}`} race={race} />
+          <RaceCard
+            key={`${race.run_id}-${race.race_title}`}
+            race={race}
+            style={{ order: displayOrderValue(race) }}
+          />
         ))}
       </div>
     </div>
