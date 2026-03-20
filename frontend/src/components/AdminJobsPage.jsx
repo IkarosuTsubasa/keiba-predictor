@@ -9,6 +9,107 @@ const TRACK_CONDITION_OPTIONS = [
   { value: "\u4e0d\u826f", label: "\u4e0d\u826f" },
 ];
 
+const LOCATION_CANDIDATES = [
+  "札幌",
+  "函館",
+  "福島",
+  "新潟",
+  "東京",
+  "中山",
+  "中京",
+  "京都",
+  "阪神",
+  "小倉",
+  "門別",
+  "盛岡",
+  "水沢",
+  "浦和",
+  "船橋",
+  "大井",
+  "川崎",
+  "金沢",
+  "笠松",
+  "名古屋",
+  "園田",
+  "姫路",
+  "高知",
+  "佐賀",
+];
+
+function normalizeRaceMemoText(value) {
+  return String(value || "")
+    .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 65248))
+    .replace(/：/g, ":")
+    .replace(/／/g, "/")
+    .replace(/（/g, "(")
+    .replace(/）/g, ")")
+    .replace(/\u3000/g, " ")
+    .trim();
+}
+
+function parseRaceMemo(text, raceDate) {
+  const raw = normalizeRaceMemoText(text);
+  if (!raw) {
+    return { updates: {}, message: "Notes is empty." };
+  }
+
+  const updates = {};
+  let hitCount = 0;
+
+  const timeMatch = raw.match(/(\d{1,2}:\d{2})\s*発走/);
+  if (timeMatch?.[1] && String(raceDate || "").trim()) {
+    updates.scheduled_off_time = `${String(raceDate).trim()}T${timeMatch[1]}`;
+    hitCount += 1;
+  }
+
+  const distanceMatch = raw.match(/(?:芝|ダート|ダ|障害|障)\s*(\d{3,4})m/i);
+  if (distanceMatch?.[1]) {
+    updates.target_distance = distanceMatch[1];
+    hitCount += 1;
+  }
+
+  const conditionMatch = raw.match(/馬場[:：]\s*(良|稍重|重|不良)/);
+  if (conditionMatch?.[1]) {
+    updates.target_track_condition = conditionMatch[1];
+    hitCount += 1;
+  }
+
+  const centralVenueMatch = raw.match(/\d+回\s*([^\s]+)\s+\d+日目/);
+  if (centralVenueMatch?.[1]) {
+    updates.location = centralVenueMatch[1];
+    hitCount += 1;
+  } else {
+    const firstVenue = LOCATION_CANDIDATES.find((name) => raw.includes(name));
+    if (firstVenue) {
+      updates.location = firstVenue;
+      hitCount += 1;
+    }
+  }
+
+  const surfaceMatch = raw.match(/(芝|ダート|ダ|障害|障)\s*\d{3,4}m/i);
+  const locationText = String(updates.location || "").trim();
+  const isLocal = ["門別", "盛岡", "水沢", "浦和", "船橋", "大井", "川崎", "金沢", "笠松", "名古屋", "園田", "姫路", "高知", "佐賀"].includes(locationText);
+  if (surfaceMatch?.[1]) {
+    const surface = surfaceMatch[1];
+    if (isLocal) {
+      updates.scope_key = "local";
+      hitCount += 1;
+    } else if (surface === "芝") {
+      updates.scope_key = "central_turf";
+      hitCount += 1;
+    } else if (surface === "ダート" || surface === "ダ") {
+      updates.scope_key = "central_dirt";
+      hitCount += 1;
+    }
+  }
+
+  if (!hitCount) {
+    return { updates: {}, message: "No supported race info found in notes." };
+  }
+
+  return { updates, message: `Auto filled ${hitCount} fields from notes.` };
+}
+
 function formatDateInputValue(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -123,9 +224,20 @@ function TrackConditionSelect({ value, onChange }) {
 
 function CreateJobForm({ onSubmit, busy }) {
   const [form, setForm] = useState(createDefaultCreateJobForm);
+  const [parseMessage, setParseMessage] = useState("");
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function applyParsedNotes() {
+    const parsed = parseRaceMemo(form.notes, form.race_date);
+    if (!Object.keys(parsed.updates || {}).length) {
+      setParseMessage(parsed.message || "No fields updated.");
+      return;
+    }
+    setForm((prev) => ({ ...prev, ...parsed.updates }));
+    setParseMessage(parsed.message || "Fields updated from notes.");
   }
 
   return (
@@ -195,6 +307,12 @@ function CreateJobForm({ onSubmit, busy }) {
           <textarea rows={3} value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
         </label>
         <div className="admin-inline-form__actions">
+          <button type="button" disabled={busy} onClick={applyParsedNotes}>
+            Auto Fill From Notes
+          </button>
+          {parseMessage ? <span>{parseMessage}</span> : null}
+        </div>
+        <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
             {busy ? "Creating..." : "Create"}
           </button>
@@ -247,6 +365,7 @@ function EditJobForm({ job, onSubmit, busy }) {
     lead_minutes: job.lead_minutes || 30,
     notes: job.notes || "",
   });
+  const [parseMessage, setParseMessage] = useState("");
 
   useEffect(() => {
     setForm({
@@ -263,6 +382,16 @@ function EditJobForm({ job, onSubmit, busy }) {
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function applyParsedNotes() {
+    const parsed = parseRaceMemo(form.notes, form.race_date);
+    if (!Object.keys(parsed.updates || {}).length) {
+      setParseMessage(parsed.message || "No fields updated.");
+      return;
+    }
+    setForm((prev) => ({ ...prev, ...parsed.updates }));
+    setParseMessage(parsed.message || "Fields updated from notes.");
   }
 
   return (
@@ -312,6 +441,12 @@ function EditJobForm({ job, onSubmit, busy }) {
           <span>Notes</span>
           <textarea value={form.notes} onChange={(event) => updateField("notes", event.target.value)} rows={3} />
         </label>
+        <div className="admin-inline-form__actions">
+          <button type="button" disabled={busy} onClick={applyParsedNotes}>
+            Auto Fill From Notes
+          </button>
+          {parseMessage ? <span>{parseMessage}</span> : null}
+        </div>
         <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
             {busy ? "Saving..." : "Save"}
