@@ -20,6 +20,12 @@ function toFiniteNumber(value, fallback) {
 
 export function sortRacesForDisplay(races) {
   return [...(races || [])].sort((a, b) => {
+    const aIndex = toFiniteNumber(a?.display_sort_index, Number.NaN);
+    const bIndex = toFiniteNumber(b?.display_sort_index, Number.NaN);
+    if (Number.isFinite(aIndex) && Number.isFinite(bIndex) && aIndex !== bIndex) {
+      return aIndex - bIndex;
+    }
+
     const aGroup = toFiniteNumber(a?.display_sort_group, Number.NaN);
     const bGroup = toFiniteNumber(b?.display_sort_group, Number.NaN);
     const aValue = toFiniteNumber(a?.display_sort_value, Number.NaN);

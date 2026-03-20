@@ -1373,9 +1373,10 @@ def _public_race_sort_key(item):
 
 def _with_public_display_sort_fields(items):
     out = []
-    for item in list(items or []):
+    for index, item in enumerate(list(items or [])):
         row = dict(item or {})
         sort_key = _public_race_sort_key(row)
+        row["display_sort_index"] = int(index)
         row["display_sort_group"] = int(sort_key[0])
         row["display_sort_value"] = int(sort_key[1])
         row["display_sort_label"] = str(sort_key[2] or "")
