@@ -222,9 +222,14 @@ function TrackConditionSelect({ value, onChange }) {
   );
 }
 
-function CreateJobForm({ onSubmit, busy }) {
+function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
   const [form, setForm] = useState(createDefaultCreateJobForm);
   const [parseMessage, setParseMessage] = useState("");
+
+  useEffect(() => {
+    setForm(createDefaultCreateJobForm());
+    setParseMessage("");
+  }, [resetToken]);
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -533,6 +538,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
   const [token, setToken] = useState(() => window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
   const [showSettled, setShowSettled] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const [createFormResetTick, setCreateFormResetTick] = useState(0);
   const [busyAction, setBusyAction] = useState("");
   const [flashMessage, setFlashMessage] = useState("");
   const [state, setState] = useState({
@@ -671,6 +677,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         setFlashMessage(`Opened daily summary share for ${data.target_date_label || data.target_date || "today"}.`);
       } else if (kind === "create") {
         setFlashMessage(`Created task ${data.job_id || ""}.`);
+        setCreateFormResetTick((value) => value + 1);
       } else if (kind === "import_archive") {
         setFlashMessage(`Archive imported. written=${data.written || 0}, skipped=${data.skipped || 0}`);
       } else if (kind === "reset_llm_state") {
@@ -740,7 +747,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         </section>
 
         <section className="admin-tool-hero">
-          <CreateJobForm busy={busyAction === "create"} onSubmit={(payload) => runToolbarAction("create", () => postForm("/api/admin/jobs/create", payload))} />
+          <CreateJobForm
+            busy={busyAction === "create"}
+            resetToken={createFormResetTick}
+            onSubmit={(payload) => runToolbarAction("create", () => postForm("/api/admin/jobs/create", payload))}
+          />
         </section>
 
         <details className="admin-tool-panel admin-tool-panel--secondary">
