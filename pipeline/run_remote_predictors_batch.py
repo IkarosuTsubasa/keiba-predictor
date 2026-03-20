@@ -95,6 +95,8 @@ def run_batch(workspace_dir: str):
                     str(workspace),
                     "--output",
                     latest_name,
+                    "--race-venue",
+                    target_location or "",
                     "--race-surface",
                     surface,
                     "--race-distance",

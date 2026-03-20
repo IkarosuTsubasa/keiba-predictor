@@ -226,36 +226,72 @@ def normalize_name(value):
     return "".join(str(value or "").split())
 
 
-def load_name_set(path, field):
+def _load_entry_sets(path, name_fields, no_fields):
     if not path.exists():
-        return None, f"{path} not found."
+        return None, None, f"{path} not found."
     with open(path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
-        if field not in fieldnames:
-            return None, f"{path} missing column: {field}"
-        names = {normalize_name(row.get(field, "")) for row in reader if row.get(field)}
+        name_field = next((field for field in name_fields if field in fieldnames), None)
+        no_field = next((field for field in no_fields if field in fieldnames), None)
+        if name_field is None and no_field is None:
+            expected = ", ".join(sorted(set(name_fields + no_fields)))
+            return None, None, f"{path} missing columns: {expected}"
+        names = set()
+        numbers = set()
+        for row in reader:
+            if name_field:
+                name = normalize_name(row.get(name_field, ""))
+                if name:
+                    names.add(name)
+            if no_field:
+                horse_no = str(row.get(no_field, "") or "").strip()
+                if horse_no:
+                    numbers.add(horse_no)
     names = {name for name in names if name}
-    if not names:
-        return None, f"{path} has no rows for {field}"
-    return names, ""
+    if not names and not numbers:
+        return None, None, f"{path} has no usable rows."
+    return names, numbers, ""
+
+
+def _format_entry_mismatch(left, right, label):
+    missing = sorted(left - right)
+    extra = sorted(right - left)
+    details = []
+    if missing:
+        details.append(f"missing_{label}={','.join(missing[:8])}")
+    if extra:
+        details.append(f"extra_{label}={','.join(extra[:8])}")
+    return "; ".join(details)
 
 
 def validate_odds_predictions(odds_path, pred_path):
-    odds_names, err = load_name_set(odds_path, "name")
-    if odds_names is None:
+    odds_names, odds_numbers, err = _load_entry_sets(
+        odds_path,
+        ["name", "HorseName", "horse_name"],
+        ["horse_no", "HorseNo", "horse_number", "馬番"],
+    )
+    if err:
         return False, err
-    pred_names, err = load_name_set(pred_path, "HorseName")
-    if pred_names is None:
+    pred_names, pred_numbers, err = _load_entry_sets(
+        pred_path,
+        ["HorseName", "horse_name", "name"],
+        ["horse_no", "HorseNo", "horse_number", "馬番"],
+    )
+    if err:
         return False, err
-    matches = odds_names & pred_names
-    base = min(len(odds_names), len(pred_names))
-    ratio = (len(matches) / base) if base else 0.0
-    if len(matches) < 3 or ratio < 0.6:
-        return (
-            False,
-            f"odds/predictions mismatch: matches={len(matches)} ratio={ratio:.2f}",
-        )
+
+    if odds_numbers and pred_numbers:
+        if odds_numbers != pred_numbers:
+            mismatch = _format_entry_mismatch(odds_numbers, pred_numbers, "horse_no")
+            return False, f"odds/predictions horse_no mismatch: {mismatch}"
+        return True, ""
+
+    if not odds_names or not pred_names:
+        return False, "odds/predictions missing comparable entrant fields."
+    if odds_names != pred_names:
+        mismatch = _format_entry_mismatch(odds_names, pred_names, "horse_name")
+        return False, f"odds/predictions horse_name mismatch: {mismatch}"
     return True, ""
 
 
@@ -700,6 +736,8 @@ def main():
                     str(ROOT_DIR),
                     "--output",
                     spec["latest_filename"],
+                    "--race-venue",
+                    target_location or "",
                     "--race-surface",
                     surface,
                     "--race-distance",
