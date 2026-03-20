@@ -89,10 +89,12 @@ def _select_share_candidate(scope_key, run_id):
     candidate_engines = [engine for engine in ordered_engines if engine in payload_map]
     if preferred_engine and preferred_engine in payload_map:
         candidate_engines = [preferred_engine] + [engine for engine in candidate_engines if engine != preferred_engine]
+
     chosen_engine = ""
     chosen_payload = None
     chosen_ticket_rows = []
     chosen_marks_map = {}
+
     for engine in candidate_engines:
         payload = payload_map.get(engine)
         if payload is None:
@@ -106,6 +108,7 @@ def _select_share_candidate(scope_key, run_id):
             chosen_ticket_rows = list(ticket_rows)
             chosen_marks_map = web_app.report_policy_marks_map(payload)
             break
+
     if not chosen_engine:
         chosen_engine = candidate_engines[0]
         chosen_payload = payload_map.get(chosen_engine) or {}
@@ -113,6 +116,7 @@ def _select_share_candidate(scope_key, run_id):
             web_app.report_policy_primary_budget(chosen_payload).get("tickets", []) or []
         )
         chosen_marks_map = web_app.report_policy_marks_map(chosen_payload)
+
     share_text = web_app.build_public_share_text(run_row, chosen_engine, chosen_marks_map, chosen_ticket_rows)
     return {
         "engine": chosen_engine,
@@ -128,7 +132,7 @@ def build_ntfy_share_notification(scope_key, run_id):
     location = str(run_row.get("location", "") or "").strip()
     race_date = str(run_row.get("date", "") or run_row.get("race_date", "") or "").strip()
     title_parts = [part for part in (location, race_id) if part]
-    title = " ".join(title_parts) if title_parts else f"予想完了 {run_id}"
+    title = " ".join(title_parts) if title_parts else f"预测完成 {run_id}"
     if race_date:
         title = f"{title} {race_date}"
     share_text = str(candidate.get("share_text", "") or "").strip()
@@ -150,6 +154,7 @@ def publish_ntfy_share_notification(scope_key, run_id):
             "skipped": True,
             "reason": "disabled",
         }
+
     topic = ntfy_topic()
     if not topic:
         return {
@@ -157,26 +162,44 @@ def publish_ntfy_share_notification(scope_key, run_id):
             "skipped": True,
             "reason": "missing_topic",
         }
+
     notification = build_ntfy_share_notification(scope_key, run_id)
-    body = notification["share_text"].encode("utf-8")
+    request_payload = {
+        "topic": topic,
+        "message": notification["share_text"],
+        "title": notification["title"],
+        "click": notification["workspace_url"],
+        "tags": ["horse_racing", "signal_strength"],
+        "actions": [
+            {
+                "action": "view",
+                "label": "发布到X",
+                "url": notification["intent_url"],
+                "clear": False,
+            },
+            {
+                "action": "view",
+                "label": "Workspace",
+                "url": notification["workspace_url"],
+                "clear": False,
+            },
+        ],
+    }
+
+    body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
-        url=f"{ntfy_server_url()}/{quote(topic, safe='')}",
+        url=f"{ntfy_server_url()}/",
         data=body,
         method="POST",
         headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "Title": notification["title"],
-            "Click": notification["workspace_url"],
-            "Tags": "horse_racing,signal_strength",
-            "Actions": (
-                f"view,发布到X,{notification['intent_url']}; "
-                f"view,Workspace,{notification['workspace_url']}"
-            ),
+            "Content-Type": "application/json; charset=utf-8",
         },
     )
+
     auth_header = _build_auth_header()
     if auth_header:
         request.add_header("Authorization", auth_header)
+
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             raw = response.read().decode("utf-8", errors="replace")
@@ -185,12 +208,14 @@ def publish_ntfy_share_notification(scope_key, run_id):
         raise RuntimeError(f"ntfy http {exc.code}: {detail or exc.reason}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"ntfy request failed: {exc}") from exc
+
     payload = {}
     if raw.strip():
         try:
             payload = json.loads(raw)
         except (TypeError, ValueError, json.JSONDecodeError):
             payload = {}
+
     return {
         "ok": True,
         "engine": notification["engine"],
