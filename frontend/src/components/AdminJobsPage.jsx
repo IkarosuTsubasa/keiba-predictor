@@ -68,9 +68,17 @@ function parseRaceMemo(text, raceDate) {
     hitCount += 1;
   }
 
-  const conditionMatch = raw.match(/馬場[:：]\s*(良|稍重|重|不良)/);
+  const conditionMatch = raw.match(/馬場[:：]\s*(良|稍重|稍|重|不良|不)/);
   if (conditionMatch?.[1]) {
-    updates.target_track_condition = conditionMatch[1];
+    const conditionMap = {
+      良: "良",
+      稍: "稍重",
+      稍重: "稍重",
+      重: "重",
+      不: "不良",
+      不良: "不良",
+    };
+    updates.target_track_condition = conditionMap[conditionMatch[1]] || conditionMatch[1];
     hitCount += 1;
   }
 
@@ -301,11 +309,21 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
         </label>
         <label>
           <span>kachiuma.csv</span>
-          <input type="file" accept=".csv" onChange={(event) => updateField("kachiuma_file", event.target.files?.[0] || null)} />
+          <input
+            key={`kachiuma-${resetToken}`}
+            type="file"
+            accept=".csv"
+            onChange={(event) => updateField("kachiuma_file", event.target.files?.[0] || null)}
+          />
         </label>
         <label>
           <span>shutuba.csv</span>
-          <input type="file" accept=".csv" onChange={(event) => updateField("shutuba_file", event.target.files?.[0] || null)} />
+          <input
+            key={`shutuba-${resetToken}`}
+            type="file"
+            accept=".csv"
+            onChange={(event) => updateField("shutuba_file", event.target.files?.[0] || null)}
+          />
         </label>
         <label className="admin-inline-form__wide">
           <span>Notes</span>
