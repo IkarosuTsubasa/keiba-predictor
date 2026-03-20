@@ -16,7 +16,7 @@ export default function FilterBar({ data, search, onApply }) {
       }}
     >
       <label className="app-filter-bar__field">
-        <span>日付</span>
+        <span>対象日</span>
         <div className="app-filter-bar__date-shell">
           <input
             type="date"

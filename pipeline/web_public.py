@@ -28,6 +28,12 @@ PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
 PUBLIC_SHARE_MAX_CHARS = 130
 
 
+PUBLIC_META_TITLE = "いかいもAI競馬"
+PUBLIC_META_DESCRIPTION = "4つのAIが同時に競馬予想を公開する競馬分析サイト"
+PUBLIC_SHARE_DETAIL_LABEL = "詳細はこちら"
+PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
+
+
 def mount_public_assets(app: FastAPI) -> None:
     app.mount(
         "/assets",

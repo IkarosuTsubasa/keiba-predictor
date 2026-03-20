@@ -15,7 +15,7 @@ import traceback
 import zipfile
 import base64
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -98,6 +98,7 @@ from web_public import (
     CONSOLE_BASE_PATH,
     PUBLIC_API_BASE_PATH,
     PUBLIC_BASE_PATH,
+    PUBLIC_SITE_URL,
     PUBLIC_SHARE_DETAIL_LABEL,
     PUBLIC_SHARE_HASHTAG,
     PUBLIC_SHARE_MAX_CHARS,
@@ -1716,9 +1717,65 @@ def llm_today(date: str = "", scope_key: str = ""):
     return build_public_index_response()
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/about", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/privacy", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/terms", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/disclaimer", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/contact", response_class=HTMLResponse)
+def public_static_pages():
+    return build_public_index_response()
+
+
 @app.get("/ads.txt")
 def ads_txt():
     return FileResponse(ADS_TXT_PATH, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    body = "\n".join(
+        [
+            "User-agent: *",
+            "Allow: /",
+            "Disallow: /keiba/console",
+            "Disallow: /keiba/console/",
+            "Disallow: /keiba/api/admin/",
+            "Disallow: /keiba/internal/",
+            "Disallow: /internal/",
+            "Disallow: /api/admin/",
+            f"Sitemap: {PUBLIC_SITE_URL}/sitemap.xml",
+            "",
+        ]
+    )
+    return Response(content=body, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    pages = [
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/about",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/privacy",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/terms",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/disclaimer",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/contact",
+    ]
+    lastmod = datetime.now(timezone.utc).date().isoformat()
+    body = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for url in pages:
+        body.extend(
+            [
+                "  <url>",
+                f"    <loc>{html.escape(url)}</loc>",
+                f"    <lastmod>{lastmod}</lastmod>",
+                "  </url>",
+            ]
+        )
+    body.append("</urlset>")
+    return Response(content="\n".join(body), media_type="application/xml; charset=utf-8")
 
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
