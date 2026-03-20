@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 import json
 
 from local_env import load_local_env
+from prediction_validation import validate_odds_predictions
 from surface_scope import (
     get_config_path,
     get_data_dir,
@@ -224,75 +225,6 @@ def map_distance(value):
 
 def normalize_name(value):
     return "".join(str(value or "").split())
-
-
-def _load_entry_sets(path, name_fields, no_fields):
-    if not path.exists():
-        return None, None, f"{path} not found."
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        name_field = next((field for field in name_fields if field in fieldnames), None)
-        no_field = next((field for field in no_fields if field in fieldnames), None)
-        if name_field is None and no_field is None:
-            expected = ", ".join(sorted(set(name_fields + no_fields)))
-            return None, None, f"{path} missing columns: {expected}"
-        names = set()
-        numbers = set()
-        for row in reader:
-            if name_field:
-                name = normalize_name(row.get(name_field, ""))
-                if name:
-                    names.add(name)
-            if no_field:
-                horse_no = str(row.get(no_field, "") or "").strip()
-                if horse_no:
-                    numbers.add(horse_no)
-    names = {name for name in names if name}
-    if not names and not numbers:
-        return None, None, f"{path} has no usable rows."
-    return names, numbers, ""
-
-
-def _format_entry_mismatch(left, right, label):
-    missing = sorted(left - right)
-    extra = sorted(right - left)
-    details = []
-    if missing:
-        details.append(f"missing_{label}={','.join(missing[:8])}")
-    if extra:
-        details.append(f"extra_{label}={','.join(extra[:8])}")
-    return "; ".join(details)
-
-
-def validate_odds_predictions(odds_path, pred_path):
-    odds_names, odds_numbers, err = _load_entry_sets(
-        odds_path,
-        ["name", "HorseName", "horse_name"],
-        ["horse_no", "HorseNo", "horse_number", "馬番"],
-    )
-    if err:
-        return False, err
-    pred_names, pred_numbers, err = _load_entry_sets(
-        pred_path,
-        ["HorseName", "horse_name", "name"],
-        ["horse_no", "HorseNo", "horse_number", "馬番"],
-    )
-    if err:
-        return False, err
-
-    if odds_numbers and pred_numbers:
-        if odds_numbers != pred_numbers:
-            mismatch = _format_entry_mismatch(odds_numbers, pred_numbers, "horse_no")
-            return False, f"odds/predictions horse_no mismatch: {mismatch}"
-        return True, ""
-
-    if not odds_names or not pred_names:
-        return False, "odds/predictions missing comparable entrant fields."
-    if odds_names != pred_names:
-        mismatch = _format_entry_mismatch(odds_names, pred_names, "horse_name")
-        return False, f"odds/predictions horse_name mismatch: {mismatch}"
-    return True, ""
 
 
 def csv_has_rows(path, min_rows=1):
