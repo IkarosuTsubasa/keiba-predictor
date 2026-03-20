@@ -1496,7 +1496,7 @@ def _build_daily_summary_text(*, target_date, headline_cards, ranked_cards, best
             lines.extend(hero_lines)
             lines.append("")
         lines.extend(model_lines)
-        lines.extend(["", "👉 全モデル・全買い目は無料公開中", PUBLIC_SHARE_URL])
+        lines.extend(["", "👉 全モデル・全買い目は無料公開中", PUBLIC_SHARE_URL, "#競馬予想 #AI競馬"])
         return "\n".join(lines)
 
     text = compose(4 if len(roi_rows) >= 4 else len(roi_rows))
