@@ -160,6 +160,42 @@ jobs:
               print(resp.read().decode("utf-8", errors="replace"))
           PY
 
+      - name: Show callback payload summary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("callback_payload.json").read_text(encoding="utf-8"))
+          status = str(payload.get("status", "") or "").strip().lower()
+          print(f"callback status: {status or '-'}")
+          error_message = str(payload.get("error_message", "") or "").strip()
+          if error_message:
+              print(f"error_message: {error_message}")
+          summary = payload.get("summary", {})
+          if isinstance(summary, dict) and summary:
+              print("summary:")
+              for key in sorted(summary.keys()):
+                  print(f"  {key}: {summary.get(key)}")
+          log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
+          if log_excerpt:
+              print("log_excerpt_tail:")
+              print(log_excerpt[-4000:])
+          PY
+
+      - name: Upload remote predictor diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-predictor-diagnostics-${{ inputs.task_id }}
+          if-no-files-found: warn
+          path: |
+            callback_payload.json
+            remote_predictor_output.log
+            predictor_outputs.zip
+            remote_v5_bundle/remote_predictor_summary.json
+
       - name: Fail workflow on remote failure
         shell: bash
         run: |
