@@ -16,6 +16,7 @@ from fetch_central_result import (
 
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
 AUTO_SETTLE_DELAY_MINUTES = 20
+JST_OFFSET = timedelta(hours=9)
 
 
 def _run_due_lock_path(base_dir):
@@ -95,6 +96,10 @@ def _parse_dt_text(value):
     return None
 
 
+def _jst_now():
+    return datetime.utcnow() + JST_OFFSET
+
+
 def _official_result_source_for_scope(scope_key):
     return "local" if str(scope_key or "").strip().lower() == "local" else "central"
 
@@ -118,7 +123,7 @@ def _fetch_official_result_payload_for_job(job):
 
 
 def _auto_settle_diagnostics(*, load_race_jobs, now_dt=None):
-    current_dt = now_dt or datetime.now()
+    current_dt = now_dt or _jst_now()
     rows = []
     for job in load_race_jobs():
         status = str(job.get("status", "") or "").strip().lower()
@@ -176,7 +181,7 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
     errors = []
     auto_settle_skipped = []
     auto_settle_attempted = []
-    auto_settle_now = datetime.now()
+    auto_settle_now = _jst_now()
     auto_settle_candidates = _auto_settle_diagnostics(
         load_race_jobs=lambda: load_race_jobs(base_dir),
         now_dt=auto_settle_now,
