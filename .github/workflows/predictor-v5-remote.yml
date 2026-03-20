@@ -205,5 +205,22 @@ jobs:
           from pathlib import Path
 
           payload = json.loads(Path("callback_payload.json").read_text(encoding="utf-8"))
-          sys.exit(0 if str(payload.get("status", "") or "").strip().lower() == "succeeded" else 1)
+          status = str(payload.get("status", "") or "").strip().lower()
+          if status == "succeeded":
+              sys.exit(0)
+
+          print(f"callback status: {status or '-'}")
+          error_message = str(payload.get("error_message", "") or "").strip()
+          if error_message:
+              print(f"error_message: {error_message}")
+          summary = payload.get("summary", {})
+          if isinstance(summary, dict) and summary:
+              print("summary:")
+              for key in sorted(summary.keys()):
+                  print(f"  {key}: {summary.get(key)}")
+          log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
+          if log_excerpt:
+              print("log_excerpt_tail:")
+              print(log_excerpt[-4000:])
+          sys.exit(1)
           PY
