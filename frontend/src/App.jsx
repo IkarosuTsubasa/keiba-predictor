@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import AdminJobsPage from "./components/AdminJobsPage";
 import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
 import EmptyRaceState from "./components/EmptyRaceState";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicStaticPage from "./components/PublicStaticPage";
-import RaceGrid, { sortRacesForDisplay } from "./components/RaceGrid";
+import RaceGrid from "./components/RaceGrid";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 
@@ -401,7 +401,7 @@ export default function App() {
   }, [isAdminConsole, isAdminWorkspace, staticPage]);
 
   const { loading, error, data } = useBoardData(search, !isAdminConsole && !isAdminWorkspace && !staticPage);
-  const races = useMemo(() => sortRacesForDisplay(data?.races || []), [data]);
+  const races = data?.races || [];
 
   if (isAdminWorkspace) {
     return <AdminWorkspacePage appBasePath={APP_BASE_PATH} />;

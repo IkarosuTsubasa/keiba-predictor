@@ -64,7 +64,7 @@ export default function RaceGrid({ races }) {
       <div className="race-grid">
         {filtered.map((race) => (
           <RaceCard
-            key={`${race.card_id || race.run_id || ""}-${race.display_header?.title || race.race_title || ""}`}
+            key={`${race.card_id || race.run_id || race.race_id || ""}-${race.display_order ?? ""}`}
             race={race}
             style={{ order: displayOrderValue(race) }}
           />

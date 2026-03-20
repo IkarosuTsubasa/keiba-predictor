@@ -1336,15 +1336,13 @@ def _build_public_placeholder_races(target_date="", scope_key=""):
                 "race_id": race_id,
                 "race_title": race_title or race_id,
                 "date_label": _public_date_label(race_date),
-                "actual_text": "予測中",
                 "location": location,
                 "scheduled_off_time": str(job.get("scheduled_off_time", "") or "").strip(),
                 "distance_label": _format_distance_label(job.get("target_distance")),
                 "track_condition": str(job.get("target_track_condition", "") or "").strip() or "良",
                 "run_id": f"task:{str(job.get('job_id', '') or '').strip() or race_id}",
                 "cards": [],
-                "is_placeholder": True,
-                "placeholder_status": "予測中",
+                "_display_variant_hint": "placeholder",
             }
         )
     placeholder_rows.sort(
@@ -1359,14 +1357,14 @@ def _build_public_placeholder_races(target_date="", scope_key=""):
 
 def _public_race_sort_key(item):
     row = dict(item or {})
-    is_placeholder = bool(row.get("is_placeholder"))
+    variant = _public_display_variant(row)
     scheduled_off_time = str(row.get("scheduled_off_time", "") or "").strip()
     off_match = re.search(r"T?(\d{2}):(\d{2})", scheduled_off_time)
     off_minutes = (int(off_match.group(1)) * 60 + int(off_match.group(2))) if off_match else 9999
     race_title = str(row.get("race_title", "") or "").strip()
     rank_match = re.search(r"(\d+)R", race_title, flags=re.IGNORECASE)
     race_rank = int(rank_match.group(1)) if rank_match else 0
-    if is_placeholder:
+    if variant == "placeholder":
         return (1, off_minutes, race_title)
     return (0, -race_rank, race_title)
 
@@ -1392,8 +1390,9 @@ def _public_placeholder_ready_text(scheduled_off_time, minutes_before=25):
 
 
 def _public_display_variant(row):
-    if bool((row or {}).get("is_placeholder")):
-        return "placeholder"
+    hint = str((row or {}).get("_display_variant_hint", "") or "").strip()
+    if hint:
+        return hint
     actual = str((row or {}).get("actual_text", "") or "").strip()
     if actual and "未" not in actual and "待ち" not in actual:
         return "settled"
@@ -1402,10 +1401,7 @@ def _public_display_variant(row):
 
 def _public_display_status(row, variant):
     if variant == "placeholder":
-        return {
-            "label": str((row or {}).get("placeholder_status", "") or "").strip() or "予測中",
-            "tone": "open",
-        }
+        return {"label": "予測中", "tone": "open"}
     if variant == "settled":
         return {"label": "結果確定", "tone": "settled"}
     return {"label": "確定待ち", "tone": "open"}
@@ -1450,15 +1446,19 @@ def _with_public_display_sort_fields(items):
         row = dict(item or {})
         sort_key = _public_race_sort_key(row)
         variant = _public_display_variant(row)
-        row["display_sort_index"] = int(index)
-        row["display_sort_group"] = int(sort_key[0])
-        row["display_sort_value"] = int(sort_key[1])
-        row["display_sort_label"] = str(sort_key[2] or "")
         row["display_order"] = int(index)
         row["display_variant"] = variant
         row["display_status"] = _public_display_status(row, variant)
         row["display_header"] = _public_display_header(row, variant)
         row["display_body"] = _public_display_body(row, variant)
+        row.pop("_display_variant_hint", None)
+        row.pop("actual_text", None)
+        row.pop("is_placeholder", None)
+        row.pop("placeholder_status", None)
+        row.pop("display_sort_index", None)
+        row.pop("display_sort_group", None)
+        row.pop("display_sort_value", None)
+        row.pop("display_sort_label", None)
         out.append(row)
     return out
 
