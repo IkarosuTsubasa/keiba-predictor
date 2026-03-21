@@ -1,5 +1,9 @@
 import React from "react";
 
+function isTrackConditionBadge(value) {
+  return ["良", "稍重", "重", "不良"].includes(String(value || "").trim());
+}
+
 function parseResultEntries(text) {
   const source = String(text || "").trim();
   if (!source || source.includes("未") || source.includes("待ち")) {
@@ -31,7 +35,9 @@ export default function RaceCardHeader({ race, actions = null }) {
   const status = resolveStatus(race);
   const title = String(race?.display_header?.title || "-");
   const badges = Array.isArray(race?.display_header?.badges)
-    ? race.display_header.badges.filter(Boolean)
+    ? race.display_header.badges.filter(
+        (item) => item && !isTrackConditionBadge(item),
+      )
     : [];
   const variant = String(race?.display_variant || "").trim();
   const isPlaceholder = variant === "placeholder";
