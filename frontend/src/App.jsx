@@ -2,12 +2,11 @@ import React, { useEffect, useState } from "react";
 import AdminJobsPage from "./components/AdminJobsPage";
 import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
-import EmptyRaceState from "./components/EmptyRaceState";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicStaticPage from "./components/PublicStaticPage";
-import RaceGrid from "./components/RaceGrid";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
+import TodayBoardContent from "./components/TodayBoardContent";
 
 const APP_BASE_PATH = "/keiba";
 const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
@@ -448,9 +447,7 @@ export default function App() {
             ]}
           />
 
-          {data.fallback_notice ? <section className="notice-strip">{data.fallback_notice}</section> : null}
-
-          {races.length ? <RaceGrid races={races} /> : <EmptyRaceState />}
+          <TodayBoardContent data={data} races={races} />
         </section>
       </div>
 
