@@ -790,6 +790,13 @@ def main():
         shutil.copy2(trifecta_src, trifecta_dest)
         trifecta_odds_path = str(trifecta_dest)
 
+    runner_filter_summary_path = ""
+    runner_filter_summary_src = ROOT_DIR / "runner_filter_summary.json"
+    if runner_filter_summary_src.exists():
+        runner_filter_summary_dest = race_dir / f"runner_filter_summary_{run_id}{race_suffix}.json"
+        shutil.copy2(runner_filter_summary_src, runner_filter_summary_dest)
+        runner_filter_summary_path = str(runner_filter_summary_dest)
+
     row = {
         "run_id": run_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -822,6 +829,7 @@ def main():
         "exacta_odds_path": exacta_odds_path,
         "trio_odds_path": trio_odds_path,
         "trifecta_odds_path": trifecta_odds_path,
+        "runner_filter_summary_path": runner_filter_summary_path,
         "plan_path": "",
         "gemini_policy_path": "",
         "deepseek_policy_path": "",
