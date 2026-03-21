@@ -109,38 +109,32 @@ export default function ModelTopFiveBoard({ data, races }) {
         ))}
       </div>
 
-      <div className="model-top-five-board__panel">
-        <div className="model-top-five-board__header">
-          <div className="model-top-five-board__title">
-            <strong>{active.label}</strong>
-            <span>{active.engine}</span>
+      <div className="model-top-five-board__header">
+        <div className="model-top-five-board__stats">
+          <div className="model-top-five-board__stat">
+            <span>回収率</span>
+            <strong>{active.summary?.roi_text || "-"}</strong>
           </div>
-          <div className="model-top-five-board__stats">
-            <div className="model-top-five-board__stat">
-              <span>回収率</span>
-              <strong>{active.summary?.roi_text || "-"}</strong>
-            </div>
-            <div className="model-top-five-board__stat">
-              <span>的中</span>
-              <strong>{formatHitText(active.summary)}</strong>
-            </div>
-            <div className="model-top-five-board__stat">
-              <span>表示</span>
-              <strong>{active.items.length}件</strong>
-            </div>
+          <div className="model-top-five-board__stat">
+            <span>的中</span>
+            <strong>{formatHitText(active.summary)}</strong>
+          </div>
+          <div className="model-top-five-board__stat">
+            <span>表示</span>
+            <strong>{active.items.length}件</strong>
           </div>
         </div>
+      </div>
 
-        <div className="model-top-five-board__grid">
-          {active.items.map((item) => (
-            <article key={item.key} className="race-card model-top-five-board__item">
-              <RaceCardHeader race={item.race} />
-              <div className="race-card__summary-grid model-top-five-board__summary-grid">
-                <AiPickSummary card={item.card} />
-              </div>
-            </article>
-          ))}
-        </div>
+      <div className="race-grid model-top-five-board__grid">
+        {active.items.map((item) => (
+          <article key={item.key} className="race-card model-top-five-board__item">
+            <RaceCardHeader race={item.race} />
+            <div className="race-card__summary-grid model-top-five-board__summary-grid">
+              <AiPickSummary card={item.card} />
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );

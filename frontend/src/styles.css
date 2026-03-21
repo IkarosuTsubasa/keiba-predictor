@@ -1124,23 +1124,12 @@ select {
   margin-top: 18px;
 }
 
-.model-top-five-board__panel {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(13, 20, 30, 0.95), rgba(10, 16, 24, 0.96));
-}
-
-.model-top-five-board__panel {
-  padding: 18px;
-  display: grid;
-  gap: 16px;
-}
-
 .model-top-five-board__header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: end;
+  padding: 0 2px;
 }
 
 .model-top-five-board__title {
@@ -1149,7 +1138,7 @@ select {
 }
 
 .model-top-five-board__title strong {
-  font-size: 24px;
+  font-size: 18px;
   line-height: 1.05;
 }
 
@@ -1183,12 +1172,6 @@ select {
 .model-top-five-board__stat strong {
   color: var(--text);
   font-size: 14px;
-}
-
-.model-top-five-board__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
 }
 
 .model-top-five-board__item {
