@@ -70,6 +70,12 @@ from race_job_store import (
 )
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
 from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, update_task as update_v5_remote_task
+from public_share_copy import (
+    PUBLIC_SHARE_DETAIL_LABEL,
+    PUBLIC_SHARE_HASHTAG,
+    PUBLIC_SHARE_MAX_CHARS,
+    PUBLIC_SHARE_URL,
+)
 from web_auth import (
     admin_token_enabled as _admin_token_enabled,
     admin_token_expected as _admin_token_expected,
@@ -100,10 +106,6 @@ from web_public import (
     PUBLIC_API_BASE_PATH,
     PUBLIC_BASE_PATH,
     PUBLIC_SITE_URL,
-    PUBLIC_SHARE_DETAIL_LABEL,
-    PUBLIC_SHARE_HASHTAG,
-    PUBLIC_SHARE_MAX_CHARS,
-    PUBLIC_SHARE_URL,
     build_public_index_response,
     mount_public_assets,
     prefix_public_html_routes as _prefix_public_html_routes,

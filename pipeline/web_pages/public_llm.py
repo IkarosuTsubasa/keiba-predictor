@@ -4,6 +4,7 @@ import html
 import re
 from datetime import datetime, timedelta
 
+from public_share_copy import PUBLIC_SHARE_TICKETS_LABEL
 from surface_scope import normalize_scope_key
 from web_report.helpers import (
     LLM_BATTLE_LABELS,
@@ -128,7 +129,7 @@ def build_public_share_text(
     header = _share_hashtag_race_label(run_row)
     marks_text = _share_marks_text(marks_map, to_int_or_none=to_int_or_none)
     tail_lines = [share_detail_label, share_url, share_hashtag]
-    base_lines = [header, "", marks_text, "", "買い目"]
+    base_lines = [header, "", marks_text, "", PUBLIC_SHARE_TICKETS_LABEL]
     ticket_lines = _share_ticket_lines(ticket_rows, to_int_or_none=to_int_or_none)
     lines = list(base_lines)
     for ticket_line in ticket_lines:

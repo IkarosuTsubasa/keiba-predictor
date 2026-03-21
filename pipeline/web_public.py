@@ -7,6 +7,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from public_share_copy import (
+    PUBLIC_SHARE_DETAIL_LABEL as SHARE_COPY_DETAIL_LABEL,
+    PUBLIC_SHARE_HASHTAG as SHARE_COPY_HASHTAG,
+    PUBLIC_SHARE_MAX_CHARS as SHARE_COPY_MAX_CHARS,
+    PUBLIC_SHARE_URL as SHARE_COPY_URL,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_FRONTEND_DIST_DIR = BASE_DIR / "public_frontend_dist"
@@ -23,16 +30,21 @@ PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
 PUBLIC_META_TITLE = "いかいもAI競馬"
 PUBLIC_META_DESCRIPTION = "4つのAIが同時に競馬予想"
 PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
-PUBLIC_SHARE_DETAIL_LABEL = "全買い目はこちら"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
+PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
+PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬 #競馬"
 PUBLIC_SHARE_MAX_CHARS = 130
 
 
 PUBLIC_META_TITLE = "いかいもAI競馬"
 PUBLIC_META_DESCRIPTION = "4つのAIが同時に競馬予想を公開する競馬分析サイト"
-PUBLIC_SHARE_DETAIL_LABEL = "詳細はこちら"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬"
-
+PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
+PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬 #競馬"
+# Public share copy must come from public_share_copy as the single source of truth.
+# Keep literal share strings out of this file to avoid accidental edits while changing meta or public-page logic.
+PUBLIC_SHARE_URL = SHARE_COPY_URL
+PUBLIC_SHARE_DETAIL_LABEL = SHARE_COPY_DETAIL_LABEL
+PUBLIC_SHARE_HASHTAG = SHARE_COPY_HASHTAG
+PUBLIC_SHARE_MAX_CHARS = SHARE_COPY_MAX_CHARS
 
 def mount_public_assets(app: FastAPI) -> None:
     app.mount(
