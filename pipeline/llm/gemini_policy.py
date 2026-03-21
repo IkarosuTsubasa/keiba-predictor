@@ -103,7 +103,9 @@ class RacePolicyInput(BaseModel):
     race_id: str
     scope_key: str
     field_size: int
+    race_context: Dict[str, Any] = Field(default_factory=dict)
     ai: PolicyAIStats
+    multi_model_ai: Dict[str, Any] = Field(default_factory=dict)
     marks_top5: List[MarkTop5] = Field(default_factory=list)
     predictions: List[PolicyPrediction] = Field(default_factory=list)
     predictions_full: List[Dict[str, Any]] = Field(default_factory=list)
@@ -111,8 +113,10 @@ class RacePolicyInput(BaseModel):
     odds_full: Dict[str, Any] = Field(default_factory=dict)
     prediction_field_guide: Dict[str, str] = Field(default_factory=dict)
     multi_predictor: Dict[str, Any] = Field(default_factory=dict)
+    horse_facts: List[Dict[str, Any]] = Field(default_factory=list)
     portfolio_history: Dict[str, Any] = Field(default_factory=dict)
     candidates: List[PolicyCandidate] = Field(default_factory=list)
+    candidates_meta: Dict[str, Any] = Field(default_factory=dict)
     constraints: PolicyConstraints
 
 
@@ -236,7 +240,9 @@ def _candidate_digest(candidates: List[PolicyCandidate]) -> str:
 def _input_context_digest(input_obj: RacePolicyInput) -> str:
     payload = {
         "field_size": int(input_obj.field_size or 0),
+        "race_context": dict(input_obj.race_context or {}),
         "ai": _model_dump(input_obj.ai),
+        "multi_model_ai": dict(input_obj.multi_model_ai or {}),
         "marks_top5": [_model_dump(x) for x in list(input_obj.marks_top5 or [])],
         "predictions": [_model_dump(x) for x in list(input_obj.predictions or [])],
         "predictions_full": list(input_obj.predictions_full or []),
@@ -244,7 +250,9 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "odds_full": dict(input_obj.odds_full or {}),
         "prediction_field_guide": dict(input_obj.prediction_field_guide or {}),
         "multi_predictor": dict(input_obj.multi_predictor or {}),
+        "horse_facts": list(input_obj.horse_facts or []),
         "portfolio_history": dict(input_obj.portfolio_history or {}),
+        "candidates_meta": dict(input_obj.candidates_meta or {}),
         "constraints": {
             "max_tickets_per_race": int(input_obj.constraints.max_tickets_per_race or 0),
             "high_odds_threshold": float(input_obj.constraints.high_odds_threshold or 0.0),
@@ -690,31 +698,39 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- 資金が尽きたら残りのレースに参加不可。一方、全て少額で薄く買うだけでは他AIに勝てない。\n\n"
 
         "== 提供データの概要 ==\n"
-        "- predictions / predictions_full: 予測モデル出力（要約版・全量版）\n"
+        "- race_context: レースの場所・馬場・距離・日付などの基礎条件\n"
+        "- predictions / predictions_full: 互換用の主表示予測。利用可能なら v5 を優先した単一モデル表示であり、これだけを特別扱いしてはいけない\n"
+        "- multi_model_ai: モデル間分歧の集約指標。consensus_gap / top1_vote_margin / disagreement_score などを含む\n"
         "- prediction_field_guide: predictions_full の各列の説明\n"
-        "- multi_predictor: 5つの予測モデル（v1-v5）の個別結果・共識表・モデル別命中率履歴\n"
+        "- multi_predictor: 5つの予測モデル（v1-v5）の平等な入力本体。個別結果・全馬順位・共識表・モデル別命中率履歴を含む\n"
+        "  - predictor_rankings: 各モデルの全馬順位。まずここを見て、モデル間の一致と不一致を把握すること\n"
         "  - profiles: 各モデルの設計思想（v1=総合バランス, v2=能力比較, v3=市場融合, v4=文脈適性, v5=スタッキング統合）\n"
-        "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank\n"
+        "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank / rank_std / top3_prob_range\n"
         "  - performance.current_scope_history: 現在条件（芝/ダート/地方）での各モデルの実績命中率\n"
+        "- horse_facts: 各馬の共通ファクト。TI、経験、騎手、オッズ、休み明け日数などの軽量サマリ\n"
         "- odds_full: 全券種の全量オッズ（win/place/wide/quinella/exacta/trio/trifecta）\n"
         "- portfolio_history: あなた自身の直近購入履歴・損益推移・券種別成績\n"
         "  - today: 本日の開始本金・確定損益・未決済拘束額・利用可能残高\n"
         "  - recent_days / lookback_summary / bet_type_breakdown / recent_tickets\n"
         "- ai: レースの予測信頼度（gap, confidence_score, stability_score, risk_score）\n\n"
+        "- candidates / candidates_meta: 実際に使ってよい候補買い目の shortlist。p_hit / ev / score は下見用の近似値であり、盲信せず他情報と突き合わせて使う\n\n"
 
         "== あなたの仕事 ==\n"
         "上記データを全て分析し、このレースで「何を」「いくら」買うか（または買わないか）を自分で判断してください。\n"
         "券種の選択、馬の選定、金額の配分、参加/見送りの判断、全てあなたに委ねます。\n\n"
 
         "== 分析の進め方（推奨、強制ではない） ==\n"
-        "1. predictions_full で全馬の予測確率・順位・スコアを俯瞰する\n"
-        "2. multi_predictor の各モデル（v1-v5）の推奨馬と命中率履歴を確認する\n"
-        "3. odds_full と予測を突き合わせ、期待値の高い馬・組み合わせを探す\n"
-        "4. portfolio_history で自分の最近の調子・癖を確認し、資金配分に反映する\n"
-        "5. 以上を踏まえ、券種・買い目・金額を自由に決定する\n\n"
+        "1. multi_predictor.predictor_rankings で v1-v5 全モデルの全馬順位を平等に確認する\n"
+        "2. multi_predictor の consensus と performance.current_scope_history、multi_model_ai を見て、モデル間の一致・不一致と実績差を確認する\n"
+        "3. horse_facts と race_context を使って、順位の背景を確認する\n"
+        "4. predictions_full は互換用の主表示に過ぎないため、補助情報として扱う\n"
+        "5. odds_full と candidates を突き合わせ、期待値の高い馬・組み合わせを探す\n"
+        "6. portfolio_history で自分の最近の調子・癖を確認し、資金配分に反映する\n"
+        "7. 以上を踏まえ、券種・買い目・金額を自由に決定する\n\n"
 
         "== 勝つための視点 ==\n"
         "- 「予測で優位性があり、かつオッズが過小評価」な組み合わせが本当の value\n"
+        "- 特定の1モデルをデフォルトで優先しないこと。v1-v5 は平等な判断材料である\n"
         "- 予測モデル間で意見が割れている場合、各モデルの命中率実績を参考に判断する\n"
         "- consensus の投票数は参考情報の一つに過ぎない。投票数が多い＝買うべき、ではない\n"
         "- 買い方は完全に自由。特定の馬を中心に組む必要はなく、データから自分なりの根拠で組み立てること\n"

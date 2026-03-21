@@ -654,11 +654,41 @@ def build_predictor_performance_context(scope_key, run_id, run_row, predictor_id
 
 
 def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map):
+    def _mean(values):
+        values = [float(v) for v in list(values or [])]
+        if not values:
+            return 0.0
+        return sum(values) / float(len(values))
+
+    def _std(values):
+        values = [float(v) for v in list(values or [])]
+        if len(values) <= 1:
+            return 0.0
+        avg = _mean(values)
+        variance = sum((value - avg) ** 2 for value in values) / float(len(values))
+        return variance ** 0.5
+
+    def _serialize_ranking_item(item):
+        return {
+            "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
+            "horse_name": str(item.get("horse_name", "") or ""),
+            "pred_rank": int(item.get("pred_rank", 0) or 0),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+            "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+            "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+            "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+            "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
+            "stability_score": round(float(item.get("stability_score", 0.0) or 0.0), 6),
+            "risk_score": round(float(item.get("risk_score", 0.0) or 0.0), 6),
+        }
+
     profiles = []
     summaries = []
+    predictor_rankings = []
     consensus = {}
     available_ids = []
     top1_horses = []
+    predictor_label_map = {}
     for spec, pred_path in resolve_predictor_paths(scope_key, run_id, run_row):
         if not pred_path or not pred_path.exists():
             continue
@@ -667,6 +697,7 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
         if not ranking:
             continue
         available_ids.append(spec["id"])
+        predictor_label_map[spec["id"]] = spec["label"]
         profiles.append(
             {
                 "predictor_id": spec["id"],
@@ -674,6 +705,14 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
                 "available": True,
                 "style_ja": "",
                 "strengths_ja": [],
+                "row_count": len(ranking),
+            }
+        )
+        predictor_rankings.append(
+            {
+                "predictor_id": spec["id"],
+                "predictor_label": spec["label"],
+                "ranking": [_serialize_ranking_item(item) for item in ranking],
             }
         )
         top_slice = ranking[:5]
@@ -686,21 +725,10 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
                 "top_choice_horse_no": normalize_horse_no_text(top_choice.get("horse_no", "")),
                 "top_choice_horse_name": str(top_choice.get("horse_name", "") or ""),
                 "top_choice_top3_prob_model": round(float(top_choice.get("top3_prob_model", 0.0) or 0.0), 6),
-                "top_horses": [
-                    {
-                        "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
-                        "horse_name": str(item.get("horse_name", "") or ""),
-                        "pred_rank": int(item.get("pred_rank", 0) or 0),
-                        "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
-                        "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
-                        "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
-                        "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
-                    }
-                    for item in top_slice
-                ],
+                "top_horses": [_serialize_ranking_item(item) for item in top_slice],
             }
         )
-        for item in top_slice:
+        for item in ranking:
             horse_no = normalize_horse_no_text(item.get("horse_no", ""))
             if not horse_no:
                 continue
@@ -712,26 +740,31 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
                     "top1_votes": 0,
                     "top3_votes": 0,
                     "predictor_count": 0,
-                    "pred_rank_total": 0.0,
-                    "top3_prob_total": 0.0,
-                    "rank_score_total": 0.0,
+                    "pred_ranks": [],
+                    "top3_probs": [],
+                    "rank_scores": [],
                     "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
                     "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
                     "predictors_support": [],
+                    "predictors_support_ids": [],
                 },
             )
             entry["predictor_count"] += 1
-            entry["pred_rank_total"] += float(item.get("pred_rank", 0) or 0)
-            entry["top3_prob_total"] += float(item.get("top3_prob_model", 0.0) or 0.0)
-            entry["rank_score_total"] += float(item.get("rank_score_norm", 0.0) or 0.0)
+            entry["pred_ranks"].append(float(item.get("pred_rank", 0) or 0))
+            entry["top3_probs"].append(float(item.get("top3_prob_model", 0.0) or 0.0))
+            entry["rank_scores"].append(float(item.get("rank_score_norm", 0.0) or 0.0))
             if int(item.get("pred_rank", 99) or 99) == 1:
                 entry["top1_votes"] += 1
             if int(item.get("pred_rank", 99) or 99) <= 3:
                 entry["top3_votes"] += 1
             entry["predictors_support"].append(spec["label"])
+            entry["predictors_support_ids"].append(spec["id"])
     consensus_rows = []
     for horse_no, entry in consensus.items():
         count = max(1, int(entry.get("predictor_count", 0) or 0))
+        pred_ranks = [float(value) for value in list(entry.get("pred_ranks", []) or [])]
+        top3_probs = [float(value) for value in list(entry.get("top3_probs", []) or [])]
+        rank_scores = [float(value) for value in list(entry.get("rank_scores", []) or [])]
         consensus_rows.append(
             {
                 "horse_no": horse_no,
@@ -739,12 +772,22 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
                 "top1_votes": int(entry.get("top1_votes", 0) or 0),
                 "top3_votes": int(entry.get("top3_votes", 0) or 0),
                 "predictor_count": count,
-                "avg_pred_rank": round(float(entry.get("pred_rank_total", 0.0) or 0.0) / count, 4),
-                "avg_top3_prob_model": round(float(entry.get("top3_prob_total", 0.0) or 0.0) / count, 6),
-                "avg_rank_score_norm": round(float(entry.get("rank_score_total", 0.0) or 0.0) / count, 6),
+                "avg_pred_rank": round(_mean(pred_ranks), 4),
+                "rank_std": round(_std(pred_ranks), 4),
+                "rank_min": int(min(pred_ranks)) if pred_ranks else 0,
+                "rank_max": int(max(pred_ranks)) if pred_ranks else 0,
+                "avg_top3_prob_model": round(_mean(top3_probs), 6),
+                "top3_prob_min": round(min(top3_probs), 6) if top3_probs else 0.0,
+                "top3_prob_max": round(max(top3_probs), 6) if top3_probs else 0.0,
+                "top3_prob_range": round((max(top3_probs) - min(top3_probs)), 6) if top3_probs else 0.0,
+                "avg_rank_score_norm": round(_mean(rank_scores), 6),
+                "rank_score_min": round(min(rank_scores), 6) if rank_scores else 0.0,
+                "rank_score_max": round(max(rank_scores), 6) if rank_scores else 0.0,
+                "rank_score_range": round((max(rank_scores) - min(rank_scores)), 6) if rank_scores else 0.0,
                 "win_odds": round(float(entry.get("win_odds", 0.0) or 0.0), 6),
                 "place_odds": round(float(entry.get("place_odds", 0.0) or 0.0), 6),
                 "predictors_support": list(entry.get("predictors_support", []) or []),
+                "predictors_support_ids": list(entry.get("predictors_support_ids", []) or []),
             }
         )
     consensus_rows.sort(
@@ -755,17 +798,36 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
             str(item.get("horse_no", "")),
         )
     )
+    preferred_primary_order = ("v5_stacking", "v4_gemini", "v3_premium", "v2_opus", "main")
+    ranking_by_id = {
+        str(item.get("predictor_id", "") or "").strip(): list(item.get("ranking", []) or [])
+        for item in predictor_rankings
+    }
+    primary_predictor_id = ""
+    for predictor_id in preferred_primary_order:
+        if ranking_by_id.get(predictor_id):
+            primary_predictor_id = predictor_id
+            break
+    if not primary_predictor_id and predictor_rankings:
+        primary_predictor_id = str(predictor_rankings[0].get("predictor_id", "") or "").strip()
     return {
         "profiles": profiles,
         "summaries": summaries,
-        "consensus": consensus_rows[:8],
+        "predictor_rankings": predictor_rankings,
+        "consensus": consensus_rows,
         "performance": build_predictor_performance_context(scope_key, run_id, run_row, available_ids),
         "meta": {
+            "fair_input_mode": "balanced_all_predictors",
             "available_predictor_ids": available_ids,
             "available_predictor_count": len(available_ids),
+            "predictor_ranking_sizes": {str(item.get("predictor_id", "") or ""): len(list(item.get("ranking", []) or [])) for item in predictor_rankings},
             "unique_top1_horses": sorted({horse for horse in top1_horses if horse}),
             "unique_top1_count": len({horse for horse in top1_horses if horse}),
             "consensus_top_horse_no": str(consensus_rows[0].get("horse_no", "") or "") if consensus_rows else "",
+            "primary_predictor_id": primary_predictor_id,
+            "primary_predictor_label": predictor_label_map.get(primary_predictor_id, ""),
+            "compatibility_primary_predictor_id": primary_predictor_id,
+            "compatibility_primary_predictor_label": predictor_label_map.get(primary_predictor_id, ""),
         },
     }
 
@@ -778,6 +840,7 @@ def build_policy_candidates(
     trio_odds_map,
     trifecta_odds_map,
     allowed_types,
+    consensus_rows=None,
 ):
     return web_policy_payload.build_policy_candidates(
         predictions,
@@ -787,6 +850,7 @@ def build_policy_candidates(
         trio_odds_map,
         trifecta_odds_map,
         allowed_types,
+        consensus_rows=consensus_rows,
     )
 
 
