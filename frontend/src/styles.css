@@ -1176,10 +1176,102 @@ select {
 
 .model-top-five-board__item {
   min-width: 0;
+  gap: 8px;
+  padding: 12px;
 }
 
-.model-top-five-board__summary-grid {
-  grid-template-columns: 1fr;
+.model-top-five-board__item .race-card-header__main h3 {
+  font-size: 20px;
+}
+
+.model-top-five-board__item .race-card-header__badges {
+  margin-top: 4px;
+}
+
+.model-top-five-board__item .race-card-header__result-list {
+  gap: 4px;
+}
+
+.model-top-five-board__item .race-card-header__result-list li {
+  line-height: 1.3;
+}
+
+.model-race-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.model-race-summary__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.model-race-summary__marks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.model-race-summary__mark {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.model-race-summary__mark--main {
+  border-color: rgba(199, 166, 109, 0.28);
+  background: rgba(199, 166, 109, 0.08);
+}
+
+.model-race-summary__mark em {
+  font-style: normal;
+  color: #aebcd1;
+  font-size: 12px;
+}
+
+.model-race-summary__mark strong {
+  color: #eef4ff;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.model-race-summary__mark--main em {
+  color: var(--gold);
+}
+
+.model-race-summary__mark--main strong {
+  font-size: 22px;
+}
+
+.model-race-summary__meta {
+  flex: 0 0 auto;
+}
+
+.model-race-summary__tickets {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+}
+
+.model-race-summary__tickets .bet-preview-list {
+  gap: 7px;
+  font-size: 13px;
+}
+
+.model-race-summary__tickets .bet-preview-list li {
+  line-height: 1.35;
 }
 
 .race-grid-tabs {

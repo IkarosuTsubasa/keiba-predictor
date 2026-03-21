@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import AiPickSummary from "./AiPickSummary";
+import ModelRaceSummary from "./ModelRaceSummary";
 import RaceCardHeader from "./RaceCardHeader";
 import { sortRacesForDisplay } from "./RaceGrid";
 
@@ -130,9 +130,7 @@ export default function ModelTopFiveBoard({ data, races }) {
         {active.items.map((item) => (
           <article key={item.key} className="race-card model-top-five-board__item">
             <RaceCardHeader race={item.race} />
-            <div className="race-card__summary-grid model-top-five-board__summary-grid">
-              <AiPickSummary card={item.card} />
-            </div>
+            <ModelRaceSummary card={item.card} />
           </article>
         ))}
       </div>
