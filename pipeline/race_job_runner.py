@@ -577,6 +577,7 @@ def _snapshot_outputs(base_dir, scope_key, race_id, run_id, workspace_dir):
     race_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_{race_id}"
     prediction_files = {
+        "shutuba_path": ("shutuba.csv", f"shutuba_{run_id}{suffix}.csv"),
         "odds_path": ("odds.csv", f"odds_{run_id}{suffix}.csv"),
         "fuku_odds_path": ("fuku_odds.csv", f"fuku_odds_{run_id}{suffix}.csv"),
         "wide_odds_path": ("wide_odds.csv", f"wide_odds_{run_id}{suffix}.csv"),
@@ -627,6 +628,7 @@ def _build_run_row(job, run_id, snapshot_paths):
         "predictions_v3_premium_path": snapshot_paths.get("predictions_v3_premium_path", ""),
         "predictions_v4_gemini_path": snapshot_paths.get("predictions_v4_gemini_path", ""),
         "predictions_v5_stacking_path": snapshot_paths.get("predictions_v5_stacking_path", ""),
+        "shutuba_path": snapshot_paths.get("shutuba_path", ""),
         "odds_path": snapshot_paths.get("odds_path", ""),
         "wide_odds_path": snapshot_paths.get("wide_odds_path", ""),
         "fuku_odds_path": snapshot_paths.get("fuku_odds_path", ""),
@@ -949,7 +951,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         if remote_predictor_batch_enabled():
             bundle_files = {
                 "kachiuma.csv": kachiuma_path,
-                "shutuba.csv": shutuba_path,
+                "shutuba.csv": snapshot_paths.get("shutuba_path", "") or shutuba_path,
                 "odds.csv": snapshot_paths.get("odds_path", ""),
                 "fuku_odds.csv": snapshot_paths.get("fuku_odds_path", ""),
                 "wide_odds.csv": snapshot_paths.get("wide_odds_path", ""),
