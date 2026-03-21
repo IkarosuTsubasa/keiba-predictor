@@ -1364,11 +1364,9 @@ def _public_race_sort_key(item):
     off_match = re.search(r"T?(\d{2}):(\d{2})", scheduled_off_time)
     off_minutes = (int(off_match.group(1)) * 60 + int(off_match.group(2))) if off_match else 9999
     race_title = str(row.get("race_title", "") or "").strip()
-    rank_match = re.search(r"(\d+)R", race_title, flags=re.IGNORECASE)
-    race_rank = int(rank_match.group(1)) if rank_match else 0
     if variant == "placeholder":
         return (1, off_minutes, race_title)
-    return (0, -race_rank, race_title)
+    return (0, -off_minutes, race_title)
 
 
 def _public_placeholder_ready_text(scheduled_off_time, minutes_before=25):
