@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from prediction_validation import format_entry_mismatch, load_entry_sets
 from predictor_catalog import list_predictors
 from race_job_runner import (
     _log_preview,
@@ -45,6 +46,53 @@ def _write_batch_summary(workspace: Path, summary: dict):
     )
 
 
+def _load_runner_filter_summary(workspace: Path):
+    path = workspace / "runner_filter_summary.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _preflight_workspace_inputs(workspace: Path):
+    shutuba_path = workspace / "shutuba.csv"
+    odds_path = workspace / "odds.csv"
+    runner_filter_summary = _load_runner_filter_summary(workspace)
+
+    shutuba_names, shutuba_numbers, shutuba_err = load_entry_sets(
+        shutuba_path,
+        ["馬名", "HorseName", "horse_name", "name"],
+        ["馬番", "horse_no", "HorseNo", "horse_number"],
+    )
+    odds_names, odds_numbers, odds_err = load_entry_sets(
+        odds_path,
+        ["name", "HorseName", "horse_name"],
+        ["horse_no", "HorseNo", "horse_number", "馬番"],
+    )
+
+    payload = {
+        "runner_filter_summary": runner_filter_summary,
+        "shutuba_count": len(shutuba_numbers or []) or len(shutuba_names or []),
+        "odds_count": len(odds_numbers or []) or len(odds_names or []),
+        "shutuba_error": shutuba_err,
+        "odds_error": odds_err,
+    }
+    if not shutuba_err and not odds_err:
+        if shutuba_numbers and odds_numbers:
+            if shutuba_numbers != odds_numbers:
+                payload["horse_no_mismatch"] = format_entry_mismatch(
+                    odds_numbers, shutuba_numbers, "horse_no"
+                )
+        elif shutuba_names and odds_names and shutuba_names != odds_names:
+            payload["horse_name_mismatch"] = format_entry_mismatch(
+                odds_names, shutuba_names, "horse_name"
+            )
+    return payload
+
+
 def run_batch(workspace_dir: str):
     workspace = Path(workspace_dir).resolve()
     if not workspace.exists():
@@ -71,6 +119,7 @@ def run_batch(workspace_dir: str):
         location=target_location,
         race_date=race_date,
     )
+    _emit_batch_log("bundle_inputs_preflight", **_preflight_workspace_inputs(workspace))
 
     process_log = []
     output_paths = {}
