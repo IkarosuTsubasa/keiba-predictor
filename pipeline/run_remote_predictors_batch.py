@@ -1,5 +1,6 @@
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 from predictor_catalog import list_predictors
@@ -28,6 +29,15 @@ def _safe_text(value, fallback=""):
     return text or fallback
 
 
+def _emit_batch_log(event, **fields):
+    payload = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "event": str(event or "").strip() or "unknown",
+    }
+    payload.update(fields)
+    print("[remote_predictor] " + json.dumps(payload, ensure_ascii=False), flush=True)
+
+
 def run_batch(workspace_dir: str):
     workspace = Path(workspace_dir).resolve()
     if not workspace.exists():
@@ -44,6 +54,17 @@ def run_batch(workspace_dir: str):
     if not odds_src.exists():
         raise FileNotFoundError(f"odds.csv not found: {odds_src}")
 
+    _emit_batch_log(
+        "batch_start",
+        workspace=str(workspace),
+        scope_key=scope_key,
+        surface=surface,
+        distance=distance,
+        track_condition=track_cond_label,
+        location=target_location,
+        race_date=race_date,
+    )
+
     process_log = []
     output_paths = {}
 
@@ -56,6 +77,13 @@ def run_batch(workspace_dir: str):
         if pred_latest_path.exists():
             pred_latest_path.unlink()
         predictor_start = __import__("datetime").datetime.now().timestamp()
+        _emit_batch_log(
+            "predictor_start",
+            predictor_id=spec["id"],
+            label=_safe_text(spec.get("label")),
+            script_name=script_name,
+            output_name=latest_name,
+        )
 
         if spec["id"] == "main":
             pred_code, pred_output = _run_subprocess(
@@ -145,15 +173,52 @@ def run_batch(workspace_dir: str):
         else:
             continue
 
+        _emit_batch_log(
+            "predictor_subprocess_done",
+            predictor_id=spec["id"],
+            code=pred_code,
+            output_name=latest_name,
+            output_preview=_log_preview(pred_output),
+        )
         process_log.append(
-            {"step": f"predictor_{spec['id']}", "code": pred_code, "output_preview": _log_preview(pred_output)}
+            {
+                "step": f"predictor_{spec['id']}",
+                "code": pred_code,
+                "output_preview": _log_preview(pred_output),
+            }
         )
         if pred_code != 0:
+            _emit_batch_log(
+                "predictor_failed",
+                predictor_id=spec["id"],
+                stage="subprocess",
+                code=pred_code,
+            )
             raise RuntimeError(f"{spec['label']} failed: {pred_output}")
+        _emit_batch_log(
+            "predictor_validate_start",
+            predictor_id=spec["id"],
+            output_name=latest_name,
+            output_path=str(pred_latest_path),
+        )
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
         if not ok:
+            _emit_batch_log(
+                "predictor_failed",
+                predictor_id=spec["id"],
+                stage="validation",
+                message=msg,
+                output_name=latest_name,
+                output_path=str(pred_latest_path),
+            )
             raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
         output_paths[spec["id"]] = str(pred_latest_path)
+        _emit_batch_log(
+            "predictor_done",
+            predictor_id=spec["id"],
+            output_name=latest_name,
+            output_path=str(pred_latest_path),
+        )
 
     summary = {
         "scope_key": scope_key,
@@ -167,6 +232,11 @@ def run_batch(workspace_dir: str):
     (workspace / "remote_predictor_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
+    )
+    _emit_batch_log(
+        "batch_done",
+        completed_predictors=summary["completed_predictors"],
+        output_paths=summary["output_paths"],
     )
     return summary
 
