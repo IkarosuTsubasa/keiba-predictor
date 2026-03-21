@@ -5,6 +5,7 @@ import random
 import re
 import time
 import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
@@ -45,6 +46,7 @@ JRA_API_TYPES = (
     JRA_API_TYPE_TRIO,
     JRA_API_TYPE_TRIFECTA,
 )
+RUNNER_FILTER_SUMMARY_FILENAME = "runner_filter_summary.json"
 
 
 def configure_utf8_io():
@@ -270,6 +272,19 @@ def parse_float_text(value):
         return None
 
 
+def parse_int_text(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
 def normalize_horse_no(value):
     raw = str(value or "").strip()
     if not raw:
@@ -295,6 +310,207 @@ def dedupe_horse_results(items):
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _safe_positive_int(value):
+    try:
+        number = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
+def _build_jra_runner_filter_summary(payload):
+    data = (((payload or {}).get("data")) or {})
+    registered_count = _safe_positive_int(data.get("touroku"))
+    starter_count = _safe_positive_int(data.get("shusso"))
+    gap_count = max(0, registered_count - starter_count)
+    odds_root = data.get("odds") or {}
+    win_map = odds_root.get("1") or {}
+    place_map = odds_root.get("2") or {}
+
+    candidate_details = []
+    strong_candidates = []
+    strong_reasons = {}
+
+    all_keys = sorted(
+        set(list(win_map.keys()) + list(place_map.keys())),
+        key=lambda x: int(re.sub(r"\D", "", str(x) or "") or "0"),
+    )
+    for horse_key in all_keys:
+        horse_no = normalize_horse_no(horse_key)
+        win_row = win_map.get(horse_key) or []
+        place_row = place_map.get(horse_key) or []
+        win_odds = parse_float_text(win_row[0] if len(win_row) > 0 else "")
+        place_low = parse_float_text(place_row[0] if len(place_row) > 0 else "")
+        place_high = parse_float_text(place_row[1] if len(place_row) > 1 else "")
+        popularity = parse_int_text(
+            win_row[2] if len(win_row) > 2 else (place_row[2] if len(place_row) > 2 else "")
+        )
+        reasons = []
+        if win_odds is not None and float(win_odds) >= 999.9:
+            reasons.append("win_odds_999_9")
+        if place_low is not None and float(place_low) < 0:
+            reasons.append("place_low_negative")
+        if place_high is not None and float(place_high) >= 999.9:
+            reasons.append("place_high_999_9")
+        candidate_details.append(
+            {
+                "horse_no": horse_no,
+                "win_odds": win_odds,
+                "place_low": place_low,
+                "place_high": place_high,
+                "popularity": popularity,
+                "strong_reasons": list(reasons),
+            }
+        )
+        if reasons:
+            strong_candidates.append(horse_no)
+            strong_reasons[horse_no] = list(reasons)
+
+    excluded_runner_nos = []
+    selection_mode = "none"
+    warning = ""
+    if gap_count > 0:
+        if len(strong_candidates) == gap_count:
+            excluded_runner_nos = sorted(
+                set(strong_candidates), key=lambda x: int(re.sub(r"\D", "", x) or "0")
+            )
+            selection_mode = "strong_only"
+        elif len(strong_candidates) < gap_count:
+            needed = gap_count - len(strong_candidates)
+            fallback_pool = []
+            for detail in candidate_details:
+                horse_no = str(detail.get("horse_no", "") or "").strip()
+                popularity = detail.get("popularity")
+                if not horse_no or horse_no in strong_candidates or popularity is None:
+                    continue
+                fallback_pool.append((int(popularity), horse_no))
+            fallback_pool.sort(key=lambda item: (-item[0], int(re.sub(r"\D", "", item[1]) or "0")))
+            fallback_runner_nos = [horse_no for _, horse_no in fallback_pool[:needed]]
+            if len(fallback_runner_nos) == needed:
+                excluded_runner_nos = sorted(
+                    set(list(strong_candidates) + fallback_runner_nos),
+                    key=lambda x: int(re.sub(r"\D", "", x) or "0"),
+                )
+                selection_mode = "strong_plus_popularity"
+            else:
+                selection_mode = "skipped_insufficient_fallback"
+                warning = (
+                    f"runner filter skipped: gap_count={gap_count}, "
+                    f"strong_candidates={len(strong_candidates)}, "
+                    f"fallback_candidates={len(fallback_pool)}"
+                )
+        else:
+            selection_mode = "skipped_excess_strong"
+            warning = (
+                f"runner filter skipped: gap_count={gap_count}, "
+                f"strong_candidates={len(strong_candidates)}"
+            )
+
+    excluded_reasons = {}
+    for horse_no in excluded_runner_nos:
+        reasons = list(strong_reasons.get(horse_no) or [])
+        if not reasons:
+            reasons = ["fallback_worst_popularity"]
+        excluded_reasons[horse_no] = reasons
+
+    return {
+        "registered_count": registered_count,
+        "starter_count": starter_count,
+        "gap_count": gap_count,
+        "selection_mode": selection_mode,
+        "filter_applied": bool(excluded_runner_nos),
+        "excluded_runner_nos": excluded_runner_nos,
+        "excluded_reasons": excluded_reasons,
+        "candidate_details": candidate_details,
+        "warning": warning,
+    }
+
+
+def _filter_horse_rows(rows, excluded_runner_nos):
+    excluded = set(str(x or "").strip() for x in list(excluded_runner_nos or []))
+    if not excluded:
+        return list(rows or [])
+    return [
+        dict(row)
+        for row in list(rows or [])
+        if str((row or {}).get("horse_no", "") or "").strip() not in excluded
+    ]
+
+
+def _filter_pair_rows(rows, excluded_runner_nos):
+    excluded = set(str(x or "").strip() for x in list(excluded_runner_nos or []))
+    if not excluded:
+        return list(rows or [])
+    filtered = []
+    for row in list(rows or []):
+        a = str((row or {}).get("horse_no_a", "") or "").strip()
+        b = str((row or {}).get("horse_no_b", "") or "").strip()
+        if a in excluded or b in excluded:
+            continue
+        filtered.append(dict(row))
+    return filtered
+
+
+def _filter_triple_rows(rows, excluded_runner_nos):
+    excluded = set(str(x or "").strip() for x in list(excluded_runner_nos or []))
+    if not excluded:
+        return list(rows or [])
+    filtered = []
+    for row in list(rows or []):
+        nums = {
+            str((row or {}).get("horse_no_a", "") or "").strip(),
+            str((row or {}).get("horse_no_b", "") or "").strip(),
+            str((row or {}).get("horse_no_c", "") or "").strip(),
+        }
+        if nums & excluded:
+            continue
+        filtered.append(dict(row))
+    return filtered
+
+
+def _filter_shutuba_csv_if_present(excluded_runner_nos):
+    excluded = set(str(x or "").strip() for x in list(excluded_runner_nos or []))
+    path = Path("shutuba.csv")
+    if not excluded or not path.exists():
+        return {"applied": False, "removed_rows": 0}
+    with open(path, "r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        if not fieldnames:
+            return {"applied": False, "removed_rows": 0}
+        no_field = next(
+            (field for field in ("馬番", "horse_no", "HorseNo", "horse_number") if field in fieldnames),
+            None,
+        )
+        if no_field is None:
+            return {"applied": False, "removed_rows": 0}
+        kept_rows = []
+        removed_rows = 0
+        for row in reader:
+            horse_no = normalize_horse_no(row.get(no_field, ""))
+            if horse_no and horse_no in excluded:
+                removed_rows += 1
+                continue
+            kept_rows.append(row)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(kept_rows)
+    print(
+        "[INFO] JRA runner filter updated shutuba.csv: "
+        f"removed_rows={removed_rows} excluded_runner_nos={sorted(excluded)}"
+    )
+    return {"applied": True, "removed_rows": removed_rows}
+
+
+def _write_runner_filter_summary(summary):
+    Path(RUNNER_FILTER_SUMMARY_FILENAME).write_text(
+        json.dumps(dict(summary or {}), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(f"Saved: {RUNNER_FILTER_SUMMARY_FILENAME}")
 
 
 def parse_row(row, fallback_index):
@@ -640,9 +856,27 @@ def fetch_and_save_jra_api_odds(race_url):
     if official_time:
         print(f"Official time: {official_time}")
 
+    runner_filter_summary = _build_jra_runner_filter_summary(payloads.get(JRA_API_TYPE_WIN_PLACE) or {})
+    runner_filter_summary["race_id"] = race_id
+    runner_filter_summary["official_datetime"] = official_time
+    excluded_runner_nos = list(runner_filter_summary.get("excluded_runner_nos") or [])
+    if excluded_runner_nos:
+        print(
+            "[INFO] JRA runner filter applied: "
+            f"registered={runner_filter_summary.get('registered_count', 0)} "
+            f"starters={runner_filter_summary.get('starter_count', 0)} "
+            f"excluded={','.join(excluded_runner_nos)} "
+            f"mode={runner_filter_summary.get('selection_mode', '')}"
+        )
+    elif str(runner_filter_summary.get("warning", "") or "").strip():
+        print(f"[WARN] {runner_filter_summary.get('warning')}")
+
     win_results, place_results = parse_jra_type1_payload(
         payloads[JRA_API_TYPE_WIN_PLACE], horse_name_map
     )
+    if excluded_runner_nos:
+        win_results = _filter_horse_rows(win_results, excluded_runner_nos)
+        place_results = _filter_horse_rows(place_results, excluded_runner_nos)
     if win_results:
         for item in win_results:
             print(f"{item['horse_no']}\t{item['name']}\t{item['odds']}")
@@ -657,10 +891,14 @@ def fetch_and_save_jra_api_odds(race_url):
     quinella_results = parse_jra_pair_payload(
         payloads[JRA_API_TYPE_QUINELLA], JRA_API_TYPE_QUINELLA
     )
+    if excluded_runner_nos:
+        quinella_results = _filter_pair_rows(quinella_results, excluded_runner_nos)
     if quinella_results:
         save_csv("quinella_odds.csv", ["horse_no_a", "horse_no_b", "odds"], quinella_results)
 
     wide_results = parse_jra_pair_payload(payloads[JRA_API_TYPE_WIDE], JRA_API_TYPE_WIDE)
+    if excluded_runner_nos:
+        wide_results = _filter_pair_rows(wide_results, excluded_runner_nos)
     if wide_results:
         save_csv(
             "wide_odds.csv",
@@ -669,10 +907,14 @@ def fetch_and_save_jra_api_odds(race_url):
         )
 
     exacta_results = parse_jra_pair_payload(payloads[JRA_API_TYPE_EXACTA], JRA_API_TYPE_EXACTA)
+    if excluded_runner_nos:
+        exacta_results = _filter_pair_rows(exacta_results, excluded_runner_nos)
     if exacta_results:
         save_csv("exacta_odds.csv", ["horse_no_a", "horse_no_b", "odds"], exacta_results)
 
     trio_results = parse_jra_triple_payload(payloads[JRA_API_TYPE_TRIO], JRA_API_TYPE_TRIO)
+    if excluded_runner_nos:
+        trio_results = _filter_triple_rows(trio_results, excluded_runner_nos)
     if trio_results:
         save_csv(
             "trio_odds.csv", ["horse_no_a", "horse_no_b", "horse_no_c", "odds"], trio_results
@@ -681,12 +923,18 @@ def fetch_and_save_jra_api_odds(race_url):
     trifecta_results = parse_jra_triple_payload(
         payloads[JRA_API_TYPE_TRIFECTA], JRA_API_TYPE_TRIFECTA
     )
+    if excluded_runner_nos:
+        trifecta_results = _filter_triple_rows(trifecta_results, excluded_runner_nos)
     if trifecta_results:
         save_csv(
             "trifecta_odds.csv",
             ["horse_no_a", "horse_no_b", "horse_no_c", "odds"],
             trifecta_results,
         )
+
+    shutuba_filter_info = _filter_shutuba_csv_if_present(excluded_runner_nos)
+    runner_filter_summary["shutuba_filter"] = shutuba_filter_info
+    _write_runner_filter_summary(runner_filter_summary)
 
     return bool(
         win_results
