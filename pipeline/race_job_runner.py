@@ -585,6 +585,10 @@ def _snapshot_outputs(base_dir, scope_key, race_id, run_id, workspace_dir):
         "exacta_odds_path": ("exacta_odds.csv", f"exacta_odds_{run_id}{suffix}.csv"),
         "trio_odds_path": ("trio_odds.csv", f"trio_odds_{run_id}{suffix}.csv"),
         "trifecta_odds_path": ("trifecta_odds.csv", f"trifecta_odds_{run_id}{suffix}.csv"),
+        "runner_filter_summary_path": (
+            "runner_filter_summary.json",
+            f"runner_filter_summary_{run_id}{suffix}.json",
+        ),
     }
     out = {}
     for spec in list_predictors():
@@ -636,6 +640,7 @@ def _build_run_row(job, run_id, snapshot_paths):
         "exacta_odds_path": snapshot_paths.get("exacta_odds_path", ""),
         "trio_odds_path": snapshot_paths.get("trio_odds_path", ""),
         "trifecta_odds_path": snapshot_paths.get("trifecta_odds_path", ""),
+        "runner_filter_summary_path": snapshot_paths.get("runner_filter_summary_path", ""),
         "plan_path": "",
         "gemini_policy_path": "",
         "deepseek_policy_path": "",
@@ -959,6 +964,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 "exacta_odds.csv": snapshot_paths.get("exacta_odds_path", ""),
                 "trio_odds.csv": snapshot_paths.get("trio_odds_path", ""),
                 "trifecta_odds.csv": snapshot_paths.get("trifecta_odds_path", ""),
+                "runner_filter_summary.json": snapshot_paths.get("runner_filter_summary_path", ""),
             }
             bundle_files = {
                 str(name or "").strip(): str(path or "").strip()
