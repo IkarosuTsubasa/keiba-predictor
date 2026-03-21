@@ -1245,11 +1245,17 @@ def build_horse_profiles(shusso_df: pd.DataFrame, recent: int = 5) -> pd.DataFra
             place_all = pd.Series(dtype=float)
             place_recent = pd.Series(dtype=float)
 
+        # Bayesian smoothing prior for PlaceScore (neutral = 0.5, strength = 5 races)
+        _ps_prior = 0.5
+        _ps_bk = 5
+
         # 1) AvgPlaceScore: ???????????????????????????????
-        ps_avg_all = float(place_all.mean()) if len(place_all) else float("nan")
+        _n_all = len(place_all)
+        ps_avg_all = float((place_all.sum() + _ps_prior * _ps_bk) / (_n_all + _ps_bk)) if _n_all > 0 else _ps_prior
 
         # 2) RecentPlaceScore: ?? N ????
-        ps_recent_mean = float(place_recent.mean()) if len(place_recent) else float("nan")
+        _n_rec = len(place_recent)
+        ps_recent_mean = float((place_recent.sum() + _ps_prior * _ps_bk) / (_n_rec + _ps_bk)) if _n_rec > 0 else _ps_prior
 
         # 3) MaxPlaceScore??? N ???????????????
         ps_max_recent = float(place_recent.max()) if len(place_recent) else float("nan")
@@ -1261,7 +1267,8 @@ def build_horse_profiles(shusso_df: pd.DataFrame, recent: int = 5) -> pd.DataFra
             ps = h["PlaceScore"].astype(float)
             num = float((ps * w).sum())
             den = float(w.sum())
-            exp_place = num / den if den > 0 else float("nan")
+            # Bayesian smoothing: blend weighted mean toward prior=0.5 with strength _ps_bk
+            exp_place = float((num + _ps_prior * _ps_bk) / (den + _ps_bk)) if den > 0 else _ps_prior
         else:
             exp_place = float("nan")
 
@@ -1454,11 +1461,26 @@ def build_profile_training_samples(hist_df: pd.DataFrame, recent: int = 5) -> pd
     recent_win = int(recent)
     long_win = max(recent_win * 2, 6)  # ?? recent=5 ??long_win=10
 
+    ps_prior = 0.5
+    ps_bk = 5.0
+
     # 1) AvgPlaceScore: ???????????????????????????
-    d["ps_avg_all"] = lag_roll("PlaceScore", long_win, "mean")
+    d["ps_sum_all"] = lag_roll("PlaceScore", long_win, "sum")
+    d["ps_count_all"] = lag_roll("PlaceScore", long_win, "count")
+    d["ps_avg_all"] = np.where(
+        d["ps_count_all"] > 0,
+        (d["ps_sum_all"].fillna(0.0) + ps_prior * ps_bk) / (d["ps_count_all"].fillna(0.0) + ps_bk),
+        ps_prior,
+    )
 
     # 2) RecentPlaceScore: ?? N ??????????????
-    d["ps_recent_mean"] = lag_roll("PlaceScore", recent_win, "mean")
+    d["ps_sum_recent"] = lag_roll("PlaceScore", recent_win, "sum")
+    d["ps_count_recent"] = lag_roll("PlaceScore", recent_win, "count")
+    d["ps_recent_mean"] = np.where(
+        d["ps_count_recent"] > 0,
+        (d["ps_sum_recent"].fillna(0.0) + ps_prior * ps_bk) / (d["ps_count_recent"].fillna(0.0) + ps_bk),
+        ps_prior,
+    )
 
     # 3) MaxPlaceScore??????????? N ????? PlaceScore
     #    ?????????????????????????????? max?
@@ -1470,7 +1492,11 @@ def build_profile_training_samples(hist_df: pd.DataFrame, recent: int = 5) -> pd
         d["ps_weighted"] = d["PlaceScore"] * d["SmoothMatch"]
         d["ps_weighted_sum"] = lag_roll("ps_weighted", recent_win, "sum")
         d["smoothmatch_sum"] = lag_roll("SmoothMatch", recent_win, "sum")
-        d["exp_place_recent"] = d["ps_weighted_sum"] / d["smoothmatch_sum"]
+        d["exp_place_recent"] = np.where(
+            d["smoothmatch_sum"] > 0,
+            (d["ps_weighted_sum"].fillna(0.0) + ps_prior * ps_bk) / (d["smoothmatch_sum"].fillna(0.0) + ps_bk),
+            ps_prior,
+        )
     else:
         d["exp_place_recent"] = np.nan
 

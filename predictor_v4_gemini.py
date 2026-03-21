@@ -330,17 +330,27 @@ class SupremeFeatureEngineer:
         df['adj_ti_mean_5'] = grouped['AdjTimeIndex'].transform(lambda x: x.shift(1).rolling(5, min_periods=1).mean())
 
         # --- 3. Aptitude (Context Specific) ---
-        def calc_expanding_context_stat(df, context_col, value_col):
-            g = df.groupby(['HorseName', context_col])[value_col]
-            return g.transform(lambda x: x.expanding().mean().shift(1))
+        def calc_expanding_context_stat(df, context_col, value_col, prior_col, prior_k=3):
+            group_cols = ['HorseName', context_col]
 
-        df['ti_course_avg'] = calc_expanding_context_stat(df, 'Location', 'TimeIndex')
-        df['ti_surface_avg'] = calc_expanding_context_stat(df, 'Surface', 'TimeIndex')
-        df['ti_dist_avg'] = calc_expanding_context_stat(df, 'Distance', 'TimeIndex')
+            def _calc(group):
+                shifted = group[value_col].shift(1)
+                obs_sum = shifted.expanding(min_periods=1).sum()
+                obs_count = shifted.expanding(min_periods=1).count()
+                obs_mean = obs_sum / obs_count.replace(0, np.nan)
+                prior = group[prior_col].where(group[prior_col].notna() & (group[prior_col] != 0), obs_mean)
+                shrunk = (obs_sum.fillna(0.0) + prior * prior_k) / (obs_count.fillna(0.0) + prior_k)
+                return shrunk.where(obs_count > 0, np.nan)
+
+            return df.groupby(group_cols, group_keys=False).apply(_calc)
+
+        df['ti_course_avg'] = calc_expanding_context_stat(df, 'Location', 'TimeIndex', 'ti_mean_5')
+        df['ti_surface_avg'] = calc_expanding_context_stat(df, 'Surface', 'TimeIndex', 'ti_mean_5')
+        df['ti_dist_avg'] = calc_expanding_context_stat(df, 'Distance', 'TimeIndex', 'ti_mean_5')
         
         # Condition Aptitude (Heavy vs Fast)
         df['BabaCategory'] = (df['BabaIndex'] >= 0).astype(int) # 1=Slow, 0=Fast
-        df['ti_cond_avg'] = calc_expanding_context_stat(df, 'BabaCategory', 'TimeIndex')
+        df['ti_cond_avg'] = calc_expanding_context_stat(df, 'BabaCategory', 'TimeIndex', 'ti_mean_5')
         
         # --- 4. Target Context Diff (For Training) ---
         df['WinDistance'] = df['Distance'].where(df['IsWin'] == 1)
@@ -354,8 +364,14 @@ class SupremeFeatureEngineer:
         for col in ['ti_course_avg', 'ti_surface_avg', 'ti_dist_avg', 'ti_cond_avg']:
             df[col] = df[col].fillna(df['ti_mean_5'])
             
+        # Odds implied probability (pre-race, no leakage)
+        if 'Odds' in df.columns:
+            df['odds_implied'] = (1.0 / df['Odds'].clip(lower=1.0)).fillna(0)
+        else:
+            df['odds_implied'] = 0.0
+
         df = df.fillna(0)
-        
+
         if is_inference:
             return self._prepare_inference_rows(df, target_context, target_horses, current_entries=current_entries)
         else:
@@ -384,11 +400,14 @@ class SupremeFeatureEngineer:
                     adj_ti_mean_5 = adj_ti_series.tail(5).mean() if len(adj_ti_series) > 0 else 0
 
                 # 2. Context Aptitude (Average of ALL matches up to now)
-                def get_context_avg(col, val, value_col):
+                def get_context_avg(col, val, value_col, _k=3):
                     matches = group[group[col] == val][value_col].dropna()
-                    if len(matches) > 0:
-                        return matches.mean()
-                    return np.nan
+                    mn = len(matches)
+                    if mn == 0:
+                        return np.nan
+                    obs = float(matches.mean())
+                    _prior = ti_mean_5 if ti_mean_5 != 0 else obs
+                    return (obs * mn + _prior * _k) / (mn + _k)
 
                 ti_course_avg = get_context_avg('Location', context['location'], 'TimeIndex')
                 ti_surface_avg = get_context_avg('Surface', context['surface'], 'TimeIndex')
@@ -422,7 +441,8 @@ class SupremeFeatureEngineer:
                 current_meta = current_entries.get(normalize_name(horse), {})
                 horse_no = current_meta.get("horse_no", last_row.get('horse_no', np.nan))
                 odds = current_meta.get("odds", last_row.get('Odds', np.nan))
-                
+                odds_implied = 1.0 / max(odds, 1.0) if pd.notna(odds) and odds > 0 else 0.0
+
             else:
                 # No history - New Horse
                 ti_mean_5, ti_max_5, ti_trend, adj_ti_mean_5 = 0, 0, 0, 0
@@ -432,7 +452,8 @@ class SupremeFeatureEngineer:
                 current_meta = current_entries.get(normalize_name(horse), {})
                 horse_no = current_meta.get("horse_no", np.nan)
                 odds = current_meta.get("odds", np.nan)
-            
+                odds_implied = 1.0 / max(odds, 1.0) if pd.notna(odds) and odds > 0 else 0.0
+
             row = {
                 "HorseName": horse,
                 "ti_mean_5": ti_mean_5,
@@ -443,10 +464,11 @@ class SupremeFeatureEngineer:
                 "ti_surface_avg": ti_surface_avg,
                 "ti_dist_avg": ti_dist_avg,
                 "ti_cond_avg": ti_cond_avg,
-                "jockey_win_rate": jockey_wr, 
+                "jockey_win_rate": jockey_wr,
                 "Age": age,
                 "sex_code": sex_code,
                 "dist_diff_from_optimal": dist_diff,
+                "odds_implied": odds_implied,
                 "horse_no": horse_no,
                 "Odds": odds
             }
@@ -463,7 +485,8 @@ class SupremePredictor:
         self.features = [
             "ti_mean_5", "ti_max_5", "ti_trend", "adj_ti_mean_5",
             "ti_course_avg", "ti_surface_avg", "ti_dist_avg", "ti_cond_avg",
-            "jockey_win_rate", "Age", "sex_code", "dist_diff_from_optimal"
+            "jockey_win_rate", "Age", "sex_code", "dist_diff_from_optimal",
+            "odds_implied"
         ]
         
     def train(self, train_df):

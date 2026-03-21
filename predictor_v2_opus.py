@@ -118,6 +118,14 @@ if os.path.exists("odds.csv"):
 else:
     print("[WARN] odds.csv not found. Predictions will lack market signal.")
 
+fuku_odds_df = None
+if os.path.exists("fuku_odds.csv"):
+    fuku_odds_df = pd.read_csv("fuku_odds.csv")
+    fuku_odds_df.columns = [re.sub(r"\s+", "", str(c or "")).strip() for c in fuku_odds_df.columns]
+    print(f"[INFO] Loaded fuku_odds.csv: {len(fuku_odds_df)} horses")
+else:
+    print("[WARN] fuku_odds.csv not found. Place odds blend will be skipped.")
+
 
 # ============================================================
 # 3. Parsing Utilities
@@ -606,9 +614,13 @@ def build_prediction_profiles(shusso_df, cur_odds_df, target_surface, target_dis
         top3_r = recent["IsTop3"].dropna()
         top3_all = h["IsTop3"].dropna()
         win_r = recent["IsWin"].dropna()
-        out["f_top3_rate5"] = float(top3_r.mean()) if len(top3_r) else np.nan
-        out["f_top3_rate_all"] = float(top3_all.mean()) if len(top3_all) else np.nan
-        out["f_win_rate5"] = float(win_r.mean()) if len(win_r) else np.nan
+        _top3_prior, _win_prior, _bk = 0.33, 0.10, 5
+        _n5 = len(top3_r)
+        out["f_top3_rate5"] = (float(top3_r.sum()) + _top3_prior * _bk) / (_n5 + _bk) if _n5 > 0 else _top3_prior
+        _nall = len(top3_all)
+        out["f_top3_rate_all"] = (float(top3_all.sum()) + _top3_prior * _bk) / (_nall + _bk) if _nall > 0 else _top3_prior
+        _nw5 = len(win_r)
+        out["f_win_rate5"] = (float(win_r.sum()) + _win_prior * _bk) / (_nw5 + _bk) if _nw5 > 0 else _win_prior
 
         fp = recent["FinishPct"].dropna()
         out["f_avg_finish5"] = float(fp.mean()) if len(fp) else np.nan
@@ -1088,8 +1100,52 @@ pred_profiles["rank_score"] = cal_probs
 pred_profiles["rank_score_raw"] = raw_probs
 pred_profiles["rank_score_norm"] = cal_probs
 
-# Sort by score
+# --- Place odds post-prediction blend ---
+def blend_place_odds(pred_df, fuku_df, alpha=0.12):
+    """Blend fukusho implied probability into final scores for re-ranking."""
+    if fuku_df is None or fuku_df.empty:
+        return pred_df, False
+
+    place_map = {}
+    for _, row in fuku_df.iterrows():
+        hno = parse_int(row.get("horse_no", np.nan))
+        mid = parse_float(row.get("odds_mid", np.nan))
+        if pd.notna(hno) and hno > 0 and pd.notna(mid) and mid > 0:
+            place_map[int(hno)] = 1.0 / mid
+
+    if not place_map:
+        return pred_df, False
+
+    df = pred_df.copy()
+    score_col = "rank_score" if "rank_score" in df.columns else "Top3Prob_model"
+
+    s = df[score_col].values.astype(float)
+    s_min, s_max = float(np.nanmin(s)), float(np.nanmax(s))
+    s_norm = (s - s_min) / (s_max - s_min) if s_max - s_min > 1e-9 else np.full_like(s, 0.5)
+
+    place_vals = df["horse_no"].apply(
+        lambda h: place_map.get(int(h), 0.0) if pd.notna(h) and h > 0 else 0.0
+    ).values.astype(float)
+    p_min, p_max = float(np.nanmin(place_vals)), float(np.nanmax(place_vals))
+    p_norm = (place_vals - p_min) / (p_max - p_min) if p_max - p_min > 1e-9 else np.full_like(place_vals, 0.0)
+
+    df[score_col] = (1.0 - alpha) * s_norm + alpha * p_norm
+    print(f"[INFO] Place odds blend applied (alpha={alpha}, {len(place_map)} horses matched)")
+    return df, True
+
+
+pred_profiles, place_blend_applied = blend_place_odds(pred_profiles, fuku_odds_df, alpha=0.12)
+
+# Sort by score after all rank adjustments
 pred_profiles = pred_profiles.sort_values("rank_score", ascending=False).reset_index(drop=True)
+
+rank_vals = pred_profiles["rank_score"].to_numpy(dtype=float)
+rank_min = float(np.nanmin(rank_vals)) if len(rank_vals) else 0.0
+rank_max = float(np.nanmax(rank_vals)) if len(rank_vals) else 0.0
+if len(rank_vals) and np.isfinite(rank_max - rank_min) and (rank_max - rank_min) > 1e-9:
+    pred_profiles["rank_score_norm"] = (rank_vals - rank_min) / (rank_max - rank_min)
+else:
+    pred_profiles["rank_score_norm"] = np.full(len(pred_profiles), 0.5 if len(pred_profiles) else np.nan)
 
 # Confidence score
 scores = pred_profiles["rank_score"].values
@@ -1113,7 +1169,7 @@ pred_profiles["risk_score"] = round(confidence, 4)
 if "horse_no" not in pred_profiles.columns:
     pred_profiles["horse_no"] = np.nan
 pred_profiles["model_mode"] = "v2_lgb"
-pred_profiles["score_is_probability"] = 1
+pred_profiles["score_is_probability"] = 0 if place_blend_applied else 1
 pred_profiles["race_id"] = "current"
 
 # ============================================================

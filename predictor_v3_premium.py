@@ -415,10 +415,17 @@ def summarize_history(rows: List[Dict[str, str]], cond: RaceCondition) -> Dict[s
     recent = mean(recent3) if recent3 else ability
     trend = (mean(recent3) - mean(prev3)) if recent3 and prev3 else 0.0
     peak = max(last8) if last8 else ability
-    dist_fit = mean(ti_adj_dist_fit) if ti_adj_dist_fit else ability - 5.0
-    venue_fit = mean(ti_adj_venue_fit) if ti_adj_venue_fit else ability - 3.0
-    going_fit = mean(ti_adj_going_fit) if ti_adj_going_fit else ability
-    baba_fit = mean(ti_adj_baba_fit) if ti_adj_baba_fit else ability
+    _PRIOR_K = 3  # shrink toward fallback when n < 3
+    n_dist = len(ti_adj_dist_fit)
+    _dist_prior = ability - 5.0
+    dist_fit = (mean(ti_adj_dist_fit) * n_dist + _dist_prior * _PRIOR_K) / (n_dist + _PRIOR_K) if ti_adj_dist_fit else _dist_prior
+    n_venue = len(ti_adj_venue_fit)
+    _venue_prior = ability - 3.0
+    venue_fit = (mean(ti_adj_venue_fit) * n_venue + _venue_prior * _PRIOR_K) / (n_venue + _PRIOR_K) if ti_adj_venue_fit else _venue_prior
+    n_going = len(ti_adj_going_fit)
+    going_fit = (mean(ti_adj_going_fit) * n_going + ability * _PRIOR_K) / (n_going + _PRIOR_K) if ti_adj_going_fit else ability
+    n_baba = len(ti_adj_baba_fit)
+    baba_fit = (mean(ti_adj_baba_fit) * n_baba + ability * _PRIOR_K) / (n_baba + _PRIOR_K) if ti_adj_baba_fit else ability
 
     style = mean(run_first_pct[:5]) if run_first_pct else 0.52
     gain = mean(run_gain[:5]) if run_gain else 0.0
@@ -436,7 +443,9 @@ def summarize_history(rows: List[Dict[str, str]], cond: RaceCondition) -> Dict[s
     else:
         pace_fit = 100.0 * (0.30 * style_score + 0.25 * gain_score + 0.45 * up_score)
 
-    t3_rate = mean(top3_list[:8]) if top3_list else 0.0
+    _n_t3 = len(top3_list[:8])
+    _T3_PRIOR, _T3_K = 0.33, 5
+    t3_rate = (sum(top3_list[:8]) + _T3_PRIOR * _T3_K) / (_n_t3 + _T3_K) if top3_list else _T3_PRIOR
     fin_std = stdev(finish_pct[:8]) if finish_pct else 0.25
     consistency = 100.0 * t3_rate - 65.0 * fin_std
     class_power = 10.0 * mean(prize_ln[:6]) if prize_ln else 0.0
