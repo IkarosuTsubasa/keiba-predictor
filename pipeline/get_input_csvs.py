@@ -1,6 +1,6 @@
 import argparse
+import shutil
 import sys
-from pathlib import Path
 
 from run_pipeline import ROOT_DIR, extract_race_id, run_script, sleep_between_scrapes, start_shared_chrome
 
@@ -24,6 +24,17 @@ def ensure_updated(path, previous_mtime):
         raise RuntimeError(f"{path.name} 无法读取时间戳: {exc}") from exc
     if current_mtime <= previous_mtime:
         raise RuntimeError(f"{path.name} 没有更新，请检查抓取是否成功。")
+
+
+def save_outputs_to_race_dir(race_id, *paths):
+    race_dir = ROOT_DIR / race_id
+    race_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths = []
+    for path in paths:
+        dest_path = race_dir / path.name
+        shutil.copy2(path, dest_path)
+        saved_paths.append(dest_path)
+    return race_dir, saved_paths
 
 
 def main():
@@ -65,11 +76,16 @@ def main():
 
     ensure_updated(shutuba_path, shutuba_before)
     ensure_updated(kachiuma_path, kachiuma_before)
+    race_dir, saved_paths = save_outputs_to_race_dir(race_id, shutuba_path, kachiuma_path)
 
     print("")
     print("已生成以下文件：")
     print(f"- {shutuba_path}")
     print(f"- {kachiuma_path}")
+    print("")
+    print(f"Race CSV 已复制到: {race_dir}")
+    for saved_path in saved_paths:
+        print(f"- {saved_path}")
 
 
 if __name__ == "__main__":

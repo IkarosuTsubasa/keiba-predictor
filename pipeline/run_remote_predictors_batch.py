@@ -38,6 +38,13 @@ def _emit_batch_log(event, **fields):
     print("[remote_predictor] " + json.dumps(payload, ensure_ascii=False), flush=True)
 
 
+def _write_batch_summary(workspace: Path, summary: dict):
+    (workspace / "remote_predictor_summary.json").write_text(
+        json.dumps(dict(summary or {}), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def run_batch(workspace_dir: str):
     workspace = Path(workspace_dir).resolve()
     if not workspace.exists():
@@ -67,6 +74,7 @@ def run_batch(workspace_dir: str):
 
     process_log = []
     output_paths = {}
+    completed_predictors = []
 
     for spec in list_predictors():
         script_name = _safe_text(spec.get("script_name"))
@@ -188,13 +196,33 @@ def run_batch(workspace_dir: str):
             }
         )
         if pred_code != 0:
+            failure_summary = {
+                "status": "failed",
+                "scope_key": scope_key,
+                "surface": surface,
+                "distance": distance,
+                "track_condition": track_cond_label,
+                "completed_predictors": list(completed_predictors),
+                "output_paths": dict(output_paths),
+                "failed_predictor": spec["id"],
+                "failed_stage": "subprocess",
+                "failure_message": f"{spec['label']} subprocess failed with exit_code={pred_code}",
+                "process_log": process_log,
+            }
+            _write_batch_summary(workspace, failure_summary)
             _emit_batch_log(
                 "predictor_failed",
                 predictor_id=spec["id"],
                 stage="subprocess",
                 code=pred_code,
             )
-            raise RuntimeError(f"{spec['label']} failed: {pred_output}")
+            _emit_batch_log(
+                "batch_failed",
+                failed_predictor=spec["id"],
+                failed_stage="subprocess",
+                message=failure_summary["failure_message"],
+            )
+            raise RuntimeError(failure_summary["failure_message"])
         _emit_batch_log(
             "predictor_validate_start",
             predictor_id=spec["id"],
@@ -203,6 +231,20 @@ def run_batch(workspace_dir: str):
         )
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
         if not ok:
+            failure_summary = {
+                "status": "failed",
+                "scope_key": scope_key,
+                "surface": surface,
+                "distance": distance,
+                "track_condition": track_cond_label,
+                "completed_predictors": list(completed_predictors),
+                "output_paths": dict(output_paths),
+                "failed_predictor": spec["id"],
+                "failed_stage": "validation",
+                "failure_message": msg,
+                "process_log": process_log,
+            }
+            _write_batch_summary(workspace, failure_summary)
             _emit_batch_log(
                 "predictor_failed",
                 predictor_id=spec["id"],
@@ -211,8 +253,15 @@ def run_batch(workspace_dir: str):
                 output_name=latest_name,
                 output_path=str(pred_latest_path),
             )
-            raise RuntimeError(f"{spec['label']} failed: {msg}\n{pred_output}")
+            _emit_batch_log(
+                "batch_failed",
+                failed_predictor=spec["id"],
+                failed_stage="validation",
+                message=msg,
+            )
+            raise RuntimeError(f"{spec['label']} failed during validation: {msg}")
         output_paths[spec["id"]] = str(pred_latest_path)
+        completed_predictors.append(spec["id"])
         _emit_batch_log(
             "predictor_done",
             predictor_id=spec["id"],
@@ -221,18 +270,16 @@ def run_batch(workspace_dir: str):
         )
 
     summary = {
+        "status": "succeeded",
         "scope_key": scope_key,
         "surface": surface,
         "distance": distance,
         "track_condition": track_cond_label,
-        "completed_predictors": [spec["id"] for spec in list_predictors() if spec["id"] in output_paths],
+        "completed_predictors": list(completed_predictors),
         "output_paths": output_paths,
         "process_log": process_log,
     }
-    (workspace / "remote_predictor_summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _write_batch_summary(workspace, summary)
     _emit_batch_log(
         "batch_done",
         completed_predictors=summary["completed_predictors"],

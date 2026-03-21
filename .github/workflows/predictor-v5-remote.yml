@@ -82,6 +82,12 @@ jobs:
           log_excerpt = ""
           if log_path.exists():
               log_excerpt = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+          structured_log_tail = ""
+          if log_path.exists():
+              lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+              marker_lines = [line for line in lines if "[remote_predictor]" in line]
+              if marker_lines:
+                  structured_log_tail = "\n".join(marker_lines[-20:])
 
           summary = {}
           if summary_path.exists():
@@ -113,6 +119,7 @@ jobs:
                       "content_base64": base64.b64encode(output_zip.read_bytes()).decode("ascii"),
                   },
                   "log_excerpt": log_excerpt,
+                  "structured_log_tail": structured_log_tail,
               }
           else:
               error_message = f"remote predictor batch failed with exit_code={exit_code}"
@@ -123,6 +130,7 @@ jobs:
                   "summary": summary,
                   "error_message": error_message,
                   "log_excerpt": log_excerpt,
+                  "structured_log_tail": structured_log_tail,
               }
 
           Path("callback_payload.json").write_text(
@@ -178,6 +186,10 @@ jobs:
               print("summary:")
               for key in sorted(summary.keys()):
                   print(f"  {key}: {summary.get(key)}")
+          structured_log_tail = str(payload.get("structured_log_tail", "") or "").strip()
+          if structured_log_tail:
+              print("structured_log_tail:")
+              print(structured_log_tail)
           log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
           if log_excerpt:
               print("log_excerpt_tail:")
@@ -218,6 +230,10 @@ jobs:
               print("summary:")
               for key in sorted(summary.keys()):
                   print(f"  {key}: {summary.get(key)}")
+          structured_log_tail = str(payload.get("structured_log_tail", "") or "").strip()
+          if structured_log_tail:
+              print("structured_log_tail:")
+              print(structured_log_tail)
           log_excerpt = str(payload.get("log_excerpt", "") or "").strip()
           if log_excerpt:
               print("log_excerpt_tail:")
