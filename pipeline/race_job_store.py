@@ -304,6 +304,18 @@ def compute_initial_status(job):
     return "uploaded"
 
 
+def _derive_process_after_dt(job):
+    row = dict(job or {})
+    off_dt = _parse_dt(row.get("scheduled_off_time", ""))
+    if off_dt is None:
+        return None
+    try:
+        lead = max(0, int(row.get("lead_minutes", 0) or 0))
+    except (TypeError, ValueError):
+        lead = 30
+    return off_dt - timedelta(minutes=lead)
+
+
 def save_artifact(base_dir, job_id, artifact_type, original_name, content):
     now = _jst_now()
     safe_name = _safe_filename(original_name)
@@ -418,11 +430,25 @@ def scan_due_jobs(base_dir, now_text=""):
     now_dt = _parse_dt(now_text) or _jst_now()
     jobs = load_jobs(base_dir)
     changed = []
+    dirty = False
     for idx, job in enumerate(jobs):
         job = initialize_job_step_fields(job)
         status = str(job.get("status", "")).strip().lower()
+        expected_status = compute_initial_status(job)
+        if status == "uploaded" and expected_status == "scheduled":
+            job["status"] = "scheduled"
+            status = "scheduled"
+            dirty = True
         process_dt = _parse_dt(job.get("process_after_time", ""))
+        if process_dt is None:
+            derived_process_dt = _derive_process_after_dt(job)
+            if derived_process_dt is not None:
+                process_dt = derived_process_dt
+                job["process_after_time"] = _dt_text(derived_process_dt)
+                dirty = True
         if status != "scheduled" or process_dt is None or process_dt > now_dt:
+            if dirty:
+                jobs[idx] = job
             continue
         job["status"] = "queued_process"
         job["queued_process_at"] = _dt_text(now_dt)
@@ -431,10 +457,50 @@ def scan_due_jobs(base_dir, now_text=""):
         job = set_job_step_state(job, "policy", "idle")
         job["updated_at"] = _dt_text(now_dt)
         jobs[idx] = job
+        dirty = True
         changed.append(dict(job))
-    if changed:
+    if dirty:
         save_jobs(base_dir, jobs)
     return changed
+
+
+def scan_due_diagnostics(base_dir, now_text=""):
+    now_dt = _parse_dt(now_text) or _jst_now()
+    rows = []
+    for job in load_jobs(base_dir):
+        row = initialize_job_step_fields(job)
+        status = str(row.get("status", "") or "").strip().lower()
+        artifact_map = _artifact_index(row.get("artifacts", []))
+        has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
+        expected_status = compute_initial_status(row)
+        effective_status = "scheduled" if status == "uploaded" and expected_status == "scheduled" else status
+        process_dt = _parse_dt(row.get("process_after_time", ""))
+        derived_process_dt = _derive_process_after_dt(row) if process_dt is None else process_dt
+        reason = "eligible"
+        if effective_status != "scheduled":
+            if not has_required:
+                reason = "missing_artifacts"
+            elif not _parse_dt(row.get("scheduled_off_time", "")):
+                reason = "missing_off_time"
+            else:
+                reason = f"status_{status or 'unknown'}"
+        elif derived_process_dt is None:
+            reason = "missing_process_after"
+        elif derived_process_dt > now_dt:
+            reason = "wait_process_after"
+        rows.append(
+            {
+                "job_id": str(row.get("job_id", "") or "").strip(),
+                "status": status,
+                "effective_status": effective_status,
+                "race_id": str(row.get("race_id", "") or "").strip(),
+                "scheduled_off_time": str(row.get("scheduled_off_time", "") or "").strip(),
+                "process_after_time": _dt_text(derived_process_dt) if derived_process_dt else "",
+                "has_required_artifacts": bool(has_required),
+                "reason": reason,
+            }
+        )
+    return rows
 
 
 def apply_job_action(base_dir, job_id, action):
@@ -544,6 +610,7 @@ __all__ = [
     "load_jobs",
     "save_artifact",
     "scan_due_jobs",
+    "scan_due_diagnostics",
     "set_job_step_state",
     "update_job",
 ]

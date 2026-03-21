@@ -174,7 +174,21 @@ def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
     return out
 
 
-def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
+def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs):
+    scan_due_candidates = scan_due_race_job_diagnostics(base_dir)
+    print(
+        "[web_app] "
+        + json.dumps(
+            {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "event": "scan_due_candidates",
+                "count": len(scan_due_candidates),
+                "items": scan_due_candidates,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     changed = scan_due_race_jobs(base_dir)
     process_results = []
     settle_results = []
@@ -376,6 +390,11 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, load_race_jobs):
     return {
         "queued_count": len(changed),
         "queued_job_ids": [str(item.get("job_id", "") or "").strip() for item in changed],
+        "scan_due_candidate_count": len(scan_due_candidates),
+        "scan_due_candidates": scan_due_candidates,
+        "scan_due_skipped": [
+            item for item in scan_due_candidates if str(item.get("reason", "") or "").strip() != "eligible"
+        ],
         "processed_count": len(process_results),
         "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
         "settled_count": len(settle_results),
@@ -426,7 +445,7 @@ def import_history_zip(*, base_dir, archive_bytes, overwrite=False):
     return {"written": written, "skipped": skipped, "sample_paths": imported_paths[:8]}
 
 
-def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_race_jobs, load_race_jobs):
+def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs):
     if not admin_token_valid(token):
         return JSONResponse({"ok": False, "error": "invalid_admin_token"}, status_code=403)
     locked, lock_payload, lock_path = _acquire_run_due_lock(base_dir)
@@ -443,6 +462,7 @@ def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_ra
         summary = run_due_jobs_once(
             base_dir=base_dir,
             scan_due_race_jobs=scan_due_race_jobs,
+            scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
             load_race_jobs=load_race_jobs,
         )
         ok = not bool(list(summary.get("errors", []) or []))

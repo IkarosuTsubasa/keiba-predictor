@@ -63,6 +63,7 @@ from race_job_store import (
     initialize_job_step_fields as initialize_race_job_step_fields,
     load_jobs as load_race_jobs,
     save_artifact as save_race_job_artifact,
+    scan_due_diagnostics as scan_due_race_job_diagnostics,
     scan_due_jobs as scan_due_race_jobs,
     set_job_step_state as set_race_job_step_state,
     update_job as update_race_job,
@@ -164,6 +165,7 @@ def run_due_jobs_once():
     return web_admin_tasks.run_due_jobs_once(
         base_dir=BASE_DIR,
         scan_due_race_jobs=scan_due_race_jobs,
+        scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
         load_race_jobs=load_race_jobs,
     )
 
@@ -2644,16 +2646,31 @@ async def admin_jobs_edit_api(request: Request):
     except ValueError:
         lead_value = 30
 
+    def _recompute_process_after_text(off_text, lead_minutes_value):
+        off_source = str(off_text or "").strip()
+        if not off_source:
+            return ""
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+            try:
+                off_dt = datetime.strptime(off_source, fmt)
+                return (off_dt - timedelta(minutes=max(0, int(lead_minutes_value or 0)))).strftime("%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+        return ""
+
     def _edit_job(row, now_text):
         row["race_id"] = race_id
         row["location"] = location
         row["race_date"] = race_date
         row["scheduled_off_time"] = scheduled_off_time
-        row["process_after_time"] = ""
         row["target_distance"] = str(target_distance_value)
         row["target_track_condition"] = target_track_condition
         row["lead_minutes"] = lead_value
         row["notes"] = notes
+        row["process_after_time"] = _recompute_process_after_text(scheduled_off_time, lead_value)
+        current_status = str(row.get("status", "") or "").strip().lower()
+        if current_status in ("uploaded", "scheduled"):
+            row["status"] = compute_race_job_initial_status(row)
         row["updated_at"] = now_text
 
     job = update_race_job(BASE_DIR, job_id, _edit_job)
@@ -2866,6 +2883,7 @@ def internal_run_due(request: Request):
         token=supplied,
         admin_token_valid=_admin_token_valid,
         scan_due_race_jobs=scan_due_race_jobs,
+        scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
         load_race_jobs=load_race_jobs,
     )
 
