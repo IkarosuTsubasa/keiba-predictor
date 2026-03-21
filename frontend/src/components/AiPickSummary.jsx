@@ -16,7 +16,7 @@ function pickHorse(marks, symbol) {
   return found ? found.horseNo : null;
 }
 
-export default function AiPickSummary({ card }) {
+export default function AiPickSummary({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
   const mainHorse = pickHorse(marks, "◎") || "-";
   const supportMarks = MARK_ORDER.filter((symbol) => symbol !== "◎")
@@ -33,7 +33,12 @@ export default function AiPickSummary({ card }) {
     >
       <div className="ai-pick-summary__head">
         <strong className="ai-pick-summary__model">{card?.label || "-"}</strong>
-        <ModelMetaBadge label="回収率" value={card?.roi_text || "-"} tone="subtle" />
+        <ModelMetaBadge
+          label="回収率"
+          value={card?.roi_text || "-"}
+          tone="subtle"
+          dynamicRoi={highlightRoi}
+        />
       </div>
 
       <div className="ai-pick-summary__marks">
@@ -45,7 +50,10 @@ export default function AiPickSummary({ card }) {
         {supportMarks.length ? (
           <div className="ai-pick-summary__subs">
             {supportMarks.map((item) => (
-              <span key={`${item.symbol}-${item.horseNo}`} className="ai-pick-summary__submark">
+              <span
+                key={`${item.symbol}-${item.horseNo}`}
+                className="ai-pick-summary__submark"
+              >
                 <em>{item.symbol}</em>
                 <strong>{item.horseNo}</strong>
               </span>

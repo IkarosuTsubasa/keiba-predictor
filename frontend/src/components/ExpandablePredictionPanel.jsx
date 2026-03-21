@@ -16,7 +16,10 @@ function resultTone(card) {
   return "neutral";
 }
 
-export default function ExpandablePredictionPanel({ cards }) {
+export default function ExpandablePredictionPanel({
+  cards,
+  highlightRoi = false,
+}) {
   return (
     <div className="expandable-prediction-panel">
       {(cards || []).map((card) => (
@@ -24,14 +27,22 @@ export default function ExpandablePredictionPanel({ cards }) {
           <div className="expandable-prediction-panel__top">
             <strong>{card.label}</strong>
             <div className="expandable-prediction-panel__meta">
-              <ModelMetaBadge label="回収率" value={card.roi_text || "-"} tone="subtle" />
+              <ModelMetaBadge
+                label="回収率"
+                value={card.roi_text || "-"}
+                tone="subtle"
+                dynamicRoi={highlightRoi}
+              />
             </div>
           </div>
 
           <div className="expandable-prediction-panel__marks">
             {parseMarks(card?.marks_text).length ? (
               parseMarks(card?.marks_text).map((mark) => (
-                <span key={`${card.engine}-${mark.symbol}-${mark.horseNo}`} className="expandable-prediction-panel__mark">
+                <span
+                  key={`${card.engine}-${mark.symbol}-${mark.horseNo}`}
+                  className="expandable-prediction-panel__mark"
+                >
                   {mark.symbol}
                   {mark.horseNo}
                 </span>
@@ -43,7 +54,9 @@ export default function ExpandablePredictionPanel({ cards }) {
 
           <BetPreviewList text={card?.ticket_plan_text || ""} />
 
-          <div className={`expandable-prediction-panel__result expandable-prediction-panel__result--${resultTone(card)}`}>
+          <div
+            className={`expandable-prediction-panel__result expandable-prediction-panel__result--${resultTone(card)}`}
+          >
             <span>結果</span>
             <strong>{card?.result_triplet_text || "結果未確定"}</strong>
           </div>

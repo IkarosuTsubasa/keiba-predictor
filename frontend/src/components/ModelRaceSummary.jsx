@@ -16,14 +16,15 @@ function pickHorse(marks, symbol) {
   return found ? found.horseNo : null;
 }
 
-export default function ModelRaceSummary({ card }) {
+export default function ModelRaceSummary({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
   const markItems = MARK_ORDER.map((symbol) => ({
     symbol,
     horseNo: pickHorse(marks, symbol),
   })).filter((item) => item.horseNo);
 
-  const main = markItems.find((item) => item.symbol === "◎") || { symbol: "◎", horseNo: "-" };
+  const main =
+    markItems.find((item) => item.symbol === "◎") || { symbol: "◎", horseNo: "-" };
   const secondary = markItems.filter((item) => item.symbol !== "◎");
 
   return (
@@ -35,14 +36,22 @@ export default function ModelRaceSummary({ card }) {
             <strong>{main.horseNo}</strong>
           </span>
           {secondary.map((item) => (
-            <span key={`${item.symbol}-${item.horseNo}`} className="model-race-summary__mark">
+            <span
+              key={`${item.symbol}-${item.horseNo}`}
+              className="model-race-summary__mark"
+            >
               <em>{item.symbol}</em>
               <strong>{item.horseNo}</strong>
             </span>
           ))}
         </div>
         <div className="model-race-summary__meta">
-          <ModelMetaBadge label="回収率" value={card?.roi_text || "-"} tone="subtle" />
+          <ModelMetaBadge
+            label="回収率"
+            value={card?.roi_text || "-"}
+            tone="subtle"
+            dynamicRoi={highlightRoi}
+          />
         </div>
       </div>
 

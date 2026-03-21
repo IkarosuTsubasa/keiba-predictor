@@ -8,6 +8,7 @@ export default function RaceCard({ race, style = undefined }) {
   const cards = race?.cards || [];
   const variant = String(race?.display_variant || "").trim();
   const isPlaceholder = variant === "placeholder";
+  const isSettled = variant === "settled";
   const hasCards = cards.length > 0;
   const placeholderTitle = String(race?.display_body?.title || "予測中");
   const placeholderMessage = String(
@@ -48,7 +49,11 @@ export default function RaceCard({ race, style = undefined }) {
       ) : (
         <div className="race-card__summary-grid">
           {cards.map((card) => (
-            <AiPickSummary key={`${race.run_id}-${card.engine}`} card={card} />
+            <AiPickSummary
+              key={`${race.run_id}-${card.engine}`}
+              card={card}
+              highlightRoi={isSettled}
+            />
           ))}
         </div>
       )}
@@ -78,7 +83,7 @@ export default function RaceCard({ race, style = undefined }) {
                 閉じる
               </button>
             </div>
-            <ExpandablePredictionPanel cards={cards} />
+            <ExpandablePredictionPanel cards={cards} highlightRoi={isSettled} />
           </div>
         </div>
       ) : null}

@@ -1725,8 +1725,9 @@ select {
   gap: 8px;
 }
 
+.model-meta-badge span,
 .model-meta-badge strong {
-  color: var(--text);
+  color: currentColor;
 }
 
 .model-meta-badge--accent {

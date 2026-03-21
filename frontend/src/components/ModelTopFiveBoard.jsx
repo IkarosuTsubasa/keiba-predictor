@@ -130,7 +130,10 @@ export default function ModelTopFiveBoard({ data, races }) {
         {active.items.map((item) => (
           <article key={item.key} className="race-card model-top-five-board__item">
             <RaceCardHeader race={item.race} />
-            <ModelRaceSummary card={item.card} />
+            <ModelRaceSummary
+              card={item.card}
+              highlightRoi={String(item.race?.display_variant || "").trim() === "settled"}
+            />
           </article>
         ))}
       </div>
