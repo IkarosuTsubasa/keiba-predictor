@@ -46,6 +46,72 @@ def _log_runner_event(event, **fields):
     print("[race_job_runner] " + json.dumps(payload, ensure_ascii=False), flush=True)
 
 
+def _read_proc_status_value_kb(field_name):
+    proc_status = Path("/proc/self/status")
+    if not proc_status.exists():
+        return None
+    prefix = f"{field_name}:"
+    try:
+        for line in proc_status.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.startswith(prefix):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                return None
+            return int(parts[1])
+    except Exception:
+        return None
+    return None
+
+
+def _current_rss_bytes():
+    rss_kb = _read_proc_status_value_kb("VmRSS")
+    if rss_kb is not None:
+        return int(rss_kb) * 1024
+    try:
+        import resource  # Unix only
+
+        rss_raw = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss or 0)
+        if sys.platform == "darwin":
+            return rss_raw
+        return rss_raw * 1024
+    except Exception:
+        return None
+
+
+def _peak_rss_bytes():
+    peak_kb = _read_proc_status_value_kb("VmHWM")
+    if peak_kb is not None:
+        return int(peak_kb) * 1024
+    try:
+        import resource  # Unix only
+
+        rss_raw = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss or 0)
+        if sys.platform == "darwin":
+            return rss_raw
+        return rss_raw * 1024
+    except Exception:
+        return None
+
+
+def _memory_fields():
+    fields = {}
+    rss_bytes = _current_rss_bytes()
+    if rss_bytes is not None:
+        fields["rss_mb"] = round(float(rss_bytes) / (1024.0 * 1024.0), 2)
+    peak_bytes = _peak_rss_bytes()
+    if peak_bytes is not None:
+        fields["rss_peak_mb"] = round(float(peak_bytes) / (1024.0 * 1024.0), 2)
+    return fields
+
+
+def _log_memory_checkpoint(stage, **fields):
+    payload = {"stage": str(stage or "").strip()}
+    payload.update(_memory_fields())
+    payload.update(fields)
+    _log_runner_event("memory_checkpoint", **payload)
+
+
 def strict_llm_odds_gate_enabled():
     raw = os.environ.get("PIPELINE_BLOCK_LLM_ON_ODDS_WARNING", "").strip().lower()
     return raw not in ("0", "false", "no", "off")
@@ -521,6 +587,7 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
         run_env.update(env)
     cmd = [sys.executable, str(script_path), *(list(script_args or []))]
     started_at = time.monotonic()
+    rss_before_bytes = _current_rss_bytes()
     _log_runner_event(
         "subprocess_start",
         script=Path(script_path).name,
@@ -528,6 +595,7 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
         timeout_seconds=int(timeout_seconds or 0) if timeout_seconds else 0,
         args=list(script_args or []),
         input_lines=len(list(inputs or [])) if inputs is not None else 0,
+        **_memory_fields(),
     )
     try:
         result = subprocess.run(
@@ -555,11 +623,18 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
             cwd=str(cwd),
             duration_ms=int((time.monotonic() - started_at) * 1000),
             output_preview=_log_preview(output),
+            rss_delta_mb=(
+                round((_current_rss_bytes() - rss_before_bytes) / (1024.0 * 1024.0), 2)
+                if _current_rss_bytes() is not None and rss_before_bytes is not None
+                else None
+            ),
+            **_memory_fields(),
         )
         return 124, output.strip()
     output = (result.stdout or "").strip()
     if result.stderr:
         output = f"{output}\n[stderr]\n{result.stderr.strip()}".strip()
+    rss_after_bytes = _current_rss_bytes()
     _log_runner_event(
         "subprocess_end",
         script=Path(script_path).name,
@@ -567,6 +642,12 @@ def _run_subprocess(script_path, *, cwd, inputs=None, env=None, timeout_seconds=
         code=int(result.returncode),
         duration_ms=int((time.monotonic() - started_at) * 1000),
         output_preview=_log_preview(output),
+        rss_delta_mb=(
+            round((rss_after_bytes - rss_before_bytes) / (1024.0 * 1024.0), 2)
+            if rss_after_bytes is not None and rss_before_bytes is not None
+            else None
+        ),
+        **_memory_fields(),
     )
     return result.returncode, output
 
@@ -664,7 +745,10 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
         lambda row, now_text: _mark_policy_processing_started(row, now_text),
     )
     for engine in engines:
+        engine_started_at = time.monotonic()
+        engine_rss_before = _current_rss_bytes()
         _log_runner_event("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
+        _log_memory_checkpoint("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
         result = web_app.execute_policy_buy(scope_key, dict(run_row), run_id, policy_engine=engine, policy_model="")
         summary["policy_engines"].append(
             {
@@ -681,7 +765,15 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
             engine=engine,
             ticket_count=len(list(result.get("tickets", []) or [])),
             payload_path=str(result.get("payload_path", "") or ""),
+            duration_ms=int((time.monotonic() - engine_started_at) * 1000),
+            rss_delta_mb=(
+                round((_current_rss_bytes() - engine_rss_before) / (1024.0 * 1024.0), 2)
+                if _current_rss_bytes() is not None and engine_rss_before is not None
+                else None
+            ),
+            **_memory_fields(),
         )
+        _log_memory_checkpoint("policy_stage_done", job_id=job_id, run_id=run_id, engine=engine)
     refreshed_job = get_job(base_path, job_id) or {}
     update_job(
         base_path,
@@ -717,6 +809,14 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             mode="policy_only",
             policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")),
         )
+        _log_memory_checkpoint(
+            "process_job_start",
+            job_id=job_id,
+            race_id=race_id,
+            scope_key=scope_key,
+            mode="policy_only",
+            run_id=run_id,
+        )
         summary = {
             "job_id": job_id,
             "race_id": race_id,
@@ -725,7 +825,11 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             "run_id": run_id,
             "policy_engines": [],
         }
-        return _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines)
+        result = _run_policy_stage(
+            base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines
+        )
+        _log_memory_checkpoint("process_job_done", job_id=job_id, run_id=run_id, mode="policy_only")
+        return result
     artifact_map = {
         str(item.get("artifact_type", "")).strip().lower(): dict(item)
         for item in list(job.get("artifacts", []) or [])
@@ -744,6 +848,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         scope_key=scope_key,
             policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")),
     )
+    _log_memory_checkpoint("process_job_start", job_id=job_id, race_id=race_id, scope_key=scope_key)
 
     migrate_legacy_data(base_path, scope_key)
     data_dir = get_data_dir(base_path, scope_key)
@@ -767,6 +872,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     with tempfile.TemporaryDirectory(prefix=f"{job_id}_", dir=str(workspace_root)) as tmp_dir:
         workspace = Path(tmp_dir)
         _log_runner_event("workspace_ready", job_id=job_id, workspace=str(workspace))
+        _log_memory_checkpoint("workspace_ready", job_id=job_id, workspace=str(workspace))
         shutil.copy2(kachiuma_path, workspace / "kachiuma.csv")
         shutil.copy2(shutuba_path, workspace / "shutuba.csv")
 
@@ -774,6 +880,9 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         if not race_url:
             raise ValueError("failed to build race url")
         _log_runner_event("odds_stage_start", job_id=job_id, race_url=race_url)
+        odds_started_at = time.monotonic()
+        odds_rss_before = _current_rss_bytes()
+        _log_memory_checkpoint("odds_stage_start", job_id=job_id, race_url=race_url)
 
         odds_code, odds_output = _run_subprocess(
             base_path.parent / "odds_extract.py",
@@ -792,6 +901,18 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             if not odds_ok:
                 raise RuntimeError(f"odds extraction incomplete: {odds_error}\n{odds_output}")
         _log_runner_event("odds_stage_done", job_id=job_id, code=odds_code)
+        _log_runner_event(
+            "odds_stage_memory",
+            job_id=job_id,
+            duration_ms=int((time.monotonic() - odds_started_at) * 1000),
+            rss_delta_mb=(
+                round((_current_rss_bytes() - odds_rss_before) / (1024.0 * 1024.0), 2)
+                if _current_rss_bytes() is not None and odds_rss_before is not None
+                else None
+            ),
+            **_memory_fields(),
+        )
+        _log_memory_checkpoint("odds_stage_done", job_id=job_id)
         update_job(
             base_path,
             job_id,
@@ -808,6 +929,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         odds_src = workspace / "odds.csv"
 
         if not remote_predictor_batch_enabled():
+            _log_memory_checkpoint("predictor_batch_start", job_id=job_id)
             for spec in list_predictors():
                 if spec["id"] == "v5_stacking" and not v5_predictor_enabled():
                     skip_message = "Predictor V5 skipped by default on deployment. Set PIPELINE_ENABLE_V5_PREDICTOR=1 to enable."
@@ -829,6 +951,8 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 if pred_latest_path.exists():
                     pred_latest_path.unlink()
                 predictor_start = datetime.now().timestamp()
+                predictor_started_at = time.monotonic()
+                predictor_rss_before = _current_rss_bytes()
                 _log_runner_event(
                     "predictor_stage_start",
                     job_id=job_id,
@@ -836,6 +960,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                     script_name=script_name,
                     output_name=latest_name,
                 )
+                _log_memory_checkpoint("predictor_stage_start", job_id=job_id, predictor_id=spec["id"])
 
                 if spec["id"] == "main":
                     pred_code, pred_output = _run_subprocess(
@@ -937,7 +1062,16 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                     predictor_id=spec["id"],
                     code=pred_code,
                     prediction_path=str(pred_latest_path),
+                    duration_ms=int((time.monotonic() - predictor_started_at) * 1000),
+                    rss_delta_mb=(
+                        round((_current_rss_bytes() - predictor_rss_before) / (1024.0 * 1024.0), 2)
+                        if _current_rss_bytes() is not None and predictor_rss_before is not None
+                        else None
+                    ),
+                    **_memory_fields(),
                 )
+                _log_memory_checkpoint("predictor_stage_done", job_id=job_id, predictor_id=spec["id"])
+            _log_memory_checkpoint("predictor_batch_done", job_id=job_id)
 
         if not remote_predictor_batch_enabled():
             update_job(
@@ -952,6 +1086,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         run_row = _build_run_row(job, run_id, snapshot_paths)
         _append_csv(data_dir / "runs.csv", run_row)
         _log_runner_event("run_row_saved", job_id=job_id, run_id=run_id, runs_csv=str(data_dir / "runs.csv"))
+        _log_memory_checkpoint("run_row_saved", job_id=job_id, run_id=run_id)
 
         if remote_predictor_batch_enabled():
             bundle_files = {
@@ -1019,7 +1154,10 @@ def process_race_job(base_dir, job_id, policy_engines=None):
             )
             return summary
 
-        return _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines)
+        _log_memory_checkpoint("policy_batch_start", job_id=job_id, run_id=run_id)
+        result = _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=policy_engines)
+        _log_memory_checkpoint("process_job_done", job_id=job_id, run_id=run_id)
+        return result
 
 
 def fail_race_job(base_dir, job_id, message):
