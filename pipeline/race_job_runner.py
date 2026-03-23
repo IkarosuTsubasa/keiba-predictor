@@ -684,6 +684,42 @@ def _snapshot_outputs(base_dir, scope_key, race_id, run_id, workspace_dir):
     return out
 
 
+def _load_json_file(path):
+    target = Path(path)
+    if not target.exists():
+        raise FileNotFoundError(f"json output missing: {target}")
+    return json.loads(target.read_text(encoding="utf-8"))
+
+
+def _run_policy_engine_subprocess(base_path, scope_key, run_id, engine, policy_model=""):
+    workspace_root = _shared_workspace_dir(base_path)
+    with tempfile.TemporaryDirectory(prefix=f"policy_{run_id}_{engine}_", dir=str(workspace_root)) as tmp_dir:
+        output_json = Path(tmp_dir) / "policy_result.json"
+        code, output = _run_subprocess(
+            base_path / "run_policy_engine_subprocess.py",
+            cwd=base_path,
+            script_args=[
+                "--scope-key",
+                str(scope_key or "").strip(),
+                "--run-id",
+                str(run_id or "").strip(),
+                "--policy-engine",
+                str(engine or "").strip(),
+                "--policy-model",
+                str(policy_model or "").strip(),
+                "--output-json",
+                str(output_json),
+            ],
+        )
+        if code != 0:
+            raise RuntimeError(f"policy subprocess failed for {engine}: {output}")
+        try:
+            result = _load_json_file(output_json)
+        except Exception as exc:
+            raise RuntimeError(f"policy subprocess output invalid for {engine}: {exc}\n{output}") from exc
+        return result
+
+
 def _build_run_row(job, run_id, snapshot_paths):
     race_id = str(job.get("race_id", "") or "").strip()
     scope_key = str(job.get("scope_key", "") or "").strip()
@@ -733,11 +769,6 @@ def _build_run_row(job, run_id, snapshot_paths):
 
 
 def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engines=None):
-    import web_app  # local import to avoid circular import during app bootstrap
-
-    run_row = web_app.resolve_run(run_id, scope_key)
-    if run_row is None:
-        raise RuntimeError(f"run row not found for run_id={run_id}")
     engines = list(policy_engines or ("openai", "gemini", "deepseek", "grok"))
     update_job(
         base_path,
@@ -749,7 +780,7 @@ def _run_policy_stage(base_path, job_id, scope_key, run_id, summary, policy_engi
         engine_rss_before = _current_rss_bytes()
         _log_runner_event("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
         _log_memory_checkpoint("policy_stage_start", job_id=job_id, run_id=run_id, engine=engine)
-        result = web_app.execute_policy_buy(scope_key, dict(run_row), run_id, policy_engine=engine, policy_model="")
+        result = _run_policy_engine_subprocess(base_path, scope_key, run_id, engine, policy_model="")
         summary["policy_engines"].append(
             {
                 "engine": engine,
