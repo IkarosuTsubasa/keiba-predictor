@@ -125,6 +125,24 @@ def normalize_header_text(text):
     return re.sub(r"\s+", "", str(text or "")).strip()
 
 
+LEGACY_COLUMN_ALIASES = {
+    "ﾀｲﾑ指数タイム指数(通常)タイム指数マスター": "ﾀｲﾑ指数",
+    "ﾀｲﾑ指数Mタイム指数(通常)タイム指数マスター": "ﾀｲﾑ指数M",
+}
+
+
+def restore_legacy_column_names(df):
+    if df is None or df.empty:
+        return df
+    renamed = {}
+    for source, target in LEGACY_COLUMN_ALIASES.items():
+        if source in df.columns and target not in df.columns:
+            renamed[source] = target
+    if renamed:
+        df = df.rename(columns=renamed)
+    return df
+
+
 def table_to_dataframe(table):
     header = []
     rows = []
@@ -149,7 +167,7 @@ def table_to_dataframe(table):
         rows = [row + [""] * (width - len(row)) for row in rows]
     if not header:
         return pd.DataFrame()
-    return pd.DataFrame(rows, columns=header)
+    return restore_legacy_column_names(pd.DataFrame(rows, columns=header))
 
 
 def get_page_source_fast(driver, url, wait_css=None, timeout=None, require_numeric=False):

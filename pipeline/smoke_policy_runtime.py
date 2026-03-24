@@ -89,6 +89,7 @@ def _assert_output(output, meta, expected_engine):
     assert str(output.participation_level) in ("no_bet", "small_bet", "normal_bet")
     assert str(meta.get("policy_engine", "")) == expected_engine
     assert str(meta.get("policy_model", "")).strip()
+    assert str(meta.get("execution_status", "")) in ("executed", "voluntary_no_bet", "invalid_bet_plan")
 
 
 def main():

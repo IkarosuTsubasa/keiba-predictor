@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v12"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v17"
+POLICY_CACHE_VERSION = "gemini_policy_v13"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v18"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -146,6 +146,7 @@ class RacePolicyOutput(BaseModel):
     longshot_horses: List[str] = Field(default_factory=list)
     max_ticket_count: int
     risk_tilt: Literal["low", "medium", "high"]
+    # 策略解释标签。由本地规则统一补齐，用来说明这次买法/见送背后的判断依据。
     reason_codes: List[str]
     warnings: Optional[List[str]] = None
     marks: List[PolicyMark] = Field(default_factory=list)
@@ -181,6 +182,7 @@ _LAST_CALL_META = {
     "cache_hit": False,
     "llm_latency_ms": 0,
     "fallback_reason": "",
+    "execution_status": "unknown",
     "picked_count": 0,
     "requested_budget_yen": 0,
     "requested_race_budget_yen": 0,
@@ -192,6 +194,18 @@ _LAST_CALL_META = {
 
 def _stable_json_dumps(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _dedupe_text_items(values: List[Any]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for item in list(values or []):
+        text = str(item or "").strip()
+        if (not text) or (text in seen):
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
 
 
 def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
@@ -300,6 +314,7 @@ def _write_cache(path: Path, output: RacePolicyOutput, meta: Dict[str, Any]) -> 
         payload = {
             "output": _model_dump(output),
             "meta": {
+                "execution_status": str(meta.get("execution_status", "") or ""),
                 "fallback_reason": str(meta.get("fallback_reason", "") or ""),
                 "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
                 "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
@@ -343,34 +358,63 @@ def _reason_codes_for(
     bet_decision: str,
     has_longshot: bool,
 ) -> List[str]:
+    # reason_codes 语义说明：
+    # - MIXED_FIELD: 参赛头数多（14头以上），视为混战盘面
+    # - NORMAL_FIELD: 参赛头数较少（13头以下），不按混战处理
+    # - STRONG_FAVORITE: 顶部优势明显，前列马较强势
+    # - LOW_CONFIDENCE: 模型总体把握偏弱
+    # - LOW_STABILITY: 结果波动较大，稳定性不足
+    # - VALUE_PRESENT: 当前候选里存在正 EV 的买法
+    # - NO_VALUE: 当前候选里没有明确正 EV
+    # - HIGH_ODDS_ONE_SHOT: 带一点高赔率冷门尝试
+    # - PLACE_FOCUS: 策略偏保守，重心在複勝
+    # - PAIR_FOCUS: 策略重心在马连/ワイド/连系组合
+    # - WIN_TILT: 策略偏向単勝直取
+    # - CONSERVATIVE: 以保守、小范围参与为主
+    # - SMALL_BET: 即使参与也只是轻注
+    # - NO_BET: 最终判断为见送り
     out: List[str] = []
     if field_size >= 14:
+        # 大头数默认按“混战”处理。
         out.append("MIXED_FIELD")
     else:
+        # 非大头数，视为常规盘面。
         out.append("NORMAL_FIELD")
     if float(ai.gap) >= 0.06 and float(ai.confidence_score) >= 0.62:
+        # 头部领先差和信心同时够高，说明强马形态较明确。
         out.append("STRONG_FAVORITE")
     if float(ai.confidence_score) < 0.5:
+        # 模型自己都不够有把握。
         out.append("LOW_CONFIDENCE")
     if float(ai.stability_score) < 0.45:
+        # 波动偏大，复现性较弱。
         out.append("LOW_STABILITY")
     if has_value:
+        # 至少存在一个正 EV 候选。
         out.append("VALUE_PRESENT")
     else:
+        # 没找到明确值得下注的价值点。
         out.append("NO_VALUE")
     if has_longshot:
+        # 这次方案里带了高赔率一击型选择。
         out.append("HIGH_ODDS_ONE_SHOT")
     if participation_level == "small_bet":
+        # 参与级别被压到轻注。
         out.append("SMALL_BET")
     if buy_style == "place_focus":
+        # 以複勝为主的稳健打法。
         out.append("PLACE_FOCUS")
     if buy_style in ("place_only", "conservative"):
+        # 玩法收缩，优先控制回撤。
         out.append("CONSERVATIVE")
     if buy_style == "pair_focus":
+        # 重心放在双马组合类票种。
         out.append("PAIR_FOCUS")
     if buy_style == "win_focus":
+        # 重心放在単勝。
         out.append("WIN_TILT")
     if bet_decision == "no_bet":
+        # 本场直接见送り。
         out.append("NO_BET")
     return out
 
@@ -742,10 +786,13 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- 見送り（no_bet）も立派な戦略。全レース参加する義務はない\n\n"
 
         "== 出力の制約（厳守） ==\n"
+        "- あなたは最終購入責任者であり、ローカル側は買い目や配分を補完しない\n"
         "- 入力データに存在する馬番・組み合わせ・券種のみ使用可能（創作禁止）\n"
         "- ticket_plan の合計金額は race_budget_yen 以下\n"
         "- stake_yen は 100円単位\n"
-        "- bet_decision が bet なら ticket_plan を必ず記入\n"
+        "- bet_decision が bet なら、ticket_plan はそのまま実行可能な完全な購入指示でなければならない\n"
+        "- 実行可能な ticket_plan を構成できない場合は no_bet を選ぶこと\n"
+        "- 中途半端な bet 出力は失敗として記録される\n"
         "- JSON のみ出力\n\n"
 
         "== 出力フィールド説明 ==\n"
@@ -892,6 +939,18 @@ def _sanitize_ticket_plan(
     return out
 
 
+def _execution_status(output: RacePolicyOutput) -> str:
+    bet_decision = str(getattr(output, "bet_decision", "") or "").strip().lower()
+    ticket_plan = list(getattr(output, "ticket_plan", []) or [])
+    if bet_decision == "no_bet":
+        return "voluntary_no_bet"
+    if bet_decision == "bet" and ticket_plan:
+        return "executed"
+    if bet_decision == "bet" and not ticket_plan:
+        return "invalid_bet_plan"
+    return "unknown"
+
+
 def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> RacePolicyOutput:
     allowed_types = {str(x).strip().lower() for x in list(input_obj.constraints.allowed_types or []) if str(x).strip()}
     allowed_horses = _horse_pool(input_obj)
@@ -926,8 +985,9 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         max_ticket_count = min(max_ticket_count, hard_cap)
     budget_cap = int(input_obj.constraints.race_budget_yen or 0) or int(input_obj.constraints.bankroll_yen or 0)
     marks = _sanitize_marks(list(output.marks or []), allowed_horses)
-    ticket_plan = _sanitize_ticket_plan(list(output.ticket_plan or []), allowed_types, allowed_horses, budget_cap)
-    warnings = [str(x) for x in list(output.warnings or []) if str(x).strip()] if output.warnings else []
+    raw_ticket_plan = list(output.ticket_plan or [])
+    ticket_plan = _sanitize_ticket_plan(raw_ticket_plan, allowed_types, allowed_horses, budget_cap)
+    warnings = _dedupe_text_items(list(output.warnings or [])) if output.warnings else []
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()
     bet_decision = str(output.bet_decision or "no_bet").strip().lower()
@@ -940,20 +1000,10 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     buy_style = str(derived_style.get("buy_style") or "no_bet").strip().lower()
     strategy_mode = str(derived_style.get("strategy_mode") or "no_bet").strip().lower()
     if bet_decision == "bet" and not ticket_plan:
-        warnings.append("MISSING_TICKET_PLAN")
-    if bet_decision == "no_bet" or buy_style == "no_bet":
-        bet_decision = "no_bet"
-        participation_level = "no_bet"
-        buy_style = "no_bet"
-        strategy_mode = "no_bet"
-        enabled_bet_types = []
-        key_horses = []
-        secondary_horses = []
-        longshot_horses = []
-        max_ticket_count = 0
-        marks = []
-        pick_ids = []
-        ticket_plan = []
+        warnings.append("NO_EXECUTABLE_TICKETS")
+    if len(ticket_plan) < len(raw_ticket_plan):
+        warnings.append("INVALID_TICKET_DROPPED")
+    warnings = _dedupe_text_items(warnings)
 
     focus_points = []
     for point in list(output.focus_points or []):
@@ -968,8 +1018,6 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         {
             "bet_decision": bet_decision,
             "participation_level": participation_level,
-            "buy_style": buy_style,
-            "strategy_mode": strategy_mode,
             "enabled_bet_types": enabled_bet_types,
             "construction_style": _derive_construction_style(
                 strategy_mode,
@@ -999,6 +1047,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput) -> None:
         "cache_hit": bool(meta.get("cache_hit", False)),
         "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
+        "execution_status": str(meta.get("execution_status", "") or _execution_status(output)),
         "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
         "requested_race_budget_yen": int(meta.get("requested_race_budget_yen", 0) or 0),
@@ -1008,12 +1057,13 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput) -> None:
     }
     print(
         "[gemini_policy] cache_hit={cache_hit} llm_latency_ms={llm_latency_ms} "
-        "fallback_reason={fallback_reason} picked_count={picked_count} "
+        "fallback_reason={fallback_reason} execution_status={execution_status} picked_count={picked_count} "
         "requested_budget_yen={requested_budget_yen} requested_race_budget_yen={requested_race_budget_yen} "
         "reused={reused} source_budget_yen={source_budget_yen} policy_version={policy_version}".format(
             cache_hit=int(_LAST_CALL_META["cache_hit"]),
             llm_latency_ms=_LAST_CALL_META["llm_latency_ms"],
             fallback_reason=_LAST_CALL_META["fallback_reason"],
+            execution_status=_LAST_CALL_META["execution_status"],
             picked_count=_LAST_CALL_META["picked_count"],
             requested_budget_yen=_LAST_CALL_META["requested_budget_yen"],
             requested_race_budget_yen=_LAST_CALL_META["requested_race_budget_yen"],
@@ -1121,6 +1171,7 @@ def call_gemini_policy(
         **request_meta,
         "cache_hit": False,
         "llm_latency_ms": int(llm_latency_ms),
+        "execution_status": _execution_status(final_output),
         "fallback_reason": str(fallback_reason or ""),
     }
     if bool(cache_enable):

@@ -3,6 +3,8 @@ import time
 
 from llm.gemini_policy import (
     RacePolicyInput,
+    RacePolicyOutput,
+    _sanitize_output,
     call_gemini_policy,
     get_last_call_meta,
     get_policy_cache_key,
@@ -387,6 +389,31 @@ def main():
     assert int(meta3.get("requested_race_budget_yen", 0) or 0) == 10000, "meta race budget should reflect caller race budget"
     assert not bool(meta3.get("reused", False)), "independent generation should not be reused"
     assert int(meta3.get("source_budget_yen", 0) or 0) == 50000, "source budget should equal 50000"
+    assert str(meta3.get("execution_status", "")) in ("executed", "voluntary_no_bet", "invalid_bet_plan"), "execution_status should be valid"
+
+    invalid_plan = RacePolicyOutput(
+        bet_decision="bet",
+        participation_level="normal_bet",
+        enabled_bet_types=["wide"],
+        construction_style="pair_spread",
+        key_horses=["1"],
+        secondary_horses=["2"],
+        longshot_horses=[],
+        max_ticket_count=1,
+        risk_tilt="medium",
+        reason_codes=["VALUE_PRESENT"],
+        ticket_plan=[{"bet_type": "wide", "legs": ["98", "99"], "stake_yen": 100}],
+        warnings=[],
+        marks=[],
+        pick_ids=[],
+        focus_points=[],
+    )
+    sanitized_invalid = _sanitize_output(invalid_plan, input_2000)
+    assert str(sanitized_invalid.bet_decision) == "bet", "sanitize must preserve original bet_decision"
+    assert list(sanitized_invalid.ticket_plan or []) == [], "invalid ticket should be removed"
+    invalid_warnings = [str(x) for x in list(sanitized_invalid.warnings or [])]
+    assert "NO_EXECUTABLE_TICKETS" in invalid_warnings, "invalid bet plan should be recorded explicitly"
+    assert "INVALID_TICKET_DROPPED" in invalid_warnings, "dropped invalid ticket should be recorded"
 
     reused_meta = dict(meta3)
     reused_meta["reused"] = True

@@ -8,6 +8,8 @@ def apply_local_ticket_plan_fallback(output_dict, candidate_lookup, race_budget_
 
 def build_policy_ticket_rows(policy_output, candidate_lookup, horse_map, policy_engine):
     output_dict = dict(policy_output or {})
+    if str(output_dict.get("bet_decision", "") or "").strip().lower() != "bet":
+        return []
     tickets = []
     for item in list(output_dict.get("ticket_plan", []) or []):
         bet_type = str(item.get("bet_type", "") or "").strip().lower()
@@ -94,6 +96,18 @@ def set_output_no_bet(output_dict):
     return output_dict
 
 
+def derive_execution_status(output_dict, tickets=None):
+    decision = str((output_dict or {}).get("bet_decision", "") or "").strip().lower()
+    ticket_list = list(tickets or [])
+    if decision == "no_bet":
+        return "voluntary_no_bet"
+    if decision == "bet" and ticket_list:
+        return "executed"
+    if decision == "bet" and not ticket_list:
+        return "invalid_bet_plan"
+    return "unknown"
+
+
 def save_policy_payload(*, base_dir, scope_key, run_id, race_id, payload, policy_engine, normalize_scope_key, get_data_dir, normalize_policy_engine):
     scope_norm = normalize_scope_key(scope_key)
     if not scope_norm:
@@ -163,7 +177,7 @@ def execute_policy_buy(
         timeout_s=resolve_policy_timeout(engine),
         cache_enable=True,
     )
-    meta = get_last_call_meta()
+    meta = dict(get_last_call_meta() or {})
     output_dict = policy_output.model_dump() if hasattr(policy_output, "model_dump") else policy_output.dict()
     output_dict = apply_local_ticket_plan_fallback(
         output_dict,
@@ -177,7 +191,7 @@ def execute_policy_buy(
         output_dict = append_output_warning(output_dict, "INVALID_TICKET_DROPPED")
     if str(output_dict.get("bet_decision", "") or "").strip().lower() == "bet" and not tickets:
         output_dict = append_output_warning(output_dict, "NO_EXECUTABLE_TICKETS")
-        output_dict = set_output_no_bet(output_dict)
+    meta["execution_status"] = derive_execution_status(output_dict, tickets)
     reserve_run_tickets(
         base_dir,
         run_id=run_id,
@@ -244,11 +258,12 @@ def execute_policy_buy(
             )
         ),
         (
-            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback} error_detail={detail}".format(
+            "[policy_meta] cache_hit={cache_hit} llm_latency_ms={latency} fallback_reason={fallback} error_detail={detail} execution_status={execution_status}".format(
                 cache_hit=int(bool(meta.get("cache_hit", False))),
                 latency=int(meta.get("llm_latency_ms", 0) or 0),
                 fallback=str(meta.get("fallback_reason", "") or ""),
                 detail=str(meta.get("error_detail", "") or ""),
+                execution_status=str(meta.get("execution_status", "") or ""),
             )
         ),
     ]

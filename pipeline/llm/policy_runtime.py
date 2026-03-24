@@ -45,6 +45,7 @@ _LAST_CALL_META = {
     "llm_latency_ms": 0,
     "fallback_reason": "",
     "error_detail": "",
+    "execution_status": "unknown",
     "picked_count": 0,
     "requested_budget_yen": 0,
     "requested_race_budget_yen": 0,
@@ -119,6 +120,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
         "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
         "error_detail": str(meta.get("error_detail", "") or ""),
+        "execution_status": str(meta.get("execution_status", "") or _gemini._execution_status(output)),
         "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
         "requested_race_budget_yen": int(meta.get("requested_race_budget_yen", 0) or 0),
@@ -131,6 +133,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_eng
     print(
         "[policy_runtime] engine={policy_engine} model={policy_model} cache_hit={cache_hit} "
         "llm_latency_ms={llm_latency_ms} fallback_reason={fallback_reason} error_detail={error_detail} "
+        "execution_status={execution_status} "
         "picked_count={picked_count} "
         "requested_budget_yen={requested_budget_yen} "
         "requested_race_budget_yen={requested_race_budget_yen} reused={reused} "
