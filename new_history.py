@@ -1,4 +1,5 @@
 from selenium import webdriver
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -10,7 +11,7 @@ import time
 import re
 import random
 import sys
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from datetime import datetime
 
 BLOCK_PATTERNS = (
@@ -27,6 +28,37 @@ SLEEP_RANGE_SECONDS = (0.6, 1.6)
 PAGE_LOAD_STRATEGY = os.environ.get("PIPELINE_PAGE_LOAD_STRATEGY", "eager").strip().lower() or "eager"
 PAGE_LOAD_TIMEOUT_SECONDS = 15.0
 PAGE_WAIT_TIMEOUT_SECONDS = 10.0
+
+
+def get_env_int(name, default, minimum=1, maximum=None):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(raw)
+    except ValueError:
+        return int(default)
+    if value < minimum:
+        value = minimum
+    if maximum is not None:
+        value = min(value, maximum)
+    return int(value)
+
+
+def get_sleep_range():
+    min_raw = os.environ.get("PIPELINE_HORSE_DELAY_MIN", "").strip()
+    max_raw = os.environ.get("PIPELINE_HORSE_DELAY_MAX", "").strip()
+    try:
+        min_value = float(min_raw) if min_raw else float(SLEEP_RANGE_SECONDS[0])
+    except ValueError:
+        min_value = float(SLEEP_RANGE_SECONDS[0])
+    try:
+        max_value = float(max_raw) if max_raw else float(SLEEP_RANGE_SECONDS[1])
+    except ValueError:
+        max_value = float(SLEEP_RANGE_SECONDS[1])
+    min_value = max(0.0, min_value)
+    max_value = max(min_value, max_value)
+    return min_value, max_value
 
 
 def configure_utf8_io():
@@ -50,7 +82,10 @@ def assert_not_blocked(driver, url):
 
 
 def sleep_jitter():
-    time.sleep(random.uniform(*SLEEP_RANGE_SECONDS))
+    sleep_min, sleep_max = get_sleep_range()
+    if sleep_max <= 0:
+        return
+    time.sleep(random.uniform(sleep_min, sleep_max))
 
 
 def get_env_float(name, default):
@@ -356,6 +391,19 @@ def find_date_column(df):
     return None
 
 
+def find_matching_column(df, candidates=(), contains=()):
+    columns = list(df.columns)
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    for col in columns:
+        text = str(col)
+        for token in contains:
+            if token and token in text:
+                return col
+    return ""
+
+
 def should_headless():
     raw = os.environ.get("PIPELINE_HEADLESS", "").strip().lower()
     if raw in ("1", "true", "yes", "on"):
@@ -364,27 +412,76 @@ def should_headless():
         return False
     return True
 
+
+def create_driver(allow_shared=True):
+    options = Options()
+    if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
+        options.page_load_strategy = PAGE_LOAD_STRATEGY
+    if allow_shared and debugger_address:
+        options.add_experimental_option("debuggerAddress", debugger_address)
+    else:
+        if should_headless():
+            options.add_argument("--headless")
+        options.add_argument("--lang=ja-JP")
+    created_driver = webdriver.Chrome(options=options)
+    try:
+        page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
+        created_driver.set_page_load_timeout(page_load_timeout)
+    except Exception:
+        pass
+    return created_driver
+
+
+def split_work_items(items, workers):
+    groups = [[] for _ in range(max(1, workers))]
+    for idx, item in enumerate(items):
+        groups[idx % len(groups)].append(item)
+    return [group for group in groups if group]
+
+
+def capture_netkeiba_cookies(active_driver):
+    cookies = []
+    allowed_keys = ("name", "value", "path", "domain", "secure", "httpOnly", "expiry", "sameSite")
+    try:
+        raw_cookies = active_driver.get_cookies()
+    except Exception:
+        return cookies
+    for cookie in raw_cookies:
+        domain = str(cookie.get("domain", "") or "").lstrip(".").lower()
+        if not domain.endswith("netkeiba.com"):
+            continue
+        cookies.append({key: cookie[key] for key in allowed_keys if key in cookie and cookie[key] is not None})
+    return cookies
+
+
+def apply_cookies_for_url(active_driver, target_url, cookies):
+    if not cookies:
+        return
+    parsed = urlparse(target_url)
+    host = str(parsed.hostname or "").lower()
+    if not host:
+        return
+    base_url = f"{parsed.scheme or 'https'}://{host}/"
+    try:
+        active_driver.get(base_url)
+    except Exception:
+        return
+    for cookie in cookies:
+        domain = str(cookie.get("domain", "") or "").lstrip(".").lower()
+        if domain and host != domain and not host.endswith(f".{domain}"):
+            continue
+        try:
+            active_driver.add_cookie(cookie)
+        except Exception:
+            continue
+
 # ===== 用户输入 =====
 url = input("History search URL: ")
 
 # ===== 启动 Selenium =====
-options = Options()
-if PAGE_LOAD_STRATEGY in ("normal", "eager", "none"):
-    options.page_load_strategy = PAGE_LOAD_STRATEGY
 debugger_address = os.environ.get("CHROME_DEBUGGER_ADDRESS", "").strip()
 shared_driver = bool(debugger_address)
-if shared_driver:
-    options.add_experimental_option("debuggerAddress", debugger_address)
-else:
-    if should_headless():
-        options.add_argument("--headless")
-    options.add_argument("--lang=ja-JP")
-driver = webdriver.Chrome(options=options)
-try:
-    page_load_timeout = get_env_float("PIPELINE_PAGE_LOAD_TIMEOUT", PAGE_LOAD_TIMEOUT_SECONDS)
-    driver.set_page_load_timeout(page_load_timeout)
-except Exception:
-    pass
+driver = create_driver(allow_shared=True)
 
 # ===== 打开目标列表页 =====
 page = get_page_source_fast(driver, url, wait_css='a[href^="/race/"]')
@@ -431,6 +528,128 @@ print(f"Found {len(race_links)} races.")
 
 # ===== 用于存储所有马匹数据 =====
 all_frames = []
+horse_fetch_workers = get_env_int("PIPELINE_HORSE_FETCH_WORKERS", 1, minimum=1, maximum=8)
+
+
+def fetch_history_horse_frame(active_driver, horse_entry, race_id, race_date, race_date_str):
+    horse_name, horse_url, finish_pos, is_top3, sex, age, sex_age = horse_entry
+    logs = [f"  - {horse_name}"]
+    horse_page = get_page_source_fast(
+        active_driver,
+        horse_url,
+        wait_css=".db_h_race_results",
+    )
+    assert_not_blocked(active_driver, horse_url)
+    soup_horse = BeautifulSoup(horse_page, 'html.parser')
+    birthdate = extract_birthdate(soup_horse)
+    table = find_new_results_table(soup_horse)
+
+    if table is None:
+        logs.append(f"    WARN: {horse_name} results table not found")
+        return None, logs
+
+    try:
+        df = table_to_dataframe(table)
+        if df.empty:
+            raise ValueError("parsed table is empty")
+    except Exception as e:
+        logs.append(f"    ERROR: Failed to parse {horse_name} table: {e}")
+        return None, logs
+    jockey_series = build_jockey_id_series(table, df)
+
+    date_col = find_date_column(df)
+    if not date_col:
+        logs.append(f"    WARN: {horse_name} date column not found. Skipping.")
+        return None, logs
+    date_series = df[date_col].apply(parse_race_date)
+    match = date_series == race_date
+    if match.any():
+        start_index = match[match].index[0]
+        df = df.loc[start_index:]
+        jockey_series = jockey_series.loc[df.index]
+    else:
+        logs.append(f"    WARN: {horse_name} no race on {race_date_str}. Skipping.")
+        return None, logs
+
+    time_index_col = find_matching_column(
+        df,
+        candidates=("ﾀｲﾑ指数", "タイム指数", "TimeIndex"),
+        contains=("指数",),
+    )
+    if time_index_col:
+        df = df[df[time_index_col].notnull() & (df[time_index_col] != 0)]
+        jockey_series = jockey_series.loc[df.index]
+    else:
+        logs.append(f"    WARN: {horse_name} missing TimeIndex column. columns={list(df.columns)}")
+        return None, logs
+
+    if df.empty:
+        logs.append(f"    WARN: {horse_name} has no valid data.")
+        return None, logs
+
+    sex_value = normalize_sex(sex, sex_age)
+    age_series = compute_age_series(df, birthdate)
+    sex_age_series = age_series.apply(lambda a: format_sex_age(sex_value, a))
+
+    df.drop(columns=["Sex", "Age"], errors="ignore", inplace=True)
+    upsert_column(df, 0, "race_id", race_id)
+    upsert_column(df, 1, "HorseName", horse_name)
+    upsert_column(df, 2, "SexAge", sex_age_series)
+    insert_jockey_id_column(df, jockey_series)
+    df.insert(3, 'finish_pos', finish_pos)
+    df.insert(4, 'is_top3', is_top3)
+    logs.append(f"    OK: {horse_name} data extracted.")
+    sleep_jitter()
+    return df, logs
+
+
+def process_history_horse_batch(items, race_id, race_date, race_date_str, session_cookies):
+    batch_results = []
+    batch_logs = []
+    batch_driver = create_driver(allow_shared=False)
+    try:
+        first_target_url = items[0][1][1] if items else ""
+        if first_target_url:
+            apply_cookies_for_url(batch_driver, first_target_url, session_cookies)
+        for order, horse_entry in items:
+            frame, logs = fetch_history_horse_frame(batch_driver, horse_entry, race_id, race_date, race_date_str)
+            batch_results.append((order, frame))
+            batch_logs.extend(logs)
+    finally:
+        batch_driver.quit()
+    return batch_results, batch_logs
+
+
+def collect_history_frames_for_race(horse_links, race_id, race_date, race_date_str, session_cookies):
+    ordered_items = list(enumerate(horse_links, start=1))
+    effective_workers = min(horse_fetch_workers, len(ordered_items))
+    if effective_workers <= 1:
+        race_frames = []
+        race_logs = []
+        for _, horse_entry in ordered_items:
+            frame, logs = fetch_history_horse_frame(driver, horse_entry, race_id, race_date, race_date_str)
+            race_logs.extend(logs)
+            if frame is not None:
+                race_frames.append(frame)
+        return race_frames, race_logs
+
+    race_logs = [f"  Parallel horse fetch enabled: workers={effective_workers}"]
+    grouped_items = split_work_items(ordered_items, effective_workers)
+    parallel_results = []
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        futures = [
+            executor.submit(process_history_horse_batch, group, race_id, race_date, race_date_str, session_cookies)
+            for group in grouped_items
+        ]
+        for future in as_completed(futures):
+            batch_results, batch_logs = future.result()
+            parallel_results.extend(batch_results)
+            race_logs.extend(batch_logs)
+    race_frames = []
+    for _, frame in sorted(parallel_results, key=lambda item: item[0]):
+        if frame is not None:
+            race_frames.append(frame)
+    return race_frames, race_logs
 
 # ===== 主循环 =====
 for race_idx, (race_name, race_url, race_date) in enumerate(race_links, start=1):
@@ -494,6 +713,19 @@ for race_idx, (race_name, race_url, race_date) in enumerate(race_links, start=1)
     if not horse_links:
         print("WARN: No horses found. Skipping race.")
         continue
+
+    session_cookies = capture_netkeiba_cookies(driver)
+    race_frames, race_logs = collect_history_frames_for_race(
+        horse_links,
+        race_id,
+        race_date,
+        race_date_str,
+        session_cookies,
+    )
+    for line in race_logs:
+        print(line)
+    all_frames.extend(race_frames)
+    continue
 
     # 抓每匹马的战绩表
     for h_idx, (horse_name, horse_url, finish_pos, is_top3, sex, age, sex_age) in enumerate(horse_links, start=1):

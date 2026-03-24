@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ja"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>EQUINE ANALYTICA | Quantitative Horse Racing Research</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;family=Work+Sans:wght@400;500;600;700&amp;family=Noto+Sans+JP:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-tertiary-container": "#4e3d00",
+              "error-container": "#ffdad6",
+              "secondary-fixed-dim": "#88d982",
+              "secondary-fixed": "#a3f69c",
+              "surface-container-high": "#e8e8ea",
+              "surface-container": "#eeeef0",
+              "on-tertiary-fixed": "#241a00",
+              "on-secondary-fixed": "#002204",
+              "on-primary-fixed-variant": "#343d96",
+              "surface-bright": "#f9f9fb",
+              "outline": "#767683",
+              "on-primary-fixed": "#000767",
+              "inverse-surface": "#2f3132",
+              "on-secondary": "#ffffff",
+              "background": "#f9f9fb",
+              "secondary-container": "#a0f399",
+              "primary-fixed": "#e0e0ff",
+              "on-primary": "#ffffff",
+              "error": "#ba1a1a",
+              "secondary": "#1b6d24",
+              "surface-dim": "#d9dadc",
+              "surface-tint": "#4c56af",
+              "surface-container-highest": "#e2e2e4",
+              "on-error": "#ffffff",
+              "surface-container-low": "#f3f3f5",
+              "primary-fixed-dim": "#bdc2ff",
+              "on-tertiary": "#ffffff",
+              "tertiary-container": "#cba72f",
+              "surface-container-lowest": "#ffffff",
+              "tertiary": "#735c00",
+              "primary-container": "#1a237e",
+              "inverse-on-surface": "#f0f0f2",
+              "tertiary-fixed-dim": "#e9c349",
+              "surface-variant": "#e2e2e4",
+              "on-surface": "#1a1c1d",
+              "on-error-container": "#93000a",
+              "on-background": "#1a1c1d",
+              "surface": "#f9f9fb",
+              "on-surface-variant": "#454652",
+              "outline-variant": "#c6c5d4",
+              "on-secondary-fixed-variant": "#005312",
+              "inverse-primary": "#bdc2ff",
+              "on-primary-container": "#8690ee",
+              "tertiary-fixed": "#ffe088",
+              "primary": "#000666",
+              "on-tertiary-fixed-variant": "#574500",
+              "on-secondary-container": "#217128"
+            },
+            fontFamily: {
+              "headline": ["Manrope", "Noto Sans JP"],
+              "body": ["Inter", "Noto Sans JP"],
+              "label": ["Work Sans", "Noto Sans JP"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(12px);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface antialiased">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-[#c6c5d4]/15 shadow-sm flex justify-between items-center px-8 h-16 max-w-full">
+<div class="flex items-center gap-8">
+<span class="text-xl font-black tracking-tighter text-[#1A237E] dark:text-white font-headline">EQUINE ANALYTICA</span>
+<div class="hidden md:flex gap-6 font-manrope text-sm font-semibold tracking-tight">
+<a class="text-[#1A237E] dark:text-blue-400 border-b-2 border-[#1A237E] pb-1" href="#">JRA News</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors duration-200" href="#">Race Schedule</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors duration-200" href="#">AI Predictions</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors duration-200" href="#">Historical Data</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors duration-200" href="#">ROI Tracker</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative hidden lg:block">
+<input class="bg-surface-container-low border-none rounded-lg text-xs py-2 px-4 w-64 focus:ring-1 focus:ring-primary-container" placeholder="Search races..." type="text"/>
+</div>
+<button class="bg-primary-container text-white px-4 py-2 rounded-md text-xs font-bold transition-opacity active:opacity-80">Premium Access</button>
+</div>
+</nav>
+<main class="pt-24 pb-12 px-8 max-w-7xl mx-auto space-y-12">
+<!-- Hero: Today's AI Featured Race -->
+<section>
+<div class="mb-6 flex items-end justify-between">
+<div>
+<span class="text-primary font-label text-xs font-bold tracking-widest uppercase mb-1 block">Featured Race Analysis</span>
+<h2 class="text-3xl font-headline font-extrabold tracking-tight">今日のAI注目レース</h2>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-high px-3 py-1.5 rounded-sm">
+<span class="material-symbols-outlined text-sm text-primary">schedule</span>
+<span class="text-xs font-bold text-primary">UPDATE: 2024.05.26 09:30</span>
+</div>
+</div>
+<div class="relative overflow-hidden rounded-xl bg-primary-container shadow-2xl group">
+<!-- Background Image Decoration -->
+<div class="absolute inset-0 opacity-20 transition-transform duration-700 group-hover:scale-105">
+<img class="w-full h-full object-cover" data-alt="dynamic close-up of a thoroughbred horse racing on a grass track with motion blur and intense afternoon sunlight" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxhVzPvj2v1W4URiCHonv_UeaWrT_umrlBd3ExG6mrK4eZXtCHQWe5hyWuNcJYdO3A_UNrE_1hEqN9UwcJqu4eDPT2FM-ztoFHIWpqx0rIkebRawU93JnxZ7yRII_Hm7x8ngokSbVlJPQbNGZ_9W-M0IVrv95qXcCgNVCzkNmBejkQMqiBxXIVhLXaXOh6gn4chrfdFcDWm3MVo200R_yN-TC4YKEX-You0yYSk9mD7pdySWZLNBbIqZm13pTU2bc0JRo7IBgcb1Nt"/>
+</div>
+<div class="absolute inset-0 bg-gradient-to-r from-primary via-primary/80 to-transparent"></div>
+<div class="relative p-10 grid grid-cols-1 lg:grid-cols-2 gap-10">
+<div class="space-y-6">
+<div class="flex items-center gap-4">
+<span class="bg-tertiary text-on-tertiary-fixed px-3 py-1 text-xs font-bold tracking-tighter">TOKYO 11R</span>
+<span class="text-white/60 font-medium tracking-widest">G1 JAPAN DERBY</span>
+</div>
+<h1 class="text-5xl md:text-6xl font-headline font-black text-white tracking-tighter leading-none">
+                            日本ダービー
+                        </h1>
+<div class="flex items-center gap-6">
+<div class="bg-white/10 backdrop-blur-md px-6 py-4 rounded-lg border border-white/10">
+<div class="text-white/60 text-[10px] font-bold tracking-widest uppercase mb-1">AI Confidence</div>
+<div class="text-4xl font-headline font-black text-tertiary-fixed italic">S RANK</div>
+</div>
+<div class="space-y-1">
+<p class="text-white/80 text-sm leading-relaxed max-w-xs">
+                                    過去10年のデータを基にした独自アルゴリズムが、今年の血統構成と調教タイムから最高評価を算出。
+                                </p>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-lowest/10 backdrop-blur-xl rounded-xl p-6 border border-white/10 flex flex-col justify-between">
+<div class="space-y-4">
+<h3 class="text-white font-headline font-bold flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary-fixed">analytics</span>
+                                AI Predictions - 指数上位
+                            </h3>
+<div class="grid grid-cols-5 gap-3">
+<div class="text-center">
+<div class="text-tertiary-fixed text-xl mb-1">◎</div>
+<div class="bg-white text-primary text-xl font-bold h-12 flex items-center justify-center rounded-lg shadow-lg">8</div>
+</div>
+<div class="text-center">
+<div class="text-white/70 text-xl mb-1">○</div>
+<div class="bg-white/90 text-primary text-xl font-bold h-12 flex items-center justify-center rounded-lg">11</div>
+</div>
+<div class="text-center">
+<div class="text-white/70 text-xl mb-1">▲</div>
+<div class="bg-white/80 text-primary text-xl font-bold h-12 flex items-center justify-center rounded-lg">3</div>
+</div>
+<div class="text-center">
+<div class="text-white/70 text-xl mb-1">△</div>
+<div class="bg-white/70 text-primary text-xl font-bold h-12 flex items-center justify-center rounded-lg">2</div>
+</div>
+<div class="text-center">
+<div class="text-white/70 text-xl mb-1">☆</div>
+<div class="bg-white/60 text-primary text-xl font-bold h-12 flex items-center justify-center rounded-lg">5</div>
+</div>
+</div>
+</div>
+<div class="mt-8 pt-6 border-t border-white/10">
+<h3 class="text-white/60 text-xs font-bold uppercase tracking-widest mb-3">推奨買い目 (Recommended Betting Plan)</h3>
+<div class="flex flex-wrap gap-3">
+<div class="bg-secondary-container/20 border border-secondary-fixed/30 px-4 py-2 rounded text-secondary-fixed">
+<span class="text-[10px] font-bold block opacity-70">WIDE</span>
+<span class="text-lg font-headline font-bold">8 — 11</span>
+</div>
+<div class="bg-secondary-container/20 border border-secondary-fixed/30 px-4 py-2 rounded text-secondary-fixed">
+<span class="text-[10px] font-bold block opacity-70">3連複</span>
+<span class="text-lg font-headline font-bold">3 — 8 — 11</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Featured Performance Section -->
+<section class="space-y-6">
+<h2 class="text-xl font-headline font-bold flex items-center gap-2">
+<span class="w-8 h-[2px] bg-primary"></span>
+                本日好調の予測モデル
+            </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<!-- Model 1 -->
+<div class="bg-surface-container-low p-6 rounded-lg flex items-center justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-primary rounded-full flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-3xl">psychology</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-lg text-primary">LLM Analysis Model v4</h4>
+<p class="text-xs text-on-surface-variant">関係者コメント・パドック概況を言語解析</p>
+</div>
+</div>
+<div class="text-right">
+<div class="text-2xl font-headline font-black text-secondary leading-none">184.2%</div>
+<div class="text-[10px] font-bold text-on-surface-variant tracking-widest uppercase">TODAY'S ROI</div>
+</div>
+</div>
+<!-- Model 2 -->
+<div class="bg-surface-container-low p-6 rounded-lg flex items-center justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-surface-container-highest rounded-full flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-3xl">query_stats</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-lg text-primary">Quant Hybrid Model</h4>
+<p class="text-xs text-on-surface-variant">血統・走破時計・馬場状態の多変量解析</p>
+</div>
+</div>
+<div class="text-right">
+<div class="text-2xl font-headline font-black text-secondary leading-none">156.8%</div>
+<div class="text-[10px] font-bold text-on-surface-variant tracking-widest uppercase">TODAY'S ROI</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Race List: Main Grid -->
+<section class="space-y-6">
+<div class="flex items-center justify-between">
+<h2 class="text-xl font-headline font-bold flex items-center gap-2">
+<span class="w-8 h-[2px] bg-primary"></span>
+                    本日のレース予測一覧
+                </h2>
+<div class="flex gap-2">
+<button class="bg-surface-container-high px-4 py-1.5 rounded text-xs font-bold text-primary active:bg-surface-container-highest">TOKYO</button>
+<button class="px-4 py-1.5 rounded text-xs font-bold text-on-surface-variant hover:bg-surface-container-low">KYOTO</button>
+<button class="px-4 py-1.5 rounded text-xs font-bold text-on-surface-variant hover:bg-surface-container-low">NIIGATA</button>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Tokyo 11R Card -->
+<div class="bg-surface-container-lowest rounded-xl p-5 shadow-sm border-l-4 border-tertiary flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="bg-surface-container-low text-primary text-[10px] font-bold px-2 py-1 rounded">TOKYO 11R</span>
+<div class="text-right">
+<span class="text-on-surface-variant text-[10px] font-bold block">CONFIDENCE</span>
+<span class="text-tertiary font-headline font-black text-xl">S</span>
+</div>
+</div>
+<h3 class="text-xl font-headline font-extrabold mb-1">日本ダービー</h3>
+<p class="text-xs text-on-surface-variant mb-4">G1 / Turf 2400m / 15:40 Start</p>
+<div class="flex gap-2 mb-6">
+<div class="bg-surface-container text-primary font-bold w-7 h-7 flex items-center justify-center rounded">8</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">11</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">3</div>
+</div>
+</div>
+<button class="w-full bg-primary text-white py-3 rounded font-bold text-sm tracking-widest hover:bg-primary-container transition-colors">VIEW PREDICTION</button>
+</div>
+<!-- Tokyo 10R Card -->
+<div class="bg-surface-container-lowest rounded-xl p-5 shadow-sm border-l-4 border-primary flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="bg-surface-container-low text-primary text-[10px] font-bold px-2 py-1 rounded">TOKYO 10R</span>
+<div class="text-right">
+<span class="text-on-surface-variant text-[10px] font-bold block">CONFIDENCE</span>
+<span class="text-primary font-headline font-black text-xl">A</span>
+</div>
+</div>
+<h3 class="text-xl font-headline font-extrabold mb-1">むらさき賞</h3>
+<p class="text-xs text-on-surface-variant mb-4">3勝 / Turf 1800m / 15:00 Start</p>
+<div class="flex gap-2 mb-6">
+<div class="bg-surface-container text-primary font-bold w-7 h-7 flex items-center justify-center rounded">14</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">2</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">9</div>
+</div>
+</div>
+<button class="w-full bg-primary text-white py-3 rounded font-bold text-sm tracking-widest hover:bg-primary-container transition-colors">VIEW PREDICTION</button>
+</div>
+<!-- Kyoto 9R Card -->
+<div class="bg-surface-container-lowest rounded-xl p-5 shadow-sm border-l-4 border-outline flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="bg-surface-container-low text-primary text-[10px] font-bold px-2 py-1 rounded">KYOTO 9R</span>
+<div class="text-right">
+<span class="text-on-surface-variant text-[10px] font-bold block">CONFIDENCE</span>
+<span class="text-outline font-headline font-black text-xl">B</span>
+</div>
+</div>
+<h3 class="text-xl font-headline font-extrabold mb-1">與杼特別</h3>
+<p class="text-xs text-on-surface-variant mb-4">2勝 / Dirt 1900m / 14:25 Start</p>
+<div class="flex gap-2 mb-6">
+<div class="bg-surface-container text-primary font-bold w-7 h-7 flex items-center justify-center rounded">6</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">12</div>
+<div class="bg-surface-container text-on-surface-variant font-bold w-7 h-7 flex items-center justify-center rounded">1</div>
+</div>
+</div>
+<button class="w-full bg-primary text-white py-3 rounded font-bold text-sm tracking-widest hover:bg-primary-container transition-colors">VIEW PREDICTION</button>
+</div>
+</div>
+</section>
+<!-- Bottom Stats: Track Record -->
+<section class="bg-surface-container-low rounded-xl p-10 border border-outline-variant/15">
+<div class="mb-8 text-center">
+<h2 class="text-2xl font-headline font-black text-primary tracking-tight">的中実績 — Track Record</h2>
+<p class="text-xs text-on-surface-variant mt-1 uppercase tracking-widest">Aggregate statistical performance</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+<div class="text-center p-6 bg-white rounded-lg shadow-sm border border-outline-variant/10">
+<span class="text-[10px] font-bold text-on-surface-variant tracking-widest uppercase mb-2 block">Total Accumulated Earnings</span>
+<div class="text-3xl font-headline font-black text-primary">¥142,509,200</div>
+<div class="mt-2 text-xs text-secondary font-bold flex items-center justify-center gap-1">
+<span class="material-symbols-outlined text-sm">trending_up</span>
+                        +¥2,400,000 this week
+                    </div>
+</div>
+<div class="text-center p-6 bg-white rounded-lg shadow-sm border border-outline-variant/10">
+<span class="text-[10px] font-bold text-on-surface-variant tracking-widest uppercase mb-2 block">Site Overall ROI</span>
+<div class="text-4xl font-headline font-black text-tertiary italic">128.4%</div>
+<div class="mt-2 text-xs text-on-surface-variant font-medium">Verified by 3rd Party Quantitative Audit</div>
+</div>
+<div class="text-center p-6 bg-white rounded-lg shadow-sm border border-outline-variant/10">
+<span class="text-[10px] font-bold text-on-surface-variant tracking-widest uppercase mb-2 block">Yesterday's Best Payout</span>
+<div class="text-3xl font-headline font-black text-primary">¥342,800</div>
+<div class="mt-2 text-xs text-on-surface-variant font-medium">Tokyo 9R 3-Way Multiple Win</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 px-8 border-t border-[#c6c5d4]/15 bg-[#f3f3f5] dark:bg-slate-900 tonal-shift-bg">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-7xl mx-auto">
+<div class="space-y-4">
+<span class="font-manrope font-bold text-[#1A237E] text-lg">EQUINE ANALYTICA</span>
+<p class="font-inter text-xs leading-relaxed text-slate-500 dark:text-slate-400 max-w-md">
+                    © 2024 Equine Analytica Quantitative Research. All Rights Reserved. Data provided by JRA Official. 当サイトは独自のアルゴリズムに基づいた情報提供を目的としており、的中を保証するものではありません。
+                </p>
+</div>
+<div class="flex flex-wrap gap-x-8 gap-y-4 md:justify-end items-center">
+<a class="font-inter text-xs text-slate-500 hover:text-[#1A237E] transition-colors cursor-pointer" href="#">Terms of Service</a>
+<a class="font-inter text-xs text-slate-500 hover:text-[#1A237E] transition-colors cursor-pointer" href="#">Privacy Policy</a>
+<a class="font-inter text-xs text-slate-500 hover:text-[#1A237E] transition-colors cursor-pointer" href="#">Quantitative Methodology</a>
+<a class="font-inter text-xs text-slate-500 hover:text-[#1A237E] transition-colors cursor-pointer" href="#">Contact Analyst</a>
+</div>
+</div>
+</footer>
+</body></html>

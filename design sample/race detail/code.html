@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ja"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>HORSE ANALYTICS | Quantitative Desk</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@600;700;800&amp;family=Work+Sans:wght@500;600&amp;family=Noto+Sans+JP:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "secondary": "#1b6d24",
+                        "on-secondary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "outline-variant": "#c6c5d4",
+                        "outline": "#767683",
+                        "on-background": "#1a1c1d",
+                        "on-secondary-fixed": "#002204",
+                        "on-error-container": "#93000a",
+                        "surface-container": "#eeeef0",
+                        "primary": "#000666",
+                        "on-tertiary-fixed": "#241a00",
+                        "primary-fixed-dim": "#bdc2ff",
+                        "surface-container-high": "#e8e8ea",
+                        "tertiary": "#735c00",
+                        "surface": "#f9f9fb",
+                        "surface-container-highest": "#e2e2e4",
+                        "on-primary-container": "#8690ee",
+                        "on-tertiary": "#ffffff",
+                        "inverse-surface": "#2f3132",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed": "#000767",
+                        "inverse-on-surface": "#f0f0f2",
+                        "secondary-container": "#a0f399",
+                        "tertiary-container": "#cba72f",
+                        "on-error": "#ffffff",
+                        "on-surface": "#1a1c1d",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed-dim": "#88d982",
+                        "tertiary-fixed-dim": "#e9c349",
+                        "secondary-fixed": "#a3f69c",
+                        "surface-bright": "#f9f9fb",
+                        "on-secondary-fixed-variant": "#005312",
+                        "error": "#ba1a1a",
+                        "inverse-primary": "#bdc2ff",
+                        "surface-variant": "#e2e2e4",
+                        "primary-fixed": "#e0e0ff",
+                        "on-tertiary-container": "#4e3d00",
+                        "on-surface-variant": "#454652",
+                        "surface-container-low": "#f3f3f5",
+                        "primary-container": "#1a237e",
+                        "tertiary-fixed": "#ffe088",
+                        "background": "#f9f9fb",
+                        "surface-tint": "#4c56af",
+                        "on-primary-fixed-variant": "#343d96",
+                        "on-secondary-container": "#217128",
+                        "surface-dim": "#d9dadc",
+                        "on-tertiary-fixed-variant": "#574500"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope", "Noto Sans JP"],
+                        "body": ["Inter", "Noto Sans JP"],
+                        "label": ["Work Sans", "Noto Sans JP"]
+                    },
+                    borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface selection:bg-primary/10">
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-[#c6c5d4]/15">
+<div class="flex justify-between items-center h-16 px-6 max-w-[1440px] mx-auto">
+<div class="text-2xl font-black tracking-tighter text-[#1A237E] font-headline">HORSE ANALYTICS</div>
+<nav class="hidden md:flex items-center gap-8 font-manrope font-semibold tracking-tight">
+<a class="text-[#1A237E] border-b-2 border-[#1A237E] pb-1" href="#">レース一覧</a>
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">ランキング</a>
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">的中実績</a>
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">アーカイブ</a>
+</nav>
+<div class="flex items-center gap-4">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-sm">search</span>
+<input class="pl-10 pr-4 py-1.5 bg-surface-container-high border-none rounded-lg text-sm w-64 focus:ring-2 focus:ring-primary/20" placeholder="レース、馬名、モデル検索" type="text"/>
+</div>
+<button class="bg-primary text-on-primary px-5 py-2 rounded-md font-bold text-sm hover:opacity-90 active:scale-95 transition-all">ログイン</button>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-16 h-[calc(100vh-64px)] w-64 bg-[#f3f3f5] border-r border-[#c6c5d4]/15 hidden md:flex flex-col p-4 gap-2 font-manrope text-sm font-medium">
+<div class="flex items-center gap-3 px-2 py-4 mb-2">
+<img alt="Analyst Profile" class="w-10 h-10 rounded-full bg-surface-container-highest" data-alt="Professional analyst avatar placeholder" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAiquVpkoavoHmnM2x2WXoieoIpjxuGwjqlPPQ6ZRPE83nIqBTl9HevHiWfHIn-YJQQBPAHV2y1QhLQ3niY6LTGThlWAAwR6gNKoOOu57CNdwfL7Mgmg2cIMVJA-uis8U5wjW5ygwyBMz7O37zfrqd2qya3Sc_HPDKz7zwqVOXPp0CSlWfAkF4WD0NVaMwnNNEijIBiTn33kO9Q1eHHzOetTKU8HrqWlP338T8jY0dRMwc9r2qE5iW9sdlwxclXnKIDa2y_CNZ1jGvt"/>
+<div>
+<div class="font-bold text-[#1A237E]">Quantitative Desk</div>
+<div class="text-[10px] text-outline">Premium Tier</div>
+</div>
+</div>
+<a class="flex items-center gap-3 px-3 py-2.5 bg-white text-[#1A237E] font-bold shadow-sm rounded-lg hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined text-lg">stars</span>推奨レース
+        </a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined text-lg">analytics</span>人気モデル
+        </a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined text-lg">offline_bolt</span>ピックアップ
+        </a>
+<div class="mt-6 mb-2 px-3 text-[10px] uppercase tracking-widest text-outline font-bold">LLM Intelligence</div>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined text-lg">smart_toy</span>GPT-4 Plan
+        </a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined text-lg">auto_awesome</span>Claude 3.5
+        </a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined text-lg">psychology</span>Gemini Pro
+        </a>
+<a class="flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined text-lg">memory</span>Llama 3
+        </a>
+<div class="mt-auto p-4 bg-primary-container rounded-xl text-white">
+<div class="text-xs opacity-80 mb-1">現在のプラン</div>
+<div class="font-bold mb-3">Free Public Access</div>
+<button class="w-full bg-tertiary-container text-on-tertiary-container py-2 rounded-lg text-xs font-bold hover:brightness-110 transition-all">購入プラン一覧</button>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="md:ml-64 pt-20 pb-12 px-6 max-w-[1200px]">
+<!-- Hero Banner: Recommended Race -->
+<section class="mb-10">
+<div class="relative overflow-hidden rounded-xl bg-primary-container text-white p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
+<div class="absolute inset-0 opacity-10 pointer-events-none" data-alt="Abstract dot pattern background" style="background-image: radial-gradient(circle at 2px 2px, white 1px, transparent 0); background-size: 24px 24px;"></div>
+<div class="relative z-10 flex-1">
+<div class="inline-flex items-center gap-2 bg-secondary-container text-on-secondary-container px-3 py-1 rounded-sm text-[10px] font-bold mb-4 uppercase tracking-widest">
+<span class="material-symbols-outlined text-xs" style="font-variation-settings: 'FILL' 1;">bolt</span> Recommended Race
+                    </div>
+<h1 class="text-3xl md:text-5xl font-black font-headline mb-4 leading-tight">東京11R ジャパンカップ (G1)</h1>
+<p class="text-lg opacity-80 font-medium mb-6 max-w-xl">5つの定量的モデルが共通して「高期待値」を算出。歴史的データに基づいた独自のAI指数が弾き出した結論を完全無料公開。</p>
+<div class="flex flex-wrap gap-4">
+<div class="bg-white/10 backdrop-blur-md px-4 py-2 rounded-lg border border-white/10">
+<div class="text-[10px] opacity-60">発走時刻</div>
+<div class="font-bold font-headline">15:40</div>
+</div>
+<div class="bg-white/10 backdrop-blur-md px-4 py-2 rounded-lg border border-white/10">
+<div class="text-[10px] opacity-60">コース</div>
+<div class="font-bold font-headline">芝 2400m</div>
+</div>
+<button class="bg-white text-primary px-8 py-3 rounded-md font-bold text-sm hover:bg-surface-container-low transition-colors ml-auto md:ml-0">
+                            分析データを見る
+                        </button>
+</div>
+</div>
+<div class="relative z-10 w-full md:w-1/3 flex justify-center">
+<div class="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-xl w-full">
+<div class="text-center mb-4">
+<div class="text-[10px] opacity-60 font-bold tracking-widest">総合AI本命馬</div>
+<div class="text-3xl font-black font-headline text-tertiary-fixed">4 ドウデュース</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between text-xs py-1 border-b border-white/5">
+<span class="opacity-60">期待値指数</span>
+<span class="font-bold">142.5 pt</span>
+</div>
+<div class="flex justify-between text-xs py-1 border-b border-white/5">
+<span class="opacity-60">的中確率</span>
+<span class="font-bold text-secondary-fixed">68.2%</span>
+</div>
+<div class="flex justify-between text-xs py-1">
+<span class="opacity-60">回収期待値</span>
+<span class="font-bold">118%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- LLM Comparison Section -->
+<section class="mb-12">
+<div class="flex items-end justify-between mb-6">
+<div>
+<h2 class="text-xl font-bold font-headline text-primary flex items-center gap-2">
+<span class="material-symbols-outlined">smart_toy</span>
+                        4大LLMによる購入プラン比較
+                    </h2>
+<p class="text-xs text-outline mt-1 font-body">世界最高峰の言語モデルが、異なるロジックで本日の勝ち馬を導出。</p>
+</div>
+<span class="text-[10px] font-bold text-secondary bg-secondary-container px-2 py-1 rounded-sm">LIVE UPDATING</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+<!-- GPT-4 Card -->
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/15 flex flex-col group hover:shadow-xl transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold font-headline border border-emerald-100">GPT</div>
+<div class="text-right">
+<div class="text-[10px] text-outline font-bold">HIT RATE</div>
+<div class="text-xl font-black font-headline text-secondary">74.2%</div>
+</div>
+</div>
+<div class="mb-4">
+<div class="text-[10px] font-bold text-outline mb-1">推奨馬</div>
+<div class="text-lg font-bold font-headline text-primary">◎ 9 オーギュストロダン</div>
+</div>
+<div class="mb-6 space-y-2">
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">買い目</span>
+<span class="font-bold text-primary">馬連 9-4,5,12</span>
+</div>
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">ROI</span>
+<span class="font-bold text-tertiary">132.5%</span>
+</div>
+</div>
+<button class="w-full mt-auto py-2 border border-outline-variant/30 rounded-lg text-xs font-bold text-primary group-hover:bg-primary group-hover:text-white transition-all">全プランを表示</button>
+</div>
+<!-- Claude 3.5 Card -->
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/15 flex flex-col group hover:shadow-xl transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-10 h-10 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center font-bold font-headline border border-orange-100">CLD</div>
+<div class="text-right">
+<div class="text-[10px] text-outline font-bold">HIT RATE</div>
+<div class="text-xl font-black font-headline text-secondary">68.9%</div>
+</div>
+</div>
+<div class="mb-4">
+<div class="text-[10px] font-bold text-outline mb-1">推奨馬</div>
+<div class="text-lg font-bold font-headline text-primary">◎ 4 ドウデュース</div>
+</div>
+<div class="mb-6 space-y-2">
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">買い目</span>
+<span class="font-bold text-primary">3連複 4-3,9-all</span>
+</div>
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">ROI</span>
+<span class="font-bold text-tertiary">156.0%</span>
+</div>
+</div>
+<button class="w-full mt-auto py-2 border border-outline-variant/30 rounded-lg text-xs font-bold text-primary group-hover:bg-primary group-hover:text-white transition-all">全プランを表示</button>
+</div>
+<!-- Gemini Pro Card -->
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/15 flex flex-col group hover:shadow-xl transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold font-headline border border-blue-100">GMN</div>
+<div class="text-right">
+<div class="text-[10px] text-outline font-bold">HIT RATE</div>
+<div class="text-xl font-black font-headline text-secondary">62.1%</div>
+</div>
+</div>
+<div class="mb-4">
+<div class="text-[10px] font-bold text-outline mb-1">推奨馬</div>
+<div class="text-lg font-bold font-headline text-primary">◎ 12 シンエンペラー</div>
+</div>
+<div class="mb-6 space-y-2">
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">買い目</span>
+<span class="font-bold text-primary">単勝 12 (5.4倍)</span>
+</div>
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">ROI</span>
+<span class="font-bold text-tertiary">108.4%</span>
+</div>
+</div>
+<button class="w-full mt-auto py-2 border border-outline-variant/30 rounded-lg text-xs font-bold text-primary group-hover:bg-primary group-hover:text-white transition-all">全プランを表示</button>
+</div>
+<!-- Llama 3 Card -->
+<div class="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/15 flex flex-col group hover:shadow-xl transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold font-headline border border-indigo-100">LLM</div>
+<div class="text-right">
+<div class="text-[10px] text-outline font-bold">HIT RATE</div>
+<div class="text-xl font-black font-headline text-secondary">59.5%</div>
+</div>
+</div>
+<div class="mb-4">
+<div class="text-[10px] font-bold text-outline mb-1">推奨馬</div>
+<div class="text-lg font-bold font-headline text-primary">◎ 3 チェルヴィニア</div>
+</div>
+<div class="mb-6 space-y-2">
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">買い目</span>
+<span class="font-bold text-primary">ワイド 3-4,9</span>
+</div>
+<div class="flex justify-between items-center text-xs">
+<span class="text-outline">ROI</span>
+<span class="font-bold text-tertiary">141.2%</span>
+</div>
+</div>
+<button class="w-full mt-auto py-2 border border-outline-variant/30 rounded-lg text-xs font-bold text-primary group-hover:bg-primary group-hover:text-white transition-all">全プランを表示</button>
+</div>
+</div>
+</section>
+<!-- Model Analysis Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Qualitative Models (Section 3) -->
+<div class="lg:col-span-2 space-y-6">
+<div class="flex items-center justify-between">
+<h2 class="text-xl font-bold font-headline text-primary flex items-center gap-2">
+<span class="material-symbols-outlined">query_stats</span>
+                        5つの定量的モデル分析
+                    </h2>
+<span class="text-xs font-medium text-outline">Update: 12:30 JST</span>
+</div>
+<div class="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant/15">
+<div class="space-y-6">
+<!-- Model Row 1 -->
+<div class="flex items-center gap-6">
+<div class="w-24 font-bold font-headline text-sm text-primary">AlphaOne</div>
+<div class="flex-1 h-3 bg-surface-container-high rounded-full overflow-hidden flex">
+<div class="h-full bg-primary w-[85%]"></div>
+</div>
+<div class="w-12 text-right font-black font-headline text-sm">85%</div>
+</div>
+<!-- Model Row 2 -->
+<div class="flex items-center gap-6">
+<div class="w-24 font-bold font-headline text-sm text-primary">BetaSigma</div>
+<div class="flex-1 h-3 bg-surface-container-high rounded-full overflow-hidden flex">
+<div class="h-full bg-primary w-[72%]"></div>
+</div>
+<div class="w-12 text-right font-black font-headline text-sm">72%</div>
+</div>
+<!-- Model Row 3 -->
+<div class="flex items-center gap-6">
+<div class="w-24 font-bold font-headline text-sm text-primary">GammaZ</div>
+<div class="flex-1 h-3 bg-surface-container-high rounded-full overflow-hidden flex">
+<div class="h-full bg-primary w-[91%]"></div>
+</div>
+<div class="w-12 text-right font-black font-headline text-sm">91%</div>
+</div>
+<!-- Model Row 4 -->
+<div class="flex items-center gap-6">
+<div class="w-24 font-bold font-headline text-sm text-primary">DeltaX</div>
+<div class="flex-1 h-3 bg-surface-container-high rounded-full overflow-hidden flex">
+<div class="h-full bg-primary w-[45%]"></div>
+</div>
+<div class="w-12 text-right font-black font-headline text-sm">45%</div>
+</div>
+<!-- Model Row 5 -->
+<div class="flex items-center gap-6">
+<div class="w-24 font-bold font-headline text-sm text-primary">Epsilon9</div>
+<div class="flex-1 h-3 bg-surface-container-high rounded-full overflow-hidden flex">
+<div class="h-full bg-primary w-[64%]"></div>
+</div>
+<div class="w-12 text-right font-black font-headline text-sm">64%</div>
+</div>
+</div>
+<div class="mt-8 pt-6 border-t border-outline-variant/15">
+<div class="text-[10px] text-outline font-bold uppercase tracking-widest mb-4">Recent Performance (Last 10 Races)</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between">
+<span class="text-xs font-medium w-24">AlphaOne</span>
+<div class="flex gap-2">
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+</div>
+</div>
+<div class="flex items-center justify-between">
+<span class="text-xs font-medium w-24">GammaZ</span>
+<div class="flex gap-2">
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-secondary"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Column Section (Section 5) -->
+<div class="space-y-6">
+<h2 class="text-xl font-bold font-headline text-primary flex items-center gap-2">
+<span class="material-symbols-outlined">newspaper</span>
+                    重賞レース展望
+                </h2>
+<div class="bg-surface-container-low rounded-xl overflow-hidden border border-outline-variant/10">
+<img class="w-full h-48 object-cover" data-alt="Dynamic shot of racehorses competing on a green track" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDUsrHQdaJO-jc-wzl_ihxChi789cMEXlkYyTMQwPUrXCi03qrS4Z2-q6a4RurFMYzjpQ3BFrsjYUuqktYYaXNpxzzd40h-G7BzQacWQ8DdA3CNuQfiV-BFivxgDIhKUEaDWsm6KkFgaf3eLJi29iMn12pwUuNMR4onHfNwf4aYfR4DVTxgdc8N8FARZJVjbxe_LMV_XCJtIRvbwrhNm97XGXNRCtzu_1clFwdMv-w-Al9T97Cc6Q-DvQUXOKxxPE5V__SGxuXqZlj8"/>
+<div class="p-6">
+<div class="text-[10px] font-bold text-secondary mb-2">EDITORIAL</div>
+<h3 class="text-lg font-bold font-headline mb-3 leading-snug">ジャパンカップ：欧州の至宝オーギュストロダン、東京の高速馬場への適性を探る</h3>
+<p class="text-sm text-outline leading-relaxed mb-6">
+                            今年のジャパンカップは稀に見る超豪華メンバーが揃った。特に注目は、ディープインパクトの最終世代として世界を席巻したオーギュストロダン。父の故郷で見せる走りは...
+                        </p>
+<a class="text-primary font-bold text-xs flex items-center gap-1 hover:underline" href="#">
+                            続きを読む <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+</div>
+<!-- Free Promo Card -->
+<div class="bg-tertiary-fixed text-on-tertiary-fixed p-6 rounded-xl relative overflow-hidden">
+<div class="absolute -right-4 -bottom-4 opacity-10">
+<span class="material-symbols-outlined text-8xl" style="font-variation-settings: 'wght' 700;">redeem</span>
+</div>
+<div class="relative z-10">
+<div class="text-sm font-bold uppercase tracking-widest mb-1">Limited Offer</div>
+<div class="text-2xl font-black font-headline mb-3">全データ無料公開中</div>
+<p class="text-xs opacity-80 leading-relaxed mb-4">現在、βテスト期間につき全てのLLM予測と定量的分析データを完全無料で公開しています。登録不要で閲覧可能です。</p>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">check_circle</span>
+<span class="text-[10px] font-bold">NO CREDIT CARD REQUIRED</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 border-t border-[#c6c5d4]/15 bg-[#f3f3f5] font-inter text-xs leading-relaxed flex flex-col items-center justify-center gap-6 px-4 text-center">
+<div class="font-manrope font-bold text-slate-400 tracking-tighter text-lg">HORSE ANALYTICS</div>
+<div class="flex flex-wrap justify-center gap-x-8 gap-y-2 text-slate-500">
+<a class="hover:text-slate-800 transition-colors" href="#">サイト情報</a>
+<a class="hover:text-slate-800 transition-colors" href="#">免責事項</a>
+<a class="hover:text-slate-800 transition-colors" href="#">利用規約</a>
+<a class="hover:text-slate-800 transition-colors" href="#">プライバシーポリシー</a>
+<a class="hover:text-slate-800 transition-colors" href="#">特定商取引法に基づく表記</a>
+</div>
+<div class="text-slate-400 mt-2">
+            © 2024 HORSE ANALYTICS Quantitative Editorial. All Rights Reserved.
+        </div>
+</footer>
+</body></html>

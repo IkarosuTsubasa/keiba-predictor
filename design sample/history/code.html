@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ja"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@600;700;800&amp;family=Work+Sans:wght@500;600&amp;family=Noto+Sans+JP:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary": "#1b6d24",
+              "on-secondary": "#ffffff",
+              "on-primary": "#ffffff",
+              "outline-variant": "#c6c5d4",
+              "outline": "#767683",
+              "on-background": "#1a1c1d",
+              "on-secondary-fixed": "#002204",
+              "on-error-container": "#93000a",
+              "surface-container": "#eeeef0",
+              "primary": "#000666",
+              "on-tertiary-fixed": "#241a00",
+              "primary-fixed-dim": "#bdc2ff",
+              "surface-container-high": "#e8e8ea",
+              "tertiary": "#735c00",
+              "surface": "#f9f9fb",
+              "surface-container-highest": "#e2e2e4",
+              "on-primary-container": "#8690ee",
+              "on-tertiary": "#ffffff",
+              "inverse-surface": "#2f3132",
+              "error-container": "#ffdad6",
+              "on-primary-fixed": "#000767",
+              "inverse-on-surface": "#f0f0f2",
+              "secondary-container": "#a0f399",
+              "tertiary-container": "#cba72f",
+              "on-error": "#ffffff",
+              "on-surface": "#1a1c1d",
+              "surface-container-lowest": "#ffffff",
+              "secondary-fixed-dim": "#88d982",
+              "tertiary-fixed-dim": "#e9c349",
+              "secondary-fixed": "#a3f69c",
+              "surface-bright": "#f9f9fb",
+              "on-secondary-fixed-variant": "#005312",
+              "error": "#ba1a1a",
+              "inverse-primary": "#bdc2ff",
+              "surface-variant": "#e2e2e4",
+              "primary-fixed": "#e0e0ff",
+              "on-tertiary-container": "#4e3d00",
+              "on-surface-variant": "#454652",
+              "surface-container-low": "#f3f3f5",
+              "primary-container": "#1a237e",
+              "tertiary-fixed": "#ffe088",
+              "background": "#f9f9fb",
+              "surface-tint": "#4c56af",
+              "on-primary-fixed-variant": "#343d96",
+              "on-secondary-container": "#217128",
+              "surface-dim": "#d9dadc",
+              "on-tertiary-fixed-variant": "#574500"
+            },
+            fontFamily: {
+              "headline": ["Manrope", "Noto Sans JP"],
+              "body": ["Inter", "Noto Sans JP"],
+              "label": ["Work Sans", "Noto Sans JP"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; }
+        .glass-nav { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); }
+    </style>
+</head>
+<body class="bg-surface text-on-surface antialiased">
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-[#c6c5d4]/15 dark:border-slate-800/15">
+<div class="flex justify-between items-center h-16 px-6 max-w-[1440px] mx-auto">
+<div class="text-2xl font-black tracking-tighter text-[#1A237E] dark:text-indigo-400 font-manrope">HORSE ANALYTICS</div>
+<nav class="hidden md:flex gap-8 font-manrope font-semibold tracking-tight">
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors" href="#">レース一覧</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors" href="#">ランキング</a>
+<a class="text-[#1A237E] dark:text-indigo-300 border-b-2 border-[#1A237E] pb-1" href="#">的中実績</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#1A237E] transition-colors" href="#">アーカイブ</a>
+</nav>
+<div class="flex items-center gap-4">
+<button class="p-2 text-slate-500 hover:bg-slate-50 rounded-lg transition-all">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="bg-primary text-on-primary px-5 py-2 rounded-md font-medium text-sm hover:opacity-90 active:scale-95 transition-all">
+                    ログイン
+                </button>
+</div>
+</div>
+</header>
+<!-- SideNavBar (Hidden on small screens) -->
+<aside class="fixed left-0 top-16 h-[calc(100vh-64px)] w-64 bg-[#f3f3f5] dark:bg-slate-900 border-r border-[#c6c5d4]/15 hidden lg:flex flex-col p-4 gap-2">
+<div class="mb-6 px-2">
+<div class="flex items-center gap-3 mb-1">
+<div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">analytics</span>
+</div>
+<div>
+<div class="font-manrope text-sm font-bold text-[#1A237E]">Quantitative Desk</div>
+<div class="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">Premium Tier</div>
+</div>
+</div>
+</div>
+<nav class="space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200 font-manrope text-sm font-medium" href="#">
+<span class="material-symbols-outlined">stars</span> 推奨レース
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200 font-manrope text-sm font-medium" href="#">
+<span class="material-symbols-outlined">analytics</span> 人気モデル
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 bg-white dark:bg-slate-800 text-[#1A237E] dark:text-indigo-300 font-bold shadow-sm rounded-lg font-manrope text-sm" href="#">
+<span class="material-symbols-outlined">offline_bolt</span> ピックアップ
+            </a>
+<div class="pt-4 pb-2 px-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Analysis Engines</div>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200 font-manrope text-sm font-medium" href="#">
+<span class="material-symbols-outlined">smart_toy</span> GPT-4 Plan
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200 font-manrope text-sm font-medium" href="#">
+<span class="material-symbols-outlined">auto_awesome</span> Claude 3.5
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 rounded-lg hover:translate-x-1 transition-transform duration-200 font-manrope text-sm font-medium" href="#">
+<span class="material-symbols-outlined">query_stats</span> 統計ダッシュボード
+            </a>
+</nav>
+<div class="mt-auto p-4 bg-primary-container rounded-xl text-white">
+<p class="text-xs opacity-80 mb-3 leading-relaxed">全ての分析データにアクセス</p>
+<button class="w-full bg-white text-primary py-2 rounded-lg text-sm font-bold hover:bg-slate-50 transition-colors">購入プラン一覧</button>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="lg:ml-64 pt-24 pb-12 px-6 lg:px-12 max-w-[1440px]">
+<!-- Section 1: Yesterday's Performance Highlights -->
+<section class="mb-12">
+<div class="flex items-baseline gap-3 mb-6">
+<h1 class="font-manrope text-2xl font-extrabold tracking-tight text-on-surface">昨日の的中実績レポート</h1>
+<span class="text-slate-400 font-label text-sm">2024.05.19 (SUN)</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Highlight Card 1 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_8px_24px_rgba(26,28,29,0.06)] border border-outline-variant/15 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-4 opacity-10">
+<span class="material-symbols-outlined text-6xl">trending_up</span>
+</div>
+<p class="text-sm font-label font-semibold text-slate-500 mb-2">TOTAL ROI</p>
+<div class="flex items-baseline gap-2">
+<span class="font-manrope text-5xl font-black text-primary tracking-tighter">248.5</span>
+<span class="text-xl font-bold text-primary">%</span>
+</div>
+<div class="mt-4 flex items-center gap-2 text-secondary font-semibold text-sm">
+<span class="material-symbols-outlined text-sm">arrow_upward</span>
+                        昨対比 +42.1%
+                    </div>
+</div>
+<!-- Highlight Card 2 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_8px_24px_rgba(26,28,29,0.06)] border border-outline-variant/15">
+<p class="text-sm font-label font-semibold text-slate-500 mb-2">STRIKE RATE</p>
+<div class="flex items-baseline gap-2">
+<span class="font-manrope text-5xl font-black text-on-surface tracking-tighter">38.2</span>
+<span class="text-xl font-bold text-on-surface">%</span>
+</div>
+<div class="mt-4 flex items-center gap-4">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 rounded-full border-2 border-white bg-primary-fixed flex items-center justify-center text-[10px] font-bold">G</div>
+<div class="w-6 h-6 rounded-full border-2 border-white bg-secondary-fixed flex items-center justify-center text-[10px] font-bold">C</div>
+<div class="w-6 h-6 rounded-full border-2 border-white bg-tertiary-fixed flex items-center justify-center text-[10px] font-bold">L</div>
+</div>
+<span class="text-xs text-slate-400">的中数: 12 / 全32レース</span>
+</div>
+</div>
+<!-- Highlight Card 3 -->
+<div class="bg-primary-container p-6 rounded-xl text-white shadow-lg flex flex-col justify-between">
+<div>
+<p class="text-xs font-label font-bold text-white/60 mb-1 uppercase tracking-widest">Top Return</p>
+<h3 class="text-lg font-bold leading-tight">東京11R オークス(G1)<br/>三連単 148,500円 的中</h3>
+</div>
+<div class="flex justify-between items-end mt-4">
+<span class="px-2 py-1 bg-tertiary-container text-on-tertiary-container text-[10px] font-bold rounded-sm uppercase">Claude 3.5 Model</span>
+<span class="text-white/60 text-[10px]">Verify ID: #QX-9921</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 2: Model Rankings (Bento Grid) -->
+<section class="mb-12">
+<div class="flex justify-between items-end mb-6">
+<div>
+<h2 class="font-manrope text-xl font-extrabold tracking-tight text-on-surface">モデル別パフォーマンス</h2>
+<p class="text-sm text-slate-500">直近30日間の定量評価ランキング</p>
+</div>
+<div class="flex gap-1 p-1 bg-surface-container-high rounded-lg">
+<button class="px-4 py-1.5 text-xs font-bold bg-white shadow-sm rounded-md">週間</button>
+<button class="px-4 py-1.5 text-xs font-bold text-slate-500 hover:text-on-surface">月間</button>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+<!-- Rank 1 -->
+<div class="md:col-span-2 bg-white p-6 rounded-xl border border-outline-variant/15 flex flex-col justify-between">
+<div class="flex justify-between items-start">
+<div>
+<span class="text-[10px] font-bold text-tertiary bg-tertiary-fixed px-2 py-0.5 rounded-sm mb-2 inline-block">RANK 01</span>
+<h3 class="text-xl font-extrabold font-manrope">Claude 3.5 Sonnet</h3>
+<p class="text-xs text-slate-400">高配当特化型・論理推論</p>
+</div>
+<div class="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
+<span class="material-symbols-outlined text-primary">auto_awesome</span>
+</div>
+</div>
+<div class="mt-8 grid grid-cols-2 gap-4">
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[10px] text-slate-500 font-bold">月間回収率</p>
+<p class="text-2xl font-black font-manrope text-secondary">162.4%</p>
+</div>
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[10px] text-slate-500 font-bold">的中率</p>
+<p class="text-2xl font-black font-manrope text-on-surface">24.1%</p>
+</div>
+</div>
+</div>
+<!-- Rank 2 -->
+<div class="bg-white p-6 rounded-xl border border-outline-variant/15">
+<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-sm mb-2 inline-block uppercase">Rank 02</span>
+<h3 class="text-lg font-bold font-manrope mb-1">GPT-4 Turbo</h3>
+<p class="text-xs text-slate-400 mb-6">安定バランス型</p>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-slate-500">回収率</span>
+<span class="font-bold">128.9%</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full" style="width: 75%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Rank 3 -->
+<div class="bg-white p-6 rounded-xl border border-outline-variant/15">
+<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-sm mb-2 inline-block uppercase">Rank 03</span>
+<h3 class="text-lg font-bold font-manrope mb-1">Llama 3 70B</h3>
+<p class="text-xs text-slate-400 mb-6">統計パターン認識</p>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-slate-500">回収率</span>
+<span class="font-bold">115.2%</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full" style="width: 60%"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 3: Result Table & Archive -->
+<section>
+<div class="bg-surface-container-low p-6 rounded-t-2xl border-x border-t border-outline-variant/15">
+<div class="flex flex-col md:flex-row gap-4 items-center justify-between">
+<h2 class="font-manrope text-xl font-extrabold tracking-tight text-on-surface">全レース結果アーカイブ</h2>
+<!-- Filters -->
+<div class="flex flex-wrap gap-2">
+<select class="bg-white border-none rounded-lg text-xs font-bold py-2 pl-3 pr-8 shadow-sm focus:ring-1 focus:ring-primary/20">
+<option>全モデル</option>
+<option>Claude 3.5</option>
+<option>GPT-4</option>
+</select>
+<select class="bg-white border-none rounded-lg text-xs font-bold py-2 pl-3 pr-8 shadow-sm focus:ring-1 focus:ring-primary/20">
+<option>全競馬場</option>
+<option>東京</option>
+<option>京都</option>
+<option>新潟</option>
+</select>
+<select class="bg-white border-none rounded-lg text-xs font-bold py-2 pl-3 pr-8 shadow-sm focus:ring-1 focus:ring-primary/20">
+<option>グレード: 全て</option>
+<option>G1</option>
+<option>G2/G3</option>
+<option>OP/L</option>
+</select>
+</div>
+</div>
+</div>
+<div class="overflow-x-auto bg-white border-x border-b border-outline-variant/15 rounded-b-2xl">
+<table class="w-full text-left border-collapse min-w-[800px]">
+<thead>
+<tr class="bg-surface-container-low text-slate-500 font-label text-[10px] uppercase tracking-wider">
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10">日付</th>
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10">開催 / レース</th>
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10">的中モデル</th>
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10">券種</th>
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10">配当</th>
+<th class="px-6 py-4 font-bold border-b border-outline-variant/10 text-right">回収率</th>
+</tr>
+</thead>
+<tbody class="text-sm divide-y divide-outline-variant/10">
+<!-- Hit Row -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-6 py-5 font-label text-slate-500">2024.05.19</td>
+<td class="px-6 py-5">
+<div class="font-bold text-on-surface">東京11R</div>
+<div class="text-xs text-slate-400">優駿牝馬 (G1)</div>
+</td>
+<td class="px-6 py-5">
+<span class="px-2 py-1 bg-surface-container-high text-primary rounded text-[10px] font-bold">Claude 3.5</span>
+</td>
+<td class="px-6 py-5 text-slate-600">三連単</td>
+<td class="px-6 py-5">
+<span class="font-manrope font-bold text-on-surface">¥148,500</span>
+</td>
+<td class="px-6 py-5 text-right">
+<span class="px-2 py-1 bg-secondary-container text-on-secondary-container font-manrope font-black text-xs rounded-sm">1,237%</span>
+</td>
+</tr>
+<!-- Loss Row -->
+<tr class="hover:bg-slate-50 transition-colors bg-slate-50/30">
+<td class="px-6 py-5 font-label text-slate-500">2024.05.19</td>
+<td class="px-6 py-5 opacity-60">
+<div class="font-bold text-on-surface">東京10R</div>
+<div class="text-xs text-slate-400">フリーウェイS</div>
+</td>
+<td class="px-6 py-5 opacity-40">
+<span class="text-[10px] font-medium">—</span>
+</td>
+<td class="px-6 py-5 text-slate-400">—</td>
+<td class="px-6 py-5 text-slate-400 font-manrope">¥0</td>
+<td class="px-6 py-5 text-right">
+<span class="px-2 py-1 bg-surface-container-highest text-slate-400 font-manrope font-black text-xs rounded-sm">0%</span>
+</td>
+</tr>
+<!-- Hit Row -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-6 py-5 font-label text-slate-500">2024.05.19</td>
+<td class="px-6 py-5">
+<div class="font-bold text-on-surface">京都11R</div>
+<div class="text-xs text-slate-400">高瀬川S</div>
+</td>
+<td class="px-6 py-5">
+<span class="px-2 py-1 bg-surface-container-high text-primary rounded text-[10px] font-bold">GPT-4 Turbo</span>
+</td>
+<td class="px-6 py-5 text-slate-600">馬連</td>
+<td class="px-6 py-5">
+<span class="font-manrope font-bold text-on-surface">¥2,480</span>
+</td>
+<td class="px-6 py-5 text-right">
+<span class="px-2 py-1 bg-secondary-container text-on-secondary-container font-manrope font-black text-xs rounded-sm">206%</span>
+</td>
+</tr>
+<!-- Hit Row -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-6 py-5 font-label text-slate-500">2024.05.18</td>
+<td class="px-6 py-5">
+<div class="font-bold text-on-surface">新潟11R</div>
+<div class="text-xs text-slate-400">八海山S</div>
+</td>
+<td class="px-6 py-5">
+<span class="px-2 py-1 bg-surface-container-high text-primary rounded text-[10px] font-bold">Llama 3</span>
+</td>
+<td class="px-6 py-5 text-slate-600">単勝</td>
+<td class="px-6 py-5">
+<span class="font-manrope font-bold text-on-surface">¥1,200</span>
+</td>
+<td class="px-6 py-5 text-right">
+<span class="px-2 py-1 bg-secondary-container text-on-secondary-container font-manrope font-black text-xs rounded-sm">400%</span>
+</td>
+</tr>
+<!-- Loss Row -->
+<tr class="hover:bg-slate-50 transition-colors bg-slate-50/30">
+<td class="px-6 py-5 font-label text-slate-500">2024.05.18</td>
+<td class="px-6 py-5 opacity-60">
+<div class="font-bold text-on-surface">東京11R</div>
+<div class="text-xs text-slate-400">メイS</div>
+</td>
+<td class="px-6 py-5 opacity-40">
+<span class="text-[10px] font-medium">—</span>
+</td>
+<td class="px-6 py-5 text-slate-400">—</td>
+<td class="px-6 py-5 text-slate-400 font-manrope">¥0</td>
+<td class="px-6 py-5 text-right">
+<span class="px-2 py-1 bg-surface-container-highest text-slate-400 font-manrope font-black text-xs rounded-sm">0%</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-6 flex justify-center">
+<nav class="flex gap-2">
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-outline-variant/20 text-slate-400">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-primary text-on-primary font-bold">1</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-outline-variant/20 hover:bg-slate-50">2</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-outline-variant/20 hover:bg-slate-50">3</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-outline-variant/20 text-slate-400">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</nav>
+</div>
+</section>
+<!-- Transparency Commitment -->
+<section class="mt-16 bg-surface-container p-8 rounded-2xl flex flex-col md:flex-row items-center gap-8 border border-outline-variant/10">
+<div class="flex-shrink-0 w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-inner">
+<span class="material-symbols-outlined text-4xl text-primary" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+</div>
+<div>
+<h3 class="text-lg font-bold mb-2">データの透明性と信頼性について</h3>
+<p class="text-sm text-slate-600 leading-relaxed max-w-2xl">
+                    HORSE ANALYTICSでは、的中・不的中を問わず全ての推奨レース結果を公開しています。LLMを用いた予測の不確実性を排除せず、統計的な優位性を長期的に証明することが、クオンツ・インベスターに対する私たちの責任であると考えています。
+                </p>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 border-t border-[#c6c5d4]/15 bg-[#f3f3f5] dark:bg-slate-950">
+<div class="flex flex-col items-center justify-center gap-6 px-4 text-center">
+<div class="font-manrope font-bold text-slate-400">HORSE ANALYTICS Quantitative Editorial.</div>
+<nav class="flex flex-wrap justify-center gap-x-8 gap-y-2">
+<a class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors duration-200" href="#">サイト情報</a>
+<a class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors duration-200" href="#">免責事項</a>
+<a class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors duration-200" href="#">利用規約</a>
+<a class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors duration-200" href="#">プライバシーポリシー</a>
+<a class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors duration-200" href="#">特定商取引法に基づく表記</a>
+</nav>
+<div class="text-[10px] text-slate-400 font-inter">© 2024 HORSE ANALYTICS Quantitative Editorial. All Rights Reserved.</div>
+</div>
+</footer>
+</body></html>

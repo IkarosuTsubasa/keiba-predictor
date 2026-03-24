@@ -1,4 +1,5 @@
 import argparse
+import os
 import shutil
 import sys
 
@@ -60,11 +61,19 @@ def main():
 
     print(f"开始生成输入文件，race_id={race_id}")
     start_shared_chrome()
+    scrape_env = {}
+    if not os.environ.get("PIPELINE_HORSE_FETCH_WORKERS", "").strip():
+        scrape_env["PIPELINE_HORSE_FETCH_WORKERS"] = "3"
+    if not os.environ.get("PIPELINE_HORSE_DELAY_MIN", "").strip():
+        scrape_env["PIPELINE_HORSE_DELAY_MIN"] = "0.6"
+    if not os.environ.get("PIPELINE_HORSE_DELAY_MAX", "").strip():
+        scrape_env["PIPELINE_HORSE_DELAY_MAX"] = "1.5"
     run_script(
         ROOT_DIR / "race_card.py",
         [race_url],
         "race_card",
         ROOT_DIR,
+        extra_env=scrape_env,
     )
     sleep_between_scrapes()
     run_script(
@@ -72,6 +81,7 @@ def main():
         [history_url],
         "new_history",
         ROOT_DIR,
+        extra_env=scrape_env,
     )
 
     ensure_updated(shutuba_path, shutuba_before)

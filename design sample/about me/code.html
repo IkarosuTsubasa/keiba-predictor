@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ja"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@400;500;600;700;800&amp;family=Noto+Sans+JP:wght@400;500;700&amp;family=Work+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary": "#1b6d24",
+              "on-secondary": "#ffffff",
+              "on-primary": "#ffffff",
+              "outline-variant": "#c6c5d4",
+              "outline": "#767683",
+              "on-background": "#1a1c1d",
+              "on-secondary-fixed": "#002204",
+              "on-error-container": "#93000a",
+              "surface-container": "#eeeef0",
+              "primary": "#000666",
+              "on-tertiary-fixed": "#241a00",
+              "primary-fixed-dim": "#bdc2ff",
+              "surface-container-high": "#e8e8ea",
+              "tertiary": "#735c00",
+              "surface": "#f9f9fb",
+              "surface-container-highest": "#e2e2e4",
+              "on-primary-container": "#8690ee",
+              "on-tertiary": "#ffffff",
+              "inverse-surface": "#2f3132",
+              "error-container": "#ffdad6",
+              "on-primary-fixed": "#000767",
+              "inverse-on-surface": "#f0f0f2",
+              "secondary-container": "#a0f399",
+              "tertiary-container": "#cba72f",
+              "on-error": "#ffffff",
+              "on-surface": "#1a1c1d",
+              "surface-container-lowest": "#ffffff",
+              "secondary-fixed-dim": "#88d982",
+              "tertiary-fixed-dim": "#e9c349",
+              "secondary-fixed": "#a3f69c",
+              "surface-bright": "#f9f9fb",
+              "on-secondary-fixed-variant": "#005312",
+              "error": "#ba1a1a",
+              "inverse-primary": "#bdc2ff",
+              "surface-variant": "#e2e2e4",
+              "primary-fixed": "#e0e0ff",
+              "on-tertiary-container": "#4e3d00",
+              "on-surface-variant": "#454652",
+              "surface-container-low": "#f3f3f5",
+              "primary-container": "#1a237e",
+              "tertiary-fixed": "#ffe088",
+              "background": "#f9f9fb",
+              "surface-tint": "#4c56af",
+              "on-primary-fixed-variant": "#343d96",
+              "on-secondary-container": "#217128",
+              "surface-dim": "#d9dadc",
+              "on-tertiary-fixed-variant": "#574500"
+            },
+            fontFamily: {
+              "headline": ["Manrope", "Noto Sans JP"],
+              "body": ["Inter", "Noto Sans JP"],
+              "label": ["Work Sans", "Noto Sans JP"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .radar-grid {
+            background-image: radial-gradient(circle, #c6c5d4 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-[#c6c5d4]/15">
+<div class="flex justify-between items-center h-16 px-6 max-w-[1440px] mx-auto">
+<div class="text-2xl font-black tracking-tighter text-[#1A237E] font-headline">HORSE ANALYTICS</div>
+<div class="hidden md:flex gap-8 items-center font-manrope font-semibold tracking-tight">
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">レース一覧</a>
+<a class="text-[#1A237E] border-b-2 border-[#1A237E] pb-1" href="#">ランキング</a>
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">的中実績</a>
+<a class="text-slate-500 hover:text-[#1A237E] transition-colors" href="#">アーカイブ</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="px-6 py-2 bg-primary-container text-on-primary rounded-md font-semibold text-sm hover:opacity-90 active:scale-95 transition-all">ログイン</button>
+</div>
+</div>
+</nav>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-16 h-[calc(100vh-64px)] w-64 bg-[#f3f3f5] border-r border-[#c6c5d4]/15 hidden lg:flex flex-col p-4 gap-2">
+<div class="mb-6 px-2">
+<div class="text-[#1A237E] font-headline font-bold text-lg">Quantitative Desk</div>
+<div class="text-xs text-slate-500">Premium Tier Analyst</div>
+</div>
+<a class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-200/50 rounded-lg transition-transform hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" data-icon="stars">stars</span>
+<span class="font-manrope text-sm font-medium">推奨レース</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-white text-[#1A237E] font-bold shadow-sm rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-manrope text-sm font-medium">人気モデル</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-200/50 rounded-lg transition-transform hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" data-icon="offline_bolt">offline_bolt</span>
+<span class="font-manrope text-sm font-medium">ピックアップ</span>
+</a>
+<div class="h-px bg-[#c6c5d4]/20 my-2"></div>
+<div class="px-4 py-2 text-[10px] uppercase tracking-widest text-outline font-bold">LLM Intelligence</div>
+<a class="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="smart_toy">smart_toy</span>
+<span class="font-manrope text-sm font-medium">GPT-4 Plan</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-200/50 rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
+<span class="font-manrope text-sm font-medium">Claude 3.5</span>
+</a>
+<div class="mt-auto p-4 bg-primary-container/5 rounded-xl border border-primary-container/10">
+<div class="text-xs font-bold text-primary mb-2">Exclusive Access</div>
+<button class="w-full py-2 bg-primary text-on-primary text-xs font-bold rounded hover:opacity-90">購入プラン一覧</button>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="lg:ml-64 pt-24 pb-12 px-6 max-w-6xl mx-auto">
+<!-- Hero Section -->
+<header class="mb-16">
+<div class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container text-[10px] font-bold uppercase tracking-[0.2em] mb-4 rounded-sm">Technical Documentation</div>
+<h1 class="text-5xl font-black font-headline tracking-tighter text-primary mb-6 leading-[1.1]">
+                アルゴリズムと知性の融合：<br/>予測モデルの学術的解説
+            </h1>
+<p class="text-lg text-on-surface-variant max-w-3xl leading-relaxed font-light">
+                HORSE ANALYTICSが提供する9つの独自モデル。最先端のLLM（大規模言語モデル）と、数理統計に基づいたクオンツアルゴリズムが、どのように膨大なデータを処理し、勝機を見出しているのか。その深淵なるロジックを公開します。
+            </p>
+</header>
+<!-- LLM Section -->
+<section class="mb-20">
+<div class="flex items-end gap-4 mb-8">
+<h2 class="text-3xl font-bold font-headline text-primary">01. LLM Intelligence</h2>
+<span class="text-outline text-sm font-label mb-1">Large Language Models Insight</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- GPT-4 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-primary shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="psychology">psychology</span>
+<div>
+<h3 class="font-bold text-xl font-headline">GPT-4 Model</h3>
+<span class="text-xs text-outline font-label">General Intelligence</span>
+</div>
+</div>
+<div class="bg-secondary-container text-on-secondary-container px-2 py-1 text-[10px] font-bold rounded-sm">総合評価 S</div>
+</div>
+<p class="text-sm text-on-surface-variant mb-6 leading-relaxed">
+                        数万通りの過去データを統合し、人間が気づかない多角的な相関関係を導き出します。展開、血統、コース適性をフラットに分析する「総合判断」において無類の強さを誇ります。
+                    </p>
+<div class="space-y-3">
+<div class="text-[10px] font-bold text-outline uppercase tracking-wider">Performance Radar</div>
+<div class="h-32 bg-surface-container-low rounded flex items-center justify-center overflow-hidden relative">
+<img class="h-full w-full object-contain opacity-80" data-alt="Radar chart showing balanced performance for GPT-4 model" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJ_VQHE3WB6xBxmlwISPtrNIuQZHMPskTgHrRl0c9XWfnBzuWgD2svA28MCo8MFZRPZk54QbHUafWZ72bHjv1kFqTxYu70oX8s1mMVZy0Rs7ZMun7vX8gh_BErBFpHaKwkdYPbyZ87KezdU5_MdhmJoVihlVsrMOwFnq_RzhYFXqBFeVJcZp-WpRFearg8n79YKPVYGQf42d9tEI6MEJkB02Zjx4K5zIWYKKf6KOssIxbjtgHxWIcbTryKuyGiP4ueTmZvqKOTiOHM"/>
+</div>
+<div class="flex justify-between text-[10px] text-primary font-bold">
+<span>展開読み: 95</span>
+<span>波乱検知: 82</span>
+<span>的中精度: 88</span>
+</div>
+</div>
+</div>
+<!-- Claude 3.5 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-tertiary shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary text-3xl" data-icon="auto_awesome">auto_awesome</span>
+<div>
+<h3 class="font-bold text-xl font-headline">Claude 3.5 Sonnet</h3>
+<span class="text-xs text-outline font-label">Contextual Nuance</span>
+</div>
+</div>
+<div class="bg-tertiary-container text-on-tertiary-container px-2 py-1 text-[10px] font-bold rounded-sm">穴馬抽出 A+</div>
+</div>
+<p class="text-sm text-on-surface-variant mb-6 leading-relaxed">
+                        「隠れた因子」の発見に特化。近走の着順には現れない不利や、パドック情報のテキスト解析から、激走の予兆を精緻に捉えます。特に重賞における穴馬の推奨精度に定評があります。
+                    </p>
+<div class="space-y-3">
+<div class="text-[10px] font-bold text-outline uppercase tracking-wider">Performance Radar</div>
+<div class="h-32 bg-surface-container-low rounded flex items-center justify-center overflow-hidden relative">
+<img class="h-full w-full object-contain opacity-80" data-alt="Radar chart showing high outlier detection for Claude model" src="https://lh3.googleusercontent.com/aida-public/AB6AXuArOQsRvZ0dCQR3xspeZfbb0arLZeaibZy6RB0sw-KLxsLSlAl-w34nJ5IVpf4ks0zuhnbvYIO-hp1dukgNDlj_xatQVGNUIRpp0fQBXEOc2KQfz_dfa2w9SrbRTOdZGULGD1s0vhvW8UmFPURlyKrJgLG9z5rz_YBNBp1lEp6m07SsFkuPCAjerCfBZ-L4K0UJ-tH_Sls3apOr559amnrEouEiM9EmbQKZQlTx3VIqTxTBbA7TyLIXhdPRvIqZ-z8kQ6nkfKg1Cu5l"/>
+</div>
+<div class="flex justify-between text-[10px] text-tertiary font-bold">
+<span>穴馬発見: 98</span>
+<span>情報感度: 92</span>
+<span>期待値: 90</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Quantitative Section -->
+<section class="mb-20">
+<div class="flex items-end gap-4 mb-8">
+<h2 class="text-3xl font-bold font-headline text-primary">02. Quantitative Models</h2>
+<span class="text-outline text-sm font-label mb-1">Mathematical Algorithms</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- AlphaOne -->
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/20">
+<span class="material-symbols-outlined text-secondary text-2xl mb-4" data-icon="query_stats">query_stats</span>
+<h3 class="font-bold text-lg mb-2">AlphaOne</h3>
+<div class="text-[10px] text-secondary font-bold mb-4">Time Index Matrix</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-4">
+                        純粋なタイム指数に基づいたモデル。トラックバイアス（馬場状態）を秒単位で補正し、全馬の真の能力を数値化。中山芝1200mなど、スピードが直結する条件で最大出力を発揮。
+                    </p>
+<div class="bg-surface-container-lowest p-3 rounded">
+<div class="text-[10px] text-outline mb-1">得意条件</div>
+<div class="text-xs font-bold text-primary">中山/阪神 短距離 (芝)</div>
+</div>
+</div>
+<!-- BetaSigma -->
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/20">
+<span class="material-symbols-outlined text-primary text-2xl mb-4" data-icon="family_history">family_history</span>
+<h3 class="font-bold text-lg mb-2">BetaSigma</h3>
+<div class="text-[10px] text-primary font-bold mb-4">Pedigree Logic</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-4">
+                        血統と気象データのクロス分析。過去30年の血統データをベースに、重馬場や極端な高温時における適性を予測。波乱が予想される雨天時のレースで真価を問われます。
+                    </p>
+<div class="bg-surface-container-lowest p-3 rounded">
+<div class="text-[10px] text-outline mb-1">得意条件</div>
+<div class="text-xs font-bold text-primary">重/不良馬場 全般</div>
+</div>
+</div>
+<!-- GammaFlux -->
+<div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/20">
+<span class="material-symbols-outlined text-tertiary text-2xl mb-4" data-icon="trending_up">trending_up</span>
+<h3 class="font-bold text-lg mb-2">GammaFlux</h3>
+<div class="text-[10px] text-tertiary font-bold mb-4">Odds Drift Analysis</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-4">
+                        オッズの異常な変動をリアルタイム監視。大口投票の流入やインサイダー的な動きを検知し、期待値の高い「買われすぎない実力馬」を割り出します。
+                    </p>
+<div class="bg-surface-container-lowest p-3 rounded">
+<div class="text-[10px] text-outline mb-1">得意条件</div>
+<div class="text-xs font-bold text-primary">ローカル開催 午後</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Philosophy Section -->
+<section class="bg-primary text-on-primary rounded-2xl p-12 relative overflow-hidden">
+<div class="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+<div>
+<h2 class="text-4xl font-black font-headline tracking-tighter mb-8 leading-tight">なぜ、我々は最高峰の知性を<br/>無料で開放するのか。</h2>
+<div class="space-y-6 text-primary-fixed-dim leading-relaxed font-light">
+<p>
+                            競馬は長らく「勘」と「経験」の世界でした。しかし、現代のデータサイエンスは、このギャンブルを緻密な投資の対象へと変貌させることができます。
+                        </p>
+<p>
+                            私たちが開発したモデルを無料で提供する理由は一つです。「予測の透明性」を確立するためです。ブラックボックス化された高額な予想ツールではなく、論理的根拠に基づいた分析を誰もが利用できる環境を作りたい。
+                        </p>
+<p>
+                            データがもたらす「的中」の先にある、競馬という競技の数学的美しさを、共に分かち合えることを願っています。
+                        </p>
+</div>
+<div class="mt-10 flex gap-4">
+<div class="flex flex-col">
+<span class="text-[10px] uppercase tracking-widest text-on-primary-container">Founder &amp; Lead Engineer</span>
+<span class="text-xl font-bold font-headline">Dr. K. Sato</span>
+</div>
+</div>
+</div>
+<div class="hidden lg:block">
+<div class="aspect-square bg-white/5 rounded-full flex items-center justify-center backdrop-blur-3xl border border-white/10">
+<img class="w-4/5 h-4/5 object-contain" data-alt="Abstract blue glowing neural network representing mathematical precision" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAcK-oshjINqJuX_7X3XZbIMy7HlEHzATOmjGJi_08R7uaUF88xVBS_8PrcuyMbYU1235yMCxb3S6M8HjJDoGzYUYIvP8r4PY87c8mqUM-f_S5TJnFBDBU1J3Nk5Y4mVgn2X8EVPiCVSOJAgt4kW1g_fkTr6I3ItWygtkzypobTC1DjBJBCrYwtJWXceUvzcCJz-46PIicKvnm9Zgvin2YWCk1UC9OA5Hb3hNpDdQXovGShuNGJ9_qe-3u7rb6XqCVd92T9FqDDVafu"/>
+</div>
+</div>
+</div>
+<!-- Decorative circle -->
+<div class="absolute -bottom-24 -right-24 w-96 h-96 bg-secondary/20 rounded-full blur-[100px]"></div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 border-t border-[#c6c5d4]/15 bg-[#f3f3f5] dark:bg-slate-950">
+<div class="flex flex-col items-center justify-center gap-6 px-4 text-center">
+<div class="font-manrope font-bold text-slate-400">HORSE ANALYTICS Quantitative Editorial.</div>
+<div class="flex flex-wrap justify-center gap-8 font-inter text-xs leading-relaxed text-slate-500">
+<a class="hover:text-slate-800 dark:hover:text-slate-200 transition-colors" href="#">サイト情報</a>
+<a class="hover:text-slate-800 dark:hover:text-slate-200 transition-colors" href="#">免責事項</a>
+<a class="hover:text-slate-800 dark:hover:text-slate-200 transition-colors" href="#">利用規約</a>
+<a class="hover:text-slate-800 dark:hover:text-slate-200 transition-colors" href="#">プライバシーポリシー</a>
+<a class="hover:text-slate-800 dark:hover:text-slate-200 transition-colors" href="#">特定商取引法に基づく表記</a>
+</div>
+<p class="text-[10px] text-slate-400">© 2024 HORSE ANALYTICS Quantitative Editorial. All Rights Reserved.</p>
+</div>
+</footer>
+</body></html>
