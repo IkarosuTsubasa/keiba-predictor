@@ -14,7 +14,7 @@ export default function BetPreviewList({ text, maxItems = 3, compact = false }) 
   if (!visible.length) {
     return (
       <div className="bet-preview-list bet-preview-list--empty">
-        買い目はまだありません
+        買い目はまだ公開されていません
       </div>
     );
   }

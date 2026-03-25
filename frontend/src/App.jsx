@@ -476,12 +476,15 @@ export default function App() {
 
   return (
     <PublicFrame
-      headerProps={{
+      headerProps={{ showFilters: false }}
+      sideNavProps={{
+        pathname: normalizedPath,
+        mode: "home",
         data,
         search,
         onApplyFilters: navigateWithSearch,
+        showTargetFilter: true,
       }}
-      sideNavProps={{ pathname: normalizedPath, mode: "home" }}
     >
       <div className="public-content-stack">
         <section className="today-races-section">

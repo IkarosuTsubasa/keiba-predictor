@@ -1,11 +1,12 @@
 import React from "react";
 
-export default function FilterBar({ data, search, onApply }) {
+export default function FilterBar({ data, search, onApply, className = "" }) {
   const params = new URLSearchParams(search);
+  const formClassName = ["app-filter-bar", className].filter(Boolean).join(" ");
 
   return (
     <form
-      className="app-filter-bar"
+      className={formClassName}
       onSubmit={(event) => {
         event.preventDefault();
         const formData = new FormData(event.currentTarget);

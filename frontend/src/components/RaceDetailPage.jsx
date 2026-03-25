@@ -17,7 +17,14 @@ function buildBackHref(search) {
   return query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
 }
 
-function buildConsensus(cards) {
+function parsePlanCount(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+}
+
+function buildConsensusRows(cards) {
   const tally = new Map();
 
   for (const card of cards || []) {
@@ -32,7 +39,7 @@ function buildConsensus(cards) {
     .sort(
       (left, right) =>
         right.count - left.count || Number(left.horseNo) - Number(right.horseNo),
-    )[0];
+    );
 }
 
 function resolveLead(variant, race) {
@@ -40,7 +47,7 @@ function resolveLead(variant, race) {
     return String(race?.display_body?.message || "公開データを準備中です。");
   }
   if (variant === "settled") {
-    return "各モデルの印、買い目、払戻結果を一画面で比較できます。";
+    return "各モデルの印、買い目、払戻結果を一画面で比較できるレース詳細です。";
   }
   return "各モデルの本命印と購入プランを、比較しやすい形で整理しています。";
 }
@@ -87,6 +94,66 @@ function MarkGrid({ marks, itemKey }) {
   );
 }
 
+function SpotlightCard({ card }) {
+  const marks = parseMarks(card?.marks_text);
+  const mainHorse = pickHorse(marks, MAIN_MARK) || "-";
+  const planCount = parsePlanCount(card?.ticket_plan_text);
+
+  return (
+    <article className="race-detail-spotlight-card">
+      <div className="race-detail-spotlight-card__head">
+        <strong>{card?.label || "-"}</strong>
+        <ModelMetaBadge
+          label="ROI"
+          value={card?.roi_text || "-"}
+          tone="subtle"
+          dynamicRoi
+        />
+      </div>
+      <div className="race-detail-spotlight-card__main">
+        <span>{MAIN_MARK}</span>
+        <strong>{mainHorse}</strong>
+      </div>
+      <div className="race-detail-spotlight-card__stats">
+        <div>
+          <span>買い目数</span>
+          <strong>{planCount || 0}</strong>
+        </div>
+        <div>
+          <span>結果</span>
+          <strong>{card?.result_triplet_text || "未確定"}</strong>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ConsensusPanel({ consensusRows }) {
+  return (
+    <section className="race-detail-panel race-detail-panel--consensus">
+      <div className="race-detail-panel__head">
+        <div>
+          <span className="race-detail-panel__eyebrow">Consensus</span>
+          <h2>本命コンセンサス</h2>
+        </div>
+      </div>
+      {consensusRows.length ? (
+        <div className="race-detail-consensus-list">
+          {consensusRows.slice(0, 3).map((item, index) => (
+            <article key={item.horseNo} className="race-detail-consensus-item">
+              <span>{`0${index + 1}`.slice(-2)}</span>
+              <strong>{`${MAIN_MARK}${item.horseNo}`}</strong>
+              <em>{`${item.count}モデル`}</em>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <PanelEmpty>本命印の集計はまだありません。</PanelEmpty>
+      )}
+    </section>
+  );
+}
+
 function CompareRow({ card }) {
   const marks = parseMarks(card?.marks_text);
 
@@ -109,6 +176,7 @@ function CompareRow({ card }) {
 function ModelDetailCard({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
   const resultText = String(card?.result_triplet_text || "結果はまだありません");
+  const planCount = parsePlanCount(card?.ticket_plan_text);
 
   return (
     <article className="race-detail-model-card">
@@ -129,9 +197,18 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 
       <MarkGrid marks={marks} itemKey={card?.engine || card?.label || "model"} />
 
+      <div className="race-detail-model-card__stats">
+        <DetailSummary label="買い目数" value={`${planCount || 0}件`} />
+        <DetailSummary
+          label="本命"
+          value={`${MAIN_MARK}${pickHorse(marks, MAIN_MARK) || "-"}`}
+          accent
+        />
+      </div>
+
       <div className="race-detail-model-card__section">
         <div className="race-detail-model-card__section-head">
-          <span>買い目</span>
+          <span>購入プラン</span>
         </div>
         <BetPreviewList text={card?.ticket_plan_text || ""} />
       </div>
@@ -152,9 +229,13 @@ export default function RaceDetailPage({ race, search = "" }) {
   const status = race?.display_status || {};
   const resultText = String(race?.display_body?.result_text || "結果は公開後に表示されます。");
   const resultEntries = parseResultEntries(resultText);
-  const consensus = useMemo(() => buildConsensus(cards) || null, [cards]);
+  const consensusRows = useMemo(() => buildConsensusRows(cards), [cards]);
   const badges = formatRaceBadges(race);
   const backHref = buildBackHref(search);
+  const totalPlanCount = cards.reduce(
+    (sum, card) => sum + parsePlanCount(card?.ticket_plan_text),
+    0,
+  );
 
   return (
     <section className="race-detail-page">
@@ -179,12 +260,8 @@ export default function RaceDetailPage({ race, search = "" }) {
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
           <DetailSummary label="公開モデル" value={`${cards.length}モデル`} />
           <DetailSummary
-            label="最多本命"
-            value={
-              consensus
-                ? `${MAIN_MARK}${consensus.horseNo} / ${consensus.count}モデル`
-                : "集計前"
-            }
+            label="買い目総数"
+            value={`${totalPlanCount}件`}
           />
           <DetailSummary
             label="結果"
@@ -193,6 +270,24 @@ export default function RaceDetailPage({ race, search = "" }) {
         </div>
       </div>
 
+      <section className="race-detail-panel race-detail-panel--spotlights">
+        <div className="race-detail-panel__head">
+          <div>
+            <span className="race-detail-panel__eyebrow">LLM Desk</span>
+            <h2>各モデルの推奨サマリー</h2>
+          </div>
+        </div>
+        {cards.length ? (
+          <div className="race-detail-spotlight-grid">
+            {cards.map((card) => (
+              <SpotlightCard key={card?.engine || card?.label} card={card} />
+            ))}
+          </div>
+        ) : (
+          <PanelEmpty>公開モデルはまだありません。</PanelEmpty>
+        )}
+      </section>
+
       <div className="race-detail-layout">
         <section
           className="race-detail-panel race-detail-panel--compare"
@@ -200,7 +295,7 @@ export default function RaceDetailPage({ race, search = "" }) {
         >
           <div className="race-detail-panel__head">
             <div>
-              <span className="race-detail-panel__eyebrow">比較</span>
+              <span className="race-detail-panel__eyebrow">Compare</span>
               <h2>モデル別の本命比較</h2>
             </div>
           </div>
@@ -210,31 +305,35 @@ export default function RaceDetailPage({ race, search = "" }) {
                 <CompareRow key={card?.engine || card?.label} card={card} />
               ))
             ) : (
-              <PanelEmpty>公開モデルはまだありません。</PanelEmpty>
+              <PanelEmpty>比較対象のモデルはまだありません。</PanelEmpty>
             )}
           </div>
         </section>
 
-        <section className="race-detail-panel race-detail-panel--result">
-          <div className="race-detail-panel__head">
-            <div>
-              <span className="race-detail-panel__eyebrow">結果</span>
-              <h2>レース結果</h2>
+        <div className="race-detail-side-stack">
+          <ConsensusPanel consensusRows={consensusRows} />
+
+          <section className="race-detail-panel race-detail-panel--result">
+            <div className="race-detail-panel__head">
+              <div>
+                <span className="race-detail-panel__eyebrow">Result</span>
+                <h2>レース結果</h2>
+              </div>
             </div>
-          </div>
-          {resultEntries.length ? (
-            <ol className="race-detail-result-list">
-              {resultEntries.map((entry) => (
-                <li key={entry.key}>
-                  <span>{entry.rank}着</span>
-                  <strong>{entry.body}</strong>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="race-detail-result-placeholder">{resultText}</p>
-          )}
-        </section>
+            {resultEntries.length ? (
+              <ol className="race-detail-result-list">
+                {resultEntries.map((entry) => (
+                  <li key={entry.key}>
+                    <span>{entry.rank}着</span>
+                    <strong>{entry.body}</strong>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="race-detail-result-placeholder">{resultText}</p>
+            )}
+          </section>
+        </div>
       </div>
 
       <section
@@ -243,7 +342,7 @@ export default function RaceDetailPage({ race, search = "" }) {
       >
         <div className="race-detail-panel__head">
           <div>
-            <span className="race-detail-panel__eyebrow">買い目</span>
+            <span className="race-detail-panel__eyebrow">Purchase Desk</span>
             <h2>モデル別の購入プラン</h2>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import FilterBar from "./FilterBar";
 
 function normalizePath(pathname) {
   return String(pathname || "").replace(/\/+$/, "") || "/";
@@ -26,16 +27,17 @@ export default function PublicSideNav({
   mode = "home",
   detailHref = "",
   detailTitle = "",
+  data,
+  search = "",
+  onApplyFilters,
+  showTargetFilter = false,
 }) {
   const [activeHash, setActiveHash] = useState("");
   const normalizedPath = normalizePath(pathname);
   const normalizedDetailHref = detailHref || pathname;
 
   useEffect(() => {
-    const syncHash = () => {
-      setActiveHash(window.location.hash || "");
-    };
-
+    const syncHash = () => setActiveHash(window.location.hash || "");
     syncHash();
     window.addEventListener("hashchange", syncHash);
     return () => window.removeEventListener("hashchange", syncHash);
@@ -62,7 +64,7 @@ export default function PublicSideNav({
           {
             href: `${normalizedDetailHref}#race-detail-summary`,
             label: "レース概要",
-            note: "開催情報と要点",
+            note: "開催情報と総括",
             active: !activeHash || activeHash === "#race-detail-summary",
           },
           {
@@ -103,7 +105,7 @@ export default function PublicSideNav({
           <span className="public-side-nav__eyebrow">公開分析デスク</span>
           <strong className="public-side-nav__title">競馬インテリジェンス</strong>
           <p className="public-side-nav__lead">
-            予測一覧と履歴分析を同じ導線で切り替えられる公開ビューです。
+            予測一覧、履歴分析、単場詳細を同じ導線で横断できる公開ビューです。
           </p>
         </div>
 
@@ -137,6 +139,18 @@ export default function PublicSideNav({
                 />
               ))}
             </nav>
+          </div>
+        ) : null}
+
+        {showTargetFilter && onApplyFilters ? (
+          <div className="public-side-nav__section public-side-nav__section--filter">
+            <span className="public-side-nav__section-label">対象日</span>
+            <FilterBar
+              data={data}
+              search={search}
+              onApply={onApplyFilters}
+              className="app-filter-bar--sidebar"
+            />
           </div>
         ) : null}
 
