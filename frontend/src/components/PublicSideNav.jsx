@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 function normalizePath(pathname) {
   return String(pathname || "").replace(/\/+$/, "") || "/";
@@ -27,66 +27,58 @@ export default function PublicSideNav({
   detailHref = "",
   detailTitle = "",
 }) {
-  const [activeHash, setActiveHash] = useState(() =>
-    typeof window !== "undefined" ? window.location.hash || "" : "",
-  );
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      setActiveHash(window.location.hash || "");
-    };
-
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
-
+  const [activeHash, setActiveHash] = useState("");
   const normalizedPath = normalizePath(pathname);
   const normalizedDetailHref = detailHref || pathname;
 
-  const primaryItems = useMemo(
-    () => [
-      {
-        href: "/keiba",
-        label: "予測一覧",
-        note: "本日の公開レース",
-        active: normalizedPath === "/keiba",
-      },
-      {
-        href: "/keiba/history",
-        label: "履歴情報",
-        note: "30日・365日・累計",
-        active: normalizedPath === "/keiba/history",
-      },
-    ],
-    [normalizedPath],
-  );
+  useEffect(() => {
+    const syncHash = () => {
+      setActiveHash(window.location.hash || "");
+    };
 
-  const detailItems = useMemo(() => {
-    if (mode !== "detail") {
-      return [];
-    }
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, [normalizedPath, normalizedDetailHref]);
 
-    return [
-      {
-        href: `${normalizedDetailHref}#race-detail-summary`,
-        label: "レース概要",
-        note: "開催情報と要点",
-        active: !activeHash || activeHash === "#race-detail-summary",
-      },
-      {
-        href: `${normalizedDetailHref}#race-detail-compare`,
-        label: "推奨馬比較",
-        note: "各 LLM の本命印",
-        active: activeHash === "#race-detail-compare",
-      },
-      {
-        href: `${normalizedDetailHref}#race-detail-models`,
-        label: "購入プラン",
-        note: "モデル別の買い目",
-        active: activeHash === "#race-detail-models",
-      },
-    ];
-  }, [activeHash, mode, normalizedDetailHref]);
+  const primaryItems = [
+    {
+      href: "/keiba",
+      label: "予測一覧",
+      note: "本日の公開レース",
+      active: normalizedPath === "/keiba",
+    },
+    {
+      href: "/keiba/history",
+      label: "履歴情報",
+      note: "30日・365日・累計",
+      active: normalizedPath === "/keiba/history",
+    },
+  ];
+
+  const detailItems =
+    mode === "detail"
+      ? [
+          {
+            href: `${normalizedDetailHref}#race-detail-summary`,
+            label: "レース概要",
+            note: "開催情報と要点",
+            active: !activeHash || activeHash === "#race-detail-summary",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-compare`,
+            label: "推奨馬比較",
+            note: "各 LLM の本命印",
+            active: activeHash === "#race-detail-compare",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-models`,
+            label: "購入プラン",
+            note: "モデル別の買い目",
+            active: activeHash === "#race-detail-models",
+          },
+        ]
+      : [];
 
   const currentPageLabel =
     mode === "detail"
@@ -95,7 +87,14 @@ export default function PublicSideNav({
         ? "履歴分析"
         : mode === "static"
           ? "インフォメーション"
-        : "公開予測ボード";
+          : "公開予測ボード";
+
+  const focusText =
+    mode === "detail"
+      ? "左の 3 セクションから、レース詳細をすばやく移動できます。"
+      : mode === "static"
+        ? "公開ページの主要導線に戻りやすい補助ナビとして配置しています。"
+        : "公開ページの主要導線を左側に固定しています。";
 
   return (
     <aside className="public-side-nav" aria-label="公開ナビゲーション">
@@ -144,13 +143,7 @@ export default function PublicSideNav({
         <div className="public-side-nav__focus">
           <span className="public-side-nav__focus-label">現在表示中</span>
           <strong>{currentPageLabel}</strong>
-          <p>
-            {mode === "detail"
-              ? "左の 3 セクションからレース詳細をすばやく移動できます。"
-              : mode === "static"
-                ? "公開ページの主要導線に戻りやすい補助ナビとして配置しています。"
-              : "公開ページの主動線を左側に固定しています。"}
-          </p>
+          <p>{focusText}</p>
         </div>
       </div>
     </aside>

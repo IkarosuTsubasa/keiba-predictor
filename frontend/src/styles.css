@@ -3892,15 +3892,13 @@ body {
   line-height: 1;
 }
 
-.race-detail-compare-row__marks,
-.race-detail-model-card__marks {
+.race-detail-mark-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 
-.race-detail-compare-row__marks span,
-.race-detail-model-card__marks span {
+.race-detail-mark-grid span {
   min-height: 66px;
   padding: 12px 10px;
   display: grid;
@@ -3912,21 +3910,18 @@ body {
   box-shadow: inset 0 0 0 1px rgba(198, 197, 212, 0.14);
 }
 
-.race-detail-compare-row__marks span.is-main,
-.race-detail-model-card__marks span.is-main {
+.race-detail-mark-grid span.is-main {
   background: rgba(255, 224, 136, 0.58);
 }
 
-.race-detail-compare-row__marks em,
-.race-detail-model-card__marks em {
+.race-detail-mark-grid em {
   font-style: normal;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
-.race-detail-compare-row__marks strong,
-.race-detail-model-card__marks strong {
+.race-detail-mark-grid strong {
   color: var(--primary);
   font-family: "Manrope", "Noto Sans JP", sans-serif;
   font-size: 28px;
@@ -4066,14 +4061,12 @@ body {
 
   .race-detail-hero__meta,
   .race-detail-model-grid,
-  .race-detail-compare-row__marks,
-  .race-detail-model-card__marks {
+  .race-detail-mark-grid {
     grid-template-columns: 1fr;
   }
 
   .race-detail-summary-card,
-  .race-detail-compare-row__marks span,
-  .race-detail-model-card__marks span {
+  .race-detail-mark-grid span {
     min-height: 0;
   }
 
@@ -4568,9 +4561,11 @@ body {
   gap: 24px;
 }
 
-.racing-intel-page__main > .racing-intel-page__shell {
+.public-content-stack {
   width: 100%;
   margin: 0;
+  display: grid;
+  gap: 24px;
 }
 
 .public-side-nav {
@@ -4701,6 +4696,16 @@ body {
 
 .public-side-nav__focus p {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.history-empty-note,
+.race-detail-empty-note {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
+  line-height: 1.7;
 }
 
 .race-detail-page [id] {

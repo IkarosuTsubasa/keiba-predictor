@@ -23,7 +23,7 @@ function sortByPercent(items, key) {
 }
 
 function rankLabel(index) {
-  return `Rank ${String(index + 1).padStart(2, "0")}`;
+  return String(index + 1).padStart(2, "0");
 }
 
 function metricWidth(value, base = 200) {
@@ -35,14 +35,14 @@ function metricWidth(value, base = 200) {
 
 function TabButton({ active, onClick, children }) {
   return (
-    <button
-      type="button"
-      className={active ? "is-active" : ""}
-      onClick={onClick}
-    >
+    <button type="button" className={active ? "is-active" : ""} onClick={onClick}>
       {children}
     </button>
   );
+}
+
+function EmptyState({ children }) {
+  return <p className="history-empty-note">{children}</p>;
 }
 
 function OverviewCard({ label, value, note, accent = false }) {
@@ -59,13 +59,20 @@ function OverviewCard({ label, value, note, accent = false }) {
 
 function LlmHeroCard({ leader }) {
   if (!leader) {
-    return null;
+    return (
+      <article className="history-hero-leader">
+        <div className="history-hero-leader__body">
+          <strong>-</strong>
+          <p>対象データがまだありません。</p>
+        </div>
+      </article>
+    );
   }
 
   return (
     <article className="history-hero-leader">
       <div className="history-hero-leader__top">
-        <span className="history-hero-leader__eyebrow">最高回収</span>
+        <span className="history-hero-leader__eyebrow">Top Return</span>
         <span className="history-hero-leader__badge">{leader.label}</span>
       </div>
       <div className="history-hero-leader__body">
@@ -80,11 +87,7 @@ function LlmHeroCard({ leader }) {
   );
 }
 
-function LlmRankBoard({ items }) {
-  const ranked = sortByPercent(items, "roi_text");
-  const leader = ranked[0] || null;
-  const rest = ranked.slice(1);
-
+function LlmRankBoard({ items, leader }) {
   return (
     <section className="history-panel history-panel--ranking">
       <div className="history-panel__head">
@@ -98,29 +101,33 @@ function LlmRankBoard({ items }) {
         <LlmHeroCard leader={leader} />
 
         <div className="history-rank-list">
-          {ranked.map((item, index) => (
-            <article key={item.engine} className="history-rank-item">
-              <div className="history-rank-item__head">
-                <span className="history-rank-item__rank">{rankLabel(index)}</span>
-                <strong>{item.label || "-"}</strong>
-                <em>{item.roi_text || "-"}</em>
-              </div>
-              <div className="history-rank-item__bar">
-                <span style={{ width: metricWidth(item.roi_text) }} />
-              </div>
-              <div className="history-rank-item__meta">
-                <span>{`${item.runs || 0}レース`}</span>
-                <span>{`損益 ${formatYen(item.profit_yen || 0)}`}</span>
-              </div>
-            </article>
-          ))}
+          {items.length ? (
+            items.map((item, index) => (
+              <article key={item.engine || item.label} className="history-rank-item">
+                <div className="history-rank-item__head">
+                  <span className="history-rank-item__rank">{`Rank ${rankLabel(index)}`}</span>
+                  <strong>{item.label || "-"}</strong>
+                  <em>{item.roi_text || "-"}</em>
+                </div>
+                <div className="history-rank-item__bar">
+                  <span style={{ width: metricWidth(item.roi_text) }} />
+                </div>
+                <div className="history-rank-item__meta">
+                  <span>{`${item.runs || 0}レース`}</span>
+                  <span>{`損益 ${formatYen(item.profit_yen || 0)}`}</span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <EmptyState>対象期間の LLM データはまだありません。</EmptyState>
+          )}
         </div>
       </div>
 
-      {rest.length ? (
+      {items.length > 1 ? (
         <div className="history-compact-grid">
-          {rest.map((item) => (
-            <article key={`compact-${item.engine}`} className="history-compact-card">
+          {items.slice(1).map((item) => (
+            <article key={`compact-${item.engine || item.label}`} className="history-compact-card">
               <span>{item.label || "-"}</span>
               <strong>{item.roi_text || "-"}</strong>
               <p>{`損益 ${formatYen(item.profit_yen || 0)}`}</p>
@@ -138,36 +145,38 @@ function LlmTrendTable({ items }) {
       <div className="history-panel__head">
         <div>
           <span className="history-panel__eyebrow">推移</span>
-          <h2>直近の推移と日次比較</h2>
+          <h2>日別の成績推移</h2>
         </div>
       </div>
 
       <div className="history-trend-table">
-        {items.map((item) => (
-          <article key={item.date} className="history-trend-row">
-            <div className="history-trend-row__summary">
-              <span>{item.date || "-"}</span>
-              <strong>{item.roi_text || "-"}</strong>
-              <em>{`損益 ${formatYen(item.profit_yen || 0)}`}</em>
-            </div>
-            <div className="history-trend-row__chips">
-              {(item.cards || []).map((card) => (
-                <span key={`${item.date}-${card.engine}`}>
-                  <b>{card.label || "-"}</b>
-                  <strong>{card.roi_text || "-"}</strong>
-                </span>
-              ))}
-            </div>
-          </article>
-        ))}
+        {items.length ? (
+          items.map((item) => (
+            <article key={item.date} className="history-trend-row">
+              <div className="history-trend-row__summary">
+                <span>{item.date || "-"}</span>
+                <strong>{item.roi_text || "-"}</strong>
+                <em>{`損益 ${formatYen(item.profit_yen || 0)}`}</em>
+              </div>
+              <div className="history-trend-row__chips">
+                {(item.cards || []).map((card) => (
+                  <span key={`${item.date}-${card.engine || card.label}`}>
+                    <b>{card.label || "-"}</b>
+                    <strong>{card.roi_text || "-"}</strong>
+                  </span>
+                ))}
+              </div>
+            </article>
+          ))
+        ) : (
+          <EmptyState>日別推移を表示できる履歴がまだありません。</EmptyState>
+        )}
       </div>
     </section>
   );
 }
 
 function PredictorMatrix({ items }) {
-  const rankedTop1 = sortByPercent(items, "top1_hit_rate_text");
-
   return (
     <section className="history-panel history-panel--predictor">
       <div className="history-panel__head">
@@ -177,57 +186,60 @@ function PredictorMatrix({ items }) {
         </div>
       </div>
 
-      <div className="history-predictor-table">
-        <div className="history-predictor-table__head">
-          <span>モデル</span>
-          <span>Top1</span>
-          <span>Top1複勝圏</span>
-          <span>Top3</span>
-          <span>Top3完全</span>
-          <span>Top5→Top3</span>
-          <span>Samples</span>
+      {items.length ? (
+        <div className="history-predictor-table">
+          <div className="history-predictor-table__head">
+            <span>モデル</span>
+            <span>Top1</span>
+            <span>Top1複勝圏</span>
+            <span>Top3</span>
+            <span>Top3完全一致</span>
+            <span>Top5→Top3</span>
+            <span>Samples</span>
+          </div>
+          {items.map((item, index) => (
+            <article
+              key={item.predictor_id || item.label}
+              className="history-predictor-table__row"
+            >
+              <div className="history-predictor-table__model">
+                <span>{`Rank ${rankLabel(index)}`}</span>
+                <strong>{item.label || "-"}</strong>
+              </div>
+              <span>{item.top1_hit_rate_text || "-"}</span>
+              <span>{item.top1_in_top3_rate_text || "-"}</span>
+              <span>{item.top3_hit_rate_text || "-"}</span>
+              <span>{item.top3_exact_rate_text || "-"}</span>
+              <span>{item.top5_to_top3_hit_rate_text || "-"}</span>
+              <strong>{item.samples || 0}</strong>
+            </article>
+          ))}
         </div>
-        {rankedTop1.map((item, index) => (
-          <article key={item.predictor_id} className="history-predictor-table__row">
-            <div className="history-predictor-table__model">
-              <span>{rankLabel(index)}</span>
-              <strong>{item.label || "-"}</strong>
-            </div>
-            <span>{item.top1_hit_rate_text || "-"}</span>
-            <span>{item.top1_in_top3_rate_text || "-"}</span>
-            <span>{item.top3_hit_rate_text || "-"}</span>
-            <span>{item.top3_exact_rate_text || "-"}</span>
-            <span>{item.top5_to_top3_hit_rate_text || "-"}</span>
-            <strong>{item.samples || 0}</strong>
-          </article>
-        ))}
-      </div>
+      ) : (
+        <EmptyState>量化モデルの履歴データはまだありません。</EmptyState>
+      )}
     </section>
   );
 }
 
-function PredictorHighlightStrip({ items }) {
-  const top1 = sortByPercent(items, "top1_hit_rate_text")[0] || null;
-  const top3 = sortByPercent(items, "top3_hit_rate_text")[0] || null;
-  const exact = sortByPercent(items, "top3_exact_rate_text")[0] || null;
-
+function PredictorHighlightStrip({ top1Leader, top3Leader, exactLeader }) {
   return (
     <div className="history-highlight-strip">
       <OverviewCard
-        label="Top1 最良"
-        value={top1?.label || "-"}
-        note={top1?.top1_hit_rate_text || "-"}
+        label="Top1 最高"
+        value={top1Leader?.label || "-"}
+        note={top1Leader?.top1_hit_rate_text || "-"}
         accent
       />
       <OverviewCard
-        label="Top3 最良"
-        value={top3?.label || "-"}
-        note={top3?.top3_hit_rate_text || "-"}
+        label="Top3 最高"
+        value={top3Leader?.label || "-"}
+        note={top3Leader?.top3_hit_rate_text || "-"}
       />
       <OverviewCard
-        label="完全一致 最良"
-        value={exact?.label || "-"}
-        note={exact?.top3_exact_rate_text || "-"}
+        label="完全一致 最高"
+        value={exactLeader?.label || "-"}
+        note={exactLeader?.top3_exact_rate_text || "-"}
       />
     </div>
   );
@@ -258,14 +270,28 @@ export default function HistoryPage({ data }) {
     ? predictorPeriod.cards
     : [];
 
-  const llmLeader = useMemo(
-    () => sortByPercent(llmCards, "roi_text")[0] || null,
+  const rankedLlmCards = useMemo(
+    () => sortByPercent(llmCards, "roi_text"),
     [llmCards],
+  );
+  const rankedPredictorCards = useMemo(
+    () => sortByPercent(predictorCards, "top1_hit_rate_text"),
+    [predictorCards],
+  );
+
+  const llmLeader = rankedLlmCards[0] || null;
+  const predictorLeaders = useMemo(
+    () => ({
+      top1: rankedPredictorCards[0] || null,
+      top3: sortByPercent(predictorCards, "top3_hit_rate_text")[0] || null,
+      exact: sortByPercent(predictorCards, "top3_exact_rate_text")[0] || null,
+    }),
+    [predictorCards, rankedPredictorCards],
   );
 
   const llmOverview = [
     {
-      label: "期間回収率",
+      label: "総合回収率",
       value: llmPeriod?.totals?.roi_text || "-",
       note: `損益 ${formatYen(llmPeriod?.totals?.profit_yen || 0)}`,
       accent: true,
@@ -286,9 +312,9 @@ export default function HistoryPage({ data }) {
 
   const predictorOverview = [
     {
-      label: "総サンプル数",
+      label: "総サンプル",
       value: String(predictorPeriod?.totals?.samples || 0),
-      note: `${activePeriodLabel}の累積実績`,
+      note: `${activePeriodLabel}の総対象数`,
       accent: true,
     },
     {
@@ -298,7 +324,7 @@ export default function HistoryPage({ data }) {
       accent: false,
     },
     {
-      label: "比較粒度",
+      label: "分析期間",
       value: activePeriodLabel,
       note: "長期スパンで比較",
       accent: false,
@@ -310,14 +336,15 @@ export default function HistoryPage({ data }) {
       <div className="history-hero">
         <div className="history-hero__copy">
           <span className="history-hero__eyebrow">履歴分析</span>
-          <h1>期間を切り替えて、モデルの強さを見る</h1>
+          <h1>長期の結果から、モデルの強さを比較する</h1>
           <p>
-            日次の断片ではなく、30日、365日、累計のスパンで回収率と命中傾向を整理した公開ヒストリーページです。
+            30日、365日、累計の各スパンで回収率と命中率の差を確認できる、
+            公開向けの履歴分析ページです。
           </p>
         </div>
 
         <div className="history-hero__controls">
-          <div className="history-hero__tabs" role="tablist" aria-label="履歴区分">
+          <div className="history-hero__tabs" role="tablist" aria-label="履歴グループ">
             <TabButton active={groupKey === "llm"} onClick={() => setGroupKey("llm")}>
               LLM 履歴
             </TabButton>
@@ -356,13 +383,17 @@ export default function HistoryPage({ data }) {
 
       {groupKey === "llm" ? (
         <>
-          <LlmRankBoard items={llmCards} />
+          <LlmRankBoard items={rankedLlmCards} leader={llmLeader} />
           <LlmTrendTable items={llmTrend} />
         </>
       ) : (
         <>
-          <PredictorHighlightStrip items={predictorCards} />
-          <PredictorMatrix items={predictorCards} />
+          <PredictorHighlightStrip
+            top1Leader={predictorLeaders.top1}
+            top3Leader={predictorLeaders.top3}
+            exactLeader={predictorLeaders.exact}
+          />
+          <PredictorMatrix items={rankedPredictorCards} />
         </>
       )}
     </section>

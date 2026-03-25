@@ -10,6 +10,8 @@ import {
   pickHorse,
 } from "../lib/publicRace";
 
+const MAIN_MARK = MARK_ORDER[0];
+
 function buildBackHref(search) {
   const query = String(search || "").replace(/^\?/, "");
   return query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
@@ -20,39 +22,35 @@ function buildConsensus(cards) {
 
   for (const card of cards || []) {
     const marks = parseMarks(card?.marks_text);
-    const mainHorse = pickHorse(marks, "◎");
+    const mainHorse = pickHorse(marks, MAIN_MARK);
     if (!mainHorse) continue;
     tally.set(mainHorse, (tally.get(mainHorse) || 0) + 1);
   }
 
-  const winner = [...tally.entries()]
+  return [...tally.entries()]
     .map(([horseNo, count]) => ({ horseNo, count }))
     .sort(
       (left, right) =>
         right.count - left.count || Number(left.horseNo) - Number(right.horseNo),
     )[0];
-
-  return winner || null;
 }
 
 function resolveLead(variant, race) {
   if (variant === "placeholder") {
-    return String(
-      race?.display_body?.message || "現在レースデータを反映しています。",
-    );
+    return String(race?.display_body?.message || "公開データを準備中です。");
   }
   if (variant === "settled") {
-    return "各モデルの印・買い目・結果をまとめて比較できます。";
+    return "各モデルの印、買い目、払戻結果を一画面で比較できます。";
   }
-  return "発走前の印と買い目を、モデルごとに見やすく整理しています。";
+  return "各モデルの本命印と購入プランを、比較しやすい形で整理しています。";
 }
 
 function resolveResultTone(text) {
   const source = String(text || "");
-  if (source && !source.includes("未") && !source.includes("待ち")) {
-    return "positive";
+  if (!source || /未|準備/.test(source)) {
+    return "neutral";
   }
-  return "neutral";
+  return "positive";
 }
 
 function DetailSummary({ label, value, accent = false }) {
@@ -63,6 +61,29 @@ function DetailSummary({ label, value, accent = false }) {
       <span>{label}</span>
       <strong>{value || "-"}</strong>
     </article>
+  );
+}
+
+function PanelEmpty({ children }) {
+  return <p className="race-detail-empty-note">{children}</p>;
+}
+
+function MarkGrid({ marks, itemKey }) {
+  return (
+    <div className="race-detail-mark-grid">
+      {MARK_ORDER.map((symbol) => {
+        const horseNo = pickHorse(marks, symbol) || "-";
+        return (
+          <span
+            key={`${itemKey}-${symbol}`}
+            className={symbol === MAIN_MARK ? "is-main" : ""}
+          >
+            <em>{symbol}</em>
+            <strong>{horseNo}</strong>
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -80,20 +101,7 @@ function CompareRow({ card }) {
           dynamicRoi
         />
       </div>
-      <div className="race-detail-compare-row__marks">
-        {MARK_ORDER.map((symbol) => {
-          const horseNo = pickHorse(marks, symbol) || "-";
-          return (
-            <span
-              key={`${card?.engine || card?.label}-${symbol}`}
-              className={symbol === "◎" ? "is-main" : ""}
-            >
-              <em>{symbol}</em>
-              <strong>{horseNo}</strong>
-            </span>
-          );
-        })}
-      </div>
+      <MarkGrid marks={marks} itemKey={card?.engine || card?.label || "compare"} />
     </article>
   );
 }
@@ -119,20 +127,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
         </div>
       </div>
 
-      <div className="race-detail-model-card__marks">
-        {MARK_ORDER.map((symbol) => {
-          const horseNo = pickHorse(marks, symbol) || "-";
-          return (
-            <span
-              key={`${card?.engine || card?.label}-${symbol}`}
-              className={symbol === "◎" ? "is-main" : ""}
-            >
-              <em>{symbol}</em>
-              <strong>{horseNo}</strong>
-            </span>
-          );
-        })}
-      </div>
+      <MarkGrid marks={marks} itemKey={card?.engine || card?.label || "model"} />
 
       <div className="race-detail-model-card__section">
         <div className="race-detail-model-card__section-head">
@@ -152,14 +147,12 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 }
 
 export default function RaceDetailPage({ race, search = "" }) {
-  const cards = Array.isArray(race?.cards) ? race.cards : [];
+  const cards = Array.isArray(race?.cards) ? race.cards.filter(Boolean) : [];
   const variant = String(race?.display_variant || "").trim();
   const status = race?.display_status || {};
-  const resultText = String(
-    race?.display_body?.result_text || "結果は確定後に表示されます",
-  );
+  const resultText = String(race?.display_body?.result_text || "結果は公開後に表示されます。");
   const resultEntries = parseResultEntries(resultText);
-  const consensus = useMemo(() => buildConsensus(cards), [cards]);
+  const consensus = useMemo(() => buildConsensus(cards) || null, [cards]);
   const badges = formatRaceBadges(race);
   const backHref = buildBackHref(search);
 
@@ -168,7 +161,7 @@ export default function RaceDetailPage({ race, search = "" }) {
       <div className="race-detail-hero" id="race-detail-summary">
         <div className="race-detail-hero__copy">
           <a className="race-detail-back-link" href={backHref}>
-            一覧へ戻る
+            予測一覧へ戻る
           </a>
           <span className="race-detail-hero__eyebrow">レース詳細</span>
           <h1>{race?.display_header?.title || "-"}</h1>
@@ -183,19 +176,19 @@ export default function RaceDetailPage({ race, search = "" }) {
         </div>
 
         <div className="race-detail-hero__meta">
-          <DetailSummary label="状態" value={status?.label || "公開中"} accent />
+          <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
           <DetailSummary label="公開モデル" value={`${cards.length}モデル`} />
           <DetailSummary
-            label="本命集中"
+            label="最多本命"
             value={
               consensus
-                ? `◎ ${consensus.horseNo} / ${consensus.count}モデル`
-                : "分散"
+                ? `${MAIN_MARK}${consensus.horseNo} / ${consensus.count}モデル`
+                : "集計前"
             }
           />
           <DetailSummary
             label="結果"
-            value={resultEntries.length ? `${resultEntries.length}着まで確定` : resultText}
+            value={resultEntries.length ? `${resultEntries.length}件の確定着順` : resultText}
           />
         </div>
       </div>
@@ -212,9 +205,13 @@ export default function RaceDetailPage({ race, search = "" }) {
             </div>
           </div>
           <div className="race-detail-compare-list">
-            {cards.map((card) => (
-              <CompareRow key={card?.engine || card?.label} card={card} />
-            ))}
+            {cards.length ? (
+              cards.map((card) => (
+                <CompareRow key={card?.engine || card?.label} card={card} />
+              ))
+            ) : (
+              <PanelEmpty>公開モデルはまだありません。</PanelEmpty>
+            )}
           </div>
         </section>
 
@@ -251,13 +248,17 @@ export default function RaceDetailPage({ race, search = "" }) {
           </div>
         </div>
         <div className="race-detail-model-grid">
-          {cards.map((card) => (
-            <ModelDetailCard
-              key={card?.engine || card?.label}
-              card={card}
-              highlightRoi={variant === "settled"}
-            />
-          ))}
+          {cards.length ? (
+            cards.map((card) => (
+              <ModelDetailCard
+                key={card?.engine || card?.label}
+                card={card}
+                highlightRoi={variant === "settled"}
+              />
+            ))
+          ) : (
+            <PanelEmpty>購入プランはまだ公開されていません。</PanelEmpty>
+          )}
         </div>
       </section>
     </section>

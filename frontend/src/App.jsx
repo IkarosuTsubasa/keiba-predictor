@@ -394,7 +394,7 @@ export default function App() {
         headerProps={{ showFilters: false }}
         sideNavProps={{ pathname: normalizedPath, mode: "static" }}
       >
-        <div className="racing-intel-page__shell">
+        <div className="public-content-stack">
           <PublicStaticPage page={staticPage} />
         </div>
       </PublicFrame>
@@ -420,7 +420,7 @@ export default function App() {
         headerProps={{ showFilters: false }}
         sideNavProps={{ pathname: normalizedPath, mode: "history" }}
       >
-        <div className="racing-intel-page__shell">
+        <div className="public-content-stack">
           <HistoryPage data={data} />
         </div>
       </PublicFrame>
@@ -438,7 +438,7 @@ export default function App() {
             detailHref: `${normalizedPath}${buildQuery(search)}`,
           }}
         >
-          <div className="racing-intel-page__shell">
+          <div className="public-content-stack">
             <section className="empty-race-state">
               <span className="empty-race-state__eyebrow">レース詳細</span>
               <h2>該当するレースが見つかりません</h2>
@@ -467,7 +467,7 @@ export default function App() {
           detailTitle: selectedRace?.display_header?.title || "レース詳細",
         }}
       >
-        <div className="racing-intel-page__shell">
+        <div className="public-content-stack">
           <RaceDetailPage race={selectedRace} search={search} />
         </div>
       </PublicFrame>
@@ -483,7 +483,7 @@ export default function App() {
       }}
       sideNavProps={{ pathname: normalizedPath, mode: "home" }}
     >
-      <div className="racing-intel-page__shell">
+      <div className="public-content-stack">
         <section className="today-races-section">
           <PageSectionHeader
             kicker="本日の公開レース"
