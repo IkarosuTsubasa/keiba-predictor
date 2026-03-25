@@ -2,8 +2,8 @@ import React, { useMemo } from "react";
 import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 import {
-  MARK_ORDER,
   APP_BASE_PATH,
+  MARK_ORDER,
   formatRaceBadges,
   parseMarks,
   parseResultEntries,
@@ -18,16 +18,21 @@ function buildBackHref(search) {
 }
 
 function parsePlanCount(text) {
-  return String(text || "")
+  const lines = String(text || "")
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean).length;
+    .filter(Boolean);
+  if (!lines.length) return 0;
+  if (lines.length === 1 && /買い目なし/.test(lines[0])) {
+    return 0;
+  }
+  return lines.filter((line) => !/買い目なし/.test(line)).length;
 }
 
-function buildConsensusRows(cards) {
+function buildConsensusRows(cards, predictorCards = []) {
   const tally = new Map();
 
-  for (const card of cards || []) {
+  for (const card of [...(cards || []), ...(predictorCards || [])]) {
     const marks = parseMarks(card?.marks_text);
     const mainHorse = pickHorse(marks, MAIN_MARK);
     if (!mainHorse) continue;
@@ -50,9 +55,9 @@ function resolveLead(variant, race) {
     );
   }
   if (variant === "settled") {
-    return "各モデルの印、買い目案、確定結果を同じ画面で比較できるレース詳細です。";
+    return "AIモデルの買い目と量化モデルの本命比較を、確定結果とあわせて確認できます。";
   }
-  return "各モデルの本命、買い目案、途中時点の見立てをまとめて確認できます。";
+  return "AIモデルの買い目と量化モデルの本命比較を、同じ画面でまとめて確認できます。";
 }
 
 function resolveResultTone(text) {
@@ -97,40 +102,6 @@ function MarkGrid({ marks, itemKey }) {
   );
 }
 
-function SpotlightCard({ card }) {
-  const marks = parseMarks(card?.marks_text);
-  const mainHorse = pickHorse(marks, MAIN_MARK) || "-";
-  const planCount = parsePlanCount(card?.ticket_plan_text);
-
-  return (
-    <article className="race-detail-spotlight-card">
-      <div className="race-detail-spotlight-card__head">
-        <strong>{card?.label || "-"}</strong>
-        <ModelMetaBadge
-          label="ROI"
-          value={card?.roi_text || "-"}
-          tone="subtle"
-          dynamicRoi
-        />
-      </div>
-      <div className="race-detail-spotlight-card__main">
-        <span>{MAIN_MARK}</span>
-        <strong>{mainHorse}</strong>
-      </div>
-      <div className="race-detail-spotlight-card__stats">
-        <div>
-          <span>買い目数</span>
-          <strong>{planCount || 0}</strong>
-        </div>
-        <div>
-          <span>結果</span>
-          <strong>{card?.result_triplet_text || "未確定"}</strong>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function ConsensusPanel({ consensusRows }) {
   return (
     <section className="race-detail-panel race-detail-panel--consensus">
@@ -151,27 +122,24 @@ function ConsensusPanel({ consensusRows }) {
           ))}
         </div>
       ) : (
-        <PanelEmpty>本命印が揃っていないため、まだ集計できません。</PanelEmpty>
+        <PanelEmpty>本命の集計対象データはまだありません。</PanelEmpty>
       )}
     </section>
   );
 }
 
-function CompareRow({ card }) {
+function PredictorCompareRow({ card }) {
   const marks = parseMarks(card?.marks_text);
 
   return (
     <article className="race-detail-compare-row">
       <div className="race-detail-compare-row__top">
         <strong>{card?.label || "-"}</strong>
-        <ModelMetaBadge
-          label="ROI"
-          value={card?.roi_text || "-"}
-          tone="subtle"
-          dynamicRoi
-        />
       </div>
-      <MarkGrid marks={marks} itemKey={card?.engine || card?.label || "compare"} />
+      <MarkGrid
+        marks={marks}
+        itemKey={card?.predictor_id || card?.label || "predictor-compare"}
+      />
     </article>
   );
 }
@@ -202,11 +170,6 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 
       <div className="race-detail-model-card__stats">
         <DetailSummary label="買い目数" value={`${planCount || 0}件`} />
-        <DetailSummary
-          label="本命"
-          value={`${MAIN_MARK}${pickHorse(marks, MAIN_MARK) || "-"}`}
-          accent
-        />
       </div>
 
       <div className="race-detail-model-card__section">
@@ -228,12 +191,18 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 
 export default function RaceDetailPage({ race, search = "" }) {
   const cards = Array.isArray(race?.cards) ? race.cards.filter(Boolean) : [];
+  const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
+    ? race.predictor_compare_cards.filter(Boolean)
+    : [];
   const variant = String(race?.display_variant || "").trim();
   const status = race?.display_status || {};
   const resultText = String(race?.display_body?.result_text || "結果はまだありません");
   const resultEntries = parseResultEntries(resultText);
-  const consensusRows = useMemo(() => buildConsensusRows(cards), [cards]);
-  const badges = formatRaceBadges(race);
+  const consensusRows = useMemo(
+    () => buildConsensusRows(cards, predictorCompareCards),
+    [cards, predictorCompareCards],
+  );
+  const badges = formatRaceBadges(race).filter((item) => !["良", "稍重", "重", "不良"].includes(String(item || "").trim()));
   const backHref = buildBackHref(search);
   const totalPlanCount = cards.reduce(
     (sum, card) => sum + parsePlanCount(card?.ticket_plan_text),
@@ -265,22 +234,29 @@ export default function RaceDetailPage({ race, search = "" }) {
         </div>
       </div>
 
-      <section className="race-detail-panel race-detail-panel--spotlights">
+      <section
+        className="race-detail-panel race-detail-panel--models"
+        id="race-detail-models"
+      >
         <div className="race-detail-panel__head">
           <div>
-            <span className="race-detail-panel__eyebrow">LLM Desk</span>
-            <h2>モデル別サマリー</h2>
+            <span className="race-detail-panel__eyebrow">Purchase Desk</span>
+            <h2>モデル別の買い目プラン</h2>
           </div>
         </div>
-        {cards.length ? (
-          <div className="race-detail-spotlight-grid">
-            {cards.map((card) => (
-              <SpotlightCard key={card?.engine || card?.label} card={card} />
-            ))}
-          </div>
-        ) : (
-          <PanelEmpty>公開モデルがまだありません。</PanelEmpty>
-        )}
+        <div className="race-detail-model-grid">
+          {cards.length ? (
+            cards.map((card) => (
+              <ModelDetailCard
+                key={card?.engine || card?.label}
+                card={card}
+                highlightRoi={variant === "settled"}
+              />
+            ))
+          ) : (
+            <PanelEmpty>買い目プランはまだ公開されていません。</PanelEmpty>
+          )}
+        </div>
       </section>
 
       <div className="race-detail-layout">
@@ -290,17 +266,20 @@ export default function RaceDetailPage({ race, search = "" }) {
         >
           <div className="race-detail-panel__head">
             <div>
-              <span className="race-detail-panel__eyebrow">Compare</span>
-              <h2>モデル別の本命比較</h2>
+              <span className="race-detail-panel__eyebrow">Quant Model</span>
+              <h2>量化モデルの本命比較</h2>
             </div>
           </div>
           <div className="race-detail-compare-list">
-            {cards.length ? (
-              cards.map((card) => (
-                <CompareRow key={card?.engine || card?.label} card={card} />
+            {predictorCompareCards.length ? (
+              predictorCompareCards.map((card) => (
+                <PredictorCompareRow
+                  key={card?.predictor_id || card?.label}
+                  card={card}
+                />
               ))
             ) : (
-              <PanelEmpty>比較対象のモデルがまだありません。</PanelEmpty>
+              <PanelEmpty>量化モデルの比較データはまだありません。</PanelEmpty>
             )}
           </div>
         </section>
@@ -330,31 +309,6 @@ export default function RaceDetailPage({ race, search = "" }) {
           </section>
         </div>
       </div>
-
-      <section
-        className="race-detail-panel race-detail-panel--models"
-        id="race-detail-models"
-      >
-        <div className="race-detail-panel__head">
-          <div>
-            <span className="race-detail-panel__eyebrow">Purchase Desk</span>
-            <h2>モデル別の買い目プラン</h2>
-          </div>
-        </div>
-        <div className="race-detail-model-grid">
-          {cards.length ? (
-            cards.map((card) => (
-              <ModelDetailCard
-                key={card?.engine || card?.label}
-                card={card}
-                highlightRoi={variant === "settled"}
-              />
-            ))
-          ) : (
-            <PanelEmpty>買い目プランはまだ公開されていません。</PanelEmpty>
-          )}
-        </div>
-      </section>
     </section>
   );
 }

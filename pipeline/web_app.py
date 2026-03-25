@@ -1846,6 +1846,57 @@ def _public_display_body(row, variant):
     }
 
 
+_PUBLIC_COMPARE_MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+
+
+def _public_predictor_compare_cards(row):
+    scope_norm = normalize_scope_key(str((row or {}).get("scope_key", "") or "").strip())
+    run_id = str((row or {}).get("run_id", "") or "").strip()
+    if not scope_norm or not run_id:
+        return []
+    if _public_display_variant(row) == "placeholder":
+        return []
+
+    _, run_row, resolved_run_id = resolve_run_selection(scope_norm, run_id)
+    if not run_row or not resolved_run_id:
+        return []
+
+    odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
+    name_to_no_map = load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
+    win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
+    place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
+    predictor_context = build_multi_predictor_context(
+        scope_norm,
+        resolved_run_id,
+        run_row,
+        name_to_no_map,
+        win_odds_map,
+        place_odds_map,
+    )
+
+    cards = []
+    for item in list((predictor_context or {}).get("predictor_rankings", []) or []):
+        ranking = list(item.get("ranking", []) or [])
+        marks_map = {}
+        for symbol, rank_item in zip(_PUBLIC_COMPARE_MARK_ORDER, ranking[: len(_PUBLIC_COMPARE_MARK_ORDER)]):
+            horse_no = normalize_horse_no_text(rank_item.get("horse_no", ""))
+            if not horse_no:
+                continue
+            marks_map[horse_no] = symbol
+        if not marks_map:
+            continue
+        predictor_id = str(item.get("predictor_id", "") or "").strip()
+        cards.append(
+            {
+                "predictor_id": predictor_id,
+                "label": str(item.get("predictor_label", "") or predictor_label(predictor_id) or predictor_id).strip() or "-",
+                "marks_text": report_format_marks_text(marks_map),
+            }
+        )
+    return cards
+
+
 def _with_public_display_sort_fields(items):
     out = []
     for index, item in enumerate(list(items or [])):
@@ -1901,7 +1952,12 @@ def build_public_board_payload(date_text="", scope_key=""):
     target_date = str(payload.get("target_date", "") or "").strip()
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
     sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
-    payload["races"] = _with_public_display_sort_fields(sorted_races)
+    enriched_races = []
+    for item in sorted_races:
+        row = dict(item or {})
+        row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
+        enriched_races.append(row)
+    payload["races"] = _with_public_display_sort_fields(enriched_races)
     payload["placeholder_race_count"] = len(placeholder_races)
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     return payload
