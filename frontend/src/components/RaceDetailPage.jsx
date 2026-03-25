@@ -44,17 +44,20 @@ function buildConsensusRows(cards) {
 
 function resolveLead(variant, race) {
   if (variant === "placeholder") {
-    return String(race?.display_body?.message || "公開データを準備中です。");
+    return String(
+      race?.display_body?.message ||
+        "公開データの準備中です。更新後にこのレースの詳細が表示されます。",
+    );
   }
   if (variant === "settled") {
-    return "各モデルの印、買い目、払戻結果を一画面で比較できるレース詳細です。";
+    return "各モデルの印、買い目案、確定結果を同じ画面で比較できるレース詳細です。";
   }
-  return "各モデルの本命印と購入プランを、比較しやすい形で整理しています。";
+  return "各モデルの本命、買い目案、途中時点の見立てをまとめて確認できます。";
 }
 
 function resolveResultTone(text) {
   const source = String(text || "");
-  if (!source || /未|準備/.test(source)) {
+  if (!source || /未|なし/.test(source)) {
     return "neutral";
   }
   return "positive";
@@ -148,7 +151,7 @@ function ConsensusPanel({ consensusRows }) {
           ))}
         </div>
       ) : (
-        <PanelEmpty>本命印の集計はまだありません。</PanelEmpty>
+        <PanelEmpty>本命印が揃っていないため、まだ集計できません。</PanelEmpty>
       )}
     </section>
   );
@@ -175,7 +178,7 @@ function CompareRow({ card }) {
 
 function ModelDetailCard({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
-  const resultText = String(card?.result_triplet_text || "結果はまだありません");
+  const resultText = String(card?.result_triplet_text || "結果未確定");
   const planCount = parsePlanCount(card?.ticket_plan_text);
 
   return (
@@ -208,7 +211,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 
       <div className="race-detail-model-card__section">
         <div className="race-detail-model-card__section-head">
-          <span>購入プラン</span>
+          <span>買い目プラン</span>
         </div>
         <BetPreviewList text={card?.ticket_plan_text || ""} />
       </div>
@@ -227,7 +230,7 @@ export default function RaceDetailPage({ race, search = "" }) {
   const cards = Array.isArray(race?.cards) ? race.cards.filter(Boolean) : [];
   const variant = String(race?.display_variant || "").trim();
   const status = race?.display_status || {};
-  const resultText = String(race?.display_body?.result_text || "結果は公開後に表示されます。");
+  const resultText = String(race?.display_body?.result_text || "結果はまだありません");
   const resultEntries = parseResultEntries(resultText);
   const consensusRows = useMemo(() => buildConsensusRows(cards), [cards]);
   const badges = formatRaceBadges(race);
@@ -242,7 +245,7 @@ export default function RaceDetailPage({ race, search = "" }) {
       <div className="race-detail-hero" id="race-detail-summary">
         <div className="race-detail-hero__copy">
           <a className="race-detail-back-link" href={backHref}>
-            予測一覧へ戻る
+            予測一覧に戻る
           </a>
           <span className="race-detail-hero__eyebrow">レース詳細</span>
           <h1>{race?.display_header?.title || "-"}</h1>
@@ -258,15 +261,7 @@ export default function RaceDetailPage({ race, search = "" }) {
 
         <div className="race-detail-hero__meta">
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
-          <DetailSummary label="公開モデル" value={`${cards.length}モデル`} />
-          <DetailSummary
-            label="買い目総数"
-            value={`${totalPlanCount}件`}
-          />
-          <DetailSummary
-            label="結果"
-            value={resultEntries.length ? `${resultEntries.length}件の確定着順` : resultText}
-          />
+          <DetailSummary label="買い目総数" value={`${totalPlanCount}件`} />
         </div>
       </div>
 
@@ -274,7 +269,7 @@ export default function RaceDetailPage({ race, search = "" }) {
         <div className="race-detail-panel__head">
           <div>
             <span className="race-detail-panel__eyebrow">LLM Desk</span>
-            <h2>各モデルの推奨サマリー</h2>
+            <h2>モデル別サマリー</h2>
           </div>
         </div>
         {cards.length ? (
@@ -284,7 +279,7 @@ export default function RaceDetailPage({ race, search = "" }) {
             ))}
           </div>
         ) : (
-          <PanelEmpty>公開モデルはまだありません。</PanelEmpty>
+          <PanelEmpty>公開モデルがまだありません。</PanelEmpty>
         )}
       </section>
 
@@ -305,7 +300,7 @@ export default function RaceDetailPage({ race, search = "" }) {
                 <CompareRow key={card?.engine || card?.label} card={card} />
               ))
             ) : (
-              <PanelEmpty>比較対象のモデルはまだありません。</PanelEmpty>
+              <PanelEmpty>比較対象のモデルがまだありません。</PanelEmpty>
             )}
           </div>
         </section>
@@ -343,7 +338,7 @@ export default function RaceDetailPage({ race, search = "" }) {
         <div className="race-detail-panel__head">
           <div>
             <span className="race-detail-panel__eyebrow">Purchase Desk</span>
-            <h2>モデル別の購入プラン</h2>
+            <h2>モデル別の買い目プラン</h2>
           </div>
         </div>
         <div className="race-detail-model-grid">
@@ -356,7 +351,7 @@ export default function RaceDetailPage({ race, search = "" }) {
               />
             ))
           ) : (
-            <PanelEmpty>購入プランはまだ公開されていません。</PanelEmpty>
+            <PanelEmpty>買い目プランはまだ公開されていません。</PanelEmpty>
           )}
         </div>
       </section>
