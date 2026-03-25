@@ -91,6 +91,10 @@ PUBLIC_PAGE_META = {
         "title": "いかいもAI競馬",
         "description": "複数のAI視点を重ねて競馬分析を公開する競馬分析サイト",
     },
+    f"{PUBLIC_BASE_PATH}/history": {
+        "title": "履歴分析 | いかいもAI競馬",
+        "description": "LLMと量化モデルの過去成績をまとめて振り返る公開ヒストリーページです。",
+    },
     f"{PUBLIC_BASE_PATH}/about": {
         "title": "このサイトについて | いかいもAI競馬",
         "description": "いかいもAI競馬の考え方と、複数の視点を重ねる競馬分析の方針を紹介します。",
@@ -134,6 +138,12 @@ PUBLIC_PAGE_META = {
 
 def _public_page_meta(path=""):
     normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
+    if normalized_path.startswith(f"{PUBLIC_BASE_PATH}/race/"):
+        meta = PUBLIC_PAGE_META[PUBLIC_BASE_PATH].copy()
+        meta["title"] = "レース詳細 | いかいもAI競馬"
+        meta["description"] = "各レースの買い目、印、モデル別の推奨馬を見やすく整理した詳細ページです。"
+        meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
+        return meta
     meta = PUBLIC_PAGE_META.get(normalized_path, PUBLIC_PAGE_META[PUBLIC_BASE_PATH]).copy()
     meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
     return meta
@@ -259,10 +269,40 @@ def _public_share_runtime_html():
       .map((item) => item.trim())
       .filter(Boolean);
 
+  const toAbsoluteUrl = (href) => {
+    const text = String(href || "").trim();
+    if (!text) {
+      return SHARE_URL;
+    }
+    try {
+      return new URL(text, window.location.origin).toString();
+    } catch (_error) {
+      return SHARE_URL;
+    }
+  };
+
+  const resolveDetailUrl = (card) => {
+    if (window.location.pathname.includes("/race/")) {
+      return window.location.href;
+    }
+    const raceCard = card?.closest(".race-card");
+    const detailHref = raceCard?.querySelector(".race-card__toggle")?.getAttribute("href") || "";
+    return toAbsoluteUrl(detailHref);
+  };
+
+  const replaceShareUrl = (text, detailUrl) => {
+    const source = String(text || "").trim();
+    if (!source) {
+      return "";
+    }
+    return source.includes(SHARE_URL) ? source.replaceAll(SHARE_URL, detailUrl) : source;
+  };
+
   const buildShareText = (raceTitle, card) => {
+    const detailUrl = resolveDetailUrl(card);
     const presetText = String(card?.dataset?.shareText || "").trim();
     if (presetText) {
-      return presetText;
+      return replaceShareUrl(presetText, detailUrl);
     }
     let ticketText = "";
     let marksText = "\\u5370\\u306a\\u3057";
@@ -289,7 +329,7 @@ def _public_share_runtime_html():
     }
     const header = parseRaceHeader(raceTitle);
     const ticketLines = splitLines(ticketText);
-    const tailLines = [SHARE_DETAIL_LABEL, SHARE_URL, SHARE_HASHTAG];
+    const tailLines = [SHARE_DETAIL_LABEL, detailUrl, SHARE_HASHTAG];
     const lines = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", "\\u8cb7\\u3044\\u76ee\\uff08\\u4e00\\u90e8\\uff09"];
     for (const ticketLine of ticketLines) {
       const candidate = [...lines, ticketLine, "", ...tailLines].join("\\n");

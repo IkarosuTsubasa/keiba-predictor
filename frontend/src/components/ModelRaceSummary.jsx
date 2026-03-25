@@ -5,10 +5,12 @@ import ModelMetaBadge from "./ModelMetaBadge";
 const MARK_ORDER = ["◎", "○", "▲", "△", "☆"];
 
 function parseMarks(text) {
-  return [...String(text || "").matchAll(/([◎○▲△☆])\s*([0-9]+)/g)].map((item) => ({
-    symbol: item[1],
-    horseNo: item[2],
-  }));
+  return [...String(text || "").matchAll(/([◎○▲△☆])\s*([0-9]+)/g)].map(
+    (item) => ({
+      symbol: item[1],
+      horseNo: item[2],
+    }),
+  );
 }
 
 function pickHorse(marks, symbol) {
@@ -47,7 +49,7 @@ export default function ModelRaceSummary({ card, highlightRoi = false }) {
         </div>
         <div className="model-race-summary__meta">
           <ModelMetaBadge
-            label="回収率"
+            label="ROI"
             value={card?.roi_text || "-"}
             tone="subtle"
             dynamicRoi={highlightRoi}

@@ -2,135 +2,128 @@ import React, { useEffect, useState } from "react";
 import AdminJobsPage from "./components/AdminJobsPage";
 import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
+import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
+import HistoryPage from "./components/HistoryPage";
 import PageSectionHeader from "./components/PageSectionHeader";
+import PublicSideNav from "./components/PublicSideNav";
 import PublicStaticPage from "./components/PublicStaticPage";
+import RaceDetailPage from "./components/RaceDetailPage";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 import TodayBoardContent from "./components/TodayBoardContent";
+import { matchRaceIdentifier } from "./lib/publicRace";
 
 const APP_BASE_PATH = "/keiba";
 const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
+const SITE_NAME = "いかいもAI競馬";
 
 const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/about`]: {
+    kicker: "About",
     title: "このサイトについて",
     lead:
-      "いかいもAI競馬は、単一の直感や単一モデルに依存しない競馬分析サイトです。複数の評価軸を重ねながら、公開情報を整理し、比較し、判断材料として読み解ける形に整えて公開しています。",
+      "いかいもAI競馬は、公開レースの予測一覧、単場詳細、履歴分析を同じ導線で見比べられる競馬予測サイトです。AI モデルの印と買い目、量化モデルの比較、公開後の成績推移を一つの画面設計で横断できるように整えています。",
+    meta: [
+      { label: "公開ページ", value: "予測一覧 / 単場詳細 / 履歴分析" },
+      { label: "AI モデル", value: "印・買い目・回収率を表示" },
+      { label: "量化モデル", value: "本命比較と期間成績を表示" },
+    ],
     sections: [
       {
-        heading: "目指していること",
+        heading: "公開ビューの役割",
         paragraphs: [
-          "このサイトが重視しているのは、一発で当てる印象よりも、複数の視点を並べて比較できる状態をつくることです。人気、オッズ、予想印、買い目、回収結果を切り離さず、ひとつの判断材料として読み取れるよう構成しています。",
-          "競馬の予想には、スピード、展開、人気、妙味、買い方の設計など、異なる判断軸が同時に存在します。当サイトではそれらを一層ずつ整理し、見える形で提示することを大切にしています。",
+          "トップでは当日の公開レースを一覧で確認し、各レースごとの印、買い目、結果、回収率を同じ流れで見られます。",
+          "単場詳細では AI モデルの買い目と、量化モデルの本命比較やコンセンサスを一つの画面で把握できます。",
         ],
       },
       {
-        heading: "単なるAI予想ではない理由",
+        heading: "AI モデルと量化モデル",
         paragraphs: [
-          "表示される結論は、単純な一問一答の出力ではありません。複数のモデル観点と公開情報の比較を通じて、どの馬に注目が集まり、どこで評価が割れ、どの券種が見合うのかを段階的に整えています。",
-          "そのため、同じレースでも『強く買う』『絞る』『広げる』『見送る』といった判断差が現れます。この差分そのものが、ひとつの重要な分析情報だと考えています。",
+          "AI モデルは公開中の買い目と印を表示するためのモデル群です。実際の公開買い目や回収率はこの AI モデル側で確認できます。",
+          "量化モデルは馬券購入のためではなく、各馬の評価や並び順を比較するための分析モデルです。履歴分析では期間ごとの強みを見比べられます。",
         ],
       },
       {
-        heading: "公開している価値",
+        heading: "見方の考え方",
         paragraphs: [
-          "当サイトでは、予想そのものだけでなく、予想に至る構造と結果の振り返りも重視しています。各AIの見解、買い目の構成、回収率の推移を同時に見られることで、単発の印象に流されにくい観察が可能になります。",
-          "日々のレースを通じて、判断の重なりと差分、そして結果との距離を継続的に検証できることが、このサイトの中核です。",
+          "単日の当たり外れだけでなく、履歴分析で月間・年間・累計の傾向を見ながら、どのモデルがどの条件で強いかを確認する使い方を想定しています。",
+          "公開情報は参考情報であり、最終的な判断はご自身で行ってください。",
         ],
       },
     ],
   },
   [`${APP_BASE_PATH}/guide`]: {
+    kicker: "Guide",
     title: "ガイド",
     lead:
-      "このページでは、サイト内で表示される印、ROI、買い目、見送り判断などの見方をまとめています。初めて利用する方が、各表示の意味を迷わず理解できるように整理した案内ページです。",
+      "初めて見る場合は、トップ、単場詳細、履歴分析の順で確認すると全体像を掴みやすくなります。ここでは各ページで何を見るべきかを簡潔にまとめています。",
+    meta: [
+      { label: "最初に見る", value: "トップ" },
+      { label: "詳しく見る", value: "単場詳細" },
+      { label: "比較する", value: "履歴分析" },
+    ],
     sections: [
       {
-        heading: "このサイトで見られるもの",
+        heading: "トップの見方",
         paragraphs: [
-          "各レースページでは、複数AIの印、買い目、回収率、公開後の結果が一覧できます。ひとつの答えを押しつけるのではなく、複数の視点を横並びで比較できることが特徴です。",
+          "トップでは公開レースの一覧を見ながら、各モデルの本命、買い目、ROI を横並びで確認できます。",
+          "まずはどのレースが公開されているか、どのモデルが本命をどこに置いているかを見るのが基本です。",
         ],
       },
       {
-        heading: "印の意味",
+        heading: "単場詳細の見方",
         paragraphs: [
-          "◎は中心視、○は対抗評価、▲は有力な次点、△と☆は押さえや注意枠として扱われます。ただし印は単独で読むのではなく、オッズや買い目の構成と合わせて見ることで意味が深まります。",
+          "単場詳細では AI モデル別の買い目をまとめて確認できます。どのモデルが何件の買い目を出しているか、結果がどうだったかを一つずつ追えます。",
+          "あわせて量化モデルの本命比較を見ることで、公開買い目と量化評価のズレも確認できます。",
         ],
       },
       {
-        heading: "複数AIを並べて見る理由",
+        heading: "履歴分析の見方",
         paragraphs: [
-          "競馬では、同じレースでも重視する要素によって評価が分かれます。複数AIを並べることで、評価が集中している馬と、意見が割れている馬を同時に確認できます。",
-          "一致は強さの参考になり、差分は不確実性や妙味のヒントになります。",
+          "履歴分析では AI モデルの回収成績と量化モデルの的中傾向を、月間・年間・累計で見比べられます。",
+          "単日の結果ではなく、期間ごとの安定感や得意な傾向を見るためのページです。",
         ],
       },
       {
-        heading: "ROIと回収率",
+        heading: "対象日の切り替え",
         paragraphs: [
-          "ROIは投じた金額に対して、どれだけ回収できたかを示す指標です。高い数値だけを見るのではなく、サンプル数、買い目の広さ、的中頻度と合わせて読むことが重要です。",
-        ],
-      },
-      {
-        heading: "買い目が出る時と出ない時",
-        paragraphs: [
-          "当サイトでは、常に買い目を出すことを目的にしていません。評価の裏付けが弱い場合や、妙味とリスクのバランスが合わない場合は、見送り判断もそのまま表示します。",
-          "見送りは消極策ではなく、判断の質を整えるための結果として扱っています。",
-        ],
-      },
-      {
-        heading: "オッズと妙味",
-        paragraphs: [
-          "支持されている馬がそのまま良い買い目になるとは限りません。当サイトでは、評価の強さだけでなく、オッズとのバランスを見ながら買い目の構成を読み取れるようにしています。",
-        ],
-      },
-      {
-        heading: "予想の受け取り方",
-        paragraphs: [
-          "本サイトの表示は、最終判断を代行するものではなく、判断材料を整理して提示するものです。複数AIの一致点と差分を見ながら、自分の基準で読む使い方を想定しています。",
+          "左側の対象日から日付を指定できます。前日・翌日の切り替えボタンでも公開日をすばやく移動できます。",
         ],
       },
     ],
   },
   [`${APP_BASE_PATH}/methodology`]: {
-    title: "分析方法",
+    kicker: "Methodology",
+    title: "分析方針",
     lead:
-      "いかいもAI競馬では、ひとつの答えを断定的に提示するのではなく、複数の評価軸を重ねながら、判断の強さと不確実性を同時に読み取れる形で公開しています。このページでは、その考え方の骨格を紹介します。",
+      "数字は、偶然を物語に変えるためではなく、物語の奥に潜む秩序を照らし出すためにあります。いかいもAI競馬では、公開予測をただ並べるのではなく、AI と量化モデルの視点を重ねることで、レースの輪郭をより立体的に浮かび上がらせることを目指しています。",
+    meta: [
+      { label: "AI モデル", value: "公開買い目の判断軸" },
+      { label: "量化モデル", value: "評価順の比較軸" },
+      { label: "履歴分析", value: "期間で見る強みと癖" },
+    ],
     sections: [
       {
-        heading: "多面的にレースを見る",
+        heading: "一つの正解より、複数の視点",
         paragraphs: [
-          "競馬の判断は、単一の能力比較だけで完結しません。人気、オッズ、展開想定、印の集中度、買い目の組み方など、複数の視点を並べて初めて全体像が見えてきます。",
-          "当サイトでは、個々の要素を一度分解し、それぞれの強弱や重なりを確認できる構成を重視しています。",
+          "競馬の予測は、単一の答えを探す作業ではありません。展開、能力、適性、市場評価、そのどれもがレースの表情を変えます。",
+          "だからこそ本サイトでは、AI モデルの公開買い目と量化モデルの比較を分けて提示し、それぞれの視点がどこで重なり、どこでズレるのかを見える形にしています。",
         ],
       },
       {
-        heading: "一致と差分の両方を評価する",
+        heading: "公開情報の扱い方",
         paragraphs: [
-          "複数のAIが同じ方向を向いている場合、それは判断の強さを測るひとつの手掛かりになります。一方で、見解が割れる場合には、レースに含まれる不確実性や論点のズレが見えてきます。",
-          "当サイトでは、一致だけでなく差分も情報として扱い、単純な多数決ではない読み方を可能にしています。",
+          "公開中の買い目や結果は、単日の当たり外れだけで評価するためのものではありません。履歴分析まで含めて眺めることで、モデルごとの癖や得意な局面が見えてきます。",
+          "数字の上下に一喜一憂するのではなく、期間の流れと再現性を見に行くことを、このサイトでは重視しています。",
         ],
       },
       {
-        heading: "オッズと評価のバランスを見る",
+        heading: "量化モデルの立ち位置",
         paragraphs: [
-          "高く評価される馬が、そのまま投票妙味のある対象になるとは限りません。支持と価格がどのように釣り合っているかを見ることで、強さと妙味の距離を把握しやすくなります。",
-          "そのため当サイトでは、評価だけでなく、どの券種でどの程度の広さを持たせるかという構成面も重要な判断材料としています。",
-        ],
-      },
-      {
-        heading: "見送りも分析結果のひとつ",
-        paragraphs: [
-          "どのレースでも無理に買い目を出すことは、分析の質を下げる場合があります。評価の裏付けが弱い時、価格とリスクが見合わない時、判断は『見送り』という形で表現されます。",
-          "当サイトでは、出す結論の多さではなく、出すべき根拠があるかどうかを重視しています。",
-        ],
-      },
-      {
-        heading: "継続的に結果を振り返る",
-        paragraphs: [
-          "分析の価値は、提示した瞬間だけでは決まりません。公開後の結果、回収率、券種ごとの傾向を継続的に確認することで、判断の癖や再現性が見えてきます。",
-          "いかいもAI競馬は、単発の印象に依存するのではなく、継続観測によって判断を磨いていくための競馬分析サイトです。",
+          "量化モデルは馬券を直接出すための装置ではなく、各馬の評価と並び順を比較するための軸です。公開買い目の背景にある温度差を測るための、もう一つの物差しとして置いています。",
+          "本命一致や上位馬の馬券内率は、派手な演出ではなく、モデルの輪郭を静かに語るための指標です。",
         ],
       },
     ],
@@ -138,40 +131,18 @@ const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/privacy`]: {
     title: "プライバシーポリシー",
     lead:
-      "当サイトでは、利用状況の把握、表示改善、広告配信の最適化のために、アクセス情報やCookie等の技術情報を利用する場合があります。本ページでは、その取扱い方針を説明します。",
+      "本サイトでは、表示改善や障害調査のために必要な範囲で一般的なアクセス情報を取り扱う場合があります。",
     sections: [
       {
-        heading: "1. 取得する情報",
+        heading: "取得する情報",
         paragraphs: [
-          "当サイトでは、アクセス日時、閲覧ページ、参照元、ブラウザ種別、端末情報、IPアドレス、Cookie等の情報を取得する場合があります。",
-          "これらはサイト運営、表示最適化、不正利用対策、広告配信の改善に利用されます。",
+          "アクセス日時、利用端末に関する基本情報、表示改善のために必要な技術情報など、一般的なアクセス解析に準じた範囲の情報を取り扱う場合があります。",
         ],
       },
       {
-        heading: "2. 利用目的",
+        heading: "利用目的",
         paragraphs: [
-          "取得した情報は、サイト品質の維持、閲覧傾向の分析、表示内容の改善、問い合わせ対応、広告の最適化のために利用します。",
-          "個人を特定する目的で第三者に販売することはありません。",
-        ],
-      },
-      {
-        heading: "3. Cookieについて",
-        paragraphs: [
-          "当サイトでは、利便性向上や広告配信のためにCookieを利用する場合があります。Cookieにより、再訪時の表示調整や利用傾向の把握が行われることがあります。",
-          "ブラウザ設定によりCookieを無効化することは可能ですが、一部機能や表示が正しく動作しない場合があります。",
-        ],
-      },
-      {
-        heading: "4. 広告配信について",
-        paragraphs: [
-          "当サイトは、第三者配信の広告サービスを利用する場合があります。広告配信事業者は、利用者の関心に応じた広告表示のためにCookie等を使用することがあります。",
-          "Googleを含む第三者事業者によるデータ利用については、各社のポリシーをご確認ください。",
-        ],
-      },
-      {
-        heading: "5. お問い合わせ",
-        paragraphs: [
-          "個人情報や本ポリシーに関するご連絡は、Contactページ記載のメールアドレスまでお願いします。",
+          "表示改善、障害調査、不正利用対策など、サイト運営に必要な目的に限って利用します。",
         ],
       },
     ],
@@ -179,43 +150,18 @@ const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/terms`]: {
     title: "利用規約",
     lead:
-      "本規約は、いかいもAI競馬が提供する情報、表示、分析コンテンツの利用条件を定めるものです。ご利用の前に内容をご確認ください。",
+      "本サイトを利用する際は、表示内容が参考情報であることをご理解のうえご利用ください。利用は自己責任で行うものとします。",
     sections: [
       {
-        heading: "1. サービスの性質",
+        heading: "利用上の注意",
         paragraphs: [
-          "本サイトは、競馬に関する公開情報、分析情報、AI予想表示、買い目参考情報を提供する情報サービスです。投票の受付や資金管理を行うものではありません。",
+          "公開情報の正確性や継続性について保証するものではありません。表示内容は予告なく変更される場合があります。",
         ],
       },
       {
-        heading: "2. 利用者の責任",
+        heading: "禁止事項",
         paragraphs: [
-          "本サイトの情報は、利用者ご自身の判断材料としてご利用ください。実際の投票、資金配分、行動判断は、すべて利用者ご本人の責任で行うものとします。",
-        ],
-      },
-      {
-        heading: "3. 表示内容について",
-        paragraphs: [
-          "当サイトは、情報の正確性、完全性、継続性の確保に努めますが、内容の完全な正確性や将来結果との一致を保証するものではありません。",
-          "表示される予想、印、買い目、回収率は参考情報であり、利益を保証するものではありません。",
-        ],
-      },
-      {
-        heading: "4. 禁止事項",
-        paragraphs: [
-          "法令違反、公序良俗違反、サイト運営の妨害、不正アクセス、情報の無断転載、誤認を招く形での再配布その他当サイトが不適切と判断する行為を禁止します。",
-        ],
-      },
-      {
-        heading: "5. 変更と停止",
-        paragraphs: [
-          "当サイトは、予告なく内容の変更、更新、一時停止または終了を行うことがあります。",
-        ],
-      },
-      {
-        heading: "6. 免責",
-        paragraphs: [
-          "当サイトの利用により生じた損害について、運営者は可能な範囲を除き責任を負いません。利用者は自らの判断でご利用ください。",
+          "不正アクセス、運営の妨害、法令や公序良俗に反する利用は禁止します。",
         ],
       },
     ],
@@ -223,37 +169,18 @@ const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/disclaimer`]: {
     title: "免責事項",
     lead:
-      "当サイトで公開しているAI予想、買い目、指標、結果整理は、情報提供を目的とした参考コンテンツです。投票判断や金銭的意思決定は、利用者ご自身の責任で行ってください。",
+      "本サイトの情報は、投資判断や馬券購入を保証するものではありません。利用により生じたいかなる結果についても、運営側は責任を負いません。",
     sections: [
       {
-        heading: "1. 予想情報について",
+        heading: "参考情報について",
         paragraphs: [
-          "当サイトの予想は、複数の分析観点を整理した参考情報です。結果的な的中や回収を保証するものではありません。",
-          "過去実績、回収率、表示順位は将来の成果を保証するものではありません。",
+          "公開している買い目、結果、履歴分析は参考情報です。最終的な判断は利用者ご自身で行ってください。",
         ],
       },
       {
-        heading: "2. 投票判断について",
+        heading: "表示の変動について",
         paragraphs: [
-          "実際の投票、金額設定、券種選択は利用者ご自身の判断で行ってください。当サイトは投票判断を代行するものではありません。",
-        ],
-      },
-      {
-        heading: "3. 情報の正確性",
-        paragraphs: [
-          "掲載情報は公開情報に基づき整理していますが、更新タイミングや外部要因により差異が生じる場合があります。当サイトは情報の完全性を保証しません。",
-        ],
-      },
-      {
-        heading: "4. 責任の範囲",
-        paragraphs: [
-          "当サイトの利用または利用不能により生じた損害について、運営者は責任を負いかねます。閲覧および利用は利用者ご自身の責任でお願いします。",
-        ],
-      },
-      {
-        heading: "5. 未成年者の利用について",
-        paragraphs: [
-          "法令に反する利用、公営競技に関する制限に反する利用、未成年者による不適切な利用は認められません。各自が適用法令を確認のうえ利用してください。",
+          "対象レース数、公開タイミング、履歴集計の条件によって数値は変動します。単日の結果だけで評価しないことを推奨します。",
         ],
       },
     ],
@@ -261,20 +188,13 @@ const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/contact`]: {
     title: "お問い合わせ",
     lead:
-      "掲載内容、表記、運営方針、広告掲載、その他ご連絡がある場合は、下記メールアドレスまでお願いします。",
+      "表示内容や公開ページに関するお問い合わせは、下記の連絡先までお願いします。確認には時間がかかる場合があります。",
     sections: [
       {
         heading: "連絡先",
         paragraphs: [
           "メール: salvasshaggyya226@gmail.com",
-          "内容確認後、順次返信いたします。内容により回答までお時間をいただく場合があります。",
-        ],
-      },
-      {
-        heading: "ご連絡時のお願い",
-        paragraphs: [
-          "対象ページのURL、対象レースID、確認したい内容をできるだけ具体的にご記載ください。",
-          "個別の投票判断や利益保証に関するご相談には回答できません。",
+          "お問い合わせの際は、対象ページの URL や発生状況をあわせて記載してください。",
         ],
       },
     ],
@@ -285,10 +205,35 @@ function buildQuery(search) {
   return search ? `?${search}` : "";
 }
 
+function extractSelectedDate(search) {
+  try {
+    return new URLSearchParams(String(search || "")).get("date") || "";
+  } catch {
+    return "";
+  }
+}
+
 function navigateWithSearch(nextSearch) {
   const url = nextSearch ? `${APP_BASE_PATH}?${nextSearch}` : APP_BASE_PATH;
   window.history.pushState({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function extractRaceDetailId(pathname) {
+  const normalized = String(pathname || "").replace(/\/+$/, "");
+  const prefix = `${APP_BASE_PATH}/race/`;
+  if (!normalized.startsWith(prefix)) {
+    return "";
+  }
+  const encodedId = normalized.slice(prefix.length);
+  if (!encodedId) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
 }
 
 function useBoardData(search, enabled = true) {
@@ -342,9 +287,9 @@ function LoadingState() {
   return (
     <main className="public-screen-state">
       <section className="public-screen-state__panel">
-        <span className="public-screen-state__eyebrow">Loading</span>
+        <span className="public-screen-state__eyebrow">読み込み中</span>
         <h1>本日の公開レースを読み込んでいます</h1>
-        <p>最新の公開データを取得しています。</p>
+        <p>最新の公開データを取得しています。しばらくお待ちください。</p>
       </section>
     </main>
   );
@@ -354,13 +299,26 @@ function ErrorState({ error, onRetry }) {
   return (
     <main className="public-screen-state">
       <section className="public-screen-state__panel public-screen-state__panel--error">
-        <span className="public-screen-state__eyebrow">Error</span>
-        <h1>公開情報を表示できません</h1>
+        <span className="public-screen-state__eyebrow">エラー</span>
+        <h1>公開情報を表示できませんでした</h1>
         <p>{error || "読み込みに失敗しました。"}</p>
         <button type="button" onClick={onRetry}>
           再読み込み
         </button>
       </section>
+    </main>
+  );
+}
+
+function PublicFrame({ headerProps = {}, sideNavProps = {}, children }) {
+  return (
+    <main className="racing-intel-page">
+      <AppHeader {...headerProps} />
+      <div className="racing-intel-page__shell racing-intel-page__shell--with-sidebar">
+        <PublicSideNav {...sideNavProps} />
+        <div className="racing-intel-page__main">{children}</div>
+      </div>
+      <SiteFooter />
     </main>
   );
 }
@@ -381,26 +339,44 @@ export default function App() {
   const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
   const isAdminWorkspace = normalizedPath === ADMIN_WORKSPACE_PATH;
   const isAdminConsole = normalizedPath === ADMIN_CONSOLE_PATH;
+  const isHistoryPage = normalizedPath === `${APP_BASE_PATH}/history`;
+  const raceDetailId = extractRaceDetailId(normalizedPath);
+  const isRaceDetail = Boolean(raceDetailId);
   const staticPage = PUBLIC_PAGE_CONTENT[normalizedPath] || null;
+  const selectedDate = extractSelectedDate(search);
 
   useEffect(() => {
     if (isAdminWorkspace) {
-      document.title = "Workspace | いかいもAI競馬";
+      document.title = `Workspace | ${SITE_NAME}`;
       return;
     }
     if (isAdminConsole) {
-      document.title = "管理コンソール | いかいもAI競馬";
+      document.title = `管理コンソール | ${SITE_NAME}`;
+      return;
+    }
+    if (isRaceDetail) {
+      document.title = `レース詳細 | ${SITE_NAME}`;
+      return;
+    }
+    if (isHistoryPage) {
+      document.title = `履歴分析 | ${SITE_NAME}`;
       return;
     }
     if (staticPage) {
-      document.title = `${staticPage.title} | いかいもAI競馬`;
+      document.title = `${staticPage.title} | ${SITE_NAME}`;
       return;
     }
-    document.title = "いかいもAI競馬";
-  }, [isAdminConsole, isAdminWorkspace, staticPage]);
+    document.title = SITE_NAME;
+  }, [isAdminConsole, isAdminWorkspace, isHistoryPage, isRaceDetail, staticPage]);
 
-  const { loading, error, data } = useBoardData(search, !isAdminConsole && !isAdminWorkspace && !staticPage);
+  const { loading, error, data } = useBoardData(
+    search,
+    !isAdminConsole && !isAdminWorkspace && !staticPage,
+  );
   const races = data?.races || [];
+  const selectedRace = isRaceDetail
+    ? races.find((race) => matchRaceIdentifier(race, raceDetailId))
+    : null;
 
   if (isAdminWorkspace) {
     return <AdminWorkspacePage appBasePath={APP_BASE_PATH} />;
@@ -412,13 +388,14 @@ export default function App() {
 
   if (staticPage) {
     return (
-      <main className="racing-intel-page">
-        <AppHeader showFilters={false} />
-        <div className="racing-intel-page__shell">
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{ pathname: normalizedPath, mode: "static" }}
+      >
+        <div className="public-content-stack">
           <PublicStaticPage page={staticPage} />
         </div>
-        <SiteFooter />
-      </main>
+      </PublicFrame>
     );
   }
 
@@ -427,32 +404,117 @@ export default function App() {
   }
 
   if (error || !data) {
-    return <ErrorState error={error} onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))} />;
+    return (
+      <ErrorState
+        error={error}
+        onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))}
+      />
+    );
+  }
+
+  if (isHistoryPage) {
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{ pathname: normalizedPath, mode: "history" }}
+      >
+        <div className="public-content-stack">
+          <HistoryPage data={data} />
+        </div>
+      </PublicFrame>
+    );
+  }
+
+  if (isRaceDetail) {
+    if (!selectedRace) {
+      return (
+        <PublicFrame
+          headerProps={{ showFilters: false }}
+          sideNavProps={{
+            pathname: normalizedPath,
+            mode: "detail",
+            detailHref: `${normalizedPath}${buildQuery(search)}`,
+          }}
+        >
+          <div className="public-content-stack">
+            <section className="empty-race-state">
+              <span className="empty-race-state__eyebrow">レース詳細</span>
+              <h2>対象のレースが見つかりません</h2>
+              <p>
+                一覧ページに戻って、対象日や公開状況を確認してから再度お試しください。
+              </p>
+              <a
+                className="race-detail-back-link race-detail-back-link--inline"
+                href={search ? `${APP_BASE_PATH}?${search}` : APP_BASE_PATH}
+              >
+                一覧へ戻る
+              </a>
+            </section>
+          </div>
+        </PublicFrame>
+      );
+    }
+
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "detail",
+          detailHref: `${normalizedPath}${buildQuery(search)}`,
+          detailTitle: selectedRace?.display_header?.title || "レース詳細",
+        }}
+      >
+        <div className="public-content-stack">
+          <RaceDetailPage race={selectedRace} search={search} />
+        </div>
+      </PublicFrame>
+    );
   }
 
   return (
-    <main className="racing-intel-page">
-      <AppHeader data={data} search={search} onApplyFilters={navigateWithSearch} />
-
-      <div className="racing-intel-page__shell">
+    <PublicFrame
+      headerProps={{ showFilters: false }}
+      sideNavProps={{
+        pathname: normalizedPath,
+        mode: "home",
+        data,
+        search,
+        onApplyFilters: navigateWithSearch,
+        showTargetFilter: true,
+      }}
+    >
+      <div className="public-content-stack">
         <section className="today-races-section">
           <PageSectionHeader
-            kicker="TODAY'S RACES"
-            title="本日のAI分析"
-            subtitle="複数の視点を重ねた競馬分析を、レースごとに比較できる形で公開しています。"
+            kicker=""
+            title={selectedDate ? "レースAI予測" : "本日のAI予測"}
+            subtitle="複数モデルの印、買い目案、結果、回収率をレース単位とモデル単位の両方から確認できます。"
             meta={[
-              data?.target_date_label || "-",
-              `${races.length}レース`,
-              data?.generated_at_label ? `更新 ${data.generated_at_label}` : "",
+              {
+                key: "target-date",
+                label: "対象日",
+                value: data?.target_date_label || "-",
+              },
+              {
+                key: "race-count",
+                label: "公開数",
+                value: `${races.length}レース`,
+              },
+              {
+                key: "generated-at",
+                label: "最終更新",
+                value: data?.generated_at_label || "-",
+              },
             ]}
           />
 
+          <HeroSpotlightStrip data={data} />
           <TodayBoardContent data={data} races={races} />
         </section>
-      </div>
 
-      <SecondaryStatsPanel data={data} />
-      <SiteFooter />
-    </main>
+        <SecondaryStatsPanel data={data} />
+      </div>
+    </PublicFrame>
   );
 }

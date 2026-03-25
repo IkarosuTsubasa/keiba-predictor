@@ -6,7 +6,7 @@ function isTrackConditionBadge(value) {
 
 function parseResultEntries(text) {
   const source = String(text || "").trim();
-  if (!source || source.includes("未") || source.includes("待ち")) {
+  if (!source || source.includes("未") || source.includes("確定前")) {
     return [];
   }
   return source
@@ -26,7 +26,7 @@ function parseResultEntries(text) {
 function resolveStatus(race) {
   const status = race?.display_status || {};
   return {
-    label: String(status.label || "").trim() || "予測中",
+    label: String(status.label || "").trim() || "公開中",
     tone: String(status.tone || "").trim() || "open",
   };
 }
@@ -41,7 +41,9 @@ export default function RaceCardHeader({ race, actions = null }) {
     : [];
   const variant = String(race?.display_variant || "").trim();
   const isPlaceholder = variant === "placeholder";
-  const resultText = String(race?.display_body?.result_text || "結果未確定");
+  const resultText = String(
+    race?.display_body?.result_text || "結果は確定後に表示されます",
+  );
   const resultEntries = parseResultEntries(resultText);
 
   return (

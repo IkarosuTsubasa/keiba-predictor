@@ -3,10 +3,12 @@ import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 
 function parseMarks(text) {
-  return [...String(text || "").matchAll(/([◎○▲△☆])\s*([0-9]+)/g)].map((item) => ({
-    symbol: item[1],
-    horseNo: item[2],
-  }));
+  return [...String(text || "").matchAll(/([◎○▲△☆])\s*([0-9]+)/g)].map(
+    (item) => ({
+      symbol: item[1],
+      horseNo: item[2],
+    }),
+  );
 }
 
 function resultTone(card) {
@@ -28,7 +30,7 @@ export default function ExpandablePredictionPanel({
             <strong>{card.label}</strong>
             <div className="expandable-prediction-panel__meta">
               <ModelMetaBadge
-                label="回収率"
+                label="ROI"
                 value={card.roi_text || "-"}
                 tone="subtle"
                 dynamicRoi={highlightRoi}
@@ -58,7 +60,7 @@ export default function ExpandablePredictionPanel({
             className={`expandable-prediction-panel__result expandable-prediction-panel__result--${resultTone(card)}`}
           >
             <span>結果</span>
-            <strong>{card?.result_triplet_text || "結果未確定"}</strong>
+            <strong>{card?.result_triplet_text || "結果はまだありません"}</strong>
           </div>
         </section>
       ))}

@@ -112,7 +112,7 @@ export default function ModelTopFiveBoard({ data, races }) {
       <div className="model-top-five-board__header">
         <div className="model-top-five-board__stats">
           <div className="model-top-five-board__stat">
-            <span>回収率</span>
+            <span>ROI</span>
             <strong>{active.summary?.roi_text || "-"}</strong>
           </div>
           <div className="model-top-five-board__stat">
@@ -120,7 +120,7 @@ export default function ModelTopFiveBoard({ data, races }) {
             <strong>{formatHitText(active.summary)}</strong>
           </div>
           <div className="model-top-five-board__stat">
-            <span>表示</span>
+            <span>掲載</span>
             <strong>{active.items.length}件</strong>
           </div>
         </div>
@@ -132,7 +132,9 @@ export default function ModelTopFiveBoard({ data, races }) {
             <RaceCardHeader race={item.race} />
             <ModelRaceSummary
               card={item.card}
-              highlightRoi={String(item.race?.display_variant || "").trim() === "settled"}
+              highlightRoi={
+                String(item.race?.display_variant || "").trim() === "settled"
+              }
             />
           </article>
         ))}

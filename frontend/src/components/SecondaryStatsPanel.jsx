@@ -6,7 +6,9 @@ function safeRoiText(value) {
 }
 
 function buildRowItems(totalLabel, totalRoi, cards) {
-  const items = [{ key: "total", label: totalLabel, value: safeRoiText(totalRoi), accent: true }];
+  const items = [
+    { key: "total", label: totalLabel, value: safeRoiText(totalRoi), accent: true },
+  ];
   for (const card of cards || []) {
     items.push({
       key: card.engine || card.label,
@@ -38,14 +40,22 @@ function RoiRow({ title, items }) {
 }
 
 export default function SecondaryStatsPanel({ data }) {
-  const allTimeItems = buildRowItems("累計", data?.all_time_roi?.totals?.roi_text, data?.all_time_roi?.cards || []);
-  const dailyItems = buildRowItems("合計", data?.totals?.roi_text, data?.summary_cards || []);
+  const allTimeItems = buildRowItems(
+    "全体",
+    data?.all_time_roi?.totals?.roi_text,
+    data?.all_time_roi?.cards || [],
+  );
+  const dailyItems = buildRowItems(
+    "全体",
+    data?.totals?.roi_text,
+    data?.summary_cards || [],
+  );
 
   return (
     <section className="secondary-stats-panel" aria-label="回収率サマリー">
       <div className="secondary-stats-panel__compact">
-        <RoiRow title="累計回収率" items={allTimeItems} />
-        <RoiRow title="本日回収率" items={dailyItems} />
+        <RoiRow title="通算 ROI" items={allTimeItems} />
+        <RoiRow title="本日 ROI" items={dailyItems} />
       </div>
     </section>
   );

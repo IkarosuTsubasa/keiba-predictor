@@ -1,10 +1,20 @@
 from pathlib import Path
 
 
+PREDICTOR_DISPLAY_LABELS = {
+    "main": "ゲート",
+    "v2_opus": "ストライド",
+    "v3_premium": "伯楽",
+    "v4_gemini": "馬場眼",
+    "v5_stacking": "フュージョン",
+    "v6_kiwami": "極 KIWAMI",
+}
+
+
 PREDICTOR_SPECS = [
     {
         "id": "main",
-        "label": "Predictor V1",
+        "label": PREDICTOR_DISPLAY_LABELS["main"],
         "script_name": "predictor.py",
         "run_field": "predictions_path",
         "latest_filename": "predictions.csv",
@@ -13,7 +23,7 @@ PREDICTOR_SPECS = [
     },
     {
         "id": "v2_opus",
-        "label": "Predictor V2 Opus",
+        "label": PREDICTOR_DISPLAY_LABELS["v2_opus"],
         "script_name": "predictor_v2_opus.py",
         "run_field": "predictions_v2_opus_path",
         "latest_filename": "predictions_v2_opus.csv",
@@ -22,7 +32,7 @@ PREDICTOR_SPECS = [
     },
     {
         "id": "v3_premium",
-        "label": "Predictor V3 Premium",
+        "label": PREDICTOR_DISPLAY_LABELS["v3_premium"],
         "script_name": "predictor_v3_premium.py",
         "run_field": "predictions_v3_premium_path",
         "latest_filename": "predictions_v3_premium.csv",
@@ -31,7 +41,7 @@ PREDICTOR_SPECS = [
     },
     {
         "id": "v4_gemini",
-        "label": "Predictor V4 Gemini",
+        "label": PREDICTOR_DISPLAY_LABELS["v4_gemini"],
         "script_name": "predictor_v4_gemini.py",
         "run_field": "predictions_v4_gemini_path",
         "latest_filename": "predictions_v4_gemini.csv",
@@ -40,7 +50,7 @@ PREDICTOR_SPECS = [
     },
     {
         "id": "v5_stacking",
-        "label": "Predictor V5 Stacking",
+        "label": PREDICTOR_DISPLAY_LABELS["v5_stacking"],
         "script_name": "predictor_v5_omc.py",
         "run_field": "predictions_v5_stacking_path",
         "latest_filename": "predictions_v5_stacking.csv",
@@ -69,7 +79,9 @@ def canonical_predictor_id(value):
 
 def predictor_label(value):
     spec = get_predictor_spec(canonical_predictor_id(value))
-    return spec["label"] if spec else "Predictor V1"
+    if spec:
+        return spec["label"]
+    return PREDICTOR_DISPLAY_LABELS["main"]
 
 
 def latest_prediction_path(root_dir, predictor_id):

@@ -50,6 +50,16 @@ def main():
     assert_true("<!doctype html" in public_html.lower(), "public home should render frontend html")
     assert_true("twitter:card" in public_html, "public home should inject meta tags")
 
+    public_race_detail = web_app.public_race_detail_spa("smoke-run-id")
+    public_race_detail_html = getattr(public_race_detail, "body", b"").decode("utf-8", errors="ignore")
+    assert_true(getattr(public_race_detail, "status_code", 0) == 200, "public race detail should return 200")
+    assert_true("<!doctype html" in public_race_detail_html.lower(), "public race detail should render frontend html")
+
+    public_history = web_app.public_history_spa()
+    public_history_html = getattr(public_history, "body", b"").decode("utf-8", errors="ignore")
+    assert_true(getattr(public_history, "status_code", 0) == 200, "public history should return 200")
+    assert_true("<!doctype html" in public_history_html.lower(), "public history should render frontend html")
+
     console_spa = web_app.console_spa()
     assert_true(getattr(console_spa, "status_code", 0) == 200, "console spa should return 200")
     workspace_spa = web_app.console_workspace_spa()
