@@ -1118,7 +1118,7 @@ def _build_public_share_text(run_row, engine, marks_map, ticket_rows, max_chars=
         ticket_rows,
         max_chars=max_chars,
         share_detail_label=PUBLIC_SHARE_DETAIL_LABEL,
-        share_url=PUBLIC_SHARE_URL,
+        share_url=_public_share_detail_url,
         share_hashtag=PUBLIC_SHARE_HASHTAG,
         to_int_or_none=to_int_or_none,
     )
@@ -1142,6 +1142,22 @@ def _public_result_triplet_text_with_nos(actual_names, actual_horse_nos):
 
 def _public_date_label(date_text):
     return web_public_llm.public_date_label(date_text, parse_run_date=_parse_run_date)
+
+
+def _public_share_detail_url(run_row):
+    from urllib.parse import quote
+
+    row = dict(run_row or {})
+    run_id = str(row.get("run_id", "") or "").strip()
+    if not run_id:
+      return PUBLIC_SHARE_URL
+
+    race_url = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/race/{quote(run_id, safe='')}"
+    date_text = str(row.get("date", "") or row.get("race_date", "") or "").strip()
+    parsed_date = _parse_run_date(date_text)
+    if not parsed_date:
+      return race_url
+    return f"{race_url}?date={parsed_date.strftime('%Y-%m-%d')}"
 
 LLM_BATTLE_ORDER = REPORT_LLM_BATTLE_ORDER
 LLM_BATTLE_LABELS = REPORT_LLM_BATTLE_LABELS
@@ -1943,7 +1959,7 @@ def build_public_board_payload(date_text="", scope_key=""):
         public_trend_series=_public_trend_series,
         parse_run_date=_parse_run_date,
         share_detail_label=PUBLIC_SHARE_DETAIL_LABEL,
-        share_url=PUBLIC_SHARE_URL,
+        share_url=_public_share_detail_url,
         share_hashtag=PUBLIC_SHARE_HASHTAG,
         share_max_chars=PUBLIC_SHARE_MAX_CHARS,
         to_int_or_none=to_int_or_none,

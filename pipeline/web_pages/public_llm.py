@@ -128,7 +128,8 @@ def build_public_share_text(
     del engine
     header = _share_hashtag_race_label(run_row)
     marks_text = _share_marks_text(marks_map, to_int_or_none=to_int_or_none)
-    tail_lines = [share_detail_label, share_url, share_hashtag]
+    share_url_text = share_url(run_row) if callable(share_url) else share_url
+    tail_lines = [share_detail_label, str(share_url_text or "").strip(), share_hashtag]
     base_lines = [header, "", marks_text, "", PUBLIC_SHARE_TICKETS_LABEL]
     ticket_lines = _share_ticket_lines(ticket_rows, to_int_or_none=to_int_or_none)
     lines = list(base_lines)
