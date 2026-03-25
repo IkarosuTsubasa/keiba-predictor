@@ -1,20 +1,7 @@
 import React from "react";
 import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
-
-const MARK_ORDER = ["◎", "○", "▲", "△", "☆"];
-
-function parseMarks(text) {
-  return [...String(text || "").matchAll(/([◎○▲△☆])\s*([0-9]+)/g)].map((item) => ({
-    symbol: item[1],
-    horseNo: item[2],
-  }));
-}
-
-function pickHorse(marks, symbol) {
-  const found = (marks || []).find((item) => item.symbol === symbol);
-  return found ? found.horseNo : null;
-}
+import { MARK_ORDER, parseMarks, pickHorse } from "../lib/publicRace";
 
 export default function AiPickSummary({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
@@ -34,7 +21,7 @@ export default function AiPickSummary({ card, highlightRoi = false }) {
       <div className="ai-pick-summary__head">
         <strong className="ai-pick-summary__model">{card?.label || "-"}</strong>
         <ModelMetaBadge
-          label="回収率"
+          label="ROI"
           value={card?.roi_text || "-"}
           tone="subtle"
           dynamicRoi={highlightRoi}

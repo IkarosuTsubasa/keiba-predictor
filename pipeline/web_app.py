@@ -1311,9 +1311,349 @@ def _public_all_time_roi_summary():
     )
 
 
+def _format_public_rate_text(value):
+    if value in ("", None):
+        return "-"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return report_format_percent_text(numeric) or "-"
+
+
+def _public_ledger_daily_rows(policy_engine="", days=None):
+    cutoff = None
+    if days not in (None, "", 0):
+        try:
+            days_value = int(days)
+        except (TypeError, ValueError):
+            days_value = 0
+        if days_value > 0:
+            cutoff = datetime.now().date() - timedelta(days=max(0, days_value - 1))
+
+    daily = {}
+    engine = normalize_policy_engine(policy_engine)
+    for row in load_rows(ledger_path(BASE_DIR, policy_engine=engine)):
+        if str(row.get("status", "")).strip().lower() != "settled":
+            continue
+        date_key = str(row.get("ledger_date", "")).strip()
+        if len(date_key) != 8:
+            continue
+        try:
+            date_obj = datetime.strptime(date_key, "%Y%m%d").date()
+        except ValueError:
+            continue
+        if cutoff and date_obj < cutoff:
+            continue
+        item = daily.setdefault(
+            date_key,
+            {"date": date_obj.strftime("%Y-%m-%d"), "runs": set(), "profit_yen": 0, "base_amount": 0},
+        )
+        item["runs"].add(str(row.get("run_id", "")).strip())
+        item["profit_yen"] += int(row.get("profit_yen", 0) or 0)
+        item["base_amount"] += int(row.get("stake_yen", 0) or 0)
+
+    out = []
+    for date_key in sorted(daily.keys(), reverse=True):
+        item = daily[date_key]
+        base = int(item["base_amount"])
+        profit = int(item["profit_yen"])
+        roi = round((base + profit) / base, 4) if base > 0 else ""
+        out.append(
+            {
+                "date": item["date"],
+                "runs": len(item["runs"]),
+                "profit_yen": profit,
+                "base_amount": base,
+                "roi": roi,
+                "policy_engine": engine,
+            }
+        )
+    return out
+
+
 def _public_trend_series(days=10):
-    del days
-    return []
+    daily = {}
+    engine_order = {engine: index for index, engine in enumerate(REPORT_LLM_BATTLE_ORDER)}
+    for engine in REPORT_LLM_BATTLE_ORDER:
+        rows = _public_ledger_daily_rows(policy_engine=engine, days=days)
+        for row in rows:
+            date_text = str(row.get("date", "") or "").strip()
+            if not date_text:
+                continue
+            stake_yen = int(row.get("base_amount", 0) or 0)
+            profit_yen = int(row.get("profit_yen", 0) or 0)
+            payout_yen = stake_yen + profit_yen
+            roi_value = round(float(payout_yen) / float(stake_yen), 4) if stake_yen > 0 else ""
+            item = daily.setdefault(
+                date_text,
+                {
+                    "date": date_text,
+                    "runs": 0,
+                    "stake_yen": 0,
+                    "payout_yen": 0,
+                    "profit_yen": 0,
+                    "cards": [],
+                },
+            )
+            item["runs"] += int(row.get("runs", 0) or 0)
+            item["stake_yen"] += stake_yen
+            item["payout_yen"] += payout_yen
+            item["profit_yen"] += profit_yen
+            item["cards"].append(
+                {
+                    "engine": engine,
+                    "label": REPORT_LLM_BATTLE_LABELS.get(engine, engine),
+                    "runs": int(row.get("runs", 0) or 0),
+                    "stake_yen": stake_yen,
+                    "payout_yen": payout_yen,
+                    "profit_yen": profit_yen,
+                    "roi_text": report_format_percent_text(roi_value) if roi_value != "" else "-",
+                }
+            )
+    out = []
+    for date_text in sorted(daily.keys(), reverse=True):
+        item = dict(daily[date_text])
+        stake_yen = int(item.get("stake_yen", 0) or 0)
+        payout_yen = int(item.get("payout_yen", 0) or 0)
+        total_roi = round(float(payout_yen) / float(stake_yen), 4) if stake_yen > 0 else ""
+        item["roi_text"] = report_format_percent_text(total_roi) if total_roi != "" else "-"
+        item["cards"] = sorted(
+            list(item.get("cards", []) or []),
+            key=lambda card: engine_order.get(str(card.get("engine", "") or ""), 99),
+        )
+        out.append(item)
+    return out
+
+
+def _public_history_period_options():
+    return [
+        {"key": "days_30", "label": "30日", "days": 30},
+        {"key": "days_365", "label": "365日", "days": 365},
+        {"key": "all_time", "label": "累計", "days": None},
+    ]
+
+
+def _public_llm_period_summary(days=None):
+    engine_order = {engine: index for index, engine in enumerate(REPORT_LLM_BATTLE_ORDER)}
+    merged_daily = {}
+    cards = []
+    total_runs = 0
+    total_stake = 0
+    total_payout = 0
+    total_profit = 0
+
+    for engine in REPORT_LLM_BATTLE_ORDER:
+        rows = _public_ledger_daily_rows(policy_engine=engine, days=days)
+        stake_yen = 0
+        payout_yen = 0
+        profit_yen = 0
+        runs = 0
+        for row in rows:
+            date_text = str(row.get("date", "") or "").strip()
+            if not date_text:
+                continue
+            base_amount = int(row.get("base_amount", 0) or 0)
+            day_profit = int(row.get("profit_yen", 0) or 0)
+            day_payout = base_amount + day_profit
+            runs += int(row.get("runs", 0) or 0)
+            stake_yen += base_amount
+            payout_yen += day_payout
+            profit_yen += day_profit
+            item = merged_daily.setdefault(
+                date_text,
+                {
+                    "date": date_text,
+                    "runs": 0,
+                    "stake_yen": 0,
+                    "payout_yen": 0,
+                    "profit_yen": 0,
+                    "cards": [],
+                },
+            )
+            item["runs"] += int(row.get("runs", 0) or 0)
+            item["stake_yen"] += base_amount
+            item["payout_yen"] += day_payout
+            item["profit_yen"] += day_profit
+            item["cards"].append(
+                {
+                    "engine": engine,
+                    "label": REPORT_LLM_BATTLE_LABELS.get(engine, engine),
+                    "runs": int(row.get("runs", 0) or 0),
+                    "stake_yen": base_amount,
+                    "payout_yen": day_payout,
+                    "profit_yen": day_profit,
+                    "roi_text": report_format_percent_text(row.get("roi", "")) if row.get("roi", "") != "" else "-",
+                }
+            )
+        roi_value = round(float(payout_yen) / float(stake_yen), 4) if stake_yen > 0 else ""
+        cards.append(
+            {
+                "engine": engine,
+                "label": REPORT_LLM_BATTLE_LABELS.get(engine, engine),
+                "runs": runs,
+                "stake_yen": stake_yen,
+                "payout_yen": payout_yen,
+                "profit_yen": profit_yen,
+                "roi_text": report_format_percent_text(roi_value) if roi_value != "" else "-",
+            }
+        )
+        total_runs += runs
+        total_stake += stake_yen
+        total_payout += payout_yen
+        total_profit += profit_yen
+
+    trend = []
+    for date_text in sorted(merged_daily.keys(), reverse=True)[:12]:
+        item = dict(merged_daily[date_text])
+        total_roi = (
+            round(float(item["payout_yen"]) / float(item["stake_yen"]), 4)
+            if int(item["stake_yen"] or 0) > 0
+            else ""
+        )
+        item["roi_text"] = report_format_percent_text(total_roi) if total_roi != "" else "-"
+        item["cards"] = sorted(
+            list(item.get("cards", []) or []),
+            key=lambda card: engine_order.get(str(card.get("engine", "") or ""), 99),
+        )
+        trend.append(item)
+
+    total_roi = round(float(total_payout) / float(total_stake), 4) if total_stake > 0 else ""
+    return {
+        "totals": {
+            "runs": total_runs,
+            "stake_yen": total_stake,
+            "payout_yen": total_payout,
+            "profit_yen": total_profit,
+            "roi_text": report_format_percent_text(total_roi) if total_roi != "" else "-",
+        },
+        "cards": cards,
+        "trend": trend,
+    }
+
+
+def _public_predictor_history_cards(scope_key="", days=None):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = [scope_norm] if scope_norm else ["central_turf", "central_dirt", "local"]
+    aggregates = {
+        spec["id"]: {
+            "predictor_id": spec["id"],
+            "label": predictor_label(spec["id"]),
+            "samples": 0,
+            "top1_hit": 0,
+            "top1_in_top3": 0,
+            "top3_exact": 0,
+            "top3_hit_count": 0,
+            "top5_hit_count": 0,
+        }
+        for spec in list_predictors()
+    }
+
+    cutoff = None
+    if days not in (None, "", 0):
+        try:
+            days_value = int(days)
+        except (TypeError, ValueError):
+            days_value = 0
+        if days_value > 0:
+            cutoff = datetime.now().date() - timedelta(days=max(0, days_value - 1))
+
+    for scope_item in scope_keys:
+        run_date_map = {}
+        for run_row in load_runs(scope_item):
+            run_id = str(run_row.get("run_id", "") or "").strip()
+            if not run_id:
+                continue
+            date_text = str(run_row.get("race_date", "") or "").strip()
+            if not date_text:
+                timestamp = str(run_row.get("timestamp", "") or "").strip()
+                date_text = timestamp[:10] if len(timestamp) >= 10 else ""
+            parsed = _parse_run_date(date_text) if date_text else None
+            if parsed:
+                run_date_map[run_id] = parsed
+
+        path = get_data_dir(BASE_DIR, scope_item) / "predictor_results.csv"
+        for row in load_csv_rows(path):
+            predictor_id = canonical_predictor_id(row.get("predictor_id"))
+            if not predictor_id:
+                continue
+            run_id = str(row.get("run_id", "") or "").strip()
+            run_date = run_date_map.get(run_id)
+            if cutoff and run_date and run_date < cutoff:
+                continue
+            if cutoff and run_date is None:
+                continue
+            aggregate = aggregates[predictor_id]
+            aggregate["samples"] += 1
+            aggregate["top1_hit"] += int(float(row.get("top1_hit", 0) or 0))
+            aggregate["top1_in_top3"] += int(float(row.get("top1_in_top3", 0) or 0))
+            aggregate["top3_exact"] += int(float(row.get("top3_exact", 0) or 0))
+            aggregate["top3_hit_count"] += int(float(row.get("top3_hit_count", 0) or 0))
+            aggregate["top5_hit_count"] += int(float(row.get("top5_hit_count", 0) or 0))
+
+    cards = []
+    for spec in list_predictors():
+        aggregate = aggregates[spec["id"]]
+        samples = int(aggregate["samples"] or 0)
+        card = {
+            "predictor_id": spec["id"],
+            "label": aggregate["label"],
+            "samples": samples,
+        }
+        top1_hit_rate = round(float(aggregate["top1_hit"]) / float(samples), 4) if samples > 0 else ""
+        top1_in_top3_rate = (
+            round(float(aggregate["top1_in_top3"]) / float(samples), 4) if samples > 0 else ""
+        )
+        top3_hit_rate = (
+            round(float(aggregate["top3_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        top3_exact_rate = round(float(aggregate["top3_exact"]) / float(samples), 4) if samples > 0 else ""
+        top5_to_top3_hit_rate = (
+            round(float(aggregate["top5_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        for key, value in (
+            ("top1_hit_rate", top1_hit_rate),
+            ("top1_in_top3_rate", top1_in_top3_rate),
+            ("top3_hit_rate", top3_hit_rate),
+            ("top3_exact_rate", top3_exact_rate),
+            ("top5_to_top3_hit_rate", top5_to_top3_hit_rate),
+        ):
+            card[key] = value
+            card[f"{key}_text"] = _format_public_rate_text(value)
+        cards.append(card)
+    return cards
+
+
+def _build_public_history_payload(payload, scope_key=""):
+    payload = dict(payload or {})
+    period_options = _public_history_period_options()
+    llm_periods = {}
+    predictor_periods = {}
+    for option in period_options:
+        key = option["key"]
+        days = option["days"]
+        llm_periods[key] = {
+            "label": option["label"],
+            **_public_llm_period_summary(days=days),
+        }
+        predictor_cards = _public_predictor_history_cards(scope_key=scope_key, days=days)
+        predictor_periods[key] = {
+            "label": option["label"],
+            "cards": predictor_cards,
+            "totals": {
+                "samples": sum(int(item.get("samples", 0) or 0) for item in predictor_cards),
+            },
+        }
+    return {
+        "llm": {
+            "periods": llm_periods,
+        },
+        "predictor": {
+            "periods": predictor_periods,
+            "scope_key": normalize_scope_key(scope_key),
+        },
+    }
+
 
 def _resolve_llm_today_target_date(target_date="", scope_key=""):
     scope_norm = normalize_scope_key(scope_key)
@@ -1563,6 +1903,7 @@ def build_public_board_payload(date_text="", scope_key=""):
     sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
     payload["races"] = _with_public_display_sort_fields(sorted_races)
     payload["placeholder_race_count"] = len(placeholder_races)
+    payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     return payload
 
 
@@ -2248,6 +2589,19 @@ def llm_today(date: str = "", scope_key: str = ""):
     return build_public_index_response(PUBLIC_BASE_PATH)
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/race/{{race_path:path}}", response_class=HTMLResponse)
+def public_race_detail_spa(race_path: str):
+    normalized = str(race_path or "").strip("/")
+    if not normalized:
+        return build_public_index_response(PUBLIC_BASE_PATH)
+    return build_public_index_response(f"{PUBLIC_BASE_PATH}/race/{normalized}")
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/history", response_class=HTMLResponse)
+def public_history_spa():
+    return build_public_index_response(f"{PUBLIC_BASE_PATH}/history")
+
+
 @app.get(f"{PUBLIC_BASE_PATH}/about", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/guide", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/methodology", response_class=HTMLResponse)
@@ -2287,6 +2641,7 @@ def robots_txt():
 def sitemap_xml():
     pages = [
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}",
+        f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/history",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/about",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/guide",
         f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}/methodology",

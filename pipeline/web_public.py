@@ -91,6 +91,10 @@ PUBLIC_PAGE_META = {
         "title": "いかいもAI競馬",
         "description": "複数のAI視点を重ねて競馬分析を公開する競馬分析サイト",
     },
+    f"{PUBLIC_BASE_PATH}/history": {
+        "title": "履歴分析 | いかいもAI競馬",
+        "description": "LLMと量化モデルの過去成績をまとめて振り返る公開ヒストリーページです。",
+    },
     f"{PUBLIC_BASE_PATH}/about": {
         "title": "このサイトについて | いかいもAI競馬",
         "description": "いかいもAI競馬の考え方と、複数の視点を重ねる競馬分析の方針を紹介します。",
@@ -134,6 +138,12 @@ PUBLIC_PAGE_META = {
 
 def _public_page_meta(path=""):
     normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
+    if normalized_path.startswith(f"{PUBLIC_BASE_PATH}/race/"):
+        meta = PUBLIC_PAGE_META[PUBLIC_BASE_PATH].copy()
+        meta["title"] = "レース詳細 | いかいもAI競馬"
+        meta["description"] = "各レースの買い目、印、モデル別の推奨馬を見やすく整理した詳細ページです。"
+        meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
+        return meta
     meta = PUBLIC_PAGE_META.get(normalized_path, PUBLIC_PAGE_META[PUBLIC_BASE_PATH]).copy()
     meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
     return meta

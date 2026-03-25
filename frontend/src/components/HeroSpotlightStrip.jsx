@@ -71,14 +71,18 @@ function buildSpotlights(data) {
     if (hitGap !== 0) return hitGap;
     const leftRaceCount = toNumber(left?.settled_races || left?.races, 0);
     const rightRaceCount = toNumber(right?.settled_races || right?.races, 0);
-    const leftRate = leftRaceCount > 0 ? toNumber(left?.hit_races, 0) / leftRaceCount : 0;
-    const rightRate = rightRaceCount > 0 ? toNumber(right?.hit_races, 0) / rightRaceCount : 0;
+    const leftRate =
+      leftRaceCount > 0 ? toNumber(left?.hit_races, 0) / leftRaceCount : 0;
+    const rightRate =
+      rightRaceCount > 0 ? toNumber(right?.hit_races, 0) / rightRaceCount : 0;
     return rightRate - leftRate;
   })[0];
 
   const roiLeader = [...available].sort((left, right) => {
-    const rightPercent = parsePercent(right?.roi_text) ?? toNumber(right?.roi_percent, -1);
-    const leftPercent = parsePercent(left?.roi_text) ?? toNumber(left?.roi_percent, -1);
+    const rightPercent =
+      parsePercent(right?.roi_text) ?? toNumber(right?.roi_percent, -1);
+    const leftPercent =
+      parsePercent(left?.roi_text) ?? toNumber(left?.roi_percent, -1);
     if (rightPercent !== leftPercent) return rightPercent - leftPercent;
     return toNumber(right?.profit_yen, 0) - toNumber(left?.profit_yen, 0);
   })[0];
@@ -86,13 +90,14 @@ function buildSpotlights(data) {
   const hitRaceCount = toNumber(hitLeader?.settled_races || hitLeader?.races, 0);
   const hitValue = toNumber(hitLeader?.hit_races, 0);
   const hitRate = hitRaceCount > 0 ? (hitValue / hitRaceCount) * 100 : 0;
-  const roiValue = parsePercent(roiLeader?.roi_text) ?? toNumber(roiLeader?.roi_percent, 0);
+  const roiValue =
+    parsePercent(roiLeader?.roi_text) ?? toNumber(roiLeader?.roi_percent, 0);
 
   return [
     {
       key: "hits",
       eyebrow: "本日の的中",
-      badge: "的中トップ",
+      badge: "ヒット数",
       title: String(hitLeader?.label || hitLeader?.engine || "-"),
       metricValue: hitValue,
       metricFormatter: (value) => `${Math.round(value)}`,
@@ -102,13 +107,13 @@ function buildSpotlights(data) {
     },
     {
       key: "roi",
-      eyebrow: "最高回収",
-      badge: "回収トップ",
+      eyebrow: "最高回収率",
+      badge: "ROI",
       title: String(roiLeader?.label || roiLeader?.engine || "-"),
       metricValue: roiValue,
       metricFormatter: (value) => formatPercent(value),
       metricSuffix: "",
-      detail: `収益 ${formatYen(roiLeader?.profit_yen)}`,
+      detail: `損益 ${formatYen(roiLeader?.profit_yen)}`,
       caption: String(roiLeader?.roi_text || "-"),
     },
   ];
@@ -122,7 +127,7 @@ export default function HeroSpotlightStrip({ data }) {
   }
 
   return (
-    <section className="hero-spotlight-strip" aria-label="本日のモデル要約">
+    <section className="hero-spotlight-strip" aria-label="本日の注目指標">
       {items.map((item, index) => (
         <article
           key={item.key}
@@ -138,7 +143,10 @@ export default function HeroSpotlightStrip({ data }) {
             <strong className="hero-spotlight-card__title">{item.title}</strong>
             <div className="hero-spotlight-card__metric">
               <strong>
-                <AnimatedMetric value={item.metricValue} formatter={item.metricFormatter} />
+                <AnimatedMetric
+                  value={item.metricValue}
+                  formatter={item.metricFormatter}
+                />
               </strong>
               {item.metricSuffix ? <span>{item.metricSuffix}</span> : null}
             </div>

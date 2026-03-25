@@ -74,8 +74,8 @@ export default function RaceGrid({ races }) {
   const tabs = useMemo(
     () => [
       { key: "all", label: "すべて" },
-      { key: "open", label: "確定待ち" },
-      { key: "settled", label: "結果確定" },
+      { key: "open", label: "発売中" },
+      { key: "settled", label: "確定済み" },
       ...locationTabs.map((location) => ({ key: location, label: location })),
     ],
     [locationTabs],
