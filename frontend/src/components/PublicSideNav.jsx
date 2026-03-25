@@ -52,8 +52,8 @@ export default function PublicSideNav({
     },
     {
       href: "/keiba/history",
-      label: "履歴情報",
-      note: "30日・365日・累計",
+      label: "履歴分析",
+      note: "月間・年間・累計",
       active: normalizedPath === "/keiba/history",
     },
   ];
@@ -64,20 +64,20 @@ export default function PublicSideNav({
           {
             href: `${normalizedDetailHref}#race-detail-summary`,
             label: "レース概要",
-            note: "開催情報と総括",
+            note: "基本情報と要点",
             active: !activeHash || activeHash === "#race-detail-summary",
           },
           {
-            href: `${normalizedDetailHref}#race-detail-compare`,
-            label: "推奨馬比較",
-            note: "各 LLM の本命印",
-            active: activeHash === "#race-detail-compare",
+            href: `${normalizedDetailHref}#race-detail-models`,
+            label: "買い目比較",
+            note: "AIモデル別の買い目",
+            active: activeHash === "#race-detail-models",
           },
           {
-            href: `${normalizedDetailHref}#race-detail-models`,
-            label: "購入プラン",
-            note: "モデル別の買い目",
-            active: activeHash === "#race-detail-models",
+            href: `${normalizedDetailHref}#race-detail-compare`,
+            label: "本命比較",
+            note: "量化モデルの本命比較",
+            active: activeHash === "#race-detail-compare",
           },
         ]
       : [];
@@ -89,28 +89,29 @@ export default function PublicSideNav({
         ? "履歴分析"
         : mode === "static"
           ? "インフォメーション"
-          : "公開予測ボード";
+          : "予測一覧";
 
   const focusText =
     mode === "detail"
-      ? "左の 3 セクションから、レース詳細をすばやく移動できます。"
-      : mode === "static"
-        ? "公開ページの主要導線に戻りやすい補助ナビとして配置しています。"
-        : "公開ページの主要導線を左側に固定しています。";
+      ? "このレースの買い目、比較、結果を一つの流れで確認できます。"
+      : mode === "history"
+        ? "期間ごとの成績比較と量化モデルの傾向をまとめて確認できます。"
+        : mode === "static"
+          ? "サイトの考え方や利用上の案内をまとめています。"
+          : "公開中のレースとモデル予測を一覧で確認できます。";
 
   return (
-    <aside className="public-side-nav" aria-label="公開ナビゲーション">
+    <aside className="public-side-nav" aria-label="サイトナビゲーション">
       <div className="public-side-nav__panel">
         <div className="public-side-nav__brand">
-          <span className="public-side-nav__eyebrow">公開分析デスク</span>
-          <strong className="public-side-nav__title">競馬インテリジェンス</strong>
+          <strong className="public-side-nav__title">いかいもAI競馬</strong>
           <p className="public-side-nav__lead">
-            予測一覧、履歴分析、単場詳細を同じ導線で横断できる公開ビューです。
+            予測一覧、履歴分析、単場詳細を同じ流れで見比べられる公開ビューです。
           </p>
         </div>
 
         <div className="public-side-nav__section">
-          <span className="public-side-nav__section-label">主要ナビゲーション</span>
+          <span className="public-side-nav__section-label">ナビゲーション</span>
           <nav className="public-side-nav__links">
             {primaryItems.map((item) => (
               <SideNavLink
@@ -126,7 +127,7 @@ export default function PublicSideNav({
 
         {detailItems.length ? (
           <div className="public-side-nav__section">
-            <span className="public-side-nav__section-label">レース詳細</span>
+            <span className="public-side-nav__section-label">単場詳細</span>
             <nav className="public-side-nav__links">
               {detailItems.map((item) => (
                 <SideNavLink
@@ -144,7 +145,6 @@ export default function PublicSideNav({
 
         {showTargetFilter && onApplyFilters ? (
           <div className="public-side-nav__section public-side-nav__section--filter">
-            <span className="public-side-nav__section-label">対象日</span>
             <FilterBar
               data={data}
               search={search}

@@ -1636,7 +1636,7 @@ def _build_public_history_payload(payload, scope_key=""):
             "label": option["label"],
             **_public_llm_period_summary(days=days),
         }
-        predictor_cards = _public_predictor_history_cards(scope_key=scope_key, days=days)
+        predictor_cards = _public_predictor_history_cards(scope_key="", days=days)
         predictor_periods[key] = {
             "label": option["label"],
             "cards": predictor_cards,

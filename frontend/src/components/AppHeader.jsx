@@ -23,16 +23,16 @@ export default function AppHeader({
               <img
                 className="app-header__logo"
                 src="/keiba/site-icon.png"
-                alt="競馬インテリジェンス"
+                alt="いかいもAI競馬"
               />
               <div className="app-header__brand-copy">
-                <span className="app-header__tag">公開競馬分析</span>
-                <strong className="app-header__title">競馬インテリジェンス</strong>
+                <span className="app-header__tag">競馬予測サイト</span>
+                <strong className="app-header__title">いかいもAI競馬</strong>
               </div>
             </a>
           </div>
 
-          <nav className="app-header__nav" aria-label="公開ナビゲーション">
+          <nav className="app-header__nav" aria-label="サイトナビゲーション">
             {HEADER_LINKS.map((item) => (
               <a key={item.href} href={item.href}>
                 {item.label}

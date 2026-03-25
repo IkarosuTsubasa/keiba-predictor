@@ -269,10 +269,40 @@ def _public_share_runtime_html():
       .map((item) => item.trim())
       .filter(Boolean);
 
+  const toAbsoluteUrl = (href) => {
+    const text = String(href || "").trim();
+    if (!text) {
+      return SHARE_URL;
+    }
+    try {
+      return new URL(text, window.location.origin).toString();
+    } catch (_error) {
+      return SHARE_URL;
+    }
+  };
+
+  const resolveDetailUrl = (card) => {
+    if (window.location.pathname.includes("/race/")) {
+      return window.location.href;
+    }
+    const raceCard = card?.closest(".race-card");
+    const detailHref = raceCard?.querySelector(".race-card__toggle")?.getAttribute("href") || "";
+    return toAbsoluteUrl(detailHref);
+  };
+
+  const replaceShareUrl = (text, detailUrl) => {
+    const source = String(text || "").trim();
+    if (!source) {
+      return "";
+    }
+    return source.includes(SHARE_URL) ? source.replaceAll(SHARE_URL, detailUrl) : source;
+  };
+
   const buildShareText = (raceTitle, card) => {
+    const detailUrl = resolveDetailUrl(card);
     const presetText = String(card?.dataset?.shareText || "").trim();
     if (presetText) {
-      return presetText;
+      return replaceShareUrl(presetText, detailUrl);
     }
     let ticketText = "";
     let marksText = "\\u5370\\u306a\\u3057";
@@ -299,7 +329,7 @@ def _public_share_runtime_html():
     }
     const header = parseRaceHeader(raceTitle);
     const ticketLines = splitLines(ticketText);
-    const tailLines = [SHARE_DETAIL_LABEL, SHARE_URL, SHARE_HASHTAG];
+    const tailLines = [SHARE_DETAIL_LABEL, detailUrl, SHARE_HASHTAG];
     const lines = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", "\\u8cb7\\u3044\\u76ee\\uff08\\u4e00\\u90e8\\uff09"];
     for (const ticketLine of ticketLines) {
       const candidate = [...lines, ticketLine, "", ...tailLines].join("\\n");

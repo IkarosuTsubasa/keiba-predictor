@@ -107,8 +107,8 @@ function ConsensusPanel({ consensusRows }) {
     <section className="race-detail-panel race-detail-panel--consensus">
       <div className="race-detail-panel__head">
         <div>
-          <span className="race-detail-panel__eyebrow">Consensus</span>
-          <h2>本命コンセンサス</h2>
+          <span className="race-detail-panel__eyebrow">総合評価</span>
+          <h2>AI・量化モデル総合本命</h2>
         </div>
       </div>
       {consensusRows.length ? (
@@ -117,12 +117,12 @@ function ConsensusPanel({ consensusRows }) {
             <article key={item.horseNo} className="race-detail-consensus-item">
               <span>{`0${index + 1}`.slice(-2)}</span>
               <strong>{`${MAIN_MARK}${item.horseNo}`}</strong>
-              <em>{`${item.count}モデル`}</em>
+              <em>{`${item.count}モデル支持`}</em>
             </article>
           ))}
         </div>
       ) : (
-        <PanelEmpty>本命の集計対象データはまだありません。</PanelEmpty>
+        <PanelEmpty>総合本命を集計できるデータがまだありません。</PanelEmpty>
       )}
     </section>
   );
@@ -153,7 +153,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
     <article className="race-detail-model-card">
       <div className="race-detail-model-card__head">
         <div>
-          <span className="race-detail-model-card__eyebrow">モデル</span>
+          <span className="race-detail-model-card__eyebrow">AIモデル</span>
           <h3>{card?.label || "-"}</h3>
         </div>
         <div className="race-detail-model-card__badges">
@@ -174,7 +174,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
 
       <div className="race-detail-model-card__section">
         <div className="race-detail-model-card__section-head">
-          <span>買い目プラン</span>
+          <span>買い目</span>
         </div>
         <BetPreviewList text={card?.ticket_plan_text || ""} />
       </div>
@@ -202,7 +202,9 @@ export default function RaceDetailPage({ race, search = "" }) {
     () => buildConsensusRows(cards, predictorCompareCards),
     [cards, predictorCompareCards],
   );
-  const badges = formatRaceBadges(race).filter((item) => !["良", "稍重", "重", "不良"].includes(String(item || "").trim()));
+  const badges = formatRaceBadges(race).filter(
+    (item) => !["良", "稍重", "重", "不良"].includes(String(item || "").trim()),
+  );
   const backHref = buildBackHref(search);
   const totalPlanCount = cards.reduce(
     (sum, card) => sum + parsePlanCount(card?.ticket_plan_text),
@@ -240,8 +242,8 @@ export default function RaceDetailPage({ race, search = "" }) {
       >
         <div className="race-detail-panel__head">
           <div>
-            <span className="race-detail-panel__eyebrow">Purchase Desk</span>
-            <h2>モデル別の買い目プラン</h2>
+            <span className="race-detail-panel__eyebrow">買い目一覧</span>
+            <h2>AIモデル別の買い目</h2>
           </div>
         </div>
         <div className="race-detail-model-grid">
@@ -254,7 +256,7 @@ export default function RaceDetailPage({ race, search = "" }) {
               />
             ))
           ) : (
-            <PanelEmpty>買い目プランはまだ公開されていません。</PanelEmpty>
+            <PanelEmpty>買い目データはまだ公開されていません。</PanelEmpty>
           )}
         </div>
       </section>
@@ -266,7 +268,7 @@ export default function RaceDetailPage({ race, search = "" }) {
         >
           <div className="race-detail-panel__head">
             <div>
-              <span className="race-detail-panel__eyebrow">Quant Model</span>
+              <span className="race-detail-panel__eyebrow">量化モデル</span>
               <h2>量化モデルの本命比較</h2>
             </div>
           </div>
@@ -290,7 +292,7 @@ export default function RaceDetailPage({ race, search = "" }) {
           <section className="race-detail-panel race-detail-panel--result">
             <div className="race-detail-panel__head">
               <div>
-                <span className="race-detail-panel__eyebrow">Result</span>
+                <span className="race-detail-panel__eyebrow">確定結果</span>
                 <h2>レース結果</h2>
               </div>
             </div>

@@ -100,8 +100,10 @@ export default function PageSectionHeader({
 
   return (
     <div className="page-section-header">
-      <div className="page-section-header__copy">
-        <span className="page-section-header__kicker">{kicker}</span>
+      <div
+        className={`page-section-header__copy${kicker ? "" : " page-section-header__copy--compact"}`}
+      >
+        {kicker ? <span className="page-section-header__kicker">{kicker}</span> : null}
         <h1>{title}</h1>
         {subtitle ? (
           <AutoFitLine
