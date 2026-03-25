@@ -526,11 +526,48 @@ class FeatureEngineV6(FeatureEngine):
         d = d.sort_values(["HorseName", "Date"]).reset_index(drop=True)
         grouped = {str(k).strip(): v.copy() for k, v in d.groupby("HorseName", sort=False)} if not d.empty else {}
 
-        target_horses: List[str] = []
-        target_horses.extend([str(x).strip() for x in d.get("HorseName", pd.Series(dtype=str)).dropna().unique().tolist()])
-        odds_names = [str(k).strip() for k in getattr(odds_engine, "_features", {}).keys()]
-        target_horses.extend(odds_names)
-        target_horses = [x for i, x in enumerate(target_horses) if x and x not in target_horses[:i]]
+        shutuba_names = [
+            str(x).strip()
+            for x in d.get("HorseName", pd.Series(dtype=str)).dropna().unique().tolist()
+            if str(x).strip()
+        ]
+        odds_names = [
+            str(k).strip()
+            for k in getattr(odds_engine, "_features", {}).keys()
+            if str(k).strip()
+        ]
+
+        current_mask = pd.Series(False, index=d.index)
+        if not d.empty:
+            if "Date" in d.columns:
+                current_mask = current_mask | d["Date"].isna()
+            if "Rank" in d.columns:
+                current_mask = current_mask | (
+                    pd.to_numeric(d["Rank"], errors="coerce").fillna(999) >= 900
+                )
+        current_names = (
+            [
+                str(x).strip()
+                for x in d.loc[current_mask, "HorseName"].dropna().unique().tolist()
+                if str(x).strip()
+            ]
+            if ("HorseName" in d.columns and current_mask.any())
+            else []
+        )
+        shared_names = [name for name in odds_names if name in set(shutuba_names)]
+
+        if current_names:
+            target_horses = current_names
+        elif odds_names:
+            target_horses = odds_names
+            if shutuba_names and not shared_names:
+                print(
+                    "[WARN] shutuba.csv and odds files appear to describe different races. "
+                    "Using odds.csv horse list for inference."
+                )
+        else:
+            target_horses = shutuba_names
+
         if not target_horses:
             return pd.DataFrame()
 

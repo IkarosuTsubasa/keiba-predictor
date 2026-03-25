@@ -447,6 +447,24 @@ select {
   color: var(--muted);
 }
 
+.admin-login-page,
+.admin-jobs-page {
+  --bg-elevated: rgba(23, 34, 49, 0.96);
+  --line: rgba(226, 210, 170, 0.24);
+  --line-strong: rgba(226, 210, 170, 0.4);
+  --text: #f7fbff;
+  --muted: #cfd9e6;
+  --gold: #e7bf73;
+  --green: #88efba;
+  --orange: #ffc37d;
+  --red: #ff9d9d;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(136, 239, 186, 0.08), transparent 24%),
+    radial-gradient(circle at top right, rgba(231, 191, 115, 0.12), transparent 22%),
+    linear-gradient(180deg, #0c1420 0%, #101b29 100%);
+}
+
 .admin-jobs-page {
   min-height: 100vh;
   padding: 24px 12px 80px;
@@ -472,8 +490,8 @@ select {
   min-height: 42px;
   padding: 0 16px;
   border-radius: 12px;
-  border: 1px solid rgba(199, 166, 109, 0.26);
-  background: rgba(17, 25, 37, 0.92);
+  border: 1px solid rgba(231, 191, 115, 0.32);
+  background: rgba(30, 43, 61, 0.96);
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -498,7 +516,7 @@ select {
 .admin-inline-panel {
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(15, 23, 35, 0.98));
   box-shadow: var(--shadow);
 }
 
@@ -507,13 +525,14 @@ select {
   padding: 16px 18px;
   cursor: pointer;
   font-weight: 700;
+  color: var(--text);
 }
 
 .admin-tool-panel--primary {
-  border-color: rgba(199, 166, 109, 0.34);
+  border-color: rgba(231, 191, 115, 0.4);
   background:
-    linear-gradient(180deg, rgba(31, 24, 13, 0.55), rgba(10, 17, 26, 0.98)),
-    linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+    linear-gradient(180deg, rgba(61, 46, 22, 0.6), rgba(15, 23, 35, 0.98)),
+    linear-gradient(180deg, var(--bg-elevated), rgba(15, 23, 35, 0.98));
 }
 
 .admin-tool-panel--primary > summary {
@@ -521,11 +540,11 @@ select {
 }
 
 .admin-tool-panel--secondary {
-  background: rgba(12, 18, 28, 0.82);
+  background: rgba(24, 35, 50, 0.94);
 }
 
 .admin-tool-panel--secondary > summary {
-  color: var(--muted);
+  color: #e7eef8;
 }
 
 .admin-tool-panel--compact .admin-tool-panel__body {
@@ -561,7 +580,7 @@ select {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(17, 25, 37, 0.95);
+  background: rgba(31, 45, 64, 0.98);
 }
 
 .admin-inline-form textarea {
@@ -613,7 +632,7 @@ select {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(15, 23, 35, 0.98));
   box-shadow: var(--shadow);
   display: grid;
   gap: 12px;
@@ -649,9 +668,18 @@ select {
 .admin-workspace-table th,
 .admin-workspace-table td {
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   text-align: left;
   white-space: nowrap;
+}
+
+.admin-workspace-table th {
+  color: #eef5ff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.admin-workspace-table td {
+  color: var(--text);
 }
 
 .admin-workspace-meta {
@@ -739,7 +767,7 @@ select {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(17, 25, 37, 0.95);
+  background: rgba(31, 45, 64, 0.98);
 }
 
 .admin-toolbar__field--wide {
@@ -756,7 +784,7 @@ select {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.96));
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(15, 23, 35, 0.96));
   display: grid;
   gap: 10px;
 }
@@ -792,7 +820,7 @@ select {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(180deg, var(--bg-elevated), rgba(10, 17, 26, 0.98));
+  background: linear-gradient(180deg, var(--bg-elevated), rgba(15, 23, 35, 0.98));
   box-shadow: var(--shadow);
   display: grid;
   gap: 14px;
@@ -908,8 +936,8 @@ select {
   min-height: 38px;
   padding: 0 14px;
   border-radius: 12px;
-  border: 1px solid rgba(199, 166, 109, 0.22);
-  background: rgba(17, 25, 37, 0.82);
+  border: 1px solid rgba(231, 191, 115, 0.28);
+  background: rgba(30, 43, 61, 0.92);
   color: var(--text);
   text-decoration: none;
   display: inline-flex;
@@ -925,8 +953,8 @@ select {
 .admin-job-card__log-item {
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(155, 167, 184, 0.14);
-  background: rgba(8, 13, 20, 0.55);
+  border: 1px solid rgba(207, 217, 230, 0.18);
+  background: rgba(19, 28, 41, 0.88);
   display: grid;
   gap: 6px;
 }
@@ -936,6 +964,7 @@ select {
   justify-content: space-between;
   gap: 10px;
   font-size: 13px;
+  color: #eef5ff;
 }
 
 .admin-job-card__log-item p {

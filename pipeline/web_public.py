@@ -295,7 +295,11 @@ def _public_share_runtime_html():
     if (!source) {
       return "";
     }
-    return source.includes(SHARE_URL) ? source.replaceAll(SHARE_URL, detailUrl) : source;
+    const escapedShareUrl = SHARE_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const placeholderLinePattern = new RegExp(`(^|\\n)${escapedShareUrl}(?=\\n|$)`, "g");
+    return placeholderLinePattern.test(source)
+      ? source.replace(placeholderLinePattern, (matched, prefix) => `${prefix}${detailUrl}`)
+      : source;
   };
 
   const buildShareText = (raceTitle, card) => {
