@@ -289,7 +289,13 @@ function LoadingState() {
     <main className="public-screen-state">
       <section className="public-screen-state__panel">
         <span className="public-screen-state__eyebrow">読み込み中</span>
-        <h1>本日の公開レースを読み込んでいます</h1>
+        <div className="public-screen-state__loader" aria-hidden="true">
+          <span className="public-screen-state__loader-ring" />
+          <span className="public-screen-state__loader-core" />
+          <span className="public-screen-state__loader-pulse public-screen-state__loader-pulse--one" />
+          <span className="public-screen-state__loader-pulse public-screen-state__loader-pulse--two" />
+        </div>
+        <h1 className="public-screen-state__loading-title">本日の公開レースを読み込んでいます</h1>
         <p>最新の公開データを取得しています。しばらくお待ちください。</p>
       </section>
     </main>
