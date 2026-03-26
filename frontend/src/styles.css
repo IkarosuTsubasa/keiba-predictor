@@ -4562,7 +4562,6 @@ body {
 
   .race-detail-hero__meta,
   .race-detail-model-grid,
-  .race-detail-mark-grid,
   .race-detail-model-card__stats {
     grid-template-columns: 1fr;
   }
