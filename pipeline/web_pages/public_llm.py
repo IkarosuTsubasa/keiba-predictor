@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 import re
@@ -31,8 +31,7 @@ BET_TYPE_TEXT_MAP = {
     "wide": "ワイド",
     "quinella": "馬連",
     "exacta": "馬単",
-    "trio": "三連複",
-    "trifecta": "三連単",
+    "trio": "3連複",
 }
 
 MARK_ORDER = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
@@ -44,10 +43,10 @@ def public_status_meta_ja(ticket_summary, actual_names):
     if status == "settled":
         return "結果確定", "settled"
     if status == "pending":
-        return "精算待ち", "pending"
+        return "結果待ち", "pending"
     if actual_ready:
-        return "結果確定", "result"
-    return "確定待ち", "planned"
+        return "結果あり", "result"
+    return "公開中", "planned"
 
 
 def public_yen_text(value):
@@ -97,7 +96,7 @@ def _share_ticket_lines(ticket_rows, *, to_int_or_none):
         amount = to_int_or_none(row.get("amount_yen"))
         if amount is None:
             amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"¥{int(amount)}" if amount is not None else "-"
+        amount_text = f"ﾂ･{int(amount)}" if amount is not None else "-"
         lines.append(f"{bet_type} {horse_no} {amount_text}")
     return lines
 
@@ -467,7 +466,7 @@ def build_public_llm_page(
             f"""
             <article class="card">
               <h3>{html.escape(safe_text(item.get('label')) or '-')}</h3>
-              <p>利益 {html.escape(public_yen_text(item.get('profit_yen', 0)))}</p>
+              <p>損益 {html.escape(public_yen_text(item.get('profit_yen', 0)))}</p>
               <p>回収率 {html.escape(safe_text(item.get('roi_text')) or '-')}</p>
               <p>的中 {int(item.get('hit_races', 0) or 0)} / {int(item.get('races', 0) or 0)}</p>
             </article>
@@ -482,7 +481,7 @@ def build_public_llm_page(
                 f"""
                 <article class="card">
                   <h4>{html.escape(safe_text(card.get('label')) or '-')}</h4>
-                  <p>判断 {html.escape(safe_text(card.get('decision_text')) or '-')}</p>
+                  <p>判定 {html.escape(safe_text(card.get('decision_text')) or '-')}</p>
                   <p>印 {html.escape(safe_text(card.get('marks_text')) or '-')}</p>
                   <p style="white-space: pre-wrap;">{html.escape(safe_text(card.get('ticket_plan_text')) or '-')}</p>
                 </article>
@@ -577,7 +576,7 @@ def build_public_llm_page(
     <section class="hero">
       <div class="eyebrow">Legacy Public LLM Page</div>
       <h1>{html.escape(target_date_label)}</h1>
-      <p>レース数 {int(totals.get('race_count', 0) or 0)} / 利益 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
+      <p>レース数 {int(totals.get('race_count', 0) or 0)} / 損益 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
       <p>投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / 回収率 {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>
     </section>
     {notice_html}
@@ -587,3 +586,4 @@ def build_public_llm_page(
 </body>
 </html>"""
     return prefix_public_html_routes(html_text)
+

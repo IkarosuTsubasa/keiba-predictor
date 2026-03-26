@@ -257,7 +257,6 @@ def refresh_odds_for_run(
     quinella_odds_path=None,
     exacta_odds_path=None,
     trio_odds_path=None,
-    trifecta_odds_path=None,
 ):
     return web_policy_runtime.refresh_odds_for_run(
         run_row,
@@ -268,7 +267,6 @@ def refresh_odds_for_run(
         quinella_odds_path=quinella_odds_path,
         exacta_odds_path=exacta_odds_path,
         trio_odds_path=trio_odds_path,
-        trifecta_odds_path=trifecta_odds_path,
         get_env_timeout=get_env_timeout,
         normalize_race_id=normalize_race_id,
         odds_extract_path=ODDS_EXTRACT,
@@ -417,7 +415,6 @@ def build_predictor_env(scope_norm, resolved_run_id, run_row):
         "quinella_odds_path": ("QUINELLA_ODDS_PATH", "quinella_odds"),
         "exacta_odds_path": ("EXACTA_ODDS_PATH", "exacta_odds"),
         "trio_odds_path": ("TRIO_ODDS_PATH", "trio_odds"),
-        "trifecta_odds_path": ("TRIFECTA_ODDS_PATH", "trifecta_odds"),
     }
     for field_name, (env_name, prefix) in odds_env_map.items():
         path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, field_name, prefix)
@@ -838,7 +835,6 @@ def build_policy_candidates(
     quinella_odds_map,
     exacta_odds_map,
     trio_odds_map,
-    trifecta_odds_map,
     allowed_types,
     consensus_rows=None,
 ):
@@ -848,7 +844,6 @@ def build_policy_candidates(
         quinella_odds_map,
         exacta_odds_map,
         trio_odds_map,
-        trifecta_odds_map,
         allowed_types,
         consensus_rows=consensus_rows,
     )
@@ -858,7 +853,7 @@ def build_pair_odds_top(candidate_lookup):
     return web_policy_payload.build_pair_odds_top(candidate_lookup)
 
 
-def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None, trifecta_rows=None):
+def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None):
     return web_policy_payload.build_odds_full(
         win_rows,
         place_rows,
@@ -866,7 +861,6 @@ def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=
         quinella_rows,
         exacta_rows,
         trio_rows,
-        trifecta_rows,
         to_float=to_float,
     )
 
@@ -886,7 +880,6 @@ def build_policy_input_payload(
     quinella_odds_path,
     exacta_odds_path,
     trio_odds_path,
-    trifecta_odds_path,
     policy_engine,
 ):
     return web_policy_payload.build_policy_input_payload(
@@ -900,7 +893,6 @@ def build_policy_input_payload(
         quinella_odds_path,
         exacta_odds_path,
         trio_odds_path,
-        trifecta_odds_path,
         policy_engine,
         load_csv_rows_flexible=load_csv_rows_flexible,
         load_name_to_no=load_name_to_no,
@@ -1986,7 +1978,6 @@ _DAILY_SUMMARY_BET_TYPE_LABELS = {
     "quinella": "馬連",
     "exacta": "馬単",
     "trio": "3連複",
-    "trifecta": "3連単",
 }
 
 
@@ -2539,7 +2530,6 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
         ("quinella_odds_path", "quinella_odds"),
         ("exacta_odds_path", "exacta_odds"),
         ("trio_odds_path", "trio_odds"),
-        ("trifecta_odds_path", "trifecta_odds"),
         ("predictions_path", "predictor_v1"),
         ("predictions_v2_opus_path", "predictor_v2"),
         ("predictions_v3_premium_path", "predictor_v3"),

@@ -692,16 +692,6 @@ def fetch_and_save_jra_api_odds(race_url):
             "trio_odds.csv", ["horse_no_a", "horse_no_b", "horse_no_c", "odds"], trio_results
         )
 
-    trifecta_results = parse_jra_triple_payload(
-        payloads[JRA_API_TYPE_TRIFECTA], JRA_API_TYPE_TRIFECTA
-    )
-    if trifecta_results:
-        save_csv(
-            "trifecta_odds.csv",
-            ["horse_no_a", "horse_no_b", "horse_no_c", "odds"],
-            trifecta_results,
-        )
-
     return bool(
         win_results
         or place_results
@@ -709,7 +699,6 @@ def fetch_and_save_jra_api_odds(race_url):
         or wide_results
         or exacta_results
         or trio_results
-        or trifecta_results
     )
 
 
@@ -1312,10 +1301,6 @@ def fetch_and_save_nar_triple_series(race_url):
         fetch_and_save_nar_triple_odds(race_url, "b7", "trio_odds.csv", keep_order=False)
     except Exception as exc:
         print(f"[WARN] trio fetch failed: {exc}")
-    try:
-        fetch_and_save_nar_triple_odds(race_url, "b8", "trifecta_odds.csv", keep_order=True)
-    except Exception as exc:
-        print(f"[WARN] trifecta fetch failed: {exc}")
 
 
 def run_browser_odds_flow(race_url, host):

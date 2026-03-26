@@ -64,14 +64,6 @@ HTML_SAMPLE = """
             <td class="Payout"><span>200円<br/>150円<br/>130円</span></td>
             <td class="Ninki"><span>3人気</span><span>2人気</span><span>1人気</span></td>
           </tr>
-          <tr class="Tan3">
-            <th>3連単</th>
-            <td class="Result">
-              <ul><li><span>1</span></li><li><span>7</span></li><li><span>8</span></li></ul>
-            </td>
-            <td class="Payout"><span>2,000円</span></td>
-            <td class="Ninki"><span>6人気</span></td>
-          </tr>
         </tbody>
       </table>
     </div>
@@ -97,7 +89,6 @@ def main():
     assert_true(payload["payouts"]["単勝"][0]["payout_yen"] == 270, "tansho payout failed")
     assert_true(payload["payouts"]["複勝"][1]["horse_numbers"] == ["7"], "fukusho parse failed")
     assert_true(payload["payouts"]["ワイド"][2]["horse_numbers"] == ["7", "8"], "wide parse failed")
-    assert_true(payload["payouts"]["3連単"][0]["horse_numbers"] == ["1", "7", "8"], "trifecta parse failed")
     print("smoke_fetch_central_result: OK")
 
 

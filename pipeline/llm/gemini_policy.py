@@ -69,14 +69,14 @@ class PolicyPrediction(BaseModel):
 
 
 class PairOddsSnapshot(BaseModel):
-    bet_type: Literal["wide", "quinella", "exacta", "trio", "trifecta"]
+    bet_type: Literal["wide", "quinella", "exacta", "trio"]
     pair: str
     odds: float
 
 
 class PolicyCandidate(BaseModel):
     id: str
-    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]
+    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio"]
     legs: List[str]
     odds_used: float
     p_hit: float
@@ -96,7 +96,7 @@ class PolicyConstraints(BaseModel):
     race_budget_yen: int = 0
     max_tickets_per_race: int
     high_odds_threshold: float
-    allowed_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]] = Field(default_factory=list)
+    allowed_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio"]] = Field(default_factory=list)
 
 
 class RacePolicyInput(BaseModel):
@@ -131,7 +131,7 @@ class PolicyMark(BaseModel):
 
 
 class PolicyTicketPlan(BaseModel):
-    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]
+    bet_type: Literal["win", "place", "wide", "quinella", "exacta", "trio"]
     legs: List[str]
     stake_yen: int
 
@@ -139,7 +139,7 @@ class PolicyTicketPlan(BaseModel):
 class RacePolicyOutput(BaseModel):
     bet_decision: Literal["bet", "no_bet"]
     participation_level: Literal["no_bet", "small_bet", "normal_bet"]
-    enabled_bet_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]] = Field(default_factory=list)
+    enabled_bet_types: List[Literal["win", "place", "wide", "quinella", "exacta", "trio"]] = Field(default_factory=list)
     construction_style: Optional[Literal["single_axis", "pair_spread", "value_hunt", "conservative_single"]] = None
     key_horses: List[str] = Field(default_factory=list)
     secondary_horses: List[str] = Field(default_factory=list)
@@ -455,7 +455,7 @@ def _infer_internal_policy_style(
         seen.add(text)
         enabled.append(text)
 
-    multi_leg_types = {"wide", "quinella", "exacta", "trio", "trifecta"}
+    multi_leg_types = {"wide", "quinella", "exacta", "trio"}
     top_type = enabled[0] if enabled else ""
     only_place = enabled == ["place"]
     only_win = enabled == ["win"]
@@ -550,7 +550,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     predictions = list(input_obj.predictions or [])
     high_odds_threshold = float(constraints.high_odds_threshold or 10.0)
     has_value = any(float(c.ev) > 0.0 for c in candidates)
-    has_combo_value = any(str(c.bet_type) in ("wide", "quinella", "exacta", "trio", "trifecta") and float(c.ev) > 0.0 for c in candidates)
+    has_combo_value = any(str(c.bet_type) in ("wide", "quinella", "exacta", "trio") and float(c.ev) > 0.0 for c in candidates)
     longshot_candidates = [c for c in candidates if float(c.odds_used) >= high_odds_threshold and float(c.ev) > 0.0]
     top_key = str(predictions[0].horse_no) if predictions else (horses[0] if horses else "")
     second_key = str(predictions[1].horse_no) if len(predictions) >= 2 else ""
@@ -624,7 +624,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
         enabled = [str(ranked_candidates[0].bet_type or "").strip().lower()]
 
     top_type = enabled[0] if enabled else ""
-    multi_leg_types = {"wide", "quinella", "exacta", "trio", "trifecta"}
+    multi_leg_types = {"wide", "quinella", "exacta", "trio"}
     top_is_multi_leg = top_type in multi_leg_types
     only_place = enabled == ["place"]
     only_win = enabled == ["win"]
@@ -663,7 +663,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     risk_tilt = "low"
     if participation_level == "normal_bet":
         risk_tilt = "medium"
-    if top_type in {"trio", "trifecta"} and participation_level != "no_bet":
+    if top_type == "trio" and participation_level != "no_bet":
         risk_tilt = "high" if strong_edge else "medium"
 
     key_horses = [top_key] if top_key else []
@@ -752,7 +752,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank / rank_std / top3_prob_range\n"
         "  - performance.current_scope_history: 現在条件（芝/ダート/地方）での各モデルの実績命中率\n"
         "- horse_facts: 各馬の共通ファクト。TI、経験、騎手、オッズ、休み明け日数などの軽量サマリ\n"
-        "- odds_full: 全券種の全量オッズ（win/place/wide/quinella/exacta/trio/trifecta）\n"
+        "- odds_full: 全券種の全量オッズ（win/place/wide/quinella/exacta/trio）\n"
         "- portfolio_history: あなた自身の直近購入履歴・損益推移・券種別成績\n"
         "  - today: 本日の開始本金・確定損益・未決済拘束額・利用可能残高\n"
         "  - recent_days / lookback_summary / bet_type_breakdown / recent_tickets\n"
@@ -920,7 +920,7 @@ def _sanitize_ticket_plan(
             continue
         if not all(h in allowed_set for h in legs):
             continue
-        expected_leg_count = {"win": 1, "place": 1, "wide": 2, "quinella": 2, "exacta": 2, "trio": 3, "trifecta": 3}
+        expected_leg_count = {"win": 1, "place": 1, "wide": 2, "quinella": 2, "exacta": 2, "trio": 3}
         if len(legs) != expected_leg_count.get(bet_type, 0):
             continue
         # For unordered bet types, sort legs to canonicalize the key

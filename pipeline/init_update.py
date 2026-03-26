@@ -40,7 +40,6 @@ DEFAULT_BET_CONFIG = {
     "strength_blend": 0.7,
     "coverage_target": 0.65,
     "min_eligible": 5,
-    "trifecta_rec_min_hit_prob": 0.06,
     "hit_floors": {
         "win": 0.55,
         "place": 0.6,
@@ -204,7 +203,6 @@ CSV_SPECS = {
         "quinella_odds_path",
         "exacta_odds_path",
         "trio_odds_path",
-        "trifecta_odds_path",
         "plan_path",
         "tickets",
         "amount_yen",

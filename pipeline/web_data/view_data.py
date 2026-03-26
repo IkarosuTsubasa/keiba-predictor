@@ -160,7 +160,12 @@ def _fallback_bet_types(pred_rank):
     return ""
 
 
-BET_TYPE_PRIORITY = ["win", "place", "wide", "quinella", "trifecta", "superfecta"]
+BET_TYPE_PRIORITY = ["win", "place", "wide", "quinella", "superfecta"]
+
+
+def _is_legacy_recommendation_type(bet_type):
+    text = str(bet_type or "").strip().lower()
+    return text.endswith("_rec")
 
 
 def _format_bet_types(bet_types):
@@ -265,7 +270,7 @@ def _build_bet_map(plan_rows, to_float):
             if status_text:
                 gate_status = status_text
         bet_type = str(row.get("bet_type", "")).strip().lower()
-        if bet_type in ("", "trifecta_rec", "pass"):
+        if bet_type in ("", "pass") or _is_legacy_recommendation_type(bet_type):
             continue
         amount = to_float(row.get("amount_yen"))
         expected = to_float(row.get("expected_return_yen"))
@@ -492,7 +497,7 @@ def load_mark_recommendation_table(get_data_dir, base_dir, load_csv_rows, to_flo
             if status_text:
                 gate_status = status_text
         bet_type = str(row.get("bet_type", "")).strip().lower()
-        if bet_type in ("", "trifecta_rec", "pass"):
+        if bet_type in ("", "pass") or _is_legacy_recommendation_type(bet_type):
             continue
         amount = to_float(row.get("amount_yen"))
         expected = to_float(row.get("expected_return_yen"))
@@ -718,7 +723,7 @@ def load_mc_uncertainty_summary(get_data_dir, base_dir, load_csv_rows, to_float,
     filtered = [
         row
         for row in rows
-        if str(row.get("bet_type", "")).strip().lower() != "trifecta_rec"
+        if not _is_legacy_recommendation_type(row.get("bet_type", ""))
     ]
     filtered = [
         row

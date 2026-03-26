@@ -405,8 +405,6 @@ def eval_ticket_hit(bet_type, horse_names, actual_order):
         return 1 if len(names) >= 2 and names[0] == actual[0] and names[1] == actual[1] else 0
     if bet == "trio":
         return 1 if len(names) >= 3 and set(names[:3]) == set(top3) else 0
-    if bet == "trifecta":
-        return 1 if len(names) >= 3 and names[:3] == top3 else 0
     return 0
 
 
@@ -432,8 +430,6 @@ def eval_ticket_hit_by_nos(bet_type, horse_nos, actual_top3_nos):
         return 1 if len(nos) >= 2 and nos[0] == actual[0] and nos[1] == actual[1] else 0
     if bet == "trio":
         return 1 if len(nos) >= 3 and set(nos[:3]) == set(top3) else 0
-    if bet == "trifecta":
-        return 1 if len(nos) >= 3 and nos[:3] == top3 else 0
     return 0
 
 
@@ -445,7 +441,6 @@ def build_official_payout_lookup(official_result_payload):
         "馬連": "quinella",
         "馬単": "exacta",
         "3連複": "trio",
-        "3連単": "trifecta",
     }
     payouts = {}
     for jp_bet_type, entries in dict((official_result_payload or {}).get("payouts", {}) or {}).items():
@@ -503,7 +498,6 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     quinella_path = (run_row or {}).get("quinella_odds_path", "")
     exacta_path = (run_row or {}).get("exacta_odds_path", "")
     trio_path = (run_row or {}).get("trio_odds_path", "")
-    trifecta_path = (run_row or {}).get("trifecta_odds_path", "")
     name_to_no = load_name_to_no(odds_path)
     win_odds_map = load_win_odds_map(odds_path)
     place_odds_map = load_place_odds_map(fuku_path)
@@ -511,7 +505,6 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
     quinella_odds_map = load_pair_odds_map(quinella_path)
     exacta_odds_map = load_exacta_odds_map(exacta_path)
     trio_odds_map = load_triple_odds_map(trio_path, ordered=False)
-    trifecta_odds_map = load_triple_odds_map(trifecta_path, ordered=True)
     official_payouts = build_official_payout_lookup(official_result_payload)
     official_top3_nos = [parse_horse_no(item.get("horse_no")) for item in list((official_result_payload or {}).get("top3", []) or [])[:3]]
     official_top3_nos = [x for x in official_top3_nos if x is not None]
@@ -551,9 +544,6 @@ def settle_run_tickets(base_dir, run_row, actual_top3_names, policy_engine="gemi
             elif payout <= 0 and bet_type == "trio" and len(nos) >= 3:
                 key = tuple(sorted(nos[:3]))
                 payout = int(round(stake * float(trio_odds_map.get(key, 0) or 0)))
-            elif payout <= 0 and bet_type == "trifecta" and len(nos) >= 3:
-                key = tuple(nos[:3])
-                payout = int(round(stake * float(trifecta_odds_map.get(key, 0) or 0)))
         profit = int(payout - stake)
         settled_count += 1
         total_stake += stake

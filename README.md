@@ -124,7 +124,7 @@ python pipeline/web_server.py
 - Runs on `http://127.0.0.1:8000`
 
 ## Data and Outputs
-- Root outputs (latest run): `predictions.csv`, `odds.csv`, `fuku_odds.csv`, `wide_odds.csv`, `quinella_odds.csv`, `trifecta_odds.csv`
+- Root outputs (latest run): `predictions.csv`, `odds.csv`, `fuku_odds.csv`, `wide_odds.csv`, `quinella_odds.csv`, `trio_odds.csv`
 - Per-scope logs: `pipeline/data/<scope>/runs.csv`, `results.csv`, `predictor_results.csv`, and optimizer logs
 - Per-race snapshots: `pipeline/data/<scope>/<race_id>/` (predictions and odds)
 

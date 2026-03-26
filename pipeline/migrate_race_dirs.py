@@ -17,7 +17,6 @@ PATH_FIELDS = {
     "wide_odds_path": "wide_odds",
     "fuku_odds_path": "fuku_odds",
     "quinella_odds_path": "quinella_odds",
-    "trifecta_odds_path": "trifecta_odds",
     "plan_path": "bet_plan",
 }
 
@@ -43,7 +42,6 @@ CANONICAL_FIELDS = [
     "wide_odds_path",
     "fuku_odds_path",
     "quinella_odds_path",
-    "trifecta_odds_path",
     "plan_path",
     "tickets",
     "amount_yen",

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 
 from llm.gemini_policy import (
@@ -123,9 +123,8 @@ def _build_smoke_input():
                 "score": round((p_exacta * odds_exacta - 1.0) * (p_exacta**0.5), 6),
             }
         )
-    for a, b, c, odds_trio, odds_trifecta in [(1, 2, 3, 41.5, 126.4), (1, 2, 4, 55.2, 188.6)]:
+    for a, b, c, odds_trio in [(1, 2, 3, 41.5), (1, 2, 4, 55.2)]:
         p_trio = round(min(0.08, 0.018 + (0.004 * a)), 6)
-        p_trifecta = round(min(0.02, 0.004 + (0.0015 * a)), 6)
         candidates.append(
             {
                 "id": f"trio:{a}-{b}-{c}",
@@ -135,17 +134,6 @@ def _build_smoke_input():
                 "p_hit": p_trio,
                 "ev": round(p_trio * odds_trio - 1.0, 6),
                 "score": round((p_trio * odds_trio - 1.0) * (p_trio**0.5), 6),
-            }
-        )
-        candidates.append(
-            {
-                "id": f"trifecta:{a}-{b}-{c}",
-                "bet_type": "trifecta",
-                "legs": [str(a), str(b), str(c)],
-                "odds_used": odds_trifecta,
-                "p_hit": p_trifecta,
-                "ev": round(p_trifecta * odds_trifecta - 1.0, 6),
-                "score": round((p_trifecta * odds_trifecta - 1.0) * (p_trifecta**0.5), 6),
             }
         )
 
@@ -188,22 +176,18 @@ def _build_smoke_input():
                 {"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 41.5},
                 {"triple": "1-2-4", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "4", "odds": 55.2},
             ],
-            "trifecta": [
-                {"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 126.4},
-                {"triple": "1-2-4", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "4", "odds": 188.6},
-            ],
         },
         "prediction_field_guide": {
             "horse_no": "馬番",
             "HorseName": "馬名",
-            "Top3Prob_model": "統合モデルの3着内確率",
-            "rank_score": "順位付け用スコア",
-            "confidence_score": "予測信頼度スコア",
-            "stability_score": "予測安定性スコア",
-            "risk_score": "リスク/不確実性スコア",
+            "Top3Prob_model": "モデルの3着内確率",
+            "rank_score": "順位スコア",
+            "confidence_score": "自信度スコア",
+            "stability_score": "安定度スコア",
+            "risk_score": "リスクスコア",
             "odds_num": "単勝オッズ",
-            "win_odds": "単勝オッズの代表値",
-            "place_odds": "複勝オッズの代表値",
+            "win_odds": "単勝オッズの推定値",
+            "place_odds": "複勝オッズの推定値",
         },
         "multi_predictor": {
             "profiles": [
@@ -211,29 +195,29 @@ def _build_smoke_input():
                     "predictor_id": "main",
                     "predictor_label": "Predictor V1",
                     "available": True,
-                    "style_ja": "総合バランス型",
-                    "strengths_ja": ["校準済み確率と順位のバランスが良い。"],
+                    "style_ja": "本命寄りバランス型",
+                    "strengths_ja": ["上位人気と指数のバランスを取りやすい"],
                 },
                 {
                     "predictor_id": "v2_opus",
                     "predictor_label": "Predictor V2 Opus",
                     "available": True,
-                    "style_ja": "上位抽出型",
-                    "strengths_ja": ["上位候補の濃淡確認に向く。"],
+                    "style_ja": "穴狙い型",
+                    "strengths_ja": ["波乱気配のあるレースで妙味を拾いやすい"],
                 },
                 {
                     "predictor_id": "v3_premium",
                     "predictor_label": "Predictor V3 Premium",
                     "available": True,
-                    "style_ja": "市場融合型",
-                    "strengths_ja": ["値頃感と保守的な買い方の判断に向く。"],
+                    "style_ja": "堅実重視型",
+                    "strengths_ja": ["高確率帯を優先した保守的な組み立てに向く"],
                 },
                 {
                     "predictor_id": "v4_gemini",
                     "predictor_label": "Predictor V4 Gemini",
                     "available": True,
-                    "style_ja": "文脈適性ハイブリッド型",
-                    "strengths_ja": ["Top3確率と順位付けを混合し、条件適合の評価に向く。"],
+                    "style_ja": "適応型ハイブリッド",
+                    "strengths_ja": ["Top3確率と順位スコアの両面から整合を取りやすい"],
                 },
             ],
             "summaries": [
@@ -312,7 +296,7 @@ def _build_smoke_input():
             "race_budget_yen": 1200,
             "max_tickets_per_race": 6,
             "high_odds_threshold": 12.0,
-            "allowed_types": ["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"],
+            "allowed_types": ["win", "place", "wide", "quinella", "exacta", "trio"],
         },
     }
     return RacePolicyInput(**payload)
@@ -351,7 +335,7 @@ def main():
     assert isinstance(out1.pick_ids, list), "pick_ids should be list"
     assert isinstance(out1.ticket_plan, list), "ticket_plan should be list"
     for item in list(out1.ticket_plan or []):
-        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio", "trifecta"), "ticket_plan bet_type should be valid"
+        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio"), "ticket_plan bet_type should be valid"
         assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "ticket_plan legs should be non-empty"
         assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "ticket_plan stake should be positive 100-yen unit"
     assert int(out1.max_ticket_count or 0) >= 0, "max_ticket_count should be non-negative"
@@ -372,7 +356,7 @@ def main():
     assert bool(meta2.get("cache_hit", False)), "second run must be cache hit"
     assert isinstance(out2.ticket_plan, list), "second run ticket_plan should be list"
     for item in list(out2.ticket_plan or []):
-        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio", "trifecta"), "cached ticket_plan bet_type should be valid"
+        assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio"), "cached ticket_plan bet_type should be valid"
         assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "cached ticket_plan legs should be non-empty"
         assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "cached ticket_plan stake should be positive 100-yen unit"
     assert int(meta2.get("requested_budget_yen", 0) or 0) == 2000, "cached meta budget should stay 2000"
@@ -438,3 +422,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

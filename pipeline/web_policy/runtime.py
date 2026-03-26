@@ -100,7 +100,6 @@ def maybe_refresh_run_odds(
     quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
     exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
     trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
     return refresh_odds_for_run(
         run_row,
         scope_norm,
@@ -110,7 +109,6 @@ def maybe_refresh_run_odds(
         quinella_odds_path=quinella_odds_path,
         exacta_odds_path=exacta_odds_path,
         trio_odds_path=trio_odds_path,
-        trifecta_odds_path=trifecta_odds_path,
     )
 
 
@@ -156,7 +154,6 @@ def expected_odds_output_names(scope_key):
         "quinella_odds.csv",
         "exacta_odds.csv",
         "trio_odds.csv",
-        "trifecta_odds.csv",
     ]
 
 
@@ -208,7 +205,6 @@ def refresh_odds_for_run(
     quinella_odds_path=None,
     exacta_odds_path=None,
     trio_odds_path=None,
-    trifecta_odds_path=None,
     *,
     get_env_timeout,
     normalize_race_id,
@@ -277,7 +273,6 @@ def refresh_odds_for_run(
         ("quinella_odds.csv", quinella_odds_path),
         ("exacta_odds.csv", exacta_odds_path),
         ("trio_odds.csv", trio_odds_path),
-        ("trifecta_odds.csv", trifecta_odds_path),
     ):
         ok, message = copy_fresh_odds_output(Path(root_dir) / tmp_name, dest, before_mtimes, started_at, warnings)
         if not ok:

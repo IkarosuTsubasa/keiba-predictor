@@ -243,8 +243,6 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
         p_hit = 0.34 * win_probs[0] * place_probs[1] * (0.82 + 0.18 * agreement)
     elif bet_type == "trio":
         p_hit = 0.26 * place_probs[0] * place_probs[1] * place_probs[2] * (0.82 + 0.18 * agreement)
-    elif bet_type == "trifecta":
-        p_hit = 0.16 * win_probs[0] * place_probs[1] * place_probs[2] * (0.80 + 0.20 * agreement)
     else:
         p_hit = 0.0
     implied_prob = _clamp(1.0 / float(odds_used)) if float(odds_used) > 0 else 0.0
@@ -253,7 +251,6 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
         "quinella": 0.35,
         "exacta": 0.22,
         "trio": 0.16,
-        "trifecta": 0.10,
     }.get(bet_type, 0.30)
     p_hit = _clamp(min(p_hit, implied_prob * 3.5 + 0.02), 0.0, type_cap)
     ev = round(p_hit * float(odds_used) - 1.0, 6)
@@ -270,7 +267,6 @@ def _trim_candidates(candidates):
         "quinella": 12,
         "exacta": 14,
         "trio": 10,
-        "trifecta": 12,
     }
     grouped = {}
     for candidate in list(candidates or []):
@@ -306,7 +302,6 @@ def build_policy_candidates(
     quinella_odds_map,
     exacta_odds_map,
     trio_odds_map,
-    trifecta_odds_map,
     allowed_types,
     consensus_rows=None,
 ):
@@ -362,14 +357,6 @@ def build_policy_candidates(
             p_hit, ev, score = _score_combo_candidate(legs, signal_map, "trio", odds)
             candidate = {"id": f"trio:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}", "bet_type": "trio", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
             candidates.append(candidate)
-    if "trifecta" in allowed_types:
-        for trio_key, odds in sorted(trifecta_odds_map.items()):
-            if float(odds or 0.0) <= 0:
-                continue
-            legs = [str(trio_key[0]), str(trio_key[1]), str(trio_key[2])]
-            p_hit, ev, score = _score_combo_candidate(legs, signal_map, "trifecta", odds)
-            candidate = {"id": f"trifecta:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}", "bet_type": "trifecta", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
-            candidates.append(candidate)
     candidates = _trim_candidates(candidates)
     candidates.sort(
         key=lambda item: (
@@ -389,7 +376,7 @@ def build_policy_candidates(
 def build_pair_odds_top(candidate_lookup):
     rows = []
     for candidate in list(candidate_lookup.values()):
-        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella", "exacta", "trio", "trifecta"):
+        if str(candidate.get("bet_type", "") or "") not in ("wide", "quinella", "exacta", "trio"):
             continue
         legs = list(candidate.get("legs", []) or [])
         if len(legs) < 2:
@@ -406,7 +393,7 @@ def build_pair_odds_top(candidate_lookup):
     return [{"bet_type": row["bet_type"], "pair": row["pair"], "odds": row["odds"]} for row in rows[:10]]
 
 
-def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None, trifecta_rows=None, *, to_float):
+def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=None, trio_rows=None, *, to_float):
     def _pair_rows(rows):
         out = []
         for row in list(rows or []):
@@ -446,7 +433,6 @@ def build_odds_full(win_rows, place_rows, wide_rows, quinella_rows, exacta_rows=
         "quinella": _pair_rows(quinella_rows),
         "exacta": _pair_rows(exacta_rows),
         "trio": _triple_rows(trio_rows),
-        "trifecta": _triple_rows(trifecta_rows),
     }
 
 
@@ -639,7 +625,6 @@ def build_policy_input_payload(
     quinella_odds_path,
     exacta_odds_path,
     trio_odds_path,
-    trifecta_odds_path,
     policy_engine,
     *,
     load_csv_rows_flexible,
@@ -664,7 +649,6 @@ def build_policy_input_payload(
     quinella_odds_map = load_pair_odds_map(quinella_odds_path)
     exacta_odds_map = load_exacta_odds_map(exacta_odds_path)
     trio_odds_map = load_triple_odds_map(trio_odds_path, ordered=False)
-    trifecta_odds_map = load_triple_odds_map(trifecta_odds_path, ordered=True)
     multi_predictor = build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map)
     pred_rows = load_csv_rows_flexible(pred_path)
     fallback_predictions = build_policy_prediction_rows_fn(pred_rows, name_to_no_map, win_odds_map, place_odds_map) if pred_rows else []
@@ -696,8 +680,6 @@ def build_policy_input_payload(
         allowed_types.append("exacta")
     if trio_odds_map:
         allowed_types.append("trio")
-    if trifecta_odds_map:
-        allowed_types.append("trifecta")
     if not allowed_types:
         return None, "No usable odds were found for LLM buy."
     candidates, candidate_lookup, horse_map = build_policy_candidates(
@@ -706,7 +688,6 @@ def build_policy_input_payload(
         quinella_odds_map,
         exacta_odds_map,
         trio_odds_map,
-        trifecta_odds_map,
         allowed_types,
         consensus_rows=multi_predictor.get("consensus", []),
     )
@@ -795,7 +776,6 @@ def build_policy_input_payload(
             load_csv_rows_flexible(quinella_odds_path),
             load_csv_rows_flexible(exacta_odds_path),
             load_csv_rows_flexible(trio_odds_path),
-            load_csv_rows_flexible(trifecta_odds_path),
             to_float=to_float,
         ),
         "prediction_field_guide": build_prediction_field_guide(),

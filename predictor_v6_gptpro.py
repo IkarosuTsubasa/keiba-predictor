@@ -11,7 +11,7 @@ but fixes the parts that matter most for real hit rate:
 3. Top3 / Win / Rank are modeled as separate heads
 4. Final probability is learned from OOF meta-combination, then Platt-calibrated
 5. Final display score is separated from true probability
-6. Combo odds (wide / quinella / exacta / trio / trifecta) are used only as
+6. Combo odds (wide / quinella / exacta / trio) are used only as
    a light post-model rerank overlay unless historical snapshots exist
 
 Usage:
@@ -27,7 +27,6 @@ Optional:
     - quinella_odds.csv
     - exacta_odds.csv
     - trio_odds.csv
-    - trifecta_odds.csv
 """
 
 from __future__ import annotations
@@ -409,8 +408,6 @@ class FeatureEngineV6(FeatureEngine):
             "exacta_network_strength_norm": 0.0,
             "trio_network_strength": 0.0,
             "trio_network_strength_norm": 0.0,
-            "trifecta_network_strength": 0.0,
-            "trifecta_network_strength_norm": 0.0,
         }
 
     def create_training_features(self, history_df: pd.DataFrame) -> pd.DataFrame:
@@ -940,7 +937,6 @@ class PredictorV6:
             ("quinella_network_strength", 0.14),
             ("exacta_network_strength_norm", 0.12),
             ("trio_network_strength_norm", 0.12),
-            ("trifecta_network_strength_norm", 0.12),
         ]
         overlay = np.zeros(len(df), dtype=float)
         active_weight = 0.0
@@ -1384,7 +1380,6 @@ def main() -> None:
         quinella_path=os.environ.get("QUINELLA_ODDS_PATH", "quinella_odds.csv"),
         exacta_path=os.environ.get("EXACTA_ODDS_PATH", "exacta_odds.csv"),
         trio_path=os.environ.get("TRIO_ODDS_PATH", "trio_odds.csv"),
-        trifecta_path=os.environ.get("TRIFECTA_ODDS_PATH", "trifecta_odds.csv"),
     )
 
     inference_df = engine.create_inference_features(shutuba_df, odds_engine, target_race_date=target_race_date)

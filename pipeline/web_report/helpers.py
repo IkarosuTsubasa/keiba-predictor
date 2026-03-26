@@ -1,4 +1,4 @@
-import re
+﻿import re
 from datetime import datetime, timedelta
 
 from surface_scope import normalize_scope_key
@@ -26,8 +26,7 @@ BET_TYPE_TEXT_MAP = {
     "wide": "ワイド",
     "quinella": "馬連",
     "exacta": "馬単",
-    "trio": "三連複",
-    "trifecta": "三連単",
+    "trio": "3連複",
 }
 MARK_SYMBOL_ORDER = {"◎": 0, "○": 1, "▲": 2, "△": 3, "☆": 4}
 
@@ -81,14 +80,12 @@ def format_ticket_target_text(bet_type, target):
     parts = [part.strip() for part in text.split("-") if part.strip()]
     if bet_type_text == "exacta" and len(parts) == 2:
         return f"{parts[0]}→{parts[1]}"
-    if bet_type_text == "trifecta" and len(parts) == 3:
-        return f"{parts[0]}→{parts[1]}→{parts[2]}"
     return "-".join(parts) if parts else text
 
 
 def _format_amount_text(value):
     amount = to_int_or_none(value)
-    return f"¥{amount}" if amount is not None else "-"
+    return f"¥{amount:,}" if amount is not None else "-"
 
 
 def format_ticket_plan_text(ticket_rows, output):
@@ -124,7 +121,7 @@ def format_ticket_plan_text(ticket_rows, output):
 
     ordered_types = [
         BET_TYPE_TEXT_MAP[key]
-        for key in ("exacta", "quinella", "wide", "trio", "trifecta", "win", "place")
+        for key in ("exacta", "quinella", "wide", "trio", "win", "place")
         if BET_TYPE_TEXT_MAP.get(key) in grouped
     ]
     extra_types = [bet_type for bet_type in grouped if bet_type not in ordered_types]
@@ -230,11 +227,11 @@ def build_battle_title(run_row):
     race_label = format_race_label(run_row)
     date_label = format_jp_date_text(run_row)
     race_name = safe_text((run_row or {}).get("trigger_race"))
-    parts = ["4つのAI競馬予想"]
+    parts = ["4つのAI競馬対決"]
     if date_label or race_label:
         detail = " ".join(part for part in [date_label, race_label] if part)
         if race_name:
-            detail = f"{detail}（{race_name}）" if detail else f"（{race_name}）"
+            detail = f"{detail}「{race_name}」" if detail else f"「{race_name}」"
         if detail:
             parts.append(detail)
     return " ".join(parts)
@@ -297,3 +294,4 @@ def public_scope_label_ja(scope_key):
         "local": "地方競馬",
     }
     return mapping.get(str(scope_key or "").strip(), str(scope_key or "").strip() or "-")
+

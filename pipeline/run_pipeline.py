@@ -615,7 +615,6 @@ def main():
         "quinella_odds.csv": ROOT_DIR / "quinella_odds.csv",
         "exacta_odds.csv": ROOT_DIR / "exacta_odds.csv",
         "trio_odds.csv": ROOT_DIR / "trio_odds.csv",
-        "trifecta_odds.csv": ROOT_DIR / "trifecta_odds.csv",
     }
     ok, msg = validate_odds_outputs(odds_extract_start, odds_required)
     if not ok:
@@ -715,7 +714,6 @@ def main():
                     "QUINELLA_ODDS_PATH": str(ROOT_DIR / "quinella_odds.csv"),
                     "EXACTA_ODDS_PATH": str(ROOT_DIR / "exacta_odds.csv"),
                     "TRIO_ODDS_PATH": str(ROOT_DIR / "trio_odds.csv"),
-                    "TRIFECTA_ODDS_PATH": str(ROOT_DIR / "trifecta_odds.csv"),
                 },
             )
         else:
@@ -783,13 +781,6 @@ def main():
         shutil.copy2(trio_src, trio_dest)
         trio_odds_path = str(trio_dest)
 
-    trifecta_odds_path = ""
-    trifecta_src = ROOT_DIR / "trifecta_odds.csv"
-    if trifecta_src.exists():
-        trifecta_dest = race_dir / f"trifecta_odds_{run_id}{race_suffix}.csv"
-        shutil.copy2(trifecta_src, trifecta_dest)
-        trifecta_odds_path = str(trifecta_dest)
-
     runner_filter_summary_path = ""
     runner_filter_summary_src = ROOT_DIR / "runner_filter_summary.json"
     if runner_filter_summary_src.exists():
@@ -828,7 +819,6 @@ def main():
         "quinella_odds_path": quinella_odds_path,
         "exacta_odds_path": exacta_odds_path,
         "trio_odds_path": trio_odds_path,
-        "trifecta_odds_path": trifecta_odds_path,
         "runner_filter_summary_path": runner_filter_summary_path,
         "plan_path": "",
         "gemini_policy_path": "",

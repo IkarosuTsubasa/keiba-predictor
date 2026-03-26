@@ -208,7 +208,6 @@ def refresh_odds_for_run(
     quinella_odds_path,
     exacta_odds_path,
     trio_odds_path,
-    trifecta_odds_path,
 ):
     race_url = (run_row.get("race_url") or "").strip()
     race_id = str(run_row.get("race_id") or "").strip()
@@ -289,13 +288,6 @@ def refresh_odds_for_run(
             shutil.copy2(trio_tmp, trio_odds_path)
         except Exception as exc:
             return False, f"Failed to update trio odds file: {exc}"
-    trifecta_tmp = ROOT_DIR / "trifecta_odds.csv"
-    if trifecta_tmp.exists() and trifecta_odds_path:
-        try:
-            Path(trifecta_odds_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(trifecta_tmp, trifecta_odds_path)
-        except Exception as exc:
-            return False, f"Failed to update trifecta odds file: {exc}"
     return True, ""
 
 
@@ -521,40 +513,6 @@ def load_quinella_odds_map(path):
     return out
 
 
-def load_trifecta_odds_map(path):
-    if not path or not Path(path).exists():
-        return {}
-    try:
-        df = pd.read_csv(path, encoding="utf-8-sig")
-    except Exception:
-        return {}
-    if (
-        "horse_no_a" not in df.columns
-        or "horse_no_b" not in df.columns
-        or "horse_no_c" not in df.columns
-    ):
-        return {}
-    odds_col = "odds" if "odds" in df.columns else "odds_mid"
-    out = {}
-    for _, row in df.iterrows():
-        a_i = parse_horse_no(row.get("horse_no_a", ""))
-        b_i = parse_horse_no(row.get("horse_no_b", ""))
-        c_i = parse_horse_no(row.get("horse_no_c", ""))
-        if a_i is None or b_i is None or c_i is None:
-            continue
-        try:
-            val = float(row.get(odds_col, 0))
-        except (TypeError, ValueError):
-            continue
-        if val <= 0:
-            continue
-        nums = sorted([a_i, b_i, c_i])
-        if len(set(nums)) != 3:
-            continue
-        out[tuple(nums)] = val
-    return out
-
-
 def pick_score_column(columns):
     for key in ("rank_score", "Top3Prob_model", "Top3Prob_est", "Top3Prob", "agg_score", "score"):
         if key in columns:
@@ -654,7 +612,6 @@ def estimate_payout_multiplier(
     wide_odds_map=None,
     fuku_odds_map=None,
     quinella_odds_map=None,
-    trifecta_odds_map=None,
     horse_nos=None,
 ):
     if bet_type == "win" and odds_map and horse_names:
@@ -694,16 +651,6 @@ def estimate_payout_multiplier(
             val = quinella_odds_map.get((a, b))
             if val:
                 return max(1.0, float(val))
-    if bet_type == "trifecta" and trifecta_odds_map and horse_nos and len(horse_nos) >= 3:
-        try:
-            nums = [int(horse_nos[0]), int(horse_nos[1]), int(horse_nos[2])]
-        except (TypeError, ValueError):
-            nums = []
-        if len(nums) == 3 and len(set(nums)) == 3:
-            nums.sort()
-            val = trifecta_odds_map.get(tuple(nums))
-            if val:
-                return max(1.0, float(val))
     odds = []
     for name in horse_names:
         val = odds_map.get(normalize_name(name), 0)
@@ -716,7 +663,6 @@ def estimate_payout_multiplier(
         "wide": 0.25,
         "quinella": 0.6,
         "exacta": 0.9,
-        "trifecta": 1.4,
     }
     factor = factors.get(bet_type, 1.0)
     return max(1.0, base * factor)
@@ -841,8 +787,6 @@ def eval_ticket(bet_type, horse_names, actual_order):
         return 1 if len(horse_names) >= 2 and horse_names[0] in top2 and horse_names[1] in top2 else 0
     if bet_type == "exacta":
         return 1 if len(horse_names) >= 2 and horse_names[0] == top2[0] and horse_names[1] == top2[1] else 0
-    if bet_type == "trifecta":
-        return 1 if all(n in top3 for n in horse_names[:3]) else 0
     return 0
 
 
@@ -919,9 +863,6 @@ def main():
     trio_odds_path = run.get("trio_odds_path") or str(
         race_dir / f"trio_odds_{run_id}_{race_id}.csv"
     )
-    trifecta_odds_path = run.get("trifecta_odds_path") or str(
-        race_dir / f"trifecta_odds_{run_id}_{race_id}.csv"
-    )
     odds_path_run = Path(odds_path)
     wide_odds_path_run = Path(wide_odds_path)
     pred_path_run = resolve_pred_path_for_run(run, run_id, race_id, race_dir)
@@ -933,7 +874,6 @@ def main():
         quinella_odds_path,
         exacta_odds_path,
         trio_odds_path,
-        trifecta_odds_path,
     )
     if updated:
         print("Updated odds for this run.")
@@ -943,7 +883,6 @@ def main():
     wide_odds_map = load_wide_odds_map(wide_odds_path)
     fuku_odds_map = load_fuku_odds_map(fuku_odds_path)
     quinella_odds_map = load_quinella_odds_map(quinella_odds_path)
-    trifecta_odds_map = load_trifecta_odds_map(trifecta_odds_path)
 
     strategy = run.get("strategy", "")
     if strategy:

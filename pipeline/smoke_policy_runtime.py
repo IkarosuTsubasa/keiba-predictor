@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 
 from llm.policy_runtime import (
@@ -60,9 +60,8 @@ def _build_input():
             "quinella": [{"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 11.4}],
             "exacta": [{"pair": "1-2", "horse_no_a": "1", "horse_no_b": "2", "odds": 17.8}],
             "trio": [{"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 39.2}],
-            "trifecta": [{"triple": "1-2-3", "horse_no_a": "1", "horse_no_b": "2", "horse_no_c": "3", "odds": 121.0}],
         },
-        "prediction_field_guide": {"Top3Prob_model": "3着内確率", "rank_score": "順位スコア"},
+        "prediction_field_guide": {"Top3Prob_model": "モデルの3着内確率", "rank_score": "順位スコア"},
         "multi_predictor": {},
         "portfolio_history": {},
         "candidates": [
@@ -77,7 +76,7 @@ def _build_input():
             "race_budget_yen": 2400,
             "max_tickets_per_race": 3,
             "high_odds_threshold": 10.0,
-            "allowed_types": ["place", "wide", "exacta", "trio", "trifecta"],
+            "allowed_types": ["place", "wide", "exacta", "trio"],
         },
     }
     return RacePolicyInput(**payload)
@@ -161,3 +160,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

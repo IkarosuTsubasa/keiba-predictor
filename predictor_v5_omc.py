@@ -249,7 +249,6 @@ class OddsEngine:
         quinella_path: str = "quinella_odds.csv",
         exacta_path: str = "exacta_odds.csv",
         trio_path: str = "trio_odds.csv",
-        trifecta_path: str = "trifecta_odds.csv",
     ) -> None:
         # Win odds (required — warn loudly if missing or malformed)
         if not Path(win_path).exists():
@@ -457,14 +456,6 @@ class OddsEngine:
             "odds",
             "trio_network_strength",
         )
-        _load_combo_market_strength(
-            trifecta_path,
-            {"horse_no_a", "horse_no_b", "horse_no_c", "odds"},
-            ["horse_no_a", "horse_no_b", "horse_no_c"],
-            "odds",
-            "trifecta_network_strength",
-        )
-
         # Fill missing place/combo features
         for name, feat in self._features.items():
             if "implied_prob_place" not in feat:
@@ -484,10 +475,6 @@ class OddsEngine:
                 feat["trio_network_strength"] = 0.0
             if "trio_network_strength_norm" not in feat:
                 feat["trio_network_strength_norm"] = 0.0
-            if "trifecta_network_strength" not in feat:
-                feat["trifecta_network_strength"] = 0.0
-            if "trifecta_network_strength_norm" not in feat:
-                feat["trifecta_network_strength_norm"] = 0.0
 
     def get_features(self, horse_name: str) -> Dict[str, float]:
         key = _normalize_name(horse_name)
@@ -503,8 +490,6 @@ class OddsEngine:
             "exacta_network_strength_norm": 0.0,
             "trio_network_strength": 0.0,
             "trio_network_strength_norm": 0.0,
-            "trifecta_network_strength": 0.0,
-            "trifecta_network_strength_norm": 0.0,
             "horse_no": 0.0,
         }
         return self._features.get(key, default)
@@ -1061,8 +1046,6 @@ class FeatureEngine:
             feat["exacta_network_strength_norm"] = odds_feat.get("exacta_network_strength_norm", 0.0)
             feat["trio_network_strength"] = odds_feat.get("trio_network_strength", 0.0)
             feat["trio_network_strength_norm"] = odds_feat.get("trio_network_strength_norm", 0.0)
-            feat["trifecta_network_strength"] = odds_feat.get("trifecta_network_strength", 0.0)
-            feat["trifecta_network_strength_norm"] = odds_feat.get("trifecta_network_strength_norm", 0.0)
         else:
             feat["odds_win"] = 0.0
             feat["implied_prob_win"] = 0.0
@@ -1074,8 +1057,6 @@ class FeatureEngine:
             feat["exacta_network_strength_norm"] = 0.0
             feat["trio_network_strength"] = 0.0
             feat["trio_network_strength_norm"] = 0.0
-            feat["trifecta_network_strength"] = 0.0
-            feat["trifecta_network_strength_norm"] = 0.0
 
         feat["popularity_pct"] = popularity / max(field_size, 1) if popularity > 0 else 0.5
 
@@ -1184,8 +1165,6 @@ class FeatureEngine:
                     "exacta_network_strength_norm": 0.0,
                     "trio_network_strength": 0.0,
                     "trio_network_strength_norm": 0.0,
-                    "trifecta_network_strength": 0.0,
-                    "trifecta_network_strength_norm": 0.0,
                 }
 
                 feat = self.compute_horse_features(
@@ -1780,7 +1759,6 @@ def main():
         quinella_path=os.environ.get("QUINELLA_ODDS_PATH", "quinella_odds.csv"),
         exacta_path=os.environ.get("EXACTA_ODDS_PATH", "exacta_odds.csv"),
         trio_path=os.environ.get("TRIO_ODDS_PATH", "trio_odds.csv"),
-        trifecta_path=os.environ.get("TRIFECTA_ODDS_PATH", "trifecta_odds.csv"),
     )
 
     # Build inference features (shutuba_df is pure history, no current race entry)

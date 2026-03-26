@@ -175,7 +175,6 @@ def run_batch(workspace_dir: str):
                     "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
                     "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
                     "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
-                    "TRIFECTA_ODDS_PATH": str(workspace / "trifecta_odds.csv"),
                 },
             )
         else:

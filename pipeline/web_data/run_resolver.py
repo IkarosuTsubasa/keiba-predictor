@@ -79,7 +79,6 @@ def infer_run_id_from_row(run_row):
         "quinella_odds_path",
         "exacta_odds_path",
         "trio_odds_path",
-        "trifecta_odds_path",
         "plan_path",
         "gemini_policy_path",
         "deepseek_policy_path",

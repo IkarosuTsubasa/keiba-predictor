@@ -153,7 +153,6 @@ def execute_policy_buy(
     quinella_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "quinella_odds_path", "quinella_odds")
     exacta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "exacta_odds_path", "exacta_odds")
     trio_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trio_odds_path", "trio_odds")
-    trifecta_odds_path = resolve_run_asset_path(scope_norm, run_id, run_row, "trifecta_odds_path", "trifecta_odds")
     context, error = build_policy_input_payload(
         scope_norm,
         run_id,
@@ -165,7 +164,6 @@ def execute_policy_buy(
         quinella_odds_path,
         exacta_odds_path,
         trio_odds_path,
-        trifecta_odds_path,
         engine,
     )
     if error:
