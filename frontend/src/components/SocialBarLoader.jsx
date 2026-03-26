@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 
 const SOCIAL_BAR_SRC =
-  "https://pl28986795.profitablecpmratenetwork.com/5d/c9/21/5dc9219459246ebdaf545057c2ec5c92.js";
+  "https://pl28986797.profitablecpmratenetwork.com/e3/2e/db/e32edbde6074bbe4d78a46d96034b088.js";
 const SOCIAL_BAR_SCRIPT_ID = "adsterra-social-bar-script";
 const SOCIAL_BAR_STATUS_FLAG = "__adsterraSocialBarStatus";
 
