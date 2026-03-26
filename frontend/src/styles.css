@@ -4492,6 +4492,15 @@ body {
   align-content: start;
 }
 
+.race-detail-model-card__comment {
+  margin: 0;
+  color: var(--primary);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .race-detail-model-card__section-head span,
 .race-detail-model-card__result span {
   color: var(--muted);

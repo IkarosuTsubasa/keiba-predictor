@@ -148,6 +148,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
   const marks = parseMarks(card?.marks_text);
   const resultText = String(card?.result_triplet_text || "結果未確定");
   const planCount = parsePlanCount(card?.ticket_plan_text);
+  const commentText = String(card?.comment || "").trim();
 
   return (
     <article className="race-detail-model-card">
@@ -177,6 +178,13 @@ function ModelDetailCard({ card, highlightRoi = false }) {
           <span>買い目</span>
         </div>
         <BetPreviewList text={card?.ticket_plan_text || ""} />
+      </div>
+
+      <div className="race-detail-model-card__section">
+        <div className="race-detail-model-card__section-head">
+          <span>コメント</span>
+        </div>
+        <p className="race-detail-model-card__comment">{commentText || "-"}</p>
       </div>
 
       <div
