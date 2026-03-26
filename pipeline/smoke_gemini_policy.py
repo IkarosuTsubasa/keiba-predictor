@@ -1,4 +1,5 @@
 ﻿import os
+import re
 import time
 
 from llm.gemini_policy import (
@@ -365,6 +366,8 @@ def main():
         assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "ticket_plan stake should be positive 100-yen unit"
     assert int(out1.max_ticket_count or 0) >= 0, "max_ticket_count should be non-negative"
     assert str(out1.risk_tilt) in ("low", "medium", "high"), "risk_tilt should be valid"
+    assert re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]", str(out1.comment or "")), "comment should be Japanese"
+    assert not re.search(r"候補プール|優位性|\\bEV\\b|selected_tickets", str(out1.comment or ""), flags=re.IGNORECASE), "comment should sound like a human betting note"
     assert str(meta1.get("fallback_reason", "")) in ("mock_mode", "cache"), "should run fallback/mock path"
     assert int(meta1.get("requested_budget_yen", 0) or 0) == 2000, "meta keeps caller budget for logging"
     assert int(meta1.get("requested_race_budget_yen", 0) or 0) == 800, "meta keeps caller race budget for logging"
@@ -426,6 +429,7 @@ def main():
     assert str(sanitized_invalid.bet_decision) == "no_bet", "invalid executable state should be downgraded to no_bet"
     assert list(sanitized_invalid.selected_tickets or []) == [], "invalid selected ticket should be removed"
     assert list(sanitized_invalid.ticket_plan or []) == [], "invalid ticket should be removed"
+    assert re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]", str(sanitized_invalid.comment or "")), "fallback comment should be Japanese"
     invalid_warnings = [str(x) for x in list(sanitized_invalid.warnings or [])]
     assert "NO_EXECUTABLE_TICKETS" in invalid_warnings, "invalid bet plan should be recorded explicitly"
     assert "INVALID_TICKET_DROPPED" in invalid_warnings, "dropped invalid ticket should be recorded"

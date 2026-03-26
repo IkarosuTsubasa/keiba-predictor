@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v14"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v19"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v20"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -471,6 +471,89 @@ def _trim_text(value: Any, limit: int = 120) -> str:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
+def _looks_like_japanese(text: Any) -> bool:
+    return bool(re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]", str(text or "")))
+
+
+def _looks_like_human_bet_comment(text: Any) -> bool:
+    value = str(text or "").strip()
+    if (not value) or (not _looks_like_japanese(value)):
+        return False
+    forbidden_patterns = (
+        r"candidate",
+        r"selected_tickets",
+        r"ticket_plan",
+        r"focus_points",
+        r"\bev\b",
+        r"p_hit",
+        r"score",
+        r"top3",
+        r"confidence",
+        r"stability",
+        r"risk",
+        r"model_summary",
+        r"horse_summary",
+        r"候補プール",
+        r"優位性",
+        r"正\s*ev",
+        r"期待値",
+        r"実行可能",
+        r"参加レベル",
+        r"bet_decision",
+        r"no_bet",
+    )
+    return not any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in forbidden_patterns)
+
+
+def _default_comment(
+    *,
+    bet_decision: str,
+    participation_level: str,
+    risk_tilt: str,
+    has_longshot: bool,
+    has_value: bool,
+) -> str:
+    decision = str(bet_decision or "").strip().lower()
+    level = str(participation_level or "").strip().lower()
+    tilt = str(risk_tilt or "").strip().lower()
+    if decision != "bet":
+        if has_value:
+            return "気になる目はあるけど、ここは見送る。"
+        return "今日はここで無理しない。"
+    if has_longshot:
+        if level == "small_bet":
+            return "穴は気になるけど、軽くつまむ程度。"
+        return "穴も一枚だけ押さえて入る。"
+    if tilt == "high":
+        return "配当狙いで、点数は絞って勝負。"
+    if level == "small_bet":
+        return "広げすぎず、良さそうなところだけ軽く。"
+    if has_value:
+        return "軸はこれで、相手を絞って入る。"
+    return "形は決まるので、絞って入る。"
+
+
+def _normalize_comment_text(
+    value: Any,
+    *,
+    bet_decision: str,
+    participation_level: str,
+    risk_tilt: str,
+    has_longshot: bool,
+    has_value: bool,
+) -> str:
+    text = _trim_text(value or "", limit=100)
+    if text and _looks_like_human_bet_comment(text):
+        return text
+    return _default_comment(
+        bet_decision=bet_decision,
+        participation_level=participation_level,
+        risk_tilt=risk_tilt,
+        has_longshot=has_longshot,
+        has_value=has_value,
+    )
+
+
 def _compact_race_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
     race_context = dict(input_obj.race_context or {})
     out = {
@@ -781,7 +864,13 @@ def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = ""
                 "no_bet",
                 False,
             ),
-            "comment": "優位性が弱く見送り",
+            "comment": _default_comment(
+                bet_decision="no_bet",
+                participation_level="no_bet",
+                risk_tilt="low",
+                has_longshot=False,
+                has_value=False,
+            ),
             "pick_ids": [],
             "selected_tickets": [],
             "ticket_plan": [],
@@ -839,7 +928,13 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
                 "warnings": warnings or None,
-                "comment": "候補不足で見送り",
+                "comment": _default_comment(
+                    bet_decision="no_bet",
+                    participation_level="no_bet",
+                    risk_tilt="low",
+                    has_longshot=False,
+                    has_value=has_value,
+                ),
                 "selected_tickets": [],
                 "pick_ids": [],
                 "focus_points": [{"type": "concept", "value": "見送り"}],
@@ -867,7 +962,13 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
                 "warnings": warnings,
-                "comment": "優位性が足りず見送り",
+                "comment": _default_comment(
+                    bet_decision="no_bet",
+                    participation_level="no_bet",
+                    risk_tilt="low",
+                    has_longshot=False,
+                    has_value=has_value,
+                ),
                 "selected_tickets": [],
                 "pick_ids": [],
                 "focus_points": [{"type": "concept", "value": "軽く入る形も作りにくい"}],
@@ -988,7 +1089,13 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
         "bet",
         bool(longshot_horses),
     )
-    comment = "候補プール上位から少数選択"
+    comment = _default_comment(
+        bet_decision="bet",
+        participation_level=participation_level,
+        risk_tilt=risk_tilt,
+        has_longshot=bool(longshot_horses),
+        has_value=has_value,
+    )
     final_state = _coerce_final_execution_state(
         bet_decision="bet",
         participation_level=participation_level,
@@ -1076,7 +1183,10 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "== 出力方針 ==\n"
         "- bet_decision が bet のときは selected_tickets を必須にする\n"
         "- selected_tickets は [{\"id\":\"candidate_id\",\"stake_yen\":300}] 形式で返す\n"
-        "- comment は短い1文でよい\n"
+        "- comment は必ず自然な日本語で、短い1文にすること\n"
+        "- comment は人間が馬券を買う前にメモするような口調にすること\n"
+        "- comment では EV / score / candidate_tickets / 優位性 など機械的な言い回しを使わないこと\n"
+        "- comment の例: 「軸はこれで、相手を絞って入る。」「穴は気になるけど軽く。」\n"
         "- それ以外の表示系フィールドは空やデフォルトでもよい\n\n"
 
         "--------------------------------\n"
@@ -1517,7 +1627,14 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     has_value = any(float(cand.get("ev", 0.0) or 0.0) > 0.0 for cand in selected_candidates) or any(
         float(c.ev or 0.0) > 0.0 for c in list(input_obj.candidates or [])
     )
-    comment = _trim_text(output.comment or "", limit=100) or ("候補内で優位が弱く見送り" if bet_decision == "no_bet" else "候補プールから選択")
+    comment = _normalize_comment_text(
+        output.comment,
+        bet_decision=bet_decision,
+        participation_level=participation_level,
+        risk_tilt=risk_tilt,
+        has_longshot=bool(longshot_horses),
+        has_value=has_value,
+    )
     reason_codes = _reason_codes_for(
         input_obj.ai,
         int(input_obj.field_size or 0),

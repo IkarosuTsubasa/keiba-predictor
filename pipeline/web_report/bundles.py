@@ -198,6 +198,7 @@ def build_llm_battle_bundle(
         result_triplet = marks_result_triplet(marks_map, actual_horse_nos)
         marks_text = format_marks_text(marks_map)
         ticket_plan_text = format_ticket_plan_text(ticket_rows, output)
+        comment_text = str(output.get("comment", "") or "").strip()
         meta_tags = [f"状態 {ticket_summary['status']}"]
         if ticket_summary["stake_yen"]:
             meta_tags.append(f"投資 ¥{ticket_summary['stake_yen']}")
@@ -211,6 +212,7 @@ def build_llm_battle_bundle(
                 "label": LLM_BATTLE_LABELS.get(engine, engine),
                 "marks_text": marks_text,
                 "ticket_plan_text": ticket_plan_text,
+                "comment_text": comment_text,
                 "result_triplet_text": format_triplet_text(result_triplet),
                 "meta_tags": meta_tags,
             }
@@ -244,6 +246,10 @@ def build_llm_battle_bundle(
                   <div class="policy-label">買い目</div>
                   <p>{html.escape(card['ticket_plan_text'])}</p>
                 </section>
+                <section class="battle-copy-card">
+                  <div class="policy-label">コメント</div>
+                  <p>{html.escape(card['comment_text'] or '-')}</p>
+                </section>
               </div>
               <div class="battle-result-row">
                 <span class="policy-label">結果一致</span>
@@ -260,6 +266,10 @@ def build_llm_battle_bundle(
                 "買い目",
                 "",
                 card["ticket_plan_text"],
+                "",
+                "コメント",
+                "",
+                card["comment_text"] or "-",
                 "",
             ]
         )
