@@ -77,49 +77,75 @@ function buildRoiSpotlight(data) {
 
   return {
     key: "roi",
-    eyebrow: "最高回収率",
+    eyebrow: "当日最高回収率",
     badge: "ROI",
     title: String(roiLeader?.label || roiLeader?.engine || "-"),
     metricValue:
       parsePercent(roiLeader?.roi_text) ?? toNumber(roiLeader?.roi_percent, 0),
-    metricFormatter: (value) => formatPercent(value),
+    metricFormatter: formatPercent,
     detail: `損益 ${formatYen(roiLeader?.profit_yen)}`,
     caption: String(roiLeader?.roi_text || "-"),
   };
 }
 
-export default function HeroSpotlightStrip({ data }) {
-  const item = useMemo(() => buildRoiSpotlight(data), [data]);
+function buildPredictorCoverageSpotlight(data) {
+  const leader = data?.daily_predictor?.top5to3_leader;
+  const samples = toNumber(leader?.samples, 0);
+  if (!leader || samples <= 0) return null;
 
-  if (!item) {
+  return {
+    key: "predictor-top5",
+    eyebrow: "当日予測上位5頭馬券内カバー率トップ",
+    badge: "TOP5",
+    title: String(leader?.label || leader?.predictor_id || "-"),
+    metricValue: toNumber(leader?.top5_to_top3_hit_rate, 0) * 100,
+    metricFormatter: formatPercent,
+    detail: `対象 ${samples}レース`,
+    caption: String(leader?.top5_to_top3_hit_rate_text || "-"),
+  };
+}
+
+function buildSpotlightItems(data) {
+  return [buildRoiSpotlight(data), buildPredictorCoverageSpotlight(data)].filter(Boolean);
+}
+
+export default function HeroSpotlightStrip({ data }) {
+  const items = useMemo(() => buildSpotlightItems(data), [data]);
+
+  if (!items.length) {
     return null;
   }
 
   return (
     <section
-      className="hero-spotlight-strip hero-spotlight-strip--single"
+      className={`hero-spotlight-strip${items.length === 1 ? " hero-spotlight-strip--single" : ""}`}
       aria-label="本日の注目指標"
     >
-      <article className="hero-spotlight-card hero-spotlight-card--roi">
-        <div className="hero-spotlight-card__top">
-          <span className="hero-spotlight-card__eyebrow">{item.eyebrow}</span>
-          <span className="hero-spotlight-card__badge">{item.badge}</span>
-        </div>
-
-        <div className="hero-spotlight-card__body">
-          <strong className="hero-spotlight-card__title">{item.title}</strong>
-          <div className="hero-spotlight-card__metric">
-            <strong>
-              <AnimatedMetric value={item.metricValue} formatter={item.metricFormatter} />
-            </strong>
+      {items.map((item) => (
+        <article
+          key={item.key}
+          className={`hero-spotlight-card${item.key === "roi" ? " hero-spotlight-card--roi" : ""}`}
+        >
+          <div className="hero-spotlight-card__top">
+            <span className="hero-spotlight-card__eyebrow">{item.eyebrow}</span>
+            <span className="hero-spotlight-card__badge">{item.badge}</span>
           </div>
-        </div>
 
-        <div className="hero-spotlight-card__meta">
-          <span>{item.detail}</span>
-          <span>{item.caption}</span>
-        </div>
-      </article>
+          <div className="hero-spotlight-card__body">
+            <strong className="hero-spotlight-card__title">{item.title}</strong>
+            <div className="hero-spotlight-card__metric">
+              <strong>
+                <AnimatedMetric value={item.metricValue} formatter={item.metricFormatter} />
+              </strong>
+            </div>
+          </div>
+
+          <div className="hero-spotlight-card__meta">
+            <span>{item.detail}</span>
+            <span>{item.caption}</span>
+          </div>
+        </article>
+      ))}
     </section>
   );
 }

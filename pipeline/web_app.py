@@ -1541,7 +1541,7 @@ def _public_llm_period_summary(days=None):
     }
 
 
-def _public_predictor_history_cards(scope_key="", days=None):
+def _public_predictor_history_cards(scope_key="", days=None, target_date=""):
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = [scope_norm] if scope_norm else ["central_turf", "central_dirt", "local"]
     aggregates = {
@@ -1559,6 +1559,10 @@ def _public_predictor_history_cards(scope_key="", days=None):
     }
 
     cutoff = None
+    exact_date = None
+    target_date_text = str(target_date or "").strip()
+    if target_date_text:
+        exact_date = _parse_run_date(target_date_text)
     if days not in (None, "", 0):
         try:
             days_value = int(days)
@@ -1588,6 +1592,9 @@ def _public_predictor_history_cards(scope_key="", days=None):
                 continue
             run_id = str(row.get("run_id", "") or "").strip()
             run_date = run_date_map.get(run_id)
+            if exact_date:
+                if run_date != exact_date:
+                    continue
             if cutoff and run_date and run_date < cutoff:
                 continue
             if cutoff and run_date is None:
@@ -1631,6 +1638,24 @@ def _public_predictor_history_cards(scope_key="", days=None):
             card[f"{key}_text"] = _format_public_rate_text(value)
         cards.append(card)
     return cards
+
+
+def _public_daily_predictor_summary(target_date="", scope_key=""):
+    cards = _public_predictor_history_cards(scope_key=scope_key, target_date=target_date)
+    ranked_cards = sorted(
+        [dict(item or {}) for item in list(cards or []) if int((item or {}).get("samples", 0) or 0) > 0],
+        key=lambda item: (
+            -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
+            -int(item.get("samples", 0) or 0),
+            -(float(item.get("top3_hit_rate", 0) or 0.0)),
+            str(item.get("predictor_id", "") or ""),
+        ),
+    )
+    return {
+        "target_date": str(target_date or "").strip(),
+        "cards": cards,
+        "top5to3_leader": ranked_cards[0] if ranked_cards else {},
+    }
 
 
 def _build_public_history_payload(payload, scope_key=""):
@@ -1968,6 +1993,7 @@ def build_public_board_payload(date_text="", scope_key=""):
         enriched_races.append(row)
     payload["races"] = _with_public_display_sort_fields(enriched_races)
     payload["placeholder_race_count"] = len(placeholder_races)
+    payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     return payload
 
