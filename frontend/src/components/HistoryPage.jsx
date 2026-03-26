@@ -37,6 +37,10 @@ const PREDICTOR_PROFILES = {
     lead: "複数モデルと複数オッズを束ねて判断する統合アンサンブル型です。",
     tags: ["統合型", "スタッキング", "複数オッズ"],
   },
+  v6_kiwami: {
+    lead: "市場事前分布と能力残差、レース内順位学習を重ねる高精度モデルです。",
+    tags: ["高精度型", "市場融合", "順位学習"],
+  },
 };
 
 function parsePercentText(value) {

@@ -57,6 +57,15 @@ PREDICTOR_SPECS = [
         "snapshot_prefix": "predictions_v5_stacking",
         "is_primary": False,
     },
+    {
+        "id": "v6_kiwami",
+        "label": PREDICTOR_DISPLAY_LABELS["v6_kiwami"],
+        "script_name": "predictor_v6_gptpro.py",
+        "run_field": "predictions_v6_kiwami_path",
+        "latest_filename": "predictions_v6_kiwami.csv",
+        "snapshot_prefix": "predictions_v6_kiwami",
+        "is_primary": False,
+    },
 ]
 
 

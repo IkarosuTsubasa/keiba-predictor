@@ -716,6 +716,29 @@ def main():
                     "TRIO_ODDS_PATH": str(ROOT_DIR / "trio_odds.csv"),
                 },
             )
+        elif spec["id"] == "v6_kiwami":
+            run_script(
+                ROOT_DIR / spec["script_name"],
+                [],
+                spec["label"],
+                ROOT_DIR,
+                {
+                    "SCOPE_KEY": scope_key,
+                    "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_TARGET_LOCATION": target_location,
+                    "PREDICTOR_TARGET_SURFACE": surface,
+                    "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                    "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                    "PREDICTOR_TARGET_DATE": race_date,
+                    "PREDICTOR_NO_PROMPT": "1",
+                    "ODDS_PATH": str(ROOT_DIR / "odds.csv"),
+                    "FUKU_ODDS_PATH": str(ROOT_DIR / "fuku_odds.csv"),
+                    "WIDE_ODDS_PATH": str(ROOT_DIR / "wide_odds.csv"),
+                    "QUINELLA_ODDS_PATH": str(ROOT_DIR / "quinella_odds.csv"),
+                    "EXACTA_ODDS_PATH": str(ROOT_DIR / "exacta_odds.csv"),
+                    "TRIO_ODDS_PATH": str(ROOT_DIR / "trio_odds.csv"),
+                },
+            )
         else:
             continue
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
@@ -813,6 +836,7 @@ def main():
         "predictions_v3_premium_path": prediction_snapshot_paths.get("v3_premium", ""),
         "predictions_v4_gemini_path": prediction_snapshot_paths.get("v4_gemini", ""),
         "predictions_v5_stacking_path": prediction_snapshot_paths.get("v5_stacking", ""),
+        "predictions_v6_kiwami_path": prediction_snapshot_paths.get("v6_kiwami", ""),
         "odds_path": odds_path,
         "wide_odds_path": wide_odds_path,
         "fuku_odds_path": fuku_odds_path,

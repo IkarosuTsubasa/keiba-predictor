@@ -405,6 +405,7 @@ def build_predictor_env(scope_norm, resolved_run_id, run_row):
             "v3_premium": "PRED_PATH_V3_PREMIUM",
             "v4_gemini": "PRED_PATH_V4_GEMINI",
             "v5_stacking": "PRED_PATH_V5_STACKING",
+            "v6_kiwami": "PRED_PATH_V6_KIWAMI",
         }.get(spec["id"])
         if env_name:
             predictor_env[env_name] = str(pred_path)
@@ -795,7 +796,7 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
             str(item.get("horse_no", "")),
         )
     )
-    preferred_primary_order = ("v5_stacking", "v4_gemini", "v3_premium", "v2_opus", "main")
+    preferred_primary_order = ("v6_kiwami", "v5_stacking", "v4_gemini", "v3_premium", "v2_opus", "main")
     ranking_by_id = {
         str(item.get("predictor_id", "") or "").strip(): list(item.get("ranking", []) or [])
         for item in predictor_rankings
@@ -2535,6 +2536,7 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
         ("predictions_v3_premium_path", "predictor_v3"),
         ("predictions_v4_gemini_path", "predictor_v4"),
         ("predictions_v5_stacking_path", "predictor_v5"),
+        ("predictions_v6_kiwami_path", "predictor_v6"),
     ):
         value = str((run_row or {}).get(field_name, "") or "").strip()
         if not value:

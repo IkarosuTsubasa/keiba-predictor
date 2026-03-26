@@ -747,6 +747,7 @@ def _build_run_row(job, run_id, snapshot_paths):
         "predictions_v3_premium_path": snapshot_paths.get("predictions_v3_premium_path", ""),
         "predictions_v4_gemini_path": snapshot_paths.get("predictions_v4_gemini_path", ""),
         "predictions_v5_stacking_path": snapshot_paths.get("predictions_v5_stacking_path", ""),
+        "predictions_v6_kiwami_path": snapshot_paths.get("predictions_v6_kiwami_path", ""),
         "shutuba_path": snapshot_paths.get("shutuba_path", ""),
         "odds_path": snapshot_paths.get("odds_path", ""),
         "wide_odds_path": snapshot_paths.get("wide_odds_path", ""),
@@ -1052,6 +1053,27 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                         },
                     )
                 elif spec["id"] == "v5_stacking":
+                    pred_code, pred_output = _run_subprocess(
+                        base_path.parent / script_name,
+                        cwd=workspace,
+                        env={
+                            "SCOPE_KEY": scope_key,
+                            "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                            "PREDICTOR_TARGET_LOCATION": target_location,
+                            "PREDICTOR_TARGET_SURFACE": surface,
+                            "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                            "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                            "PREDICTOR_TARGET_DATE": race_date,
+                            "PREDICTOR_NO_PROMPT": "1",
+                            "ODDS_PATH": str(workspace / "odds.csv"),
+                            "FUKU_ODDS_PATH": str(workspace / "fuku_odds.csv"),
+                            "WIDE_ODDS_PATH": str(workspace / "wide_odds.csv"),
+                            "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
+                            "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
+                            "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
+                        },
+                    )
+                elif spec["id"] == "v6_kiwami":
                     pred_code, pred_output = _run_subprocess(
                         base_path.parent / script_name,
                         cwd=workspace,

@@ -177,6 +177,27 @@ def run_batch(workspace_dir: str):
                     "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
                 },
             )
+        elif spec["id"] == "v6_kiwami":
+            pred_code, pred_output = _run_subprocess(
+                ROOT_DIR / script_name,
+                cwd=workspace,
+                env={
+                    "SCOPE_KEY": scope_key,
+                    "PREDICTIONS_OUTPUT": str(pred_latest_path),
+                    "PREDICTOR_TARGET_LOCATION": target_location,
+                    "PREDICTOR_TARGET_SURFACE": surface,
+                    "PREDICTOR_TARGET_DISTANCE": distance or "1800",
+                    "PREDICTOR_TARGET_CONDITION": track_cond_label,
+                    "PREDICTOR_TARGET_DATE": race_date,
+                    "PREDICTOR_NO_PROMPT": "1",
+                    "ODDS_PATH": str(workspace / "odds.csv"),
+                    "FUKU_ODDS_PATH": str(workspace / "fuku_odds.csv"),
+                    "WIDE_ODDS_PATH": str(workspace / "wide_odds.csv"),
+                    "QUINELLA_ODDS_PATH": str(workspace / "quinella_odds.csv"),
+                    "EXACTA_ODDS_PATH": str(workspace / "exacta_odds.csv"),
+                    "TRIO_ODDS_PATH": str(workspace / "trio_odds.csv"),
+                },
+            )
         else:
             continue
 
@@ -288,7 +309,7 @@ def run_batch(workspace_dir: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run remote predictor batch v1-v5")
+    parser = argparse.ArgumentParser(description="Run remote predictor batch v1-v6")
     parser.add_argument("--workspace", required=True)
     args = parser.parse_args()
     summary = run_batch(args.workspace)

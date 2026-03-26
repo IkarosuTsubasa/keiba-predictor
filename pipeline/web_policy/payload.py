@@ -481,7 +481,7 @@ def _choose_primary_predictions(multi_predictor, fallback_predictions):
     primary_predictor_id = str(meta.get("primary_predictor_id", "") or "").strip()
     if primary_predictor_id:
         preferred_ids.append(primary_predictor_id)
-    for predictor_id in ("v5_stacking", "v4_gemini", "v3_premium", "v2_opus", "main"):
+    for predictor_id in ("v6_kiwami", "v5_stacking", "v4_gemini", "v3_premium", "v2_opus", "main"):
         if predictor_id not in preferred_ids:
             preferred_ids.append(predictor_id)
 
@@ -499,6 +499,7 @@ def _load_selected_predictor_predictions(selected_predictor_id, run_row, fallbac
         "v3_premium": "predictions_v3_premium_path",
         "v4_gemini": "predictions_v4_gemini_path",
         "v5_stacking": "predictions_v5_stacking_path",
+        "v6_kiwami": "predictions_v6_kiwami_path",
     }
     selected_field = field_map.get(str(selected_predictor_id or "").strip(), "predictions_path")
     selected_path = str((run_row or {}).get(selected_field, "") or "").strip()

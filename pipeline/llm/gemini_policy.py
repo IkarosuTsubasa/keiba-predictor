@@ -743,12 +743,12 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
 
         "== 提供データの概要 ==\n"
         "- race_context: レースの場所・馬場・距離・日付などの基礎条件\n"
-        "- predictions / predictions_full: 互換用の主表示予測。利用可能なら v5 を優先した単一モデル表示であり、これだけを特別扱いしてはいけない\n"
+        "- predictions / predictions_full: 互換用の主表示予測。利用可能なら v6 を優先した単一モデル表示であり、これだけを特別扱いしてはいけない\n"
         "- multi_model_ai: モデル間分歧の集約指標。consensus_gap / top1_vote_margin / disagreement_score などを含む\n"
         "- prediction_field_guide: predictions_full の各列の説明\n"
-        "- multi_predictor: 5つの予測モデル（v1-v5）の平等な入力本体。個別結果・全馬順位・共識表・モデル別命中率履歴を含む\n"
+        "- multi_predictor: 6つの予測モデル（v1-v6）の平等な入力本体。個別結果・全馬順位・共識表・モデル別命中率履歴を含む\n"
         "  - predictor_rankings: 各モデルの全馬順位。まずここを見て、モデル間の一致と不一致を把握すること\n"
-        "  - profiles: 各モデルの設計思想（v1=総合バランス, v2=能力比較, v3=市場融合, v4=文脈適性, v5=スタッキング統合）\n"
+        "  - profiles: 各モデルの設計思想（v1=総合バランス, v2=能力比較, v3=市場融合, v4=文脈適性, v5=スタッキング統合, v6=市場融合ランカー）\n"
         "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank / rank_std / top3_prob_range\n"
         "  - performance.current_scope_history: 現在条件（芝/ダート/地方）での各モデルの実績命中率\n"
         "- horse_facts: 各馬の共通ファクト。TI、経験、騎手、オッズ、休み明け日数などの軽量サマリ\n"
@@ -764,7 +764,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "券種の選択、馬の選定、金額の配分、参加/見送りの判断、全てあなたに委ねます。\n\n"
 
         "== 分析の進め方（推奨、強制ではない） ==\n"
-        "1. multi_predictor.predictor_rankings で v1-v5 全モデルの全馬順位を平等に確認する\n"
+        "1. multi_predictor.predictor_rankings で v1-v6 全モデルの全馬順位を平等に確認する\n"
         "2. multi_predictor の consensus と performance.current_scope_history、multi_model_ai を見て、モデル間の一致・不一致と実績差を確認する\n"
         "3. horse_facts と race_context を使って、順位の背景を確認する\n"
         "4. predictions_full は互換用の主表示に過ぎないため、補助情報として扱う\n"
@@ -774,7 +774,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
 
         "== 勝つための視点 ==\n"
         "- 「予測で優位性があり、かつオッズが過小評価」な組み合わせが本当の value\n"
-        "- 特定の1モデルをデフォルトで優先しないこと。v1-v5 は平等な判断材料である\n"
+        "- 特定の1モデルをデフォルトで優先しないこと。v1-v6 は平等な判断材料である\n"
         "- 予測モデル間で意見が割れている場合、各モデルの命中率実績を参考に判断する\n"
         "- consensus の投票数は参考情報の一つに過ぎない。投票数が多い＝買うべき、ではない\n"
         "- 買い方は完全に自由。特定の馬を中心に組む必要はなく、データから自分なりの根拠で組み立てること\n"
