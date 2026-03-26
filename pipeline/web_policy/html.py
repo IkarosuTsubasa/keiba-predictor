@@ -257,6 +257,7 @@ def build_policy_html(payload, *, to_float):
         detail_rows.append(
             _policy_detail_row("reason_codes", json.dumps(output.get("reason_codes", []), ensure_ascii=False), code=True)
         )
+        detail_rows.append(_policy_detail_row("comment", output.get("comment", "")))
         detail_rows.append(_policy_detail_row("bet_decision", output.get("bet_decision", "")))
         detail_rows.append(_policy_detail_row("participation_level", output.get("participation_level", "")))
         detail_rows.append(_policy_detail_row("ticket_summary", json.dumps(output.get("ticket_summary", {}), ensure_ascii=False), code=True))

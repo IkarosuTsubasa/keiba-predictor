@@ -315,6 +315,7 @@ def build_public_board_payload(
                     "engine": engine,
                     "label": LLM_BATTLE_LABELS.get(engine, engine),
                     "decision_text": decision_text,
+                    "comment": safe_text(output.get("comment")) or "",
                     "status_label": status_label,
                     "status_tone": status_tone,
                     "ticket_plan_text": public_ticket_plan_text(ticket_rows),
@@ -482,6 +483,7 @@ def build_public_llm_page(
                 <article class="card">
                   <h4>{html.escape(safe_text(card.get('label')) or '-')}</h4>
                   <p>判定 {html.escape(safe_text(card.get('decision_text')) or '-')}</p>
+                  <p>{html.escape(safe_text(card.get('comment')) or '-')}</p>
                   <p>印 {html.escape(safe_text(card.get('marks_text')) or '-')}</p>
                   <p style="white-space: pre-wrap;">{html.escape(safe_text(card.get('ticket_plan_text')) or '-')}</p>
                 </article>

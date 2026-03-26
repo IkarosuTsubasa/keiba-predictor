@@ -2477,6 +2477,7 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
                 "model": str((payload or {}).get("policy_model", "") or (payload or {}).get("gemini_model", "") or "").strip(),
                 "bet_decision": str(output.get("bet_decision", "") or "").strip(),
                 "participation_level": str(output.get("participation_level", "") or "").strip(),
+                "comment": str(output.get("comment", "") or "").strip(),
                 "enabled_bet_types": list(output.get("enabled_bet_types", []) or []),
                 "reason_codes": list(output.get("reason_codes", []) or []),
                 "marks": list(output.get("marks", []) or []),
