@@ -4,6 +4,7 @@ import time
 from llm.gemini_policy import (
     RacePolicyInput,
     RacePolicyOutput,
+    _build_prompt_payload,
     _sanitize_output,
     call_gemini_policy,
     get_last_call_meta,
@@ -331,10 +332,15 @@ def main():
     policy_input = _build_smoke_input()
     input_2000 = _clone_with_budget(policy_input, 2000, 800)
     input_50000 = _clone_with_budget(policy_input, 50000, 10000)
+    place_only_payload = policy_input.model_dump() if hasattr(policy_input, "model_dump") else policy_input.dict()
+    place_only_payload["constraints"]["allowed_types"] = ["place"]
+    place_only_input = RacePolicyInput(**place_only_payload)
 
     key_2000 = get_policy_cache_key(input_2000, model="gemini-3.1-flash-lite-preview")
     key_50000 = get_policy_cache_key(input_50000, model="gemini-3.1-flash-lite-preview")
-    assert key_2000 == key_50000, "cache key should ignore budget after budget-agnostic policy change"
+    assert key_2000 != key_50000, "cache key should change when bankroll or race budget changes"
+    place_only_prompt_payload = _build_prompt_payload(place_only_input)
+    assert all(str(item.get("bet_type", "")) == "place" for item in list(place_only_prompt_payload.get("candidate_tickets", []) or [])), "prompt candidate_tickets should already respect allowed_types"
 
     out1 = call_gemini_policy(
         input=input_2000,
@@ -347,8 +353,12 @@ def main():
     assert str(out1.bet_decision) in ("bet", "no_bet"), "bet_decision should be valid"
     assert str(out1.participation_level) in ("no_bet", "small_bet", "normal_bet"), "participation_level should be valid"
     assert str(out1.construction_style) in ("single_axis", "pair_spread", "value_hunt", "conservative_single")
+    assert isinstance(out1.selected_tickets, list), "selected_tickets should be list"
     assert isinstance(out1.pick_ids, list), "pick_ids should be list"
     assert isinstance(out1.ticket_plan, list), "ticket_plan should be list"
+    for item in list(out1.selected_tickets or []):
+        assert str(item.id).strip(), "selected_tickets id should be non-empty"
+        assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "selected_tickets stake should be positive 100-yen unit"
     for item in list(out1.ticket_plan or []):
         assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio"), "ticket_plan bet_type should be valid"
         assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "ticket_plan legs should be non-empty"
@@ -369,7 +379,11 @@ def main():
     )
     meta2 = get_last_call_meta()
     assert bool(meta2.get("cache_hit", False)), "second run must be cache hit"
+    assert isinstance(out2.selected_tickets, list), "second run selected_tickets should be list"
     assert isinstance(out2.ticket_plan, list), "second run ticket_plan should be list"
+    for item in list(out2.selected_tickets or []):
+        assert str(item.id).strip(), "cached selected_tickets id should be non-empty"
+        assert int(item.stake_yen or 0) > 0 and int(item.stake_yen or 0) % 100 == 0, "cached selected_tickets stake should be positive 100-yen unit"
     for item in list(out2.ticket_plan or []):
         assert str(item.bet_type) in ("win", "place", "wide", "quinella", "exacta", "trio"), "cached ticket_plan bet_type should be valid"
         assert isinstance(item.legs, list) and all(str(x).strip() for x in list(item.legs or [])), "cached ticket_plan legs should be non-empty"
@@ -401,6 +415,7 @@ def main():
         max_ticket_count=1,
         risk_tilt="medium",
         reason_codes=["VALUE_PRESENT"],
+        selected_tickets=[{"id": "wide:98-99", "stake_yen": 100}],
         ticket_plan=[{"bet_type": "wide", "legs": ["98", "99"], "stake_yen": 100}],
         warnings=[],
         marks=[],
@@ -408,11 +423,38 @@ def main():
         focus_points=[],
     )
     sanitized_invalid = _sanitize_output(invalid_plan, input_2000)
-    assert str(sanitized_invalid.bet_decision) == "bet", "sanitize must preserve original bet_decision"
+    assert str(sanitized_invalid.bet_decision) == "no_bet", "invalid executable state should be downgraded to no_bet"
+    assert list(sanitized_invalid.selected_tickets or []) == [], "invalid selected ticket should be removed"
     assert list(sanitized_invalid.ticket_plan or []) == [], "invalid ticket should be removed"
     invalid_warnings = [str(x) for x in list(sanitized_invalid.warnings or [])]
     assert "NO_EXECUTABLE_TICKETS" in invalid_warnings, "invalid bet plan should be recorded explicitly"
     assert "INVALID_TICKET_DROPPED" in invalid_warnings, "dropped invalid ticket should be recorded"
+    assert str(sanitized_invalid.participation_level) == "no_bet", "invalid executable state should be downgraded to no_bet"
+
+    inconsistent_no_bet = RacePolicyOutput(
+        bet_decision="no_bet",
+        participation_level="normal_bet",
+        enabled_bet_types=["wide"],
+        construction_style="pair_spread",
+        key_horses=["1"],
+        secondary_horses=["2"],
+        longshot_horses=[],
+        max_ticket_count=1,
+        risk_tilt="medium",
+        reason_codes=["VALUE_PRESENT"],
+        selected_tickets=[{"id": "wide:1-2", "stake_yen": 100}],
+        ticket_plan=[{"bet_type": "wide", "legs": ["1", "2"], "stake_yen": 100}],
+        warnings=[],
+        marks=[{"symbol": "◎", "horse_no": "1"}],
+        pick_ids=["wide:1-2"],
+        focus_points=[{"type": "horse", "value": "1"}],
+    )
+    sanitized_no_bet = _sanitize_output(inconsistent_no_bet, input_2000)
+    assert str(sanitized_no_bet.bet_decision) == "no_bet", "no_bet decision should remain canonical"
+    assert str(sanitized_no_bet.participation_level) == "no_bet", "no_bet should force participation_level=no_bet"
+    assert list(sanitized_no_bet.selected_tickets or []) == [], "no_bet should clear selected_tickets"
+    assert list(sanitized_no_bet.pick_ids or []) == [], "no_bet should clear pick_ids"
+    assert list(sanitized_no_bet.ticket_plan or []) == [], "no_bet should clear ticket_plan"
 
     reused_meta = dict(meta3)
     reused_meta["reused"] = True

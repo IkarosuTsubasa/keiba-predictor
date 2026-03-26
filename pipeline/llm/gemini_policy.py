@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v13"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v18"
+POLICY_CACHE_VERSION = "gemini_policy_v14"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v19"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -136,6 +136,11 @@ class PolicyTicketPlan(BaseModel):
     stake_yen: int
 
 
+class PolicySelectedTicket(BaseModel):
+    id: str
+    stake_yen: int
+
+
 class RacePolicyOutput(BaseModel):
     bet_decision: Literal["bet", "no_bet"]
     participation_level: Literal["no_bet", "small_bet", "normal_bet"]
@@ -144,12 +149,14 @@ class RacePolicyOutput(BaseModel):
     key_horses: List[str] = Field(default_factory=list)
     secondary_horses: List[str] = Field(default_factory=list)
     longshot_horses: List[str] = Field(default_factory=list)
-    max_ticket_count: int
-    risk_tilt: Literal["low", "medium", "high"]
+    max_ticket_count: int = 0
+    risk_tilt: Literal["low", "medium", "high"] = "low"
     # 策略解释标签。由本地规则统一补齐，用来说明这次买法/见送背后的判断依据。
-    reason_codes: List[str]
+    reason_codes: List[str] = Field(default_factory=list)
+    comment: Optional[str] = None
     warnings: Optional[List[str]] = None
     marks: List[PolicyMark] = Field(default_factory=list)
+    selected_tickets: List[PolicySelectedTicket] = Field(default_factory=list)
     pick_ids: List[str] = Field(default_factory=list)
     ticket_plan: List[PolicyTicketPlan] = Field(default_factory=list)
     focus_points: List[FocusPoint] = Field(default_factory=list)
@@ -251,6 +258,42 @@ def _candidate_digest(candidates: List[PolicyCandidate]) -> str:
     return hashlib.sha256(_stable_json_dumps(slim).encode("utf-8")).hexdigest()
 
 
+def _canonical_legs_for_bet_type(bet_type: str, legs: List[str]) -> List[str]:
+    normalized = [_normalize_horse_no_text(x) for x in list(legs or []) if _normalize_horse_no_text(x)]
+    if str(bet_type or "").strip().lower() in ("wide", "quinella", "trio"):
+        return sorted(normalized, key=lambda x: int(x) if x.isdigit() else x)
+    return normalized
+
+
+def _ticket_key_from_parts(bet_type: str, legs: List[str]) -> str:
+    bet_type_text = str(bet_type or "").strip().lower()
+    canon_legs = _canonical_legs_for_bet_type(bet_type_text, legs)
+    return f"{bet_type_text}:{'-'.join(canon_legs)}"
+
+
+def _build_candidate_maps(input_obj: RacePolicyInput) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    by_id: Dict[str, Dict[str, Any]] = {}
+    by_ticket_key: Dict[str, Dict[str, Any]] = {}
+    for cand in list(input_obj.candidates or []):
+        candidate_id = str(cand.id or "").strip()
+        bet_type = str(cand.bet_type or "").strip().lower()
+        legs = _canonical_legs_for_bet_type(bet_type, list(cand.legs or []))
+        if (not candidate_id) or (not bet_type) or (not legs):
+            continue
+        row = {
+            "id": candidate_id,
+            "bet_type": bet_type,
+            "legs": legs,
+            "odds_used": round(float(cand.odds_used or 0.0), 6),
+            "p_hit": round(float(cand.p_hit or 0.0), 6),
+            "ev": round(float(cand.ev or 0.0), 6),
+            "score": round(float(cand.score or 0.0), 6),
+        }
+        by_id[candidate_id] = row
+        by_ticket_key[_ticket_key_from_parts(bet_type, legs)] = row
+    return {"by_id": by_id, "by_ticket_key": by_ticket_key}
+
+
 def _input_context_digest(input_obj: RacePolicyInput) -> str:
     payload = {
         "field_size": int(input_obj.field_size or 0),
@@ -268,6 +311,8 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "portfolio_history": dict(input_obj.portfolio_history or {}),
         "candidates_meta": dict(input_obj.candidates_meta or {}),
         "constraints": {
+            "bankroll_yen": int(input_obj.constraints.bankroll_yen or 0),
+            "race_budget_yen": int(input_obj.constraints.race_budget_yen or 0),
             "max_tickets_per_race": int(input_obj.constraints.max_tickets_per_race or 0),
             "high_odds_threshold": float(input_obj.constraints.high_odds_threshold or 0.0),
             "allowed_types": list(input_obj.constraints.allowed_types or []),
@@ -419,6 +464,219 @@ def _reason_codes_for(
     return out
 
 
+def _trim_text(value: Any, limit: int = 120) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _compact_race_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
+    race_context = dict(input_obj.race_context or {})
+    out = {
+        "race_id": str(input_obj.race_id or ""),
+        "scope_key": str(input_obj.scope_key or ""),
+        "field_size": int(input_obj.field_size or 0),
+    }
+    for key in (
+        "race_date",
+        "track_name",
+        "venue",
+        "surface",
+        "distance",
+        "race_class",
+        "track_condition",
+        "weather",
+        "pace_label",
+        "course",
+    ):
+        value = race_context.get(key)
+        if value in (None, "", []):
+            continue
+        out[key] = value
+    return out
+
+
+def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
+    multi_predictor = dict(input_obj.multi_predictor or {})
+    consensus_rows = []
+    for row in list(multi_predictor.get("consensus", []) or [])[: min(10, max(1, int(input_obj.field_size or 0)))]:
+        consensus_rows.append(
+            {
+                "horse_no": _normalize_horse_no_text(row.get("horse_no", "")),
+                "horse_name": str(row.get("horse_name", "") or ""),
+                "top1_votes": int(row.get("top1_votes", 0) or 0),
+                "top3_votes": int(row.get("top3_votes", 0) or 0),
+                "avg_pred_rank": round(float(row.get("avg_pred_rank", 0.0) or 0.0), 3),
+                "avg_top3_prob_model": round(float(row.get("avg_top3_prob_model", 0.0) or 0.0), 6),
+                "avg_rank_score_norm": round(float(row.get("avg_rank_score_norm", 0.0) or 0.0), 6),
+            }
+        )
+    performance = dict(multi_predictor.get("performance", {}) or {})
+    scope_history = list(performance.get("current_scope_history", []) or [])
+    compact_perf = []
+    for row in scope_history[:6]:
+        compact_perf.append(
+            {
+                "predictor_id": str(row.get("predictor_id", "") or row.get("name", "") or ""),
+                "hit_rate": row.get("hit_rate"),
+                "top3_rate": row.get("top3_rate"),
+                "roi": row.get("roi"),
+                "sample_size": row.get("sample_size"),
+            }
+        )
+    marks_top5 = []
+    for row in list(input_obj.marks_top5 or [])[:5]:
+        marks_top5.append(
+            {
+                "horse_no": _normalize_horse_no_text(row.horse_no),
+                "horse_name": str(row.horse_name or ""),
+                "pred_rank": int(row.pred_rank or 0),
+                "top3_prob_model": round(float(row.top3_prob_model or 0.0), 6),
+            }
+        )
+    ai = _model_dump(input_obj.ai)
+    return {
+        "ai_confidence": {
+            "gap": round(float(ai.get("gap", 0.0) or 0.0), 6),
+            "confidence_score": round(float(ai.get("confidence_score", 0.0) or 0.0), 6),
+            "stability_score": round(float(ai.get("stability_score", 0.0) or 0.0), 6),
+            "risk_score": round(float(ai.get("risk_score", 0.0) or 0.0), 6),
+        },
+        "multi_model_ai": {
+            str(key): value
+            for key, value in dict(input_obj.multi_model_ai or {}).items()
+            if str(key or "") in ("consensus_gap", "top1_vote_margin", "disagreement_score", "favorite_strength")
+        },
+        "consensus_top": consensus_rows,
+        "marks_top5": marks_top5,
+        "predictor_scope_performance": compact_perf,
+    }
+
+
+def _compact_horse_summary(input_obj: RacePolicyInput) -> List[Dict[str, Any]]:
+    fact_map = {}
+    for row in list(input_obj.horse_facts or []):
+        horse_no = _normalize_horse_no_text(row.get("horse_no", ""))
+        if horse_no:
+            fact_map[horse_no] = dict(row or {})
+    consensus_map = {}
+    for row in list((input_obj.multi_predictor or {}).get("consensus", []) or []):
+        horse_no = _normalize_horse_no_text(row.get("horse_no", ""))
+        if horse_no:
+            consensus_map[horse_no] = dict(row or {})
+    out = []
+    seen = set()
+    for row in list(input_obj.predictions or []):
+        horse_no = _normalize_horse_no_text(row.horse_no)
+        if (not horse_no) or (horse_no in seen):
+            continue
+        seen.add(horse_no)
+        fact = fact_map.get(horse_no, {})
+        consensus = consensus_map.get(horse_no, {})
+        out.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": str(row.horse_name or fact.get("horse_name", "") or ""),
+                "pred_rank": int(row.pred_rank or 0),
+                "top3_prob_model": round(float(row.top3_prob_model or 0.0), 6),
+                "rank_score_norm": round(float(row.rank_score_norm or 0.0), 6),
+                "win_odds": round(float(row.win_odds or fact.get("win_odds", 0.0) or 0.0), 6),
+                "place_odds": round(float(row.place_odds or fact.get("place_odds", 0.0) or 0.0), 6),
+                "top1_votes": int(consensus.get("top1_votes", 0) or 0),
+                "top3_votes": int(consensus.get("top3_votes", 0) or 0),
+                "avg_pred_rank": round(float(consensus.get("avg_pred_rank", 0.0) or 0.0), 3),
+                "context_fit": _trim_text(
+                    fact.get("context_fit")
+                    or fact.get("fit_note")
+                    or fact.get("style_note")
+                    or fact.get("memo")
+                    or "",
+                    limit=60,
+                ),
+            }
+        )
+    return out
+
+
+def _compact_portfolio_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
+    portfolio_history = dict(input_obj.portfolio_history or {})
+    today = dict(portfolio_history.get("today", {}) or {})
+    lookback = dict(portfolio_history.get("lookback_summary", {}) or {})
+    breakdown = list(portfolio_history.get("bet_type_breakdown", []) or [])
+    compact_breakdown = []
+    for row in breakdown[:6]:
+        compact_breakdown.append(
+            {
+                "bet_type": str(row.get("bet_type", "") or ""),
+                "roi": row.get("roi"),
+                "hit_rate": row.get("hit_rate"),
+                "count": row.get("count"),
+            }
+        )
+    available_capital = int(today.get("available_capital", today.get("available_capital_yen", 0)) or 0)
+    locked_capital = int(today.get("locked_capital", today.get("locked_capital_yen", 0)) or 0)
+    streak = int(
+        lookback.get("losing_streak")
+        or lookback.get("consecutive_losses")
+        or portfolio_history.get("losing_streak")
+        or 0
+    )
+    return {
+        "today_pnl": int(today.get("confirmed_pnl", today.get("pnl", 0)) or 0),
+        "available_capital": available_capital,
+        "locked_capital": locked_capital,
+        "recent_overbet_flag": bool(locked_capital > max(0, available_capital)),
+        "losing_streak_flag": bool(streak >= 3),
+        "lookback_summary": {
+            str(key): value
+            for key, value in lookback.items()
+            if str(key or "") in ("roi", "hit_rate", "count", "avg_stake_yen", "max_drawdown")
+        },
+        "bet_type_breakdown": compact_breakdown,
+    }
+
+
+def _compact_candidate_tickets(input_obj: RacePolicyInput) -> List[Dict[str, Any]]:
+    allowed_types = {str(x).strip().lower() for x in list(input_obj.constraints.allowed_types or []) if str(x).strip()}
+    out = []
+    for cand in list(input_obj.candidates or []):
+        bet_type = str(cand.bet_type or "").strip().lower()
+        if allowed_types and bet_type not in allowed_types:
+            continue
+        out.append(
+            {
+                "id": str(cand.id or ""),
+                "bet_type": bet_type,
+                "legs": _canonical_legs_for_bet_type(bet_type, list(cand.legs or [])),
+                "odds": round(float(cand.odds_used or 0.0), 6),
+                "p_hit": round(float(cand.p_hit or 0.0), 6),
+                "ev": round(float(cand.ev or 0.0), 6),
+                "score": round(float(cand.score or 0.0), 6),
+            }
+        )
+    return out
+
+
+def _build_prompt_payload(input_obj: RacePolicyInput) -> Dict[str, Any]:
+    constraints = input_obj.constraints
+    return {
+        "race_summary": _compact_race_summary(input_obj),
+        "model_summary": _compact_model_summary(input_obj),
+        "horse_summary": _compact_horse_summary(input_obj),
+        "candidate_pool_meta": dict(input_obj.candidates_meta or {}),
+        "candidate_tickets": _compact_candidate_tickets(input_obj),
+        "portfolio_summary": _compact_portfolio_summary(input_obj),
+        "constraints": {
+            "bankroll_yen": int(constraints.bankroll_yen or 0),
+            "race_budget_yen": int(constraints.race_budget_yen or 0),
+            "max_tickets_per_race": int(constraints.max_tickets_per_race or 0),
+            "high_odds_threshold": round(float(constraints.high_odds_threshold or 0.0), 6),
+            "allowed_types": [str(x) for x in list(constraints.allowed_types or []) if str(x).strip()],
+        },
+    }
+
+
 def _derive_construction_style(strategy_mode: str, buy_style: str, participation_level: str) -> str:
     mode = str(strategy_mode or "").strip().lower()
     style = str(buy_style or "").strip().lower()
@@ -523,7 +781,9 @@ def fallback_no_bet_policy(input_obj: RacePolicyInput, fallback_reason: str = ""
                 "no_bet",
                 False,
             ),
+            "comment": "優位性が弱く見送り",
             "pick_ids": [],
+            "selected_tickets": [],
             "ticket_plan": [],
             "warnings": warnings or None,
         },
@@ -534,6 +794,7 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     ai = input_obj.ai
     constraints = input_obj.constraints
     allowed_types = {str(x).strip().lower() for x in list(constraints.allowed_types or []) if str(x).strip()}
+    candidate_by_id = dict(_build_candidate_maps(input_obj).get("by_id", {}) or {})
     candidates = [
         c for c in input_obj.candidates if (not allowed_types) or (str(c.bet_type) in allowed_types)
     ]
@@ -578,6 +839,8 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
                 "warnings": warnings or None,
+                "comment": "候補不足で見送り",
+                "selected_tickets": [],
                 "pick_ids": [],
                 "focus_points": [{"type": "concept", "value": "見送り"}],
             },
@@ -604,6 +867,8 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
                     ai, int(input_obj.field_size or 0), has_value, "no_bet", "no_bet", "no_bet", False
                 ),
                 "warnings": warnings,
+                "comment": "優位性が足りず見送り",
+                "selected_tickets": [],
                 "pick_ids": [],
                 "focus_points": [{"type": "concept", "value": "軽く入る形も作りにくい"}],
             },
@@ -688,126 +953,131 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
         focus_points.append({"type": "bet_type", "value": enabled[0]})
     if longshot_horses:
         focus_points.append({"type": "concept", "value": "高オッズは補助1点まで"})
+    budget_cap = int(constraints.race_budget_yen or 0) or int(constraints.bankroll_yen or 0)
+    selected_tickets: List[Dict[str, Any]] = []
+    if budget_cap >= 100 and prioritized:
+        selected_candidates = prioritized[: max(1, min(int(max_ticket_count or 0), len(prioritized)))]
+        unit_budget = min(
+            max(1, budget_cap // 100),
+            len(selected_candidates) if participation_level == "small_bet" else max(len(selected_candidates), min(len(selected_candidates) * 2, budget_cap // 100)),
+        )
+        per_ticket_units = max(1, unit_budget // max(1, len(selected_candidates)))
+        remainder_units = max(0, unit_budget - per_ticket_units * len(selected_candidates))
+        for idx, cand in enumerate(selected_candidates):
+            units = per_ticket_units + (1 if idx < remainder_units else 0)
+            selected_tickets.append({"id": str(cand.id), "stake_yen": int(units * 100)})
+    pick_ids = [str(item.get("id", "")).strip() for item in selected_tickets if str(item.get("id", "")).strip()]
+    ticket_plan = []
+    for item in selected_tickets:
+        candidate = dict(candidate_by_id.get(str(item.get("id", "")).strip(), {}) or {})
+        if not candidate:
+            continue
+        ticket_plan.append(
+            {
+                "bet_type": str(candidate.get("bet_type", "") or "").strip().lower(),
+                "legs": list(candidate.get("legs", []) or []),
+                "stake_yen": int(item.get("stake_yen", 0) or 0),
+            }
+        )
+    reason_codes = _reason_codes_for(
+        ai,
+        int(input_obj.field_size or 0),
+        has_value,
+        participation_level,
+        buy_style,
+        "bet",
+        bool(longshot_horses),
+    )
+    comment = "候補プール上位から少数選択"
+    final_state = _coerce_final_execution_state(
+        bet_decision="bet",
+        participation_level=participation_level,
+        enabled_bet_types=enabled,
+        key_horses=key_horses,
+        secondary_horses=secondary_horses,
+        longshot_horses=longshot_horses,
+        max_ticket_count=min(
+            max(1, int(max_ticket_count)),
+            max(1, int(constraints.max_tickets_per_race or max_ticket_count)),
+        ),
+        risk_tilt=risk_tilt,
+        reason_codes=reason_codes,
+        comment=comment,
+        warnings=warnings,
+        marks=[],
+        selected_tickets=selected_tickets,
+        pick_ids=pick_ids,
+        ticket_plan=ticket_plan,
+        focus_points=focus_points,
+    )
+    final_style_meta = _infer_internal_policy_style(
+        bet_decision=str(final_state.get("bet_decision", "") or ""),
+        participation_level=str(final_state.get("participation_level", "") or ""),
+        enabled_bet_types=list(final_state.get("enabled_bet_types", []) or []),
+        construction_style=construction_style,
+    )
+    final_state["reason_codes"] = _reason_codes_for(
+        ai,
+        int(input_obj.field_size or 0),
+        has_value,
+        str(final_state.get("participation_level", "") or ""),
+        str(final_style_meta.get("buy_style", "no_bet") or "no_bet"),
+        str(final_state.get("bet_decision", "") or ""),
+        bool(final_state.get("longshot_horses", [])),
+    )
+    final_construction_style = (
+        "conservative_single"
+        if str(final_state.get("bet_decision", "") or "") == "no_bet"
+        else construction_style
+    )
 
     return _model_validate(
         RacePolicyOutput,
         {
-            "bet_decision": "bet",
-            "participation_level": participation_level,
-            "enabled_bet_types": enabled,
-            "construction_style": construction_style,
-            "key_horses": key_horses,
-            "secondary_horses": secondary_horses,
-            "longshot_horses": longshot_horses,
-            "max_ticket_count": min(
-                max(1, int(max_ticket_count)),
-                max(1, int(constraints.max_tickets_per_race or max_ticket_count)),
-            ),
-            "risk_tilt": risk_tilt,
-            "reason_codes": _reason_codes_for(
-                ai,
-                int(input_obj.field_size or 0),
-                has_value,
-                participation_level,
-                buy_style,
-                "bet",
-                bool(longshot_horses),
-            ),
-            "warnings": warnings or None,
-            "pick_ids": [],
-            "focus_points": focus_points,
+            **final_state,
+            "construction_style": final_construction_style,
         },
     )
 
 def _make_prompt(input_obj: RacePolicyInput) -> str:
     schema = _model_json_schema(RacePolicyOutput)
-    payload = _model_dump(input_obj)
-    payload.pop("candidates", None)
+    payload = _build_prompt_payload(input_obj)
     input_json = _stable_json_dumps(payload)
     schema_json = _stable_json_dumps(schema)
     constraints = input_obj.constraints
     return (
-        "あなたは馬券購入AIコンペティションの参加者です。\n"
-        "複数のAIが同条件で競い合い、週末終了時の資金残高で順位が決まります。\n"
-        "あなたの出力がそのまま購入指示になります。ローカル側は検証・記録のみで、買い目や配分には一切介入しません。\n\n"
+        "あなたは当日の馬券ポートフォリオ最適化AIです。\n"
+        "目的はこの1レース単体の的中ではなく、当日終了時の期待資金成長を最大化することです。\n"
+        "無理に参加する必要はありません。優位が弱ければ no_bet を選んでください。\n\n"
 
-        "== コンペティション条件 ==\n"
-        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円（残高を増やすことが目的）\n"
+        "== 役割 ==\n"
+        "- あなたの仕事は candidate_tickets から選ぶことと、各候補への stake_yen 配分だけです\n"
+        "- candidate_tickets に存在しない組み合わせを出力してはいけません\n"
+        "- 候補探索は上流で完了済みです。あなたは候補池の最終選択者です\n"
+        "- marks / focus_points / key_horses / enabled_bet_types / ticket_plan などの表示系フィールドは主目的ではありません\n"
+        "- bet のときは selected_tickets を最優先で正しく返してください\n\n"
+
+        "== 判断基準 ==\n"
+        "1. candidate_tickets の edge（ev / score / p_hit）\n"
+        "2. model_summary の合意度と不一致の質\n"
+        "3. horse_summary の文脈適性\n"
+        "4. portfolio_summary と予算制約に基づく当日資金配分\n\n"
+
+        "== 制約 ==\n"
+        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
         f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
         f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
-        "- 購入単位: 100円刻み\n"
-        "- 実運用では同じ時間帯や近い時間帯に 4-5 レース同時に買う必要が生じることがある\n"
-        "- 1レースで資金を使いすぎると、期待値がある後続レースに参加できず機会損失になる\n"
-        "- 単レース最適ではなく、当日全体のレース配分を意識して資金を残すこと\n"
-        "- 資金が尽きたら残りのレースに参加不可。一方、全て少額で薄く買うだけでは他AIに勝てない。\n\n"
-
-        "== 提供データの概要 ==\n"
-        "- race_context: レースの場所・馬場・距離・日付などの基礎条件\n"
-        "- predictions / predictions_full: 互換用の主表示予測。利用可能なら v6 を優先した単一モデル表示であり、これだけを特別扱いしてはいけない\n"
-        "- multi_model_ai: モデル間分歧の集約指標。consensus_gap / top1_vote_margin / disagreement_score などを含む\n"
-        "- prediction_field_guide: predictions_full の各列の説明\n"
-        "- multi_predictor: 6つの予測モデル（v1-v6）の平等な入力本体。個別結果・全馬順位・共識表・モデル別命中率履歴を含む\n"
-        "  - predictor_rankings: 各モデルの全馬順位。まずここを見て、モデル間の一致と不一致を把握すること\n"
-        "  - profiles: 各モデルの設計思想（v1=総合バランス, v2=能力比較, v3=市場融合, v4=文脈適性, v5=スタッキング統合, v6=市場融合ランカー）\n"
-        "  - consensus: 馬番ごとの top1_votes / top3_votes / avg_pred_rank / rank_std / top3_prob_range\n"
-        "  - performance.current_scope_history: 現在条件（芝/ダート/地方）での各モデルの実績命中率\n"
-        "- horse_facts: 各馬の共通ファクト。TI、経験、騎手、オッズ、休み明け日数などの軽量サマリ\n"
-        "- odds_full: 全券種の全量オッズ（win/place/wide/quinella/exacta/trio）\n"
-        "- portfolio_history: あなた自身の直近購入履歴・損益推移・券種別成績\n"
-        "  - today: 本日の開始本金・確定損益・未決済拘束額・利用可能残高\n"
-        "  - recent_days / lookback_summary / bet_type_breakdown / recent_tickets\n"
-        "- ai: レースの予測信頼度（gap, confidence_score, stability_score, risk_score）\n\n"
-        "- candidates / candidates_meta: 実際に使ってよい候補買い目の shortlist。p_hit / ev / score は下見用の近似値であり、盲信せず他情報と突き合わせて使う\n\n"
-
-        "== あなたの仕事 ==\n"
-        "上記データを全て分析し、このレースで「何を」「いくら」買うか（または買わないか）を自分で判断してください。\n"
-        "券種の選択、馬の選定、金額の配分、参加/見送りの判断、全てあなたに委ねます。\n\n"
-
-        "== 分析の進め方（推奨、強制ではない） ==\n"
-        "1. multi_predictor.predictor_rankings で v1-v6 全モデルの全馬順位を平等に確認する\n"
-        "2. multi_predictor の consensus と performance.current_scope_history、multi_model_ai を見て、モデル間の一致・不一致と実績差を確認する\n"
-        "3. horse_facts と race_context を使って、順位の背景を確認する\n"
-        "4. predictions_full は互換用の主表示に過ぎないため、補助情報として扱う\n"
-        "5. odds_full と candidates を突き合わせ、期待値の高い馬・組み合わせを探す\n"
-        "6. portfolio_history で自分の最近の調子・癖を確認し、資金配分に反映する\n"
-        "7. 以上を踏まえ、券種・買い目・金額を自由に決定する\n\n"
-
-        "== 勝つための視点 ==\n"
-        "- 「予測で優位性があり、かつオッズが過小評価」な組み合わせが本当の value\n"
-        "- 特定の1モデルをデフォルトで優先しないこと。v1-v6 は平等な判断材料である\n"
-        "- 予測モデル間で意見が割れている場合、各モデルの命中率実績を参考に判断する\n"
-        "- consensus の投票数は参考情報の一つに過ぎない。投票数が多い＝買うべき、ではない\n"
-        "- 買い方は完全に自由。特定の馬を中心に組む必要はなく、データから自分なりの根拠で組み立てること\n"
-        "- 命中率の高い堅実な馬券と、たまに当たる高配当のバランスが週間収支の鍵\n"
-        "- 今この1レースだけでなく、このあと 4-5 レース続けて買う可能性を前提に資金配分する\n"
-        "- 明確な優位がないのに単レースへ過大投入するのは、後続の高期待値レースを逃すので避ける\n"
-        "- 「このレースはデータ的に自信が持てる」時に厚く張り、曖昧な時は薄く張るか見送る\n"
-        "- 連敗中の取り返し買い、連勝中の過信買いは典型的な失敗パターン\n"
-        "- 見送り（no_bet）も立派な戦略。全レース参加する義務はない\n\n"
-
-        "== 出力の制約（厳守） ==\n"
-        "- あなたは最終購入責任者であり、ローカル側は買い目や配分を補完しない\n"
-        "- 入力データに存在する馬番・組み合わせ・券種のみ使用可能（創作禁止）\n"
-        "- ticket_plan の合計金額は race_budget_yen 以下\n"
-        "- stake_yen は 100円単位\n"
-        "- bet_decision が bet なら、ticket_plan はそのまま実行可能な完全な購入指示でなければならない\n"
-        "- 実行可能な ticket_plan を構成できない場合は no_bet を選ぶこと\n"
-        "- 中途半端な bet 出力は失敗として記録される\n"
+        "- 購入単位は100円刻み\n"
+        "- selected_tickets の id は candidate_tickets の id と完全一致であること\n"
+        "- selected_tickets の合計金額は race_budget_yen 以下\n"
+        "- selected_tickets を実行可能に構成できないなら no_bet を返すこと\n"
         "- JSON のみ出力\n\n"
 
-        "== 出力フィールド説明 ==\n"
-        "- bet_decision: bet（購入）/ no_bet（見送り）\n"
-        "- participation_level: no_bet / small_bet / normal_bet\n"
-        "- enabled_bet_types: 今回使う券種リスト（odds_full に存在するもののみ）\n"
-        "- key_horses: 注目馬 / secondary_horses: 次点馬 / longshot_horses: 穴馬（全て任意、無理に埋めなくてよい）\n"
-        "- marks: ◎○▲△☆（必要な分だけ）\n"
-        "- focus_points: type=horse/pair/bet_type/concept, value=内容\n"
-        "- max_ticket_count: 購入点数\n"
-        "- risk_tilt: low / medium / high\n"
-        "- reason_codes: MIXED_FIELD / NORMAL_FIELD / STRONG_FAVORITE / LOW_CONFIDENCE / LOW_STABILITY / VALUE_PRESENT / NO_VALUE / HIGH_ODDS_ONE_SHOT / PLACE_FOCUS / PAIR_FOCUS / WIN_TILT / CONSERVATIVE / SMALL_BET / NO_BET から該当するものを選択\n"
-        "- ticket_plan: [{\"bet_type\": \"券種\", \"legs\": [\"馬番\",...], \"stake_yen\": 金額}] ← これが実際の購入指示\n"
-        "- pick_ids: 補助情報（空でも可）\n"
-        "- warnings: 注意事項があれば\n\n"
+        "== 出力方針 ==\n"
+        "- bet_decision が bet のときは selected_tickets を必須にする\n"
+        "- selected_tickets は [{\"id\":\"candidate_id\",\"stake_yen\":300}] 形式で返す\n"
+        "- comment は短い1文でよい\n"
+        "- それ以外の表示系フィールドは空やデフォルトでもよい\n\n"
 
         "--------------------------------\n"
         "【入力JSON】\n"
@@ -884,8 +1154,8 @@ def _sanitize_marks(marks: List[PolicyMark], allowed_horses: List[str]) -> List[
     seen_symbols = set()
     seen_horses = set()
     for mark in list(marks or []):
-        symbol = str(getattr(mark, "symbol", "") or "").strip()
-        horse_no = _normalize_horse_no_text(getattr(mark, "horse_no", ""))
+        symbol = str((mark.get("symbol", "") if isinstance(mark, dict) else getattr(mark, "symbol", "")) or "").strip()
+        horse_no = _normalize_horse_no_text(mark.get("horse_no", "") if isinstance(mark, dict) else getattr(mark, "horse_no", ""))
         if (not symbol) or (not horse_no):
             continue
         if symbol in seen_symbols or horse_no in seen_horses:
@@ -903,6 +1173,7 @@ def _sanitize_ticket_plan(
     allowed_types: set,
     allowed_horses: List[str],
     max_budget: int,
+    candidate_by_ticket_key: Dict[str, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     budget_cap = max(0, int(max_budget or 0))
     allowed_set = {_normalize_horse_no_text(h) for h in allowed_horses if _normalize_horse_no_text(h)}
@@ -923,9 +1194,10 @@ def _sanitize_ticket_plan(
         expected_leg_count = {"win": 1, "place": 1, "wide": 2, "quinella": 2, "exacta": 2, "trio": 3}
         if len(legs) != expected_leg_count.get(bet_type, 0):
             continue
-        # For unordered bet types, sort legs to canonicalize the key
-        canon_legs = sorted(legs, key=lambda x: int(x) if x.isdigit() else x) if bet_type in ("wide", "quinella", "trio") else legs
-        ticket_key = f"{bet_type}:{'-'.join(canon_legs)}"
+        ticket_key = _ticket_key_from_parts(bet_type, legs)
+        candidate = dict(candidate_by_ticket_key.get(ticket_key, {}) or {})
+        if not candidate:
+            continue
         if ticket_key in seen_keys:
             continue
         stake_yen = int(stake_yen // 100) * 100
@@ -935,8 +1207,148 @@ def _sanitize_ticket_plan(
             continue
         seen_keys.add(ticket_key)
         used += stake_yen
-        out.append({"bet_type": bet_type, "legs": legs, "stake_yen": stake_yen})
+        out.append({"bet_type": bet_type, "legs": list(candidate.get("legs", []) or legs), "stake_yen": stake_yen})
     return out
+
+
+def _sanitize_selected_tickets(
+    selected_tickets: List[PolicySelectedTicket],
+    candidate_by_id: Dict[str, Dict[str, Any]],
+    allowed_types: set,
+    max_budget: int,
+    max_tickets: int,
+) -> List[Dict[str, Any]]:
+    budget_cap = max(0, int(max_budget or 0))
+    ticket_cap = max(0, int(max_tickets or 0))
+    out: List[Dict[str, Any]] = []
+    seen_ids = set()
+    used = 0
+    for item in list(selected_tickets or []):
+        candidate_id = str((item.get("id", "") if isinstance(item, dict) else getattr(item, "id", "")) or "").strip()
+        stake_yen = int((item.get("stake_yen", 0) if isinstance(item, dict) else getattr(item, "stake_yen", 0)) or 0)
+        if (not candidate_id) or (candidate_id in seen_ids):
+            continue
+        candidate = dict(candidate_by_id.get(candidate_id, {}) or {})
+        if not candidate:
+            continue
+        if allowed_types and str(candidate.get("bet_type", "") or "") not in allowed_types:
+            continue
+        stake_yen = int(stake_yen // 100) * 100
+        if stake_yen <= 0:
+            continue
+        if budget_cap > 0 and used + stake_yen > budget_cap:
+            continue
+        if ticket_cap > 0 and len(out) >= ticket_cap:
+            break
+        seen_ids.add(candidate_id)
+        used += stake_yen
+        out.append({"id": candidate_id, "stake_yen": stake_yen})
+    return out
+
+
+def _selected_tickets_from_ticket_plan(
+    ticket_plan: List[PolicyTicketPlan],
+    candidate_by_ticket_key: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in list(ticket_plan or []):
+        bet_type = str((item.get("bet_type", "") if isinstance(item, dict) else getattr(item, "bet_type", "")) or "").strip().lower()
+        raw_legs = item.get("legs", []) if isinstance(item, dict) else getattr(item, "legs", [])
+        legs = [_normalize_horse_no_text(x) for x in list(raw_legs or []) if _normalize_horse_no_text(x)]
+        stake_yen = int((item.get("stake_yen", 0) if isinstance(item, dict) else getattr(item, "stake_yen", 0)) or 0)
+        candidate = dict(candidate_by_ticket_key.get(_ticket_key_from_parts(bet_type, legs), {}) or {})
+        candidate_id = str(candidate.get("id", "") or "").strip()
+        if (not candidate_id) or stake_yen <= 0:
+            continue
+        out.append({"id": candidate_id, "stake_yen": stake_yen})
+    return out
+
+
+def _coerce_final_execution_state(
+    *,
+    bet_decision: str,
+    participation_level: str,
+    enabled_bet_types: List[str],
+    key_horses: List[str],
+    secondary_horses: List[str],
+    longshot_horses: List[str],
+    max_ticket_count: int,
+    risk_tilt: str,
+    reason_codes: List[str],
+    comment: str,
+    warnings: List[str],
+    marks: List[Dict[str, str]],
+    selected_tickets: List[Dict[str, Any]],
+    pick_ids: List[str],
+    ticket_plan: List[Dict[str, Any]],
+    focus_points: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    decision = str(bet_decision or "").strip().lower()
+    level = str(participation_level or "").strip().lower()
+    warning_list = _dedupe_text_items(list(warnings or []))
+    focus_points_out = list(focus_points or [])
+    if decision != "bet":
+        final_reason_codes = _dedupe_text_items(list(reason_codes or []) + ["NO_BET"])
+        return {
+            "bet_decision": "no_bet",
+            "participation_level": "no_bet",
+            "enabled_bet_types": [],
+            "key_horses": [],
+            "secondary_horses": [],
+            "longshot_horses": [],
+            "max_ticket_count": 0,
+            "risk_tilt": "low",
+            "reason_codes": final_reason_codes,
+            "comment": comment,
+            "warnings": warning_list or None,
+            "marks": [],
+            "selected_tickets": [],
+            "pick_ids": [],
+            "ticket_plan": [],
+            "focus_points": focus_points_out or [{"type": "concept", "value": "見送り"}],
+        }
+    if not list(selected_tickets or []):
+        warning_list.append("NO_EXECUTABLE_TICKETS")
+        warning_list = _dedupe_text_items(warning_list)
+        final_reason_codes = _dedupe_text_items(list(reason_codes or []) + ["NO_BET"])
+        return {
+            "bet_decision": "no_bet",
+            "participation_level": "no_bet",
+            "enabled_bet_types": [],
+            "key_horses": [],
+            "secondary_horses": [],
+            "longshot_horses": [],
+            "max_ticket_count": 0,
+            "risk_tilt": "low",
+            "reason_codes": final_reason_codes,
+            "comment": comment,
+            "warnings": warning_list or None,
+            "marks": [],
+            "selected_tickets": [],
+            "pick_ids": [],
+            "ticket_plan": [],
+            "focus_points": [{"type": "concept", "value": "見送り"}],
+        }
+    if level not in ("small_bet", "normal_bet"):
+        level = "small_bet"
+    return {
+        "bet_decision": "bet",
+        "participation_level": level,
+        "enabled_bet_types": list(enabled_bet_types or []),
+        "key_horses": list(key_horses or []),
+        "secondary_horses": list(secondary_horses or []),
+        "longshot_horses": list(longshot_horses or []),
+        "max_ticket_count": int(max_ticket_count or 0),
+        "risk_tilt": str(risk_tilt or "low").strip().lower() if str(risk_tilt or "").strip().lower() in ("low", "medium", "high") else "low",
+        "reason_codes": list(reason_codes or []),
+        "comment": comment,
+        "warnings": warning_list or None,
+        "marks": list(marks or []),
+        "selected_tickets": list(selected_tickets or []),
+        "pick_ids": list(pick_ids or []),
+        "ticket_plan": list(ticket_plan or []),
+        "focus_points": focus_points_out,
+    }
 
 
 def _execution_status(output: RacePolicyOutput) -> str:
@@ -954,8 +1366,9 @@ def _execution_status(output: RacePolicyOutput) -> str:
 def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> RacePolicyOutput:
     allowed_types = {str(x).strip().lower() for x in list(input_obj.constraints.allowed_types or []) if str(x).strip()}
     allowed_horses = _horse_pool(input_obj)
-
-    pick_ids = [str(x).strip() for x in list(output.pick_ids or []) if str(x).strip()]
+    candidate_maps = _build_candidate_maps(input_obj)
+    candidate_by_id = dict(candidate_maps.get("by_id", {}) or {})
+    candidate_by_ticket_key = dict(candidate_maps.get("by_ticket_key", {}) or {})
 
     enabled_bet_types = []
     seen_types = set()
@@ -968,15 +1381,6 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
         seen_types.add(text)
         enabled_bet_types.append(text)
 
-    key_horses = _sanitize_horse_list(list(output.key_horses or []), allowed_horses)
-    secondary_horses = [
-        x for x in _sanitize_horse_list(list(output.secondary_horses or []), allowed_horses) if x not in set(key_horses)
-    ]
-    longshot_horses = [
-        x
-        for x in _sanitize_horse_list(list(output.longshot_horses or []), allowed_horses)
-        if x not in set(key_horses + secondary_horses)
-    ]
     max_ticket_count = int(output.max_ticket_count or 0)
     if max_ticket_count < 0:
         max_ticket_count = 0
@@ -984,9 +1388,80 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     if hard_cap > 0:
         max_ticket_count = min(max_ticket_count, hard_cap)
     budget_cap = int(input_obj.constraints.race_budget_yen or 0) or int(input_obj.constraints.bankroll_yen or 0)
-    marks = _sanitize_marks(list(output.marks or []), allowed_horses)
     raw_ticket_plan = list(output.ticket_plan or [])
-    ticket_plan = _sanitize_ticket_plan(raw_ticket_plan, allowed_types, allowed_horses, budget_cap)
+    raw_selected_tickets = list(output.selected_tickets or [])
+    if (not raw_selected_tickets) and raw_ticket_plan:
+        raw_selected_tickets = _selected_tickets_from_ticket_plan(raw_ticket_plan, candidate_by_ticket_key)
+    selected_tickets = _sanitize_selected_tickets(
+        raw_selected_tickets,
+        candidate_by_id,
+        allowed_types,
+        budget_cap,
+        hard_cap,
+    )
+    if not selected_tickets and list(output.pick_ids or []):
+        pick_selected = [{"id": str(x).strip(), "stake_yen": 100} for x in list(output.pick_ids or []) if str(x).strip()]
+        selected_tickets = _sanitize_selected_tickets(
+            pick_selected,
+            candidate_by_id,
+            allowed_types,
+            budget_cap,
+            hard_cap,
+        )
+    pick_ids = [str(item.get("id", "")).strip() for item in selected_tickets if str(item.get("id", "")).strip()]
+    ticket_plan = []
+    for item in selected_tickets:
+        candidate = dict(candidate_by_id.get(str(item.get("id", "")).strip(), {}) or {})
+        if not candidate:
+            continue
+        ticket_plan.append(
+            {
+                "bet_type": str(candidate.get("bet_type", "") or "").strip().lower(),
+                "legs": list(candidate.get("legs", []) or []),
+                "stake_yen": int(item.get("stake_yen", 0) or 0),
+            }
+        )
+    if not ticket_plan:
+        ticket_plan = _sanitize_ticket_plan(
+            raw_ticket_plan,
+            allowed_types,
+            allowed_horses,
+            budget_cap,
+            candidate_by_ticket_key,
+        )
+        if ticket_plan:
+            pick_ids = [
+                str(candidate_by_ticket_key.get(_ticket_key_from_parts(item.get("bet_type", ""), item.get("legs", [])), {}).get("id", "")).strip()
+                for item in ticket_plan
+            ]
+            pick_ids = [x for x in pick_ids if x]
+            selected_tickets = [
+                {"id": candidate_id, "stake_yen": int(ticket.get("stake_yen", 0) or 0)}
+                for candidate_id, ticket in zip(pick_ids, ticket_plan)
+                if candidate_id
+            ]
+    horse_scores: Dict[str, int] = {}
+    longshot_horses_set = set()
+    selected_candidates = []
+    for item in selected_tickets:
+        candidate = dict(candidate_by_id.get(str(item.get("id", "")).strip(), {}) or {})
+        if not candidate:
+            continue
+        selected_candidates.append(candidate)
+        stake_yen = int(item.get("stake_yen", 0) or 0)
+        for leg in list(candidate.get("legs", []) or []):
+            horse_scores[leg] = int(horse_scores.get(leg, 0) or 0) + stake_yen
+        if float(candidate.get("odds_used", 0.0) or 0.0) >= float(input_obj.constraints.high_odds_threshold or 0.0):
+            for leg in list(candidate.get("legs", []) or []):
+                longshot_horses_set.add(str(leg))
+    ranked_horses = [horse for horse, _ in sorted(horse_scores.items(), key=lambda kv: (-int(kv[1]), kv[0]))]
+    key_horses = ranked_horses[:1]
+    secondary_horses = [horse for horse in ranked_horses[1:3] if horse not in set(key_horses)]
+    longshot_horses = [horse for horse in ranked_horses if horse in longshot_horses_set and horse not in set(key_horses + secondary_horses)]
+    marks = _sanitize_marks(
+        [{"symbol": symbol, "horse_no": horse_no} for symbol, horse_no in zip(["◎", "○", "▲", "△", "☆"], ranked_horses[:5])],
+        allowed_horses,
+    )
     warnings = _dedupe_text_items(list(output.warnings or [])) if output.warnings else []
 
     participation_level = str(output.participation_level or "no_bet").strip().lower()
@@ -994,49 +1469,116 @@ def _sanitize_output(output: RacePolicyOutput, input_obj: RacePolicyInput) -> Ra
     derived_style = _infer_internal_policy_style(
         bet_decision=bet_decision,
         participation_level=participation_level,
-        enabled_bet_types=enabled_bet_types,
+        enabled_bet_types=enabled_bet_types or [str(item.get("bet_type", "")).strip().lower() for item in ticket_plan if str(item.get("bet_type", "")).strip()],
         construction_style=str(output.construction_style or "").strip(),
     )
     buy_style = str(derived_style.get("buy_style") or "no_bet").strip().lower()
     strategy_mode = str(derived_style.get("strategy_mode") or "no_bet").strip().lower()
-    if bet_decision == "bet" and not ticket_plan:
-        warnings.append("NO_EXECUTABLE_TICKETS")
-    if len(ticket_plan) < len(raw_ticket_plan):
+    if len(ticket_plan) < len(raw_ticket_plan) or len(selected_tickets) < len(raw_selected_tickets):
         warnings.append("INVALID_TICKET_DROPPED")
     warnings = _dedupe_text_items(warnings)
 
     focus_points = []
-    for point in list(output.focus_points or []):
-        point_type = str(getattr(point, "type", "") or "").strip()
-        point_value = str(getattr(point, "value", "") or "").strip()
-        if not point_type or not point_value:
-            continue
-        focus_points.append({"type": point_type, "value": point_value})
+    if key_horses:
+        focus_points.append({"type": "horse", "value": key_horses[0]})
+    if ticket_plan:
+        focus_points.append({"type": "bet_type", "value": str(ticket_plan[0].get("bet_type", "")).strip()})
+    top_pair_candidate = next((cand for cand in selected_candidates if len(list(cand.get("legs", []) or [])) >= 2), None)
+    if top_pair_candidate:
+        focus_points.append({"type": "pair", "value": "-".join(str(x) for x in list(top_pair_candidate.get("legs", []) or []))})
+    elif bet_decision == "no_bet":
+        focus_points.append({"type": "concept", "value": "見送り"})
 
-    return _model_validate(
-        RacePolicyOutput,
-        {
-            "bet_decision": bet_decision,
-            "participation_level": participation_level,
-            "enabled_bet_types": enabled_bet_types,
-            "construction_style": _derive_construction_style(
+    enabled_from_tickets = []
+    seen_ticket_types = set()
+    for item in ticket_plan:
+        bet_type = str(item.get("bet_type", "")).strip().lower()
+        if (not bet_type) or (bet_type in seen_ticket_types):
+            continue
+        seen_ticket_types.add(bet_type)
+        enabled_from_tickets.append(bet_type)
+    if enabled_from_tickets:
+        enabled_bet_types = enabled_from_tickets
+    if not max_ticket_count:
+        max_ticket_count = len(selected_tickets)
+    if ticket_plan and max_ticket_count > 0:
+        max_ticket_count = min(max_ticket_count, len(ticket_plan))
+    elif ticket_plan:
+        max_ticket_count = len(ticket_plan)
+    risk_tilt = str(output.risk_tilt or "").strip().lower()
+    if risk_tilt not in ("low", "medium", "high"):
+        risk_tilt = "low"
+        if any(str(item.get("bet_type", "")).strip().lower() in ("exacta", "trio") for item in ticket_plan):
+            risk_tilt = "high"
+        elif any(float(cand.get("odds_used", 0.0) or 0.0) >= float(input_obj.constraints.high_odds_threshold or 0.0) for cand in selected_candidates):
+            risk_tilt = "medium"
+        elif participation_level == "normal_bet":
+            risk_tilt = "medium"
+    has_value = any(float(cand.get("ev", 0.0) or 0.0) > 0.0 for cand in selected_candidates) or any(
+        float(c.ev or 0.0) > 0.0 for c in list(input_obj.candidates or [])
+    )
+    comment = _trim_text(output.comment or "", limit=100) or ("候補内で優位が弱く見送り" if bet_decision == "no_bet" else "候補プールから選択")
+    reason_codes = _reason_codes_for(
+        input_obj.ai,
+        int(input_obj.field_size or 0),
+        has_value,
+        participation_level,
+        buy_style,
+        bet_decision,
+        bool(longshot_horses),
+    )
+    final_state = _coerce_final_execution_state(
+        bet_decision=bet_decision,
+        participation_level=participation_level,
+        enabled_bet_types=enabled_bet_types,
+        key_horses=key_horses,
+        secondary_horses=secondary_horses,
+        longshot_horses=longshot_horses,
+        max_ticket_count=max_ticket_count,
+        risk_tilt=risk_tilt,
+        reason_codes=reason_codes,
+        comment=comment,
+        warnings=warnings,
+        marks=marks,
+        selected_tickets=selected_tickets,
+        pick_ids=pick_ids,
+        ticket_plan=ticket_plan,
+        focus_points=focus_points,
+    )
+    final_style_meta = _infer_internal_policy_style(
+        bet_decision=str(final_state.get("bet_decision", "") or ""),
+        participation_level=str(final_state.get("participation_level", "") or ""),
+        enabled_bet_types=list(final_state.get("enabled_bet_types", []) or []),
+        construction_style=str(output.construction_style or "").strip(),
+    )
+    final_state["reason_codes"] = _reason_codes_for(
+        input_obj.ai,
+        int(input_obj.field_size or 0),
+        has_value,
+        str(final_state.get("participation_level", "") or ""),
+        str(final_style_meta.get("buy_style", "no_bet") or "no_bet"),
+        str(final_state.get("bet_decision", "") or ""),
+        bool(final_state.get("longshot_horses", [])),
+    )
+    final_construction_style = (
+        "conservative_single"
+        if str(final_state.get("bet_decision", "") or "") == "no_bet"
+        else (
+            _derive_construction_style(
                 strategy_mode,
                 buy_style,
                 participation_level,
             )
             if not output.construction_style
-            else str(output.construction_style).strip(),
-            "key_horses": key_horses,
-            "secondary_horses": secondary_horses,
-            "longshot_horses": longshot_horses,
-            "max_ticket_count": max_ticket_count,
-            "risk_tilt": str(output.risk_tilt or "low").strip().lower(),
-            "reason_codes": [str(x) for x in list(output.reason_codes or []) if str(x).strip()],
-            "warnings": warnings or None,
-            "marks": marks,
-            "pick_ids": pick_ids,
-            "ticket_plan": ticket_plan,
-            "focus_points": focus_points,
+            else str(output.construction_style).strip()
+        )
+    )
+
+    return _model_validate(
+        RacePolicyOutput,
+        {
+            **final_state,
+            "construction_style": final_construction_style,
         },
     )
 
@@ -1048,7 +1590,7 @@ def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput) -> None:
         "llm_latency_ms": int(meta.get("llm_latency_ms", 0) or 0),
         "fallback_reason": str(meta.get("fallback_reason", "") or ""),
         "execution_status": str(meta.get("execution_status", "") or _execution_status(output)),
-        "picked_count": int(max(len(output.pick_ids or []), int(output.max_ticket_count or 0))),
+        "picked_count": int(max(len(output.selected_tickets or []), len(output.pick_ids or []), int(output.max_ticket_count or 0))),
         "requested_budget_yen": int(meta.get("requested_budget_yen", 0) or 0),
         "requested_race_budget_yen": int(meta.get("requested_race_budget_yen", 0) or 0),
         "reused": bool(meta.get("reused", False)),
