@@ -1,1 +1,2 @@
-google.com, pub-2154555054261960, DIRECT, f08c47fec0942fa0
+# ads.txt is intentionally left without authorized sellers for now.
+# Add the current ad network entry here after the new publisher account details are confirmed.
