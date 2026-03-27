@@ -18,11 +18,21 @@ function shiftDate(dateText, offsetDays) {
   return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
 }
 
-export default function FilterBar({ data, search, onApply, className = "" }) {
+function defaultTodayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+export default function FilterBar({ data, search, onApply, className = "", context = "default" }) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
-  const initialDate = normalizeDateText(params.get("date") || data?.target_date || "");
+  const initialDate = normalizeDateText(params.get("date") || data?.target_date || defaultTodayKey());
   const [date, setDate] = useState(initialDate);
   const formClassName = ["app-filter-bar", className].filter(Boolean).join(" ");
+  const isSidebar = context === "sidebar";
+  const fieldLabel = isSidebar ? "レース一覧の日付" : "対象日";
+  const prevLabel = isSidebar ? "前日一覧" : "前日";
+  const nextLabel = isSidebar ? "翌日一覧" : "翌日";
+  const submitLabel = isSidebar ? "一覧表示" : "Go";
 
   useEffect(() => {
     setDate(initialDate);
@@ -46,7 +56,7 @@ export default function FilterBar({ data, search, onApply, className = "" }) {
       }}
     >
       <label className="app-filter-bar__field">
-        <span>対象日</span>
+        <span>{fieldLabel}</span>
         <div className="app-filter-bar__date-shell">
           <input
             type="date"
@@ -69,7 +79,7 @@ export default function FilterBar({ data, search, onApply, className = "" }) {
             submitDate(nextDate);
           }}
         >
-          前日
+          {prevLabel}
         </button>
 
         <button
@@ -82,11 +92,11 @@ export default function FilterBar({ data, search, onApply, className = "" }) {
             submitDate(nextDate);
           }}
         >
-          翌日
+          {nextLabel}
         </button>
 
         <button type="submit" className="app-filter-bar__submit">
-          Go
+          {submitLabel}
         </button>
       </div>
     </form>

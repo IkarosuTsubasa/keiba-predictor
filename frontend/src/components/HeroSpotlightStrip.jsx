@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { buildTargetDateContext } from "../lib/homepage";
 
 function toNumber(value, fallback = 0) {
   const number = Number(value);
@@ -67,21 +68,18 @@ function buildRoiSpotlight(data) {
   if (!available.length) return null;
 
   const roiLeader = [...available].sort((left, right) => {
-    const rightPercent =
-      parsePercent(right?.roi_text) ?? toNumber(right?.roi_percent, -1);
-    const leftPercent =
-      parsePercent(left?.roi_text) ?? toNumber(left?.roi_percent, -1);
+    const rightPercent = parsePercent(right?.roi_text) ?? toNumber(right?.roi_percent, -1);
+    const leftPercent = parsePercent(left?.roi_text) ?? toNumber(left?.roi_percent, -1);
     if (rightPercent !== leftPercent) return rightPercent - leftPercent;
     return toNumber(right?.profit_yen, 0) - toNumber(left?.profit_yen, 0);
   })[0];
 
   return {
     key: "roi",
-    eyebrow: "当日最高回収率",
+    eyebrow: "対象日ROIリーダー",
     badge: "ROI",
     title: String(roiLeader?.label || roiLeader?.engine || "-"),
-    metricValue:
-      parsePercent(roiLeader?.roi_text) ?? toNumber(roiLeader?.roi_percent, 0),
+    metricValue: parsePercent(roiLeader?.roi_text) ?? toNumber(roiLeader?.roi_percent, 0),
     metricFormatter: formatPercent,
     detail: `損益 ${formatYen(roiLeader?.profit_yen)}`,
     caption: String(roiLeader?.roi_text || "-"),
@@ -95,7 +93,7 @@ function buildPredictorCoverageSpotlight(data) {
 
   return {
     key: "predictor-top5",
-    eyebrow: "当日予測上位5頭馬券内カバー率トップ",
+    eyebrow: "対象日予測カバレッジ",
     badge: "TOP5",
     title: String(leader?.label || leader?.predictor_id || "-"),
     metricValue: toNumber(leader?.top5_to_top3_hit_rate, 0) * 100,
@@ -111,6 +109,7 @@ function buildSpotlightItems(data) {
 
 export default function HeroSpotlightStrip({ data }) {
   const items = useMemo(() => buildSpotlightItems(data), [data]);
+  const targetDateContext = useMemo(() => buildTargetDateContext(data), [data]);
 
   if (!items.length) {
     return null;
@@ -119,7 +118,7 @@ export default function HeroSpotlightStrip({ data }) {
   return (
     <section
       className={`hero-spotlight-strip${items.length === 1 ? " hero-spotlight-strip--single" : ""}`}
-      aria-label="本日の注目指標"
+      aria-label={`${targetDateContext.targetDateLabel}の注目指標`}
     >
       {items.map((item) => (
         <article

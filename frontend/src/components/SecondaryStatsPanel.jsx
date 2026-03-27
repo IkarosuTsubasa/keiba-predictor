@@ -1,4 +1,5 @@
 import React from "react";
+import { buildTargetDateContext } from "../lib/homepage";
 
 function safeRoiText(value) {
   const text = String(value || "").trim();
@@ -6,9 +7,8 @@ function safeRoiText(value) {
 }
 
 function buildRowItems(totalLabel, totalRoi, cards) {
-  const items = [
-    { key: "total", label: totalLabel, value: safeRoiText(totalRoi), accent: true },
-  ];
+  const items = [{ key: "total", label: totalLabel, value: safeRoiText(totalRoi), accent: true }];
+
   for (const card of cards || []) {
     items.push({
       key: card.engine || card.label,
@@ -17,6 +17,7 @@ function buildRowItems(totalLabel, totalRoi, cards) {
       accent: false,
     });
   }
+
   return items;
 }
 
@@ -40,22 +41,19 @@ function RoiRow({ title, items }) {
 }
 
 export default function SecondaryStatsPanel({ data }) {
+  const targetDateContext = buildTargetDateContext(data);
   const allTimeItems = buildRowItems(
-    "全体",
+    "累計",
     data?.all_time_roi?.totals?.roi_text,
     data?.all_time_roi?.cards || [],
   );
-  const dailyItems = buildRowItems(
-    "全体",
-    data?.totals?.roi_text,
-    data?.summary_cards || [],
-  );
+  const dailyItems = buildRowItems("合計", data?.totals?.roi_text, data?.summary_cards || []);
 
   return (
-    <section className="secondary-stats-panel" aria-label="回収率サマリー">
+    <section className="secondary-stats-panel" aria-label="履歴と当日のROI比較">
       <div className="secondary-stats-panel__compact">
-        <RoiRow title="通算 ROI" items={allTimeItems} />
-        <RoiRow title="本日 ROI" items={dailyItems} />
+        <RoiRow title="累計 ROI" items={allTimeItems} />
+        <RoiRow title={targetDateContext.dailyRoiTitle} items={dailyItems} />
       </div>
     </section>
   );

@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 
 const FOOTER_LINKS = [
   { href: "/keiba/privacy", label: "プライバシーポリシー" },
@@ -14,7 +14,7 @@ export default function SiteFooter() {
         <div className="site-footer__brand">
           <strong className="site-footer__title">いかいもAI競馬</strong>
           <p className="site-footer__note">
-            公開レースの予測、単場詳細、履歴分析をまとめて確認できる競馬予測サイトです。
+            独自の定量モデルと複数のLLMを比較し、公開レースの予想、結果、履歴検証まで確認できる競馬分析サイトです。
           </p>
         </div>
 
@@ -29,3 +29,4 @@ export default function SiteFooter() {
     </footer>
   );
 }
+

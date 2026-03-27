@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+﻿import React, { useMemo } from "react";
 import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 import {
@@ -55,9 +55,9 @@ function resolveLead(variant, race) {
     );
   }
   if (variant === "settled") {
-    return "AIモデルの買い目と量化モデルの本命比較を、確定結果とあわせて確認できます。";
+    return "AIモデルの買い目と定量モデルの本命比較を、確定結果とあわせて確認できます。";
   }
-  return "AIモデルの買い目と量化モデルの本命比較を、同じ画面でまとめて確認できます。";
+  return "AIモデルの買い目と定量モデルの本命比較を、同じ画面でまとめて確認できます。";
 }
 
 function resolveResultTone(text) {
@@ -108,7 +108,7 @@ function ConsensusPanel({ consensusRows }) {
       <div className="race-detail-panel__head">
         <div>
           <span className="race-detail-panel__eyebrow">総合評価</span>
-          <h2>AI・量化モデル総合本命</h2>
+          <h2>AI・定量モデル総合本命</h2>
         </div>
       </div>
       {consensusRows.length ? (
@@ -276,8 +276,8 @@ export default function RaceDetailPage({ race, search = "" }) {
         >
           <div className="race-detail-panel__head">
             <div>
-              <span className="race-detail-panel__eyebrow">量化モデル</span>
-              <h2>量化モデルの本命比較</h2>
+              <span className="race-detail-panel__eyebrow">定量モデル</span>
+              <h2>定量モデルの本命比較</h2>
             </div>
           </div>
           <div className="race-detail-compare-list">
@@ -289,7 +289,7 @@ export default function RaceDetailPage({ race, search = "" }) {
                 />
               ))
             ) : (
-              <PanelEmpty>量化モデルの比較データはまだありません。</PanelEmpty>
+              <PanelEmpty>定量モデルの比較データはまだありません。</PanelEmpty>
             )}
           </div>
         </section>
@@ -322,3 +322,4 @@ export default function RaceDetailPage({ race, search = "" }) {
     </section>
   );
 }
+

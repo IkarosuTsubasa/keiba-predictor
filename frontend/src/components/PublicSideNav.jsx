@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import FilterBar from "./FilterBar";
 
 function normalizePath(pathname) {
@@ -6,11 +6,7 @@ function normalizePath(pathname) {
 }
 
 function SideNavLink({ href, label, note, active = false, compact = false }) {
-  const className = [
-    "public-side-nav__link",
-    active ? "is-active" : "",
-    compact ? "is-compact" : "",
-  ]
+  const className = ["public-side-nav__link", active ? "is-active" : "", compact ? "is-compact" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -35,6 +31,7 @@ export default function PublicSideNav({
   const [activeHash, setActiveHash] = useState("");
   const normalizedPath = normalizePath(pathname);
   const normalizedDetailHref = detailHref || pathname;
+  const shouldShowTargetFilter = Boolean(onApplyFilters) && (showTargetFilter || mode !== "static");
 
   useEffect(() => {
     const syncHash = () => setActiveHash(window.location.hash || "");
@@ -46,14 +43,14 @@ export default function PublicSideNav({
   const primaryItems = [
     {
       href: "/keiba",
-      label: "予測一覧",
-      note: "本日の公開レース",
+      label: "トップページ",
+      note: "公開レースと導読",
       active: normalizedPath === "/keiba",
     },
     {
       href: "/keiba/history",
       label: "履歴分析",
-      note: "月間・年間・累計",
+      note: "月間・年間・累計の比較",
       active: normalizedPath === "/keiba/history",
     },
   ];
@@ -64,7 +61,7 @@ export default function PublicSideNav({
           {
             href: `${normalizedDetailHref}#race-detail-summary`,
             label: "レース概要",
-            note: "基本情報と要点",
+            note: "基本情報と結果",
             active: !activeHash || activeHash === "#race-detail-summary",
           },
           {
@@ -75,8 +72,8 @@ export default function PublicSideNav({
           },
           {
             href: `${normalizedDetailHref}#race-detail-compare`,
-            label: "本命比較",
-            note: "量化モデルの本命比較",
+            label: "定量比較",
+            note: "定量モデルの本命比較",
             active: activeHash === "#race-detail-compare",
           },
         ]
@@ -89,25 +86,23 @@ export default function PublicSideNav({
         ? "履歴分析"
         : mode === "static"
           ? "インフォメーション"
-          : "予測一覧";
+          : "トップページ";
 
   const focusText =
     mode === "detail"
-      ? "このレースの買い目、比較、結果を一つの流れで確認できます。"
+      ? "このレースの買い目、定量比較、結果を一つの流れで確認できます。"
       : mode === "history"
-        ? "期間ごとの成績比較と量化モデルの傾向をまとめて確認できます。"
+        ? "期間ごとの成績比較と定量モデルの傾向をまとめて確認できます。"
         : mode === "static"
-          ? "サイトの考え方や利用上の案内をまとめています。"
-          : "公開中のレースとモデル予測を一覧で確認できます。";
+          ? "サイトの考え方と利用上の案内をまとめています。"
+          : "見どころ、深掘り分析、公開レースの順に読み進められます。";
 
   return (
     <aside className="public-side-nav" aria-label="サイトナビゲーション">
       <div className="public-side-nav__panel">
         <div className="public-side-nav__brand">
+          <span className="public-side-nav__eyebrow">Navigation</span>
           <strong className="public-side-nav__title">いかいもAI競馬</strong>
-          <p className="public-side-nav__lead">
-            予測一覧、履歴分析、単場詳細を同じ流れで見比べられる公開ビューです。
-          </p>
         </div>
 
         <div className="public-side-nav__section">
@@ -125,9 +120,29 @@ export default function PublicSideNav({
           </nav>
         </div>
 
+        {shouldShowTargetFilter ? (
+          <div className="public-side-nav__section public-side-nav__section--filter">
+            <div className="public-side-nav__filter-intro">
+              <span className="public-side-nav__section-label public-side-nav__section-label--primary">
+                レース一覧
+              </span>
+              <p className="public-side-nav__filter-note">
+                日付を選ぶと、その日の公開レース一覧へ移動できます。
+              </p>
+            </div>
+            <FilterBar
+              data={data}
+              search={search}
+              onApply={onApplyFilters}
+              className="app-filter-bar--sidebar"
+              context="sidebar"
+            />
+          </div>
+        ) : null}
+
         {detailItems.length ? (
           <div className="public-side-nav__section">
-            <span className="public-side-nav__section-label">単場詳細</span>
+            <span className="public-side-nav__section-label">詳細案内</span>
             <nav className="public-side-nav__links">
               {detailItems.map((item) => (
                 <SideNavLink
@@ -143,17 +158,6 @@ export default function PublicSideNav({
           </div>
         ) : null}
 
-        {showTargetFilter && onApplyFilters ? (
-          <div className="public-side-nav__section public-side-nav__section--filter">
-            <FilterBar
-              data={data}
-              search={search}
-              onApply={onApplyFilters}
-              className="app-filter-bar--sidebar"
-            />
-          </div>
-        ) : null}
-
         <div className="public-side-nav__focus">
           <span className="public-side-nav__focus-label">現在表示中</span>
           <strong>{currentPageLabel}</strong>
@@ -163,3 +167,4 @@ export default function PublicSideNav({
     </aside>
   );
 }
+

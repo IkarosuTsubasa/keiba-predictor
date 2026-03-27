@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 
 const PREDICTOR_LABELS = {
   top1: "本命1着率",
@@ -289,7 +289,7 @@ function PredictorDesk({ items }) {
       <div className="history-panel__head">
         <div>
           <span className="history-panel__eyebrow">量化比較</span>
-          <h2>量化モデル比較</h2>
+          <h2>定量モデル比較</h2>
         </div>
       </div>
 
@@ -330,8 +330,8 @@ function PredictorDesk({ items }) {
           <div className="history-predictor-card-grid">
             {items.map((item) => {
               const profile = PREDICTOR_PROFILES[item.predictor_id] || {
-                lead: "能力、適性、オッズを横断して評価する量化モデルです。",
-                tags: ["量化モデル"],
+                lead: "能力、適性、オッズを横断して評価する定量モデルです。",
+                tags: ["定量モデル"],
               };
               return (
                 <article
@@ -356,7 +356,7 @@ function PredictorDesk({ items }) {
           </div>
         </>
       ) : (
-        <EmptyState>量化モデルの履歴データはまだありません。</EmptyState>
+        <EmptyState>定量モデルの履歴データはまだありません。</EmptyState>
       )}
     </section>
   );
@@ -425,7 +425,7 @@ export default function HistoryPage({ data }) {
           <span className="history-hero__eyebrow">履歴分析</span>
           <h1>成績比較</h1>
           <p>
-            AI モデルと量化モデルの成績を、月間・年間・累計で確認できます。
+            AI モデルと定量モデルの成績を、月間・年間・累計で確認できます。
           </p>
         </div>
 
@@ -438,7 +438,7 @@ export default function HistoryPage({ data }) {
               active={groupKey === "predictor"}
               onClick={() => setGroupKey("predictor")}
             >
-              量化モデル
+              定量モデル
             </TabButton>
           </div>
           <div className="history-period-tabs" role="tablist" aria-label="履歴期間">
@@ -483,3 +483,4 @@ export default function HistoryPage({ data }) {
     </section>
   );
 }
+

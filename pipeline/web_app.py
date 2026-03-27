@@ -2677,7 +2677,10 @@ def console_workspace_spa():
 
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
-    return build_public_index_response(PUBLIC_BASE_PATH)
+    home_intro_payload = None
+    if not str(date or "").strip():
+        home_intro_payload = build_public_board_payload(date_text=date, scope_key=scope_key)
+    return build_public_index_response(PUBLIC_BASE_PATH, home_intro_payload=home_intro_payload)
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/race/{{race_path:path}}", response_class=HTMLResponse)

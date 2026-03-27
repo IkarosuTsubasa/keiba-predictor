@@ -1,9 +1,13 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import AdminJobsPage from "./components/AdminJobsPage";
 import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
+import BeginnerGuideSection from "./components/BeginnerGuideSection";
+import FeaturedContentSection from "./components/FeaturedContentSection";
 import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
+import HomeHeroSection from "./components/HomeHeroSection";
+import MethodSummarySection from "./components/MethodSummarySection";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicSideNav from "./components/PublicSideNav";
 import PublicStaticPage from "./components/PublicStaticPage";
@@ -11,6 +15,7 @@ import RaceDetailPage from "./components/RaceDetailPage";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 import TodayBoardContent from "./components/TodayBoardContent";
+import { buildTargetDateContext } from "./lib/homepage";
 import { matchRaceIdentifier } from "./lib/publicRace";
 
 const APP_BASE_PATH = "/keiba";
@@ -18,38 +23,39 @@ const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
 const SITE_NAME = "いかいもAI競馬";
+const HOME_PAGE_TITLE = "いかいもAI競馬 | 独自モデルとLLMで競馬予想を比較・検証する分析サイト";
 
 const PUBLIC_PAGE_CONTENT = {
   [`${APP_BASE_PATH}/about`]: {
     kicker: "About",
     title: "このサイトについて",
     lead:
-      "いかいもAI競馬は、公開レースの予測一覧、単場詳細、履歴分析を同じ導線で見比べられる競馬予測サイトです。AI モデルの印と買い目、量化モデルの比較、公開後の成績推移を一つの画面設計で横断できるように整えています。",
+      "いかいもAI競馬は、独自の定量モデルで有力馬を抽出し、その評価をもとに複数のLLMが買い目の考え方を提示する競馬分析サイトです。予想だけを並べるのではなく、公開、比較、結果確認、履歴検証までを同じ導線で見られるように整えています。",
     meta: [
-      { label: "公開ページ", value: "予測一覧 / 単場詳細 / 履歴分析" },
-      { label: "AI モデル", value: "印・買い目・回収率を表示" },
-      { label: "量化モデル", value: "本命比較と期間成績を表示" },
+      { label: "サイトの軸", value: "独自モデル / LLM比較 / 公開検証" },
+      { label: "公開ページ", value: "予測一覧 / レース詳細 / 履歴分析" },
+      { label: "見られるもの", value: "印 / 買い目 / 比較 / 回収率 / 振り返り" },
     ],
     sections: [
       {
-        heading: "公開ビューの役割",
+        heading: "このサイトがやっていること",
         paragraphs: [
-          "トップでは当日の公開レースを一覧で確認し、各レースごとの印、買い目、結果、回収率を同じ流れで見られます。",
-          "単場詳細では AI モデルの買い目と、量化モデルの本命比較やコンセンサスを一つの画面で把握できます。",
+          "このサイトでは、独自の定量モデルで各レースの有力馬と評価順を整理し、その情報をもとに複数のLLMがどのように買い目を組み立てるかを公開しています。",
+          "予想を出して終わりではなく、レースごとの結果、回収率、履歴分析まで同じ流れで確認できるようにし、モデルごとの特徴や差を追いやすくしています。",
         ],
       },
       {
-        heading: "AI モデルと量化モデル",
+        heading: "定量モデルとLLMの関係",
         paragraphs: [
-          "AI モデルは公開中の買い目と印を表示するためのモデル群です。実際の公開買い目や回収率はこの AI モデル側で確認できます。",
-          "量化モデルは馬券購入のためではなく、各馬の評価や並び順を比較するための分析モデルです。履歴分析では期間ごとの強みを見比べられます。",
+          "定量モデルは馬券を直接出すための装置ではなく、各馬の評価順や有力候補を整理するための分析軸です。どの馬にどれだけ注目が集まっているかを測る土台として使っています。",
+          "LLMはその評価を受けて、券種の選び方、点数の置き方、見送り判断の違いを提示します。つまり、定量モデルが土台をつくり、LLMが買い目構成の差を見せる役割を担います。",
         ],
       },
       {
-        heading: "見方の考え方",
+        heading: "このサイトの見方",
         paragraphs: [
-          "単日の当たり外れだけでなく、履歴分析で月間・年間・累計の傾向を見ながら、どのモデルがどの条件で強いかを確認する使い方を想定しています。",
-          "公開情報は参考情報であり、最終的な判断はご自身で行ってください。",
+          "まずはトップで対象日の見どころと公開レース全体を確認し、気になるレースがあればレース詳細でAIモデル別の買い目と定量モデルの本命比較を見るのが基本的な使い方です。",
+          "そのうえで履歴分析まで遡ると、単日の当たり外れだけでは見えにくいモデルごとの傾向や再現性を把握しやすくなります。公開情報は参考情報であり、最終的な判断はご自身で行ってください。",
         ],
       },
     ],
@@ -58,32 +64,39 @@ const PUBLIC_PAGE_CONTENT = {
     kicker: "Guide",
     title: "ガイド",
     lead:
-      "初めて見る場合は、トップ、単場詳細、履歴分析の順で確認すると全体像を掴みやすくなります。ここでは各ページで何を見るべきかを簡潔にまとめています。",
+      "初めて見る場合は、トップ、レース詳細、履歴分析の順で確認すると全体像を掴みやすくなります。ここでは各ページで何を見て、どこを比較するとサイトの特徴が分かるかを簡潔にまとめています。",
     meta: [
       { label: "最初に見る", value: "トップ" },
-      { label: "詳しく見る", value: "単場詳細" },
-      { label: "比較する", value: "履歴分析" },
+      { label: "次に見る", value: "レース詳細" },
+      { label: "最後に比べる", value: "履歴分析" },
     ],
     sections: [
       {
         heading: "トップの見方",
         paragraphs: [
-          "トップでは公開レースの一覧を見ながら、各モデルの本命、買い目、ROI を横並びで確認できます。",
-          "まずはどのレースが公開されているか、どのモデルが本命をどこに置いているかを見るのが基本です。",
+          "トップでは、まず対象日の見どころ、分析方法、注目コンテンツを確認し、そのあとで公開レースの一覧に進む構成になっています。",
+          "データだけを見るのではなく、どのレースを先に読むべきか、どこで意見が割れているか、どのような比較軸で見るべきかをつかんでからレース一覧を見るのが基本です。",
         ],
       },
       {
-        heading: "単場詳細の見方",
+        heading: "レース詳細の見方",
         paragraphs: [
-          "単場詳細では AI モデル別の買い目をまとめて確認できます。どのモデルが何件の買い目を出しているか、結果がどうだったかを一つずつ追えます。",
-          "あわせて量化モデルの本命比較を見ることで、公開買い目と量化評価のズレも確認できます。",
+          "レース詳細では、AIモデル別の買い目、コメント、結果を同じ画面で確認できます。どのモデルがどの券種を選び、何点で組み、どういう結果になったかを一つずつ追えます。",
+          "あわせて定量モデルの本命比較を見ると、買い目の方向性と評価順の関係、どこでズレが出ているかを確認できます。モデル一致度を見る場としてもレース詳細が中心になります。",
         ],
       },
       {
         heading: "履歴分析の見方",
         paragraphs: [
-          "履歴分析では AI モデルの回収成績と量化モデルの的中傾向を、月間・年間・累計で見比べられます。",
-          "単日の結果ではなく、期間ごとの安定感や得意な傾向を見るためのページです。",
+          "履歴分析では、AIモデルの回収成績と定量モデルの傾向を、月間・年間・累計で見比べられます。単日の結果ではなく、期間で見たときにどのモデルがどの条件で強いかを把握するためのページです。",
+          "トップやレース詳細で感じた印象を、その日だけの偶然で終わらせず、履歴で確かめに行く使い方を想定しています。",
+        ],
+      },
+      {
+        heading: "どこを比較すればいいか",
+        paragraphs: [
+          "まずは本命が揃っているか、券種が揃っているか、見送り判断に差があるかの3点を見ると、各モデルの考え方の違いがつかみやすくなります。",
+          "そのうえで結果や履歴分析まで追うと、単なる一発の当たり外れではなく、モデルごとの得意不得意やリスクの置き方まで読み取りやすくなります。",
         ],
       },
       {
@@ -98,32 +111,32 @@ const PUBLIC_PAGE_CONTENT = {
     kicker: "Methodology",
     title: "分析方針",
     lead:
-      "数字は、偶然を物語に変えるためではなく、物語の奥に潜む秩序を照らし出すためにあります。いかいもAI競馬では、公開予測をただ並べるのではなく、AI と量化モデルの視点を重ねることで、レースの輪郭をより立体的に浮かび上がらせることを目指しています。",
+      "いかいもAI競馬では、独自の定量モデルで有力馬を抽出し、その評価をもとに複数のLLMが買い目を組み立てます。重要なのは、どれか一つの答えを絶対視することではなく、どの視点がどこで揃い、どこで割れ、結果としてどうだったかを同じ形式で追い続けることです。",
     meta: [
-      { label: "AI モデル", value: "公開買い目の判断軸" },
-      { label: "量化モデル", value: "評価順の比較軸" },
-      { label: "履歴分析", value: "期間で見る強みと癖" },
+      { label: "Step 1", value: "定量モデルで有力馬を抽出" },
+      { label: "Step 2", value: "LLMで買い目構成を比較" },
+      { label: "Step 3", value: "結果と履歴で継続検証" },
     ],
     sections: [
       {
-        heading: "一つの正解より、複数の視点",
+        heading: "独自モデルで有力馬を抽出する",
         paragraphs: [
-          "競馬の予測は、単一の答えを探す作業ではありません。展開、能力、適性、市場評価、そのどれもがレースの表情を変えます。",
-          "だからこそ本サイトでは、AI モデルの公開買い目と量化モデルの比較を分けて提示し、それぞれの視点がどこで重なり、どこでズレるのかを見える形にしています。",
+          "最初の土台になるのは定量モデルです。過去成績、条件適性、位置取り、想定オッズとのバランスなどを踏まえて、有力馬と評価順の輪郭を整理します。",
+          "ここで重視しているのは、単に順位を出すことではなく、どの馬が軸になりやすいか、どこから評価が落ちるか、どのレースが素直でどのレースが難解かを見極めることです。",
         ],
       },
       {
-        heading: "公開情報の扱い方",
+        heading: "LLMで買い目構成を比較する",
         paragraphs: [
-          "公開中の買い目や結果は、単日の当たり外れだけで評価するためのものではありません。履歴分析まで含めて眺めることで、モデルごとの癖や得意な局面が見えてきます。",
-          "数字の上下に一喜一憂するのではなく、期間の流れと再現性を見に行くことを、このサイトでは重視しています。",
+          "LLMは定量モデルの評価やレース条件を受け取り、どの券種を選ぶか、何点に絞るか、資金配分をどう考えるかといった買い目構成を提示します。",
+          "同じ有力馬を見ていても、券種の選び方や見送り判断はモデルごとに変わります。この差を見比べることで、単なる印の一致だけでは分からない思想の違いが見えてきます。",
         ],
       },
       {
-        heading: "量化モデルの立ち位置",
+        heading: "公開、結果、履歴で検証する",
         paragraphs: [
-          "量化モデルは馬券を直接出すための装置ではなく、各馬の評価と並び順を比較するための軸です。公開買い目の背景にある温度差を測るための、もう一つの物差しとして置いています。",
-          "本命一致や上位馬の馬券内率は、派手な演出ではなく、モデルの輪郭を静かに語るための指標です。",
+          "本サイトでは、公開した予想をその場限りで終わらせません。結果、回収率、期間別の成績まで同じ導線で確認できるようにし、単日の印象と履歴の実績を行き来できる構造にしています。",
+          "重視しているのは、短期の当たり外れだけでなく、どのモデルがどんな条件で強いか、どこで慎重に見るべきかを継続して検証することです。公開情報は参考情報であり、最終的な判断は利用者自身で行ってください。",
         ],
       },
     ],
@@ -294,7 +307,7 @@ function LoadingState() {
           <span className="public-screen-state__loader-pulse public-screen-state__loader-pulse--one" />
           <span className="public-screen-state__loader-pulse public-screen-state__loader-pulse--two" />
         </div>
-        <h1 className="public-screen-state__loading-title">本日の公開レースを読み込んでいます</h1>
+        <h1 className="public-screen-state__loading-title">公開レースを読み込んでいます</h1>
         <p>最新の公開データを取得しています。しばらくお待ちください。</p>
       </section>
     </main>
@@ -350,7 +363,7 @@ export default function App() {
   const isRaceDetail = Boolean(raceDetailId);
   const staticPage = PUBLIC_PAGE_CONTENT[normalizedPath] || null;
   const selectedDate = extractSelectedDate(search);
-
+  const isDateFocusedHome = normalizedPath === APP_BASE_PATH && Boolean(selectedDate);
   useEffect(() => {
     if (isAdminWorkspace) {
       document.title = `Workspace | ${SITE_NAME}`;
@@ -372,17 +385,25 @@ export default function App() {
       document.title = `${staticPage.title} | ${SITE_NAME}`;
       return;
     }
-    document.title = SITE_NAME;
+    document.title = HOME_PAGE_TITLE;
   }, [isAdminConsole, isAdminWorkspace, isHistoryPage, isRaceDetail, staticPage]);
 
   const { loading, error, data } = useBoardData(
     search,
     !isAdminConsole && !isAdminWorkspace && !staticPage,
   );
+  const targetDateContext = data ? buildTargetDateContext(data) : null;
   const races = data?.races || [];
   const selectedRace = isRaceDetail
     ? races.find((race) => matchRaceIdentifier(race, raceDetailId))
     : null;
+
+  useEffect(() => {
+    const shouldHideStaticIntro =
+      normalizedPath === APP_BASE_PATH && !loading && !error && Boolean(data);
+    document.body.classList.toggle("home-app-ready", shouldHideStaticIntro);
+    return () => document.body.classList.remove("home-app-ready");
+  }, [data, error, loading, normalizedPath]);
 
   if (isAdminWorkspace) {
     return <AdminWorkspacePage appBasePath={APP_BASE_PATH} />;
@@ -422,7 +443,14 @@ export default function App() {
     return (
       <PublicFrame
         headerProps={{ showFilters: false }}
-        sideNavProps={{ pathname: normalizedPath, mode: "history" }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "history",
+          data,
+          search,
+          onApplyFilters: navigateWithSearch,
+          showTargetFilter: true,
+        }}
       >
         <div className="public-content-stack">
           <HistoryPage data={data} />
@@ -440,6 +468,10 @@ export default function App() {
             pathname: normalizedPath,
             mode: "detail",
             detailHref: `${normalizedPath}${buildQuery(search)}`,
+            data,
+            search,
+            onApplyFilters: navigateWithSearch,
+            showTargetFilter: true,
           }}
         >
           <div className="public-content-stack">
@@ -469,6 +501,10 @@ export default function App() {
           mode: "detail",
           detailHref: `${normalizedPath}${buildQuery(search)}`,
           detailTitle: selectedRace?.display_header?.title || "レース詳細",
+          data,
+          search,
+          onApplyFilters: navigateWithSearch,
+          showTargetFilter: true,
         }}
       >
         <div className="public-content-stack">
@@ -490,12 +526,20 @@ export default function App() {
         showTargetFilter: true,
       }}
     >
-      <div className="public-content-stack">
-        <section className="today-races-section">
+      <div className="public-content-stack public-content-stack--home">
+        {!isDateFocusedHome ? (
+          <>
+            <HomeHeroSection data={data} search={search} />
+            <FeaturedContentSection data={data} />
+            <MethodSummarySection />
+          </>
+        ) : null}
+
+        <section className="today-races-section" id="home-race-board">
           <PageSectionHeader
-            kicker=""
-            title={selectedDate ? "レースAI予測" : "本日のAI予測"}
-            subtitle="複数モデルの印、買い目案、結果、回収率をレース単位とモデル単位の両方から確認できます。"
+            kicker="Race Board"
+            title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
+            subtitle="比較用の導読を確認したあとに、各レースの印、買い目、結果、回収率をレース単位とモデル単位の両方から見比べられます。"
             meta={[
               {
                 key: "target-date",
@@ -507,20 +551,17 @@ export default function App() {
                 label: "公開数",
                 value: `${races.length}レース`,
               },
-              {
-                key: "generated-at",
-                label: "最終更新",
-                value: data?.generated_at_label || "-",
-              },
             ]}
           />
 
-          <HeroSpotlightStrip data={data} />
+          {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
           <TodayBoardContent data={data} races={races} />
         </section>
 
         <SecondaryStatsPanel data={data} />
+        {!isDateFocusedHome ? <BeginnerGuideSection /> : null}
       </div>
     </PublicFrame>
   );
 }
+

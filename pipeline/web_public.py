@@ -1,6 +1,7 @@
-import html
+﻿import html
 import json
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -88,24 +89,24 @@ def load_public_index_html():
 
 PUBLIC_PAGE_META = {
     PUBLIC_BASE_PATH: {
-        "title": "いかいもAI競馬",
-        "description": "複数のAI視点を重ねて競馬分析を公開する競馬分析サイト",
+        "title": "いかいもAI競馬 | 独自モデルとLLMで競馬予想を比較・検証する分析サイト",
+        "description": "独自の定量モデルで有力馬を抽出し、複数のLLMで買い目構成を比較。レースごとの予想、結果、回収率、振り返りまで公開する競馬分析サイトです。",
     },
     f"{PUBLIC_BASE_PATH}/history": {
         "title": "履歴分析 | いかいもAI競馬",
-        "description": "LLMと量化モデルの過去成績をまとめて振り返る公開ヒストリーページです。",
+        "description": "LLMと定量モデルの過去成績をまとめて振り返る公開ヒストリーページです。",
     },
     f"{PUBLIC_BASE_PATH}/about": {
         "title": "このサイトについて | いかいもAI競馬",
-        "description": "いかいもAI競馬の考え方と、複数の視点を重ねる競馬分析の方針を紹介します。",
+        "description": "独自の定量モデル、複数のLLM、公開検証までをどう組み合わせているかを紹介するページです。",
     },
     f"{PUBLIC_BASE_PATH}/guide": {
         "title": "ガイド | いかいもAI競馬",
-        "description": "印、ROI、買い目、見送り判断など、サイト内で表示される情報の見方を案内します。",
+        "description": "トップ、レース詳細、履歴分析をどう読み進めればよいかをまとめた利用ガイドです。",
     },
     f"{PUBLIC_BASE_PATH}/methodology": {
         "title": "分析方法 | いかいもAI競馬",
-        "description": "多面的な評価、比較、オッズとの整合、見送り判断など、本サイトの分析フレームを紹介します。",
+        "description": "独自モデルで有力馬を抽出し、LLMで買い目構成を比較し、結果と履歴で検証する流れを紹介します。",
     },
     f"{PUBLIC_BASE_PATH}/privacy": {
         "title": "プライバシーポリシー | いかいもAI競馬",
@@ -190,6 +191,431 @@ def inject_public_meta_tags(content="", path=""):
     {robots_tag}
     """.strip()
     return re.sub(r"</head>", f"{meta_block}\n  </head>", html_text, count=1, flags=re.IGNORECASE)
+
+
+def _safe_text(value=""):
+    return str(value or "").strip()
+
+
+def _public_home_intro_html(payload=None):
+    payload = dict(payload or {})
+    totals = dict(payload.get("totals", {}) or {})
+    hero = dict(payload.get("hero", {}) or {})
+    lead_race = dict(hero.get("lead_race", {}) or {})
+    leader = dict(hero.get("leader", {}) or {})
+
+    def _parse_main_horse(mark_text=""):
+        matched = re.search(r"◎\s*([0-9]+)", _safe_text(mark_text))
+        return matched.group(1) if matched else ""
+
+    def _agreement_stats(race_row):
+        cards = list((race_row or {}).get("cards", []) or [])
+        main_horses = [_parse_main_horse(card.get("marks_text")) for card in cards]
+        main_horses = [item for item in main_horses if item]
+        counts = {}
+        for horse_no in main_horses:
+            counts[horse_no] = counts.get(horse_no, 0) + 1
+        top_horse = ""
+        top_count = 0
+        for horse_no, count in counts.items():
+            if count > top_count:
+                top_horse = horse_no
+                top_count = count
+        no_bet_count = 0
+        for card in cards:
+            if _safe_text(card.get("decision_text")).lower() == "no_bet":
+                no_bet_count += 1
+        agreement_ratio = float(top_count) / float(len(main_horses)) if main_horses else 0.0
+        return {
+            "card_count": len(cards),
+            "valid_main_count": len(main_horses),
+            "unique_main_count": len(counts),
+            "top_horse": top_horse,
+            "top_count": top_count,
+            "no_bet_count": no_bet_count,
+            "agreement_ratio": agreement_ratio,
+        }
+
+    def _analysis_tags(stats):
+        tags = []
+        if float(stats.get("agreement_ratio", 0.0) or 0.0) >= 0.75:
+            tags.append("高一致")
+        elif int(stats.get("unique_main_count", 0) or 0) >= 3 or int(stats.get("no_bet_count", 0) or 0) >= 2:
+            tags.append("分歧あり")
+        if int(stats.get("top_count", 0) or 0) >= 2 and float(stats.get("agreement_ratio", 0.0) or 0.0) >= 0.5:
+            tags.append("軸向き")
+        if int(stats.get("unique_main_count", 0) or 0) >= 3 or int(stats.get("no_bet_count", 0) or 0) >= 1:
+            tags.append("波乱注意")
+        if not tags:
+            tags.append("軸向き")
+        return tags[:3]
+
+    def _tokyo_today_key():
+        return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+    def _target_date_heading(date_text="", date_label=""):
+        matched = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", _safe_text(date_text))
+        if matched:
+            return f"{int(matched.group(1))}年{int(matched.group(2))}月{int(matched.group(3))}日"
+        return _safe_text(date_label) or "対象日"
+
+    def _recommendation_reason(stats, lead_meta_text, leader_label_text):
+        if float(stats.get("agreement_ratio", 0.0) or 0.0) >= 0.75:
+            return f"{leader_label_text}を含む複数モデルの視点が近く、読み筋の起点として確認しやすいレースです。"
+        if int(stats.get("unique_main_count", 0) or 0) >= 3 or int(stats.get("no_bet_count", 0) or 0) >= 2:
+            return "本命候補や見送り判断が割れやすく、複数LLMの差を比較する価値が高いレースです。"
+        if int(stats.get("top_count", 0) or 0) >= 2:
+            return "軸候補の重なりが見えやすく、買い目構成の差だけを落ち着いて比較しやすいレースです。"
+        return f"{lead_meta_text}の条件で判断材料が揃っており、定量モデルとLLMの差を読み始める基点に向いています。"
+
+    def _cards_html(items):
+        out = []
+        for item in items:
+            tags_html = "".join(
+                f"<span>{html.escape(tag)}</span>" for tag in list(item.get("tags", []) or []) if _safe_text(tag)
+            )
+            out.append(
+                f"""
+                <article class="public-home-static-intro__content-card">
+                  <span>{html.escape(_safe_text(item.get('category')))}</span>
+                  <strong>{html.escape(_safe_text(item.get('title')))}</strong>
+                  <p>{html.escape(_safe_text(item.get('excerpt')))}</p>
+                  <div class="public-home-static-intro__content-tags">{tags_html}</div>
+                  <a href="{html.escape(_safe_text(item.get('href')))}">{html.escape(_safe_text(item.get('cta')) or '続きを読む')}</a>
+                </article>
+                """
+            )
+        return "".join(out)
+
+    race_count = int(totals.get("race_count", 0) or 0)
+    settled_count = int(totals.get("settled_count", 0) or 0)
+    updated_at = _safe_text(payload.get("generated_at_label")) or "公開中"
+    target_date = _safe_text(payload.get("target_date"))
+    target_date_label = _target_date_heading(target_date, payload.get("target_date_label"))
+    is_today = bool(target_date) and target_date == _tokyo_today_key()
+    summary_heading = "本日のサマリー" if is_today else f"{target_date_label}のサマリー"
+    guide_cta_label = "レース一覧を見る"
+    race_list_href = f"{PUBLIC_BASE_PATH}?date={html.escape(target_date)}" if target_date else PUBLIC_BASE_PATH
+    lead_race_title = _safe_text(lead_race.get("race_title")) or f"{target_date_label}の注目レース"
+    leader_label = _safe_text(leader.get("label")) or "各モデル"
+    lead_meta_items = [
+        _safe_text(lead_race.get("location")),
+        _safe_text(lead_race.get("distance_label")),
+        _safe_text(lead_race.get("track_condition")),
+    ]
+    lead_meta_items = [item for item in lead_meta_items if item]
+    lead_meta = " / ".join(lead_meta_items) if lead_meta_items else target_date_label
+    lead_stats = _agreement_stats(lead_race)
+    analysis_tags_html = "".join(f"<span>{html.escape(tag)}</span>" for tag in _analysis_tags(lead_stats))
+    lead_text = (
+        f"{lead_race_title}を起点に、対象日の{race_count}レースを比較できます。"
+        f"{leader_label}を含む各モデルの判断差と買い目構成の違いを、同じ導線で確認できます。"
+    )
+    reason_text = _recommendation_reason(lead_stats, lead_meta, leader_label)
+
+    featured_cards = [
+        {
+            "category": "分析方法",
+            "title": "定量モデルとLLMの役割分担を読み解く",
+            "excerpt": "定量モデルがどこまで土台をつくり、LLM比較がどの局面で効いてくるのかを、公開フローに沿って整理した解説です。",
+            "tags": ["分析方法", "モデル比較", "公開フロー"],
+            "href": f"{PUBLIC_BASE_PATH}/methodology",
+            "cta": "続きを読む",
+        },
+        {
+            "category": "ガイド",
+            "title": "初めてでも迷わないトップページの読み方",
+            "excerpt": "見どころ、深掘り分析、公開レースのどこから読めばよいかをまとめた導入ガイドです。",
+            "tags": ["ガイド", "導入", "比較の見方"],
+            "href": f"{PUBLIC_BASE_PATH}/guide",
+            "cta": "続きを読む",
+        },
+        {
+            "category": "検証",
+            "title": "履歴分析でモデル差と再現性を確かめる",
+            "excerpt": "単日の当たり外れではなく、期間で見たときにどのモデルがどんな局面で強いかを確認するための入口です。",
+            "tags": ["履歴分析", "再現性", "検証"],
+            "href": f"{PUBLIC_BASE_PATH}/history",
+            "cta": "続きを読む",
+        },
+    ]
+
+    method_cards = [
+        {
+            "category": "Step 1",
+            "title": "独自定量モデルで有力馬を抽出",
+            "excerpt": "過去成績、条件適性、想定オッズ、位置取りのバランスから、各レースの有力候補と評価順の輪郭を整理します。",
+            "tags": ["定量モデル", "評価順", "有力馬"],
+            "href": f"{PUBLIC_BASE_PATH}/methodology",
+            "cta": "分析方法を見る",
+        },
+        {
+            "category": "Step 2",
+            "title": "LLMで買い目構成を比較",
+            "excerpt": "同じ定量評価を受け取りながらも、複数のLLMが券種、点数、見送り判断の違いをどう出すかを並べて確認します。",
+            "tags": ["LLM比較", "券種", "判断差"],
+            "href": f"{PUBLIC_BASE_PATH}/methodology",
+            "cta": "分析方法を見る",
+        },
+        {
+            "category": "Step 3",
+            "title": "結果と履歴で継続検証",
+            "excerpt": "公開した予想は結果とともに追跡し、単日だけでなく履歴分析までつなげてモデル差と再現性を見ていきます。",
+            "tags": ["結果", "回収率", "履歴分析"],
+            "href": f"{PUBLIC_BASE_PATH}/history",
+            "cta": "履歴分析を見る",
+        },
+    ]
+
+    metrics_html = "".join(
+        [
+            f"""
+            <article class="public-home-static-intro__metric">
+              <span>対象日</span>
+              <strong>{html.escape(target_date_label)}</strong>
+            </article>
+            """,
+            f"""
+            <article class="public-home-static-intro__metric">
+              <span>データ更新</span>
+              <strong>{html.escape(updated_at)}</strong>
+            </article>
+            """,
+            f"""
+            <article class="public-home-static-intro__metric">
+              <span>対象レース数</span>
+              <strong>{race_count}レース</strong>
+            </article>
+            """,
+            f"""
+            <article class="public-home-static-intro__metric">
+              <span>結果確定</span>
+              <strong>{settled_count}レース</strong>
+            </article>
+            """,
+        ]
+    )
+
+    return f"""
+<style>
+.public-home-static-intro {{
+  width: min(1440px, calc(100vw - 24px));
+  margin: 14px auto 0;
+  color: #1a1c1d;
+}}
+.home-app-ready .public-home-static-intro {{
+  display: none;
+}}
+.public-home-static-intro__inner,
+.public-home-static-intro__summary,
+.public-home-static-intro__content-card {{
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(26, 28, 29, 0.08);
+}}
+.public-home-static-intro__inner {{
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(203, 167, 47, 0.14), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(26, 35, 126, 0.12), transparent 24%),
+    linear-gradient(180deg, #ffffff, #f7f7fa);
+}}
+.public-home-static-intro__hero {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}}
+.public-home-static-intro__copy,
+.public-home-static-intro__summary,
+.public-home-static-intro__section,
+.public-home-static-intro__content-card {{
+  display: grid;
+  gap: 12px;
+}}
+.public-home-static-intro__eyebrow,
+.public-home-static-intro__section-eyebrow,
+.public-home-static-intro__metric span,
+.public-home-static-intro__content-card span {{
+  color: #735c00;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}}
+.public-home-static-intro__copy h1,
+.public-home-static-intro__summary strong,
+.public-home-static-intro__section h2,
+.public-home-static-intro__content-card strong {{
+  margin: 0;
+  color: #000666;
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+  letter-spacing: -0.05em;
+}}
+.public-home-static-intro__copy h1 {{
+  max-width: 620px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.02;
+}}
+.public-home-static-intro__summary strong {{
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 0.98;
+}}
+.public-home-static-intro__copy p,
+.public-home-static-intro__summary p,
+.public-home-static-intro__section p,
+.public-home-static-intro__content-card p {{
+  margin: 0;
+  color: #5f6270;
+  line-height: 1.72;
+}}
+.public-home-static-intro__actions,
+.public-home-static-intro__summary-badges,
+.public-home-static-intro__content-tags {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}}
+.public-home-static-intro__primary,
+.public-home-static-intro__secondary,
+.public-home-static-intro__summary a,
+.public-home-static-intro__content-card a {{
+  min-height: 44px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 700;
+}}
+.public-home-static-intro__primary {{
+  background: linear-gradient(135deg, #000666, #1a237e);
+  color: #ffffff;
+}}
+.public-home-static-intro__secondary,
+.public-home-static-intro__summary a,
+.public-home-static-intro__content-card a {{
+  background: rgba(255, 255, 255, 0.86);
+  color: #000666;
+  box-shadow: inset 0 0 0 1px rgba(198, 197, 212, 0.18);
+}}
+.public-home-static-intro__summary {{
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 245, 248, 0.98));
+}}
+.public-home-static-intro__summary-reason {{
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(224, 224, 255, 0.42);
+}}
+.public-home-static-intro__summary-reason span {{
+  color: #735c00;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}}
+.public-home-static-intro__summary-badges span,
+.public-home-static-intro__content-tags span {{
+  min-height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(224, 224, 255, 0.62);
+  color: #000666;
+  font-size: 11px;
+  font-weight: 700;
+}}
+.public-home-static-intro__summary-meta {{
+  margin: 0;
+  color: #5f6270;
+  font-size: 13px;
+}}
+.public-home-static-intro__metrics,
+.public-home-static-intro__content-grid {{
+  display: grid;
+  gap: 10px;
+}}
+.public-home-static-intro__metrics {{
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}}
+.public-home-static-intro__content-grid {{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}}
+.public-home-static-intro__metric,
+.public-home-static-intro__content-card {{
+  min-height: 100%;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff, #f5f5f8);
+}}
+.public-home-static-intro__metric strong {{
+  font-size: clamp(18px, 2vw, 28px);
+  line-height: 1;
+}}
+@media (max-width: 1180px) {{
+  .public-home-static-intro__hero,
+  .public-home-static-intro__content-grid {{
+    grid-template-columns: 1fr;
+  }}
+}}
+@media (max-width: 680px) {{
+  .public-home-static-intro__inner {{
+    padding: 18px;
+    border-radius: 24px;
+  }}
+  .public-home-static-intro__copy h1 {{
+    font-size: 29px;
+  }}
+  .public-home-static-intro__actions {{
+    display: grid;
+  }}
+}}
+</style>
+<section class="public-home-static-intro" aria-label="ホームイントロ">
+  <div class="public-home-static-intro__inner">
+    <div class="public-home-static-intro__hero">
+      <div class="public-home-static-intro__copy">
+        <span class="public-home-static-intro__eyebrow">独自モデル × 複数LLM比較 × レース検証</span>
+        <h1>定量モデルとLLM比較でレースを検証する競馬分析サイト</h1>
+        <p>いかいもAI競馬では、独自の定量モデルで各レースの有力馬と確率の偏りを抽出し、さらに複数のLLMで判断差を比較・公開しています。予想を並べるだけでなく、結果・回収率・レース後の振り返りまで継続して検証します。</p>
+        <div class="public-home-static-intro__actions">
+          <a class="public-home-static-intro__primary" href="{race_list_href}">{html.escape(guide_cta_label)}</a>
+        </div>
+      </div>
+    </div>
+    <section class="public-home-static-intro__section">
+      <span class="public-home-static-intro__section-eyebrow">Featured Content</span>
+      <h2>最新の深掘り分析</h2>
+      <p>分析方法、読み方、履歴検証の3方向から、公開レースをどう読むかを整理した内容をまとめています。</p>
+      <div class="public-home-static-intro__content-grid">{_cards_html(featured_cards)}</div>
+    </section>
+    <section class="public-home-static-intro__section">
+      <span class="public-home-static-intro__section-eyebrow">Method</span>
+      <h2>予想の作り方</h2>
+      <p>定量モデルで有力馬を抽出し、LLMで買い目構成を比較し、その後の結果と履歴まで同じ流れで検証します。</p>
+      <div class="public-home-static-intro__content-grid">{_cards_html(method_cards)}</div>
+    </section>
+  </div>
+</section>
+""".strip()
+
+def inject_public_home_intro(content="", path="", payload=None):
+    html_text = str(content or "")
+    normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
+    if normalized_path != PUBLIC_BASE_PATH or not html_text or payload is None:
+        return html_text
+
+    intro_html = _public_home_intro_html(payload=payload)
+    if intro_html in html_text:
+        return html_text
+    if '<div id="root"></div>' in html_text:
+        return html_text.replace('<div id="root"></div>', f"{intro_html}\n    <div id=\"root\"></div>", 1)
+    return intro_html + html_text
 
 
 def _public_share_runtime_html():
@@ -590,10 +1016,11 @@ def inject_public_share_runtime(html_text):
     return content + runtime
 
 
-def build_public_index_response(path=""):
+def build_public_index_response(path="", home_intro_payload=None):
     html_text = load_public_index_html()
     html_text = prefix_public_html_routes(html_text)
     html_text = inject_public_meta_tags(html_text, path=path)
+    html_text = inject_public_home_intro(html_text, path=path, payload=home_intro_payload)
     html_text = inject_public_share_runtime(html_text)
     return HTMLResponse(html_text)
 
@@ -625,3 +1052,7 @@ def register_public_static_routes(app: FastAPI) -> None:
         if fallback_path.exists():
             return FileResponse(fallback_path, media_type="image/png")
         raise HTTPException(status_code=404, detail="og image not found")
+
+
+
+
