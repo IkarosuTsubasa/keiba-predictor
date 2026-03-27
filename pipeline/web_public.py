@@ -613,6 +613,9 @@ def inject_public_home_intro(content="", path="", payload=None):
     intro_html = _public_home_intro_html(payload=payload)
     if intro_html in html_text:
         return html_text
+    slot_marker = "<!-- PUBLIC_HOME_INTRO_SLOT -->"
+    if slot_marker in html_text:
+        return html_text.replace(slot_marker, intro_html, 1)
     if '<div id="root"></div>' in html_text:
         return html_text.replace('<div id="root"></div>', f"{intro_html}\n    <div id=\"root\"></div>", 1)
     return intro_html + html_text

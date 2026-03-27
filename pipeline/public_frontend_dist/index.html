@@ -16,10 +16,234 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&family=Work+Sans:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      .public-app-boot {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(203, 167, 47, 0.12), transparent 28%),
+          linear-gradient(180deg, #f6f5f1 0%, #f1f3f6 48%, #eceff2 100%);
+        color: #1a1c1d;
+        font-family: "Noto Sans JP", sans-serif;
+      }
+
+      .public-app-boot__header {
+        width: min(1440px, calc(100vw - 24px));
+        margin: 0 auto;
+        padding: 18px 0 14px;
+      }
+
+      .public-app-boot__header-bar {
+        min-height: 72px;
+        padding: 0 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 18px 48px rgba(26, 28, 29, 0.08);
+      }
+
+      .public-app-boot__brand {
+        display: grid;
+        gap: 4px;
+      }
+
+      .public-app-boot__brand strong {
+        font-family: "Manrope", "Noto Sans JP", sans-serif;
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+
+      .public-app-boot__brand span,
+      .public-app-boot__nav span,
+      .public-app-boot__loading-label {
+        color: #6b7280;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .public-app-boot__header-links {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .public-app-boot__header-links i {
+        min-width: 92px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: rgba(24, 28, 38, 0.06);
+      }
+
+      .public-app-boot__shell {
+        width: min(1440px, calc(100vw - 24px));
+        margin: 0 auto;
+        padding: 0 0 28px;
+        display: grid;
+        grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+        gap: 20px;
+      }
+
+      .public-app-boot__nav,
+      .public-app-boot__main-card,
+      .public-app-boot__loading {
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 18px 48px rgba(26, 28, 29, 0.08);
+      }
+
+      .public-app-boot__nav {
+        padding: 22px;
+        display: grid;
+        gap: 14px;
+        align-self: start;
+      }
+
+      .public-app-boot__nav strong {
+        color: #15417e;
+        font-size: 14px;
+      }
+
+      .public-app-boot__nav p {
+        margin: 0;
+        color: #5f6673;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .public-app-boot__nav-items {
+        display: grid;
+        gap: 10px;
+      }
+
+      .public-app-boot__nav-items i {
+        height: 68px;
+        border-radius: 18px;
+        background: rgba(24, 28, 38, 0.05);
+      }
+
+      .public-app-boot__main {
+        display: grid;
+        gap: 18px;
+      }
+
+      .public-app-boot__main-card {
+        min-height: 160px;
+      }
+
+      .public-app-boot__loading {
+        padding: 24px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .public-app-boot__loading strong {
+        font-family: "Manrope", "Noto Sans JP", sans-serif;
+        font-size: 22px;
+        letter-spacing: -0.03em;
+      }
+
+      .public-app-boot__loading p {
+        margin: 0;
+        color: #5f6673;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .public-app-boot__loading-bar {
+        height: 10px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(21, 65, 126, 0.12), rgba(203, 167, 47, 0.34), rgba(21, 65, 126, 0.12));
+        background-size: 220% 100%;
+        animation: public-app-boot-slide 1.4s ease-in-out infinite;
+      }
+
+      @keyframes public-app-boot-slide {
+        0% { background-position: 100% 0; }
+        100% { background-position: -100% 0; }
+      }
+
+      @media (max-width: 1180px) {
+        .public-app-boot__shell {
+          grid-template-columns: 1fr;
+        }
+
+        .public-app-boot__main {
+          order: 1;
+        }
+
+        .public-app-boot__nav {
+          order: 2;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .public-app-boot__header-bar,
+        .public-app-boot__nav,
+        .public-app-boot__main-card,
+        .public-app-boot__loading {
+          border-radius: 22px;
+        }
+
+        .public-app-boot__header-bar,
+        .public-app-boot__nav,
+        .public-app-boot__loading {
+          padding: 18px;
+        }
+
+        .public-app-boot__header-links {
+          display: none;
+        }
+      }
+    </style>
     <script type="module" crossorigin src="/keiba/assets/index-CAS34v2u.js"></script>
     <link rel="stylesheet" crossorigin href="/keiba/assets/index-xxBwm5Y_.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="public-app-boot">
+        <header class="public-app-boot__header">
+          <div class="public-app-boot__header-bar">
+            <div class="public-app-boot__brand">
+              <span>Keiba Analysis</span>
+              <strong>いかいもAI競馬</strong>
+            </div>
+            <div class="public-app-boot__header-links" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+          </div>
+        </header>
+        <div class="public-app-boot__shell">
+          <aside class="public-app-boot__nav" aria-hidden="true">
+            <span>Navigation</span>
+            <strong>レース一覧</strong>
+            <p>対象日を切り替えながら、公開レースと履歴分析を確認できます。</p>
+            <div class="public-app-boot__nav-items">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+          </aside>
+          <div class="public-app-boot__main">
+            <!-- PUBLIC_HOME_INTRO_SLOT -->
+            <section class="public-app-boot__loading" aria-live="polite">
+              <span class="public-app-boot__loading-label">Loading</span>
+              <strong>公開レースを読み込んでいます</strong>
+              <p>ヘッダーとナビゲーションを先に表示しながら、公開データを読み込みます。</p>
+              <div class="public-app-boot__loading-bar" aria-hidden="true"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
