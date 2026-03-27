@@ -266,9 +266,12 @@ def parse_float_text(value):
     if raw in ("", "-", "---.-"):
         return None
     try:
-        return float(raw)
+        parsed = float(raw)
     except ValueError:
         return None
+    if parsed < 0:
+        return None
+    return parsed
 
 
 def parse_int_text(value):
