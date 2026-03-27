@@ -615,6 +615,96 @@ def _build_horse_facts(predictions, consensus_rows):
     return facts
 
 
+def _ledger_date_to_job_date_text(ledger_date=""):
+    digits = "".join(ch for ch in str(ledger_date or "").strip() if ch.isdigit())
+    if len(digits) >= 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return ""
+
+
+def _job_date_text(job):
+    race_date = str((job or {}).get("race_date", "") or "").strip()
+    if race_date:
+        return race_date[:10]
+    scheduled_off_time = str((job or {}).get("scheduled_off_time", "") or "").strip()
+    if len(scheduled_off_time) >= 10:
+        return scheduled_off_time[:10]
+    return ""
+
+
+def _daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs):
+    target_date = _ledger_date_to_job_date_text(ledger_date)
+    if not target_date:
+        return {}
+    jobs = [dict(item or {}) for item in list(load_race_jobs(base_dir) or []) if isinstance(item, dict)]
+    if not jobs:
+        return {
+            "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+        }
+
+    active_status_exclusions = {"settled", "failed", "deleted"}
+    planned_jobs = []
+    active_jobs = []
+    for job in jobs:
+        if _job_date_text(job) != target_date:
+            continue
+        status = str(job.get("status", "") or "").strip().lower()
+        if status in {"failed", "deleted"}:
+            continue
+        planned_jobs.append(job)
+        if status not in active_status_exclusions:
+            active_jobs.append(job)
+
+    if not planned_jobs:
+        return {
+            "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+        }
+
+    def _job_sort_key(job):
+        return (
+            str(job.get("scheduled_off_time", "") or ""),
+            str(job.get("race_date", "") or ""),
+            str(job.get("race_id", "") or ""),
+            str(job.get("created_at", "") or ""),
+        )
+
+    planned_jobs.sort(key=_job_sort_key)
+    active_jobs.sort(key=_job_sort_key)
+
+    current_race_id = str((run_row or {}).get("race_id", "") or "").strip()
+    current_run_id = str((run_row or {}).get("run_id", "") or "").strip()
+    current_index = -1
+    for idx, job in enumerate(active_jobs):
+        job_race_id = str(job.get("race_id", "") or "").strip()
+        job_run_id = str(job.get("run_id", "") or "").strip()
+        if current_race_id and job_race_id == current_race_id:
+            current_index = idx
+            break
+        if current_run_id and job_run_id and job_run_id == current_run_id:
+            current_index = idx
+            break
+
+    planned_count = len(planned_jobs)
+    active_count = len(active_jobs)
+    remaining_count = active_count if current_index < 0 else max(1, active_count - current_index)
+    sequence_for_day = 0
+    for idx, job in enumerate(planned_jobs, start=1):
+        if current_race_id and str(job.get("race_id", "") or "").strip() == current_race_id:
+            sequence_for_day = idx
+            break
+        if current_run_id and str(job.get("run_id", "") or "").strip() == current_run_id:
+            sequence_for_day = idx
+            break
+
+    return {
+        "planned_races_for_day": planned_count,
+        "remaining_races_for_day": remaining_count,
+        "active_races_for_day": active_count,
+        "race_sequence_for_day": sequence_for_day,
+        "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+    }
+
+
 def build_policy_input_payload(
     scope_key,
     run_id,
@@ -638,11 +728,13 @@ def build_policy_input_payload(
     build_policy_prediction_rows_fn,
     extract_ledger_date,
     summarize_bankroll,
+    load_race_jobs,
     base_dir,
     build_multi_predictor_context,
     build_history_context,
     to_float,
 ):
+    core_bet_types = ("win", "place", "wide")
     name_to_no_map = load_name_to_no(odds_path)
     win_odds_map = load_win_odds_map(odds_path)
     place_odds_map = load_place_odds_map(fuku_odds_path)
@@ -681,6 +773,7 @@ def build_policy_input_payload(
         allowed_types.append("exacta")
     if trio_odds_map:
         allowed_types.append("trio")
+    allowed_types = [bet_type for bet_type in allowed_types if bet_type in core_bet_types]
     if not allowed_types:
         return None, "No usable odds were found for LLM buy."
     candidates, candidate_lookup, horse_map = build_policy_candidates(
@@ -710,6 +803,7 @@ def build_policy_input_payload(
     ]
     multi_predictor["meta"] = multi_predictor_meta
     race_context = _build_race_context(run_row, scope_key, len(predictions))
+    race_context.update(_daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs))
     multi_model_ai = _build_multi_model_ai(predictions, multi_predictor)
     horse_facts = _build_horse_facts(predictions, multi_predictor.get("consensus", []))
     payload = {

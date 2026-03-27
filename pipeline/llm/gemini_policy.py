@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v14"
+POLICY_CACHE_VERSION = "gemini_policy_v15"
 POLICY_PROMPT_VERSION = "gemini_policy_prompt_v20"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
@@ -1152,6 +1152,23 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     input_json = _stable_json_dumps(payload)
     schema_json = _stable_json_dumps(schema)
     constraints = input_obj.constraints
+    race_context = dict(input_obj.race_context or {})
+    budget_scope_note = str(race_context.get("budget_scope_note", "") or "").strip()
+    planned_races_for_day = int(race_context.get("planned_races_for_day", 0) or 0)
+    remaining_races_for_day = int(race_context.get("remaining_races_for_day", 0) or 0)
+    race_sequence_for_day = int(race_context.get("race_sequence_for_day", 0) or 0)
+    daily_plan_lines = []
+    if budget_scope_note:
+        daily_plan_lines.append(f"- {budget_scope_note}")
+    if planned_races_for_day > 0:
+        daily_plan_lines.append(f"- 当日の想定レース数: {planned_races_for_day}レース")
+    if remaining_races_for_day > 0:
+        daily_plan_lines.append(f"- このレースを含む残り想定レース数: {remaining_races_for_day}レース")
+    if race_sequence_for_day > 0:
+        daily_plan_lines.append(f"- 今日の進行上の位置づけ: {race_sequence_for_day}レース目")
+    daily_plan_text = "\n".join(daily_plan_lines)
+    if daily_plan_text:
+        daily_plan_text += "\n"
     return (
         "あなたは当日の馬券ポートフォリオ最適化AIです。\n"
         "目的はこの1レース単体の的中ではなく、当日終了時の期待資金成長を最大化することです。\n"
@@ -1173,10 +1190,12 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "== 制約 ==\n"
         f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
         f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
+        f"{daily_plan_text}"
         f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
         "- 購入単位は100円刻み\n"
         "- selected_tickets の id は candidate_tickets の id と完全一致であること\n"
         "- selected_tickets の合計金額は race_budget_yen 以下\n"
+        "- bankroll_yen は当日全体の運用資金であり、この1レースで大半を使い切らないこと\n"
         "- selected_tickets を実行可能に構成できないなら no_bet を返すこと\n"
         "- JSON のみ出力\n\n"
 

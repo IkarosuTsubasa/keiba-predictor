@@ -905,6 +905,7 @@ def build_policy_input_payload(
         build_policy_prediction_rows_fn=build_policy_prediction_rows,
         extract_ledger_date=extract_ledger_date,
         summarize_bankroll=summarize_bankroll,
+        load_race_jobs=load_race_jobs,
         base_dir=BASE_DIR,
         build_multi_predictor_context=build_multi_predictor_context,
         build_history_context=build_history_context,
