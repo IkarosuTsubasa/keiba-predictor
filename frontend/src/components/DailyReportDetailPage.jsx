@@ -266,8 +266,8 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
             日報一覧へ戻る
           </a>
           <span className="daily-report-detail-hero__eyebrow">私の日報</span>
-          <h1>{item?.title || "-"}</h1>
-          <p>{item?.lead || item?.summary || "日報の本文はまだありません。"}</p>
+          <h1>{renderInline(item?.title || "-", "hero-title")}</h1>
+          <p>{renderInline(item?.lead || item?.summary || "日報の本文はまだありません。", "hero-lead")}</p>
           {tags.length ? (
             <div className="daily-report-detail-hero__tags">
               {tags.map((tag) => (
