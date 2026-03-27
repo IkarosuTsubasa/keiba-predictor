@@ -2258,9 +2258,9 @@ def _daily_reports_dir():
     return path
 
 
-def _daily_report_slug(target_date="", engine="openai"):
+def _daily_report_slug(target_date="", engine="deepseek"):
     date_key = re.sub(r"[^0-9]", "", str(target_date or "").strip())[:8] or datetime.now().strftime("%Y%m%d")
-    engine_key = re.sub(r"[^a-z0-9_-]+", "-", str(engine or "").strip().lower()).strip("-") or "openai"
+    engine_key = re.sub(r"[^a-z0-9_-]+", "-", str(engine or "").strip().lower()).strip("-") or "deepseek"
     stamp = datetime.now().strftime("%H%M%S")
     return f"{date_key}-{engine_key}-{stamp}"
 
@@ -2479,7 +2479,7 @@ def _daily_report_source_payload(date_text="", scope_key=""):
 
 def generate_and_store_daily_report(date_text="", scope_key="", policy_engine="", model=""):
     source_payload = _daily_report_source_payload(date_text=date_text, scope_key=scope_key)
-    engine = normalize_daily_report_engine(policy_engine or os.environ.get("DAILY_REPORT_ENGINE", "openai"))
+    engine = normalize_daily_report_engine(policy_engine or os.environ.get("DAILY_REPORT_ENGINE", "deepseek"))
     generation = generate_daily_report_document(
         source_payload,
         policy_engine=engine,

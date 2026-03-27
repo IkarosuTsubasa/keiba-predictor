@@ -22,7 +22,7 @@ def normalize_report_engine(value: str = "") -> str:
     engine = _policy_runtime.normalize_policy_engine(value)
     if engine in REPORT_ENGINE_LABELS:
         return engine
-    return "openai"
+    return "deepseek"
 
 
 def resolve_report_model(engine: str, model: str = "") -> str:
@@ -305,7 +305,7 @@ def _gemini_report_call(prompt: str, model: str, api_key: str, timeout_s: int) -
 def generate_daily_report_document(
     source_payload: Dict[str, Any],
     *,
-    policy_engine: str = "openai",
+    policy_engine: str = "deepseek",
     model: str = "",
     timeout_s: int = 90,
 ) -> Dict[str, Any]:
