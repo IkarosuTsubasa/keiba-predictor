@@ -1,18 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
-
-function formatDateTime(value) {
-  const text = String(value || "").trim();
-  if (!text) return "-";
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
+import React, { Fragment, useEffect, useMemo, useState } from "react";
 
 function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
@@ -28,6 +14,22 @@ function ErrorState({ title = "", details = [] }) {
       ) : null}
     </div>
   );
+}
+
+function renderInline(text, keyPrefix = "inline") {
+  const source = String(text || "");
+  if (!source) return "";
+  const parts = source.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      return <strong key={key}>{part.slice(2, -2)}</strong>;
+    }
+    if (/^`[^`]+`$/.test(part)) {
+      return <code key={key}>{part.slice(1, -1)}</code>;
+    }
+    return <Fragment key={key}>{part}</Fragment>;
+  });
 }
 
 function parseMarkdown(markdown) {
@@ -127,16 +129,16 @@ function MarkdownArticle({ markdown = "" }) {
     <div className="daily-report-markdown">
       {blocks.map((block, index) => {
         if (block.type === "h2") {
-          return <h2 key={`md-${index}`}>{block.text}</h2>;
+          return <h2 key={`md-${index}`}>{renderInline(block.text, `h2-${index}`)}</h2>;
         }
         if (block.type === "h3") {
-          return <h3 key={`md-${index}`}>{block.text}</h3>;
+          return <h3 key={`md-${index}`}>{renderInline(block.text, `h3-${index}`)}</h3>;
         }
         if (block.type === "ul") {
           return (
             <ul key={`md-${index}`} className="daily-report-article__bullets">
-              {(block.items || []).map((item) => (
-                <li key={`md-${index}-${item}`}>{item}</li>
+              {(block.items || []).map((item, itemIndex) => (
+                <li key={`md-${index}-${itemIndex}`}>{renderInline(item, `ul-${index}-${itemIndex}`)}</li>
               ))}
             </ul>
           );
@@ -144,14 +146,14 @@ function MarkdownArticle({ markdown = "" }) {
         if (block.type === "ol") {
           return (
             <ol key={`md-${index}`} className="daily-report-article__bullets">
-              {(block.items || []).map((item) => (
-                <li key={`md-${index}-${item}`}>{item}</li>
+              {(block.items || []).map((item, itemIndex) => (
+                <li key={`md-${index}-${itemIndex}`}>{renderInline(item, `ol-${index}-${itemIndex}`)}</li>
               ))}
             </ol>
           );
         }
         if (block.type === "quote") {
-          return <blockquote key={`md-${index}`}>{block.text}</blockquote>;
+          return <blockquote key={`md-${index}`}>{renderInline(block.text, `quote-${index}`)}</blockquote>;
         }
         if (block.type === "code") {
           return (
@@ -160,7 +162,7 @@ function MarkdownArticle({ markdown = "" }) {
             </pre>
           );
         }
-        return <p key={`md-${index}`}>{block.text}</p>;
+        return <p key={`md-${index}`}>{renderInline(block.text, `p-${index}`)}</p>;
       })}
     </div>
   );
@@ -220,9 +222,7 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
         setState({
           loading: false,
           errorTitle: String(error?.title || error?.message || "日報の読み込みに失敗しました。"),
-          errorDetails: Array.isArray(error?.details)
-            ? error.details
-            : [`url: ${url}`],
+          errorDetails: Array.isArray(error?.details) ? error.details : [`url: ${url}`],
           item: null,
         });
       });
@@ -249,10 +249,7 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
   if (state.errorTitle || !state.item) {
     return (
       <section className="daily-report-detail-page">
-        <ErrorState
-          title={state.errorTitle || "日報が見つかりません。"}
-          details={state.errorDetails}
-        />
+        <ErrorState title={state.errorTitle || "日報が見つかりません。"} details={state.errorDetails} />
       </section>
     );
   }
@@ -285,21 +282,13 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
             <span>対象日</span>
             <strong>{item?.target_date_label || item?.target_date || "-"}</strong>
           </article>
-          <article className="race-detail-summary-card">
-            <span>生成モデル</span>
-            <strong>{item?.engine_label || "-"}</strong>
-          </article>
-          <article className="race-detail-summary-card">
-            <span>保存日時</span>
-            <strong>{formatDateTime(item?.created_at)}</strong>
-          </article>
         </div>
       </div>
 
       <article className="daily-report-article">
         {item?.summary ? (
           <section className="daily-report-article__intro">
-            <p>{item.summary}</p>
+            <p>{renderInline(item.summary, "summary")}</p>
           </section>
         ) : null}
 

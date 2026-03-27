@@ -1,19 +1,5 @@
 import React, { useEffect, useState } from "react";
 
-function formatDateTime(value) {
-  const text = String(value || "").trim();
-  if (!text) return "-";
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
 }
@@ -37,12 +23,10 @@ function ReportCard({ item, featured = false }) {
     <article className={className}>
       <div className="daily-report-card__top">
         <span>{item?.target_date_label || item?.target_date || "-"}</span>
-        <em>{item?.engine_label || "-"}</em>
       </div>
       <h2>{item?.title || "-"}</h2>
       <p>{item?.lead || item?.summary || "日報の要約はまだありません。"}</p>
       <div className="daily-report-card__meta">
-        <span>{formatDateTime(item?.created_at)}</span>
         <span>{item?.mode === "fallback" ? "ローカル要約" : "LLM生成"}</span>
       </div>
       <a href={href}>続きを読む</a>

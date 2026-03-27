@@ -2253,59 +2253,121 @@ def build_daily_summary_share_payload(date_text=""):
 
 
 def _daily_reports_dir():
-    path = BASE_DIR / "data" / "_shared" / "daily_reports"
+    path = BASE_DIR.parent / "data" / "reports"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
+def _legacy_daily_reports_dir():
+    return BASE_DIR / "data" / "_shared" / "daily_reports"
+
+
+def _daily_report_date_key(value=""):
+    return re.sub(r"[^0-9]", "", str(value or "").strip())[:8]
+
+
 def _daily_report_slug(target_date="", engine="deepseek"):
-    date_key = re.sub(r"[^0-9]", "", str(target_date or "").strip())[:8] or datetime.now().strftime("%Y%m%d")
-    engine_key = re.sub(r"[^a-z0-9_-]+", "-", str(engine or "").strip().lower()).strip("-") or "deepseek"
-    stamp = datetime.now().strftime("%H%M%S")
-    return f"{date_key}-{engine_key}-{stamp}"
+    return _daily_report_date_key(target_date) or datetime.now().strftime("%Y%m%d")
 
 
-def _daily_report_path(slug=""):
+def _daily_report_path(slug="", *, legacy=False):
     safe_slug = re.sub(r"[^a-zA-Z0-9_-]+", "", str(slug or "").strip())
     if not safe_slug:
         return None
-    return _daily_reports_dir() / f"{safe_slug}.json"
+    base_dir = _legacy_daily_reports_dir() if legacy else _daily_reports_dir()
+    return base_dir / f"{safe_slug}.json"
+
+
+def _hydrate_daily_report_record(payload, *, path_stem="", source_priority=0):
+    item = dict(payload or {})
+    existing_slug = str(item.get("slug", "") or "").strip() or str(path_stem or "").strip()
+    canonical_slug = _daily_report_date_key(item.get("target_date", "") or existing_slug) or existing_slug
+    item["slug"] = canonical_slug
+    if existing_slug and existing_slug != canonical_slug:
+        item.setdefault("legacy_slug", existing_slug)
+    item["public_url"] = f"{PUBLIC_BASE_PATH}/reports/{canonical_slug}"
+    item["_source_priority"] = int(source_priority or 0)
+    return item
+
+
+def _daily_report_sort_key(item):
+    return (
+        str(item.get("created_at", "") or ""),
+        int(item.get("_source_priority", 0) or 0),
+        str(item.get("slug", "") or ""),
+    )
 
 
 def _load_daily_report_record(slug=""):
-    path = _daily_report_path(slug)
-    if path is None or (not path.exists()):
+    safe_slug = re.sub(r"[^a-zA-Z0-9_-]+", "", str(slug or "").strip())
+    if not safe_slug:
         return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _load_daily_report_records(limit=None):
-    items = []
-    for path in _daily_reports_dir().glob("*.json"):
+    for path, source_priority in (
+        (_daily_report_path(safe_slug, legacy=False), 2),
+        (_daily_report_path(safe_slug, legacy=True), 1),
+    ):
+        if path is None or (not path.exists()):
+            continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if not isinstance(payload, dict):
+        if isinstance(payload, dict):
+            item = _hydrate_daily_report_record(payload, path_stem=path.stem, source_priority=source_priority)
+            item.pop("_source_priority", None)
+            return item
+
+    date_key = _daily_report_date_key(safe_slug)
+    if not date_key:
+        return None
+    target_date = f"{date_key[:4]}-{date_key[4:6]}-{date_key[6:8]}"
+    candidates = []
+    for item in _load_daily_report_records(limit=500):
+        item_target_date = str(item.get("target_date", "") or "").strip()
+        item_slug = str(item.get("slug", "") or "").strip()
+        legacy_slug = str(item.get("legacy_slug", "") or "").strip()
+        if item_target_date == target_date or item_slug == date_key or legacy_slug == safe_slug:
+            candidates.append(item)
+    if not candidates:
+        return None
+    candidates.sort(key=_daily_report_sort_key, reverse=True)
+    item = dict(candidates[0] or {})
+    item.pop("_source_priority", None)
+    return item
+
+
+def _load_daily_report_records(limit=None):
+    items_by_slug = {}
+    for directory, source_priority in (
+        (_daily_reports_dir(), 2),
+        (_legacy_daily_reports_dir(), 1),
+    ):
+        if not directory.exists():
             continue
-        payload.setdefault("slug", path.stem)
-        items.append(payload)
-    items.sort(
-        key=lambda item: (
-            str(item.get("created_at", "") or ""),
-            str(item.get("slug", "") or ""),
-        ),
-        reverse=True,
-    )
+        for path in directory.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            item = _hydrate_daily_report_record(payload, path_stem=path.stem, source_priority=source_priority)
+            item_slug = str(item.get("slug", "") or "").strip()
+            if not item_slug:
+                continue
+            existing = items_by_slug.get(item_slug)
+            if existing is None or _daily_report_sort_key(item) > _daily_report_sort_key(existing):
+                items_by_slug[item_slug] = item
+    items = list(items_by_slug.values())
+    items.sort(key=_daily_report_sort_key, reverse=True)
     if limit is not None:
         try:
             limit_value = max(1, int(limit))
         except (TypeError, ValueError):
             limit_value = 50
         items = items[:limit_value]
+    for item in items:
+        item.pop("_source_priority", None)
     return items
 
 
