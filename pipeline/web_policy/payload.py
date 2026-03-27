@@ -188,13 +188,13 @@ def _build_horse_signal_map(predictions, consensus_rows):
         rank_std = _safe_float(consensus.get("rank_std", 0.0), 0.0)
         disagreement = _clamp(rank_std / max(1.0, field_size / 3.0))
         agreement = _clamp(1.0 - disagreement)
-        anchor_strength = _clamp(0.55 * top1_vote_ratio + 0.45 * top3_vote_ratio)
+        anchor_strength = _clamp(0.6 * top1_vote_ratio + 0.4 * top3_vote_ratio)
         support_score = _clamp(
-            0.35 * top3_prob
+            0.30 * top3_prob
             + 0.10 * win_prob
-            + 0.15 * rank_score
-            + 0.20 * top1_vote_ratio
-            + 0.15 * top3_vote_ratio
+            + 0.12 * rank_score
+            + 0.26 * top1_vote_ratio
+            + 0.18 * top3_vote_ratio
             - 0.05 * disagreement
         )
         out[horse_no] = {
@@ -202,7 +202,7 @@ def _build_horse_signal_map(predictions, consensus_rows):
             "horse_name": str(item.get("horse_name", "") or ""),
             "top3_prob": top3_prob,
             "win_prob": win_prob,
-            "place_prob": _clamp(top3_prob * (0.95 + 0.08 * agreement) * (0.95 + 0.06 * anchor_strength), 0.0, 0.95),
+            "place_prob": _clamp(top3_prob * (0.95 + 0.08 * agreement) * (0.95 + 0.07 * anchor_strength), 0.0, 0.95),
             "rank_score": rank_score,
             "top1_vote_ratio": top1_vote_ratio,
             "top3_vote_ratio": top3_vote_ratio,
@@ -233,8 +233,11 @@ def _score_single_candidate(item, signal_map, bet_type):
         p_hit = _clamp(min(raw_p_hit, implied_prob * 1.8 + 0.08), 0.0, 0.92)
     ev = round(p_hit * odds_used - 1.0, 6)
     ev_for_score = max(-1.0, min(1.5, ev))
-    score = round(ev_for_score * 0.42 + p_hit * 0.23 + signal.get("support_score", 0.0) * 0.35, 6)
-    return round(p_hit, 6), ev, score
+    quant_support_score = round(float(signal.get("support_score", 0.0) or 0.0), 6)
+    quant_anchor_strength = round(anchor_strength, 6)
+    quant_agreement = round(float(signal.get("agreement", 0.0) or 0.0), 6)
+    score = round(ev_for_score * 0.42 + p_hit * 0.20 + quant_support_score * 0.38, 6)
+    return round(p_hit, 6), ev, score, quant_support_score, quant_anchor_strength, quant_agreement
 
 
 def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
@@ -266,18 +269,21 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
     p_hit = _clamp(min(p_hit, implied_prob * 3.5 + 0.02), 0.0, type_cap)
     ev = round(p_hit * float(odds_used) - 1.0, 6)
     ev_for_score = max(-1.0, min(1.8, ev))
-    score = round(ev_for_score * 0.42 + p_hit * 0.18 + support * 0.40, 6)
-    return round(p_hit, 6), ev, score
+    quant_support_score = round(float(support or 0.0), 6)
+    quant_anchor_strength = round(float(anchor_strength or 0.0), 6)
+    quant_agreement = round(float(agreement or 0.0), 6)
+    score = round(ev_for_score * 0.42 + p_hit * 0.18 + quant_support_score * 0.40, 6)
+    return round(p_hit, 6), ev, score, quant_support_score, quant_anchor_strength, quant_agreement
 
 
 def _trim_candidates(candidates):
     quotas = {
-        "win": 6,
-        "place": 6,
-        "wide": 16,
-        "quinella": 12,
-        "exacta": 14,
-        "trio": 10,
+        "win": 8,
+        "place": 8,
+        "wide": 20,
+        "quinella": 16,
+        "exacta": 18,
+        "trio": 12,
     }
     grouped = {}
     for candidate in list(candidates or []):
@@ -304,7 +310,7 @@ def _trim_candidates(candidates):
             str(item.get("id", "")),
         )
     )
-    return selected[:80]
+    return selected[:100]
 
 
 def build_policy_candidates(
@@ -327,46 +333,46 @@ def build_policy_candidates(
         if "win" in allowed_types:
             win_odds = float(item.get("win_odds", 0.0) or 0.0)
             if win_odds > 0:
-                p_hit, ev, score = _score_single_candidate(item, signal_map, "win")
-                candidate = {"id": f"win:{horse_no}", "bet_type": "win", "legs": [horse_no], "odds_used": round(win_odds, 6), "p_hit": p_hit, "ev": ev, "score": score}
+                p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_single_candidate(item, signal_map, "win")
+                candidate = {"id": f"win:{horse_no}", "bet_type": "win", "legs": [horse_no], "odds_used": round(win_odds, 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
                 candidates.append(candidate)
         if "place" in allowed_types:
             place_odds = float(item.get("place_odds", 0.0) or 0.0)
             if place_odds > 0:
-                p_hit, ev, score = _score_single_candidate(item, signal_map, "place")
-                candidate = {"id": f"place:{horse_no}", "bet_type": "place", "legs": [horse_no], "odds_used": round(place_odds, 6), "p_hit": p_hit, "ev": ev, "score": score}
+                p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_single_candidate(item, signal_map, "place")
+                candidate = {"id": f"place:{horse_no}", "bet_type": "place", "legs": [horse_no], "odds_used": round(place_odds, 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
                 candidates.append(candidate)
     if "wide" in allowed_types:
         for pair, odds in sorted(wide_odds_map.items()):
             if float(odds or 0.0) <= 0:
                 continue
             legs = [str(pair[0]), str(pair[1])]
-            p_hit, ev, score = _score_combo_candidate(legs, signal_map, "wide", odds)
-            candidate = {"id": f"wide:{pair[0]}-{pair[1]}", "bet_type": "wide", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
+            p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_combo_candidate(legs, signal_map, "wide", odds)
+            candidate = {"id": f"wide:{pair[0]}-{pair[1]}", "bet_type": "wide", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
             candidates.append(candidate)
     if "quinella" in allowed_types:
         for pair, odds in sorted(quinella_odds_map.items()):
             if float(odds or 0.0) <= 0:
                 continue
             legs = [str(pair[0]), str(pair[1])]
-            p_hit, ev, score = _score_combo_candidate(legs, signal_map, "quinella", odds)
-            candidate = {"id": f"quinella:{pair[0]}-{pair[1]}", "bet_type": "quinella", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
+            p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_combo_candidate(legs, signal_map, "quinella", odds)
+            candidate = {"id": f"quinella:{pair[0]}-{pair[1]}", "bet_type": "quinella", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
             candidates.append(candidate)
     if "exacta" in allowed_types:
         for pair, odds in sorted(exacta_odds_map.items()):
             if float(odds or 0.0) <= 0:
                 continue
             legs = [str(pair[0]), str(pair[1])]
-            p_hit, ev, score = _score_combo_candidate(legs, signal_map, "exacta", odds)
-            candidate = {"id": f"exacta:{pair[0]}-{pair[1]}", "bet_type": "exacta", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
+            p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_combo_candidate(legs, signal_map, "exacta", odds)
+            candidate = {"id": f"exacta:{pair[0]}-{pair[1]}", "bet_type": "exacta", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
             candidates.append(candidate)
     if "trio" in allowed_types:
         for trio_key, odds in sorted(trio_odds_map.items()):
             if float(odds or 0.0) <= 0:
                 continue
             legs = [str(trio_key[0]), str(trio_key[1]), str(trio_key[2])]
-            p_hit, ev, score = _score_combo_candidate(legs, signal_map, "trio", odds)
-            candidate = {"id": f"trio:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}", "bet_type": "trio", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score}
+            p_hit, ev, score, quant_support_score, quant_anchor_strength, quant_agreement = _score_combo_candidate(legs, signal_map, "trio", odds)
+            candidate = {"id": f"trio:{trio_key[0]}-{trio_key[1]}-{trio_key[2]}", "bet_type": "trio", "legs": legs, "odds_used": round(float(odds), 6), "p_hit": p_hit, "ev": ev, "score": score, "quant_support_score": quant_support_score, "quant_anchor_strength": quant_anchor_strength, "quant_agreement": quant_agreement}
             candidates.append(candidate)
     candidates = _trim_candidates(candidates)
     candidates.sort(
@@ -511,14 +517,14 @@ def _build_consensus_primary_predictions(multi_predictor, reference_predictions)
         consensus_rank = float(consensus.get("avg_pred_rank", reference_rank) or reference_rank)
         top1_ratio = float(consensus.get("top1_votes", 0) or 0) / predictor_count_cap
         top3_ratio = float(consensus.get("top3_votes", 0) or 0) / predictor_count_cap
-        blended_rank = 0.65 * reference_rank + 0.35 * consensus_rank - 0.35 * top1_ratio - 0.15 * top3_ratio
+        blended_rank = 0.55 * reference_rank + 0.45 * consensus_rank - 0.28 * top1_ratio - 0.12 * top3_ratio
         merged.append(
             {
                 "horse_no": horse_no,
                 "horse_name": str(consensus.get("horse_name", "") or item.get("horse_name", "") or ""),
                 "pred_rank": int(item.get("pred_rank", 0) or 0),
-                "top3_prob_model": round(0.7 * float(item.get("top3_prob_model", 0.0) or 0.0) + 0.3 * float(consensus.get("avg_top3_prob_model", item.get("top3_prob_model", 0.0)) or 0.0), 6),
-                "rank_score_norm": round(0.7 * float(item.get("rank_score_norm", 0.0) or 0.0) + 0.3 * float(consensus.get("avg_rank_score_norm", item.get("rank_score_norm", 0.0)) or 0.0), 6),
+                "top3_prob_model": round(0.65 * float(item.get("top3_prob_model", 0.0) or 0.0) + 0.35 * float(consensus.get("avg_top3_prob_model", item.get("top3_prob_model", 0.0)) or 0.0), 6),
+                "rank_score_norm": round(0.65 * float(item.get("rank_score_norm", 0.0) or 0.0) + 0.35 * float(consensus.get("avg_rank_score_norm", item.get("rank_score_norm", 0.0)) or 0.0), 6),
                 "win_odds": round(float(consensus.get("win_odds", item.get("win_odds", 0.0)) or 0.0), 6),
                 "place_odds": round(float(consensus.get("place_odds", item.get("place_odds", 0.0)) or 0.0), 6),
                 "confidence_score": round(float(item.get("confidence_score", 0.5) or 0.5), 6),
@@ -811,7 +817,7 @@ def build_policy_input_payload(
     build_history_context,
     to_float,
 ):
-    core_bet_types = ("win", "place", "wide")
+    core_bet_types = ("win", "place", "wide", "quinella", "exacta", "trio")
     name_to_no_map = load_name_to_no(odds_path)
     win_odds_map = load_win_odds_map(odds_path)
     place_odds_map = load_place_odds_map(fuku_odds_path)

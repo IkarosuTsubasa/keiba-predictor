@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v15"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v21"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v23"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -82,6 +82,9 @@ class PolicyCandidate(BaseModel):
     p_hit: float
     ev: float
     score: float
+    quant_support_score: float = 0.0
+    quant_anchor_strength: float = 0.0
+    quant_agreement: float = 0.0
 
 
 class PolicyAIStats(BaseModel):
@@ -252,6 +255,9 @@ def _candidate_digest(candidates: List[PolicyCandidate]) -> str:
                 "p_hit": round(float(item.p_hit), 6),
                 "ev": round(float(item.ev), 6),
                 "score": round(float(item.score), 6),
+                "quant_support_score": round(float(item.quant_support_score or 0.0), 6),
+                "quant_anchor_strength": round(float(item.quant_anchor_strength or 0.0), 6),
+                "quant_agreement": round(float(item.quant_agreement or 0.0), 6),
             }
         )
     slim = sorted(slim, key=lambda x: str(x.get("id", "")))
@@ -288,6 +294,9 @@ def _build_candidate_maps(input_obj: RacePolicyInput) -> Dict[str, Dict[str, Dic
             "p_hit": round(float(cand.p_hit or 0.0), 6),
             "ev": round(float(cand.ev or 0.0), 6),
             "score": round(float(cand.score or 0.0), 6),
+            "quant_support_score": round(float(cand.quant_support_score or 0.0), 6),
+            "quant_anchor_strength": round(float(cand.quant_anchor_strength or 0.0), 6),
+            "quant_agreement": round(float(cand.quant_agreement or 0.0), 6),
         }
         by_id[candidate_id] = row
         by_ticket_key[_ticket_key_from_parts(bet_type, legs)] = row
@@ -616,6 +625,46 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
                 "top_horses": top_horses,
             }
         )
+    predictor_horse_probs = []
+    for row in list(multi_predictor.get("predictor_rankings", []) or [])[:8]:
+        horses = []
+        for item in list(row.get("ranking", []) or []):
+            horses.append(
+                {
+                    "horse_no": _normalize_horse_no_text(item.get("horse_no", "")),
+                    "horse_name": str(item.get("horse_name", "") or ""),
+                    "top3_prob": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                }
+            )
+        if not horses:
+            continue
+        predictor_horse_probs.append(
+            {
+                "predictor_id": str(row.get("predictor_id", "") or ""),
+                "predictor_label": str(row.get("predictor_label", "") or ""),
+                "horses": horses,
+            }
+        )
+    if not predictor_horse_probs:
+        for row in list(multi_predictor.get("summaries", []) or [])[:8]:
+            horses = []
+            for item in list(row.get("top_horses", []) or []):
+                horses.append(
+                    {
+                        "horse_no": _normalize_horse_no_text(item.get("horse_no", "")),
+                        "horse_name": str(item.get("horse_name", "") or ""),
+                        "top3_prob": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                    }
+                )
+            if not horses:
+                continue
+            predictor_horse_probs.append(
+                {
+                    "predictor_id": str(row.get("predictor_id", "") or ""),
+                    "predictor_label": str(row.get("predictor_label", "") or ""),
+                    "horses": horses,
+                }
+            )
     performance = dict(multi_predictor.get("performance", {}) or {})
     scope_history = list(performance.get("current_scope_history", []) or [])
     compact_perf = []
@@ -666,6 +715,7 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
         "consensus_anchor": consensus_anchor,
         "consensus_top": consensus_rows,
         "predictor_top_picks": predictor_top_picks,
+        "predictor_horse_probs": predictor_horse_probs,
         "marks_top5": marks_top5,
         "predictor_scope_performance": compact_perf,
     }
@@ -774,6 +824,9 @@ def _compact_candidate_tickets(input_obj: RacePolicyInput) -> List[Dict[str, Any
                 "p_hit": round(float(cand.p_hit or 0.0), 6),
                 "ev": round(float(cand.ev or 0.0), 6),
                 "score": round(float(cand.score or 0.0), 6),
+                "quant_support_score": round(float(cand.quant_support_score or 0.0), 6),
+                "quant_anchor_strength": round(float(cand.quant_anchor_strength or 0.0), 6),
+                "quant_agreement": round(float(cand.quant_agreement or 0.0), 6),
             }
         )
     return out
@@ -1220,17 +1273,19 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- bet のときは selected_tickets を最優先で正しく返してください\n\n"
 
         "== 判断基準 ==\n"
-        "1. model_summary の量化モデル合意度。consensus_anchor と predictor_top_picks を見て、どの馬が広く支持されているかを把握すること\n"
-        "2. horse_summary の top1_votes / top3_votes / rank_std / predictors_support を見て、量化モデルの支持が厚い馬を優先候補にすること\n"
-        "3. その上で candidate_tickets の edge（ev / score / p_hit）を比較し、量化モデルの見立てと整合する候補を優先すること\n"
-        "4. portfolio_summary と予算制約に基づく当日資金配分\n\n"
+        "1. まず model_summary の predictor_horse_probs を見て、6本の量化モデルが全馬をどう評価しているかを確認すること\n"
+        "2. 6本のモデルで top3_prob が高い馬、複数モデルで強く評価されている馬、逆に割れている馬を見て、自分なりの印を決めること\n"
+        "3. その上で horse_summary の top1_votes / top3_votes / rank_std / predictors_support を補助的に使い、支持の厚さとブレを確認すること\n"
+        "4. 最後に candidate_tickets の edge（ev / score / p_hit）と odds を見て、どの買い方にするかを決めること\n"
+        "5. portfolio_summary と予算制約に基づく当日資金配分\n\n"
 
-        "== 量化モデル参照ルール ==\n"
-        "- このタスクでは量化模型の見立てを必ず参照すること\n"
-        "- candidate_tickets の edge だけで決めず、量化モデルの支持がある馬を優先的に含めること\n"
-        "- consensus_anchor の馬、または predictor_top_picks で複数モデルが上位評価している馬は、買い目の軸候補として強く考慮すること\n"
-        "- ただし量化モデルの共識だけで固定せず、candidate_tickets の edge やオッズ妙味も合わせて最終判断すること\n"
-        "- 量化モデルの支持が薄い馬を中心に買う場合は、相応の edge やオッズ妙味があるときに限ること\n\n"
+        "== 量化モデル最優先ルール ==\n"
+        "- このタスクでは6本の量化モデル結果を第一優先の材料として扱うこと\n"
+        "- まず6本の量化モデルから印の軸を作り、その後で odds と candidate_tickets を使って買い方を決めること\n"
+        "- predictor_horse_probs には各モデルの全馬評価が入っているので、上位数頭だけでなく全体の並びも確認すること\n"
+        "- consensus_anchor は参考にしてよいが、それだけで機械的に固定せず、6本それぞれの結果を必ず読むこと\n"
+        "- candidate_tickets は候補池であり、量化モデルの読みを無視して edge だけで決めてはいけない\n"
+        "- 量化モデルの支持が薄い馬を主軸にする場合は、odds 妙味や買い方の理由が明確なときに限ること\n\n"
 
         "== 制約 ==\n"
         f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"

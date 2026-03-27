@@ -6,6 +6,7 @@ from llm.gemini_policy import (
     RacePolicyInput,
     RacePolicyOutput,
     _build_prompt_payload,
+    _make_prompt,
     _sanitize_output,
     call_gemini_policy,
     get_last_call_meta,
@@ -344,9 +345,20 @@ def main():
     assert all(str(item.get("bet_type", "")) == "place" for item in list(place_only_prompt_payload.get("candidate_tickets", []) or [])), "prompt candidate_tickets should already respect allowed_types"
     assert str(place_only_prompt_payload.get("model_summary", {}).get("consensus_anchor", {}).get("horse_no", "")) == "1", "prompt should expose quantitative consensus anchor"
     assert len(list(place_only_prompt_payload.get("model_summary", {}).get("predictor_top_picks", []) or [])) >= 5, "prompt should expose per-predictor top picks"
+    predictor_horse_probs = list(place_only_prompt_payload.get("model_summary", {}).get("predictor_horse_probs", []) or [])
+    assert len(predictor_horse_probs) >= 5, "prompt should expose all-horse quantitative views for each predictor"
+    first_predictor_row = predictor_horse_probs[0]
+    assert len(list(first_predictor_row.get("horses", []) or [])) >= 5, "each predictor view should include multiple horses"
+    first_prob_row = list(first_predictor_row.get("horses", []) or [])[0]
+    assert sorted(first_prob_row.keys()) == ["horse_name", "horse_no", "top3_prob"], "predictor horse rows should stay minimal"
     assert any(str(item.get("horse_no", "")) == "1" for item in list(place_only_prompt_payload.get("horse_summary", []) or [])), "horse_summary should include consensus-led horses"
     first_horse_row = list(place_only_prompt_payload.get("horse_summary", []) or [])[0]
     assert "predictors_support" in first_horse_row and "rank_std" in first_horse_row, "horse_summary should expose quantitative support details"
+    first_candidate_row = list(place_only_prompt_payload.get("candidate_tickets", []) or [])[0]
+    assert "quant_support_score" in first_candidate_row and "quant_anchor_strength" in first_candidate_row, "candidate_tickets should expose quantitative ticket support"
+    place_only_prompt_text = _make_prompt(place_only_input)
+    assert "predictor_horse_probs" in place_only_prompt_text, "prompt should explicitly include all-horse predictor probabilities"
+    assert "量化モデル最優先ルール" in place_only_prompt_text, "prompt should explicitly declare quantitative-model-first rule"
 
     out1 = call_gemini_policy(
         input=input_2000,
