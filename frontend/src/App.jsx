@@ -10,7 +10,6 @@ import PublicStaticPage from "./components/PublicStaticPage";
 import RaceDetailPage from "./components/RaceDetailPage";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
-import SocialBarLoader from "./components/SocialBarLoader";
 import TodayBoardContent from "./components/TodayBoardContent";
 import { matchRaceIdentifier } from "./lib/publicRace";
 
@@ -317,16 +316,7 @@ function ErrorState({ error, onRetry }) {
   );
 }
 
-function PublicFrame({
-  headerProps = {},
-  sideNavProps = {},
-  showSocialBar = false,
-  children,
-}) {
-  const shouldShowSocialBar = Boolean(
-    showSocialBar || sideNavProps.mode === "home" || sideNavProps.mode === "detail",
-  );
-
+function PublicFrame({ headerProps = {}, sideNavProps = {}, children }) {
   return (
     <main className="racing-intel-page">
       <AppHeader {...headerProps} />
@@ -335,7 +325,6 @@ function PublicFrame({
         <div className="racing-intel-page__main">{children}</div>
       </div>
       <SiteFooter />
-      <SocialBarLoader enabled={shouldShowSocialBar} />
     </main>
   );
 }
@@ -361,7 +350,6 @@ export default function App() {
   const isRaceDetail = Boolean(raceDetailId);
   const staticPage = PUBLIC_PAGE_CONTENT[normalizedPath] || null;
   const selectedDate = extractSelectedDate(search);
-  const showSocialBar = normalizedPath === APP_BASE_PATH || isRaceDetail;
 
   useEffect(() => {
     if (isAdminWorkspace) {
@@ -453,7 +441,6 @@ export default function App() {
             mode: "detail",
             detailHref: `${normalizedPath}${buildQuery(search)}`,
           }}
-          showSocialBar={showSocialBar}
         >
           <div className="public-content-stack">
             <section className="empty-race-state">
