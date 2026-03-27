@@ -288,7 +288,7 @@ function PredictorDesk({ items }) {
     <section className="history-panel history-panel--predictor">
       <div className="history-panel__head">
         <div>
-          <span className="history-panel__eyebrow">量化比較</span>
+          <span className="history-panel__eyebrow">定量比較</span>
           <h2>定量モデル比較</h2>
         </div>
       </div>

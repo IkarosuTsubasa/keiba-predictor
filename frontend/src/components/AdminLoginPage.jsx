@@ -16,7 +16,7 @@ export default function AdminLoginPage({
   const authCheckUrl = `${appBasePath}/api/admin/auth-check`;
 
   useEffect(() => {
-    document.title = "Admin Console";
+    document.title = "管理コンソール";
   }, []);
 
   useEffect(() => {
@@ -44,11 +44,11 @@ export default function AdminLoginPage({
         setReady(valid);
         if (!valid) {
           window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-          setError("Admin token invalid.");
+          setError("管理トークンが無効です。");
         }
       })
       .catch((fetchError) => {
-        setError(fetchError?.message || "Auth check failed.");
+        setError(fetchError?.message || "認証確認に失敗しました。");
       })
       .finally(() => {
         setChecking(false);
@@ -78,7 +78,7 @@ export default function AdminLoginPage({
         setEnabled(Boolean(data?.enabled));
         if (!valid) {
           setReady(false);
-          setError("Admin token invalid.");
+          setError("管理トークンが無効です。");
           window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
           return;
         }
@@ -94,7 +94,7 @@ export default function AdminLoginPage({
       })
       .catch((fetchError) => {
         setReady(false);
-        setError(fetchError?.message || "Auth check failed.");
+        setError(fetchError?.message || "認証確認に失敗しました。");
       })
       .finally(() => {
         setChecking(false);
@@ -102,36 +102,36 @@ export default function AdminLoginPage({
   }
 
   return (
-    <main className="admin-login-page">
-      <section className="admin-login-card">
-        <span className="admin-login-card__eyebrow">Admin Console</span>
-        <h1>Admin Login</h1>
-        <p>Use the admin token to open the React control panel.</p>
+      <main className="admin-login-page">
+        <section className="admin-login-card">
+          <span className="admin-login-card__eyebrow">管理コンソール</span>
+          <h1>管理ログイン</h1>
+          <p>管理トークンを入力して管理画面を開きます。</p>
 
-        <form className="admin-login-form" onSubmit={handleSubmit}>
-          <label className="admin-login-form__field">
-            <span>Admin Token</span>
-            <input
-              type="password"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder={enabled ? "ADMIN_TOKEN" : "ADMIN_TOKEN disabled"}
-            />
-          </label>
+          <form className="admin-login-form" onSubmit={handleSubmit}>
+            <label className="admin-login-form__field">
+              <span>管理トークン</span>
+              <input
+                type="password"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder={enabled ? "ADMIN_TOKEN" : "ADMIN_TOKEN は無効です"}
+              />
+            </label>
 
           {error ? <div className="admin-login-form__error">{error}</div> : null}
 
           <div className="admin-login-form__actions">
             <button type="submit" disabled={checking}>
-              {checking ? "Checking..." : "Sign In"}
+              {checking ? "確認中..." : "ログイン"}
             </button>
             {ready ? (
               <a href={`${appBasePath}/console`} className="admin-login-form__link">
-                Open Console
+                管理画面を開く
               </a>
             ) : (
               <a href={appBasePath} className="admin-login-form__link admin-login-form__link--ghost">
-                Back to Public
+                公開ページへ戻る
               </a>
             )}
           </div>

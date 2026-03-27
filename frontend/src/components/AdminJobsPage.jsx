@@ -50,7 +50,7 @@ function normalizeRaceMemoText(value) {
 function parseRaceMemo(text, raceDate) {
   const raw = normalizeRaceMemoText(text);
   if (!raw) {
-    return { updates: {}, message: "Notes is empty." };
+    return { updates: {}, message: "メモが空です。" };
   }
 
   const updates = {};
@@ -112,10 +112,10 @@ function parseRaceMemo(text, raceDate) {
   }
 
   if (!hitCount) {
-    return { updates: {}, message: "No supported race info found in notes." };
+    return { updates: {}, message: "メモから補完できるレース情報が見つかりませんでした。" };
   }
 
-  return { updates, message: `Auto filled ${hitCount} fields from notes.` };
+  return { updates, message: `メモから ${hitCount} 項目を補完しました。` };
 }
 
 function formatDateInputValue(date) {
@@ -176,18 +176,18 @@ function notifyMeta(job) {
   const status = String(job?.ntfy_notify_status || "").trim().toLowerCase();
   if (status === "notified") {
     return {
-      label: `通知 已发送${job?.ntfy_notify_engine ? ` (${job.ntfy_notify_engine})` : ""}`,
+      label: `通知送信済み${job?.ntfy_notify_engine ? ` (${job.ntfy_notify_engine})` : ""}`,
       tone: "good",
     };
   }
   if (status === "failed") {
     return {
-      label: `通知 失败${job?.ntfy_notify_error ? `: ${job.ntfy_notify_error}` : ""}`,
+      label: `通知送信失敗${job?.ntfy_notify_error ? `: ${job.ntfy_notify_error}` : ""}`,
       tone: "danger",
     };
   }
   return {
-    label: "通知 未发送",
+    label: "通知未送信",
     tone: "muted",
   };
 }
@@ -209,7 +209,7 @@ function ProcessLog({ entries }) {
         <div key={`${entry.step}-${index}`} className="admin-job-card__log-item">
           <div className="admin-job-card__log-head">
             <strong>{entry.step || "-"}</strong>
-            <span>{entry.code !== "" ? `exit ${entry.code}` : "exit -"}</span>
+            <span>{entry.code !== "" ? `終了コード ${entry.code}` : "終了コード -"}</span>
           </div>
           {entry.preview ? <p>{entry.preview}</p> : null}
         </div>
@@ -246,18 +246,18 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
   function applyParsedNotes() {
     const parsed = parseRaceMemo(form.notes, form.race_date);
     if (!Object.keys(parsed.updates || {}).length) {
-      setParseMessage(parsed.message || "No fields updated.");
+      setParseMessage(parsed.message || "更新できる項目はありませんでした。");
       return;
     }
     setForm((prev) => ({ ...prev, ...parsed.updates }));
-    setParseMessage(parsed.message || "Fields updated from notes.");
+    setParseMessage(parsed.message || "メモから項目を補完しました。");
   }
 
   return (
     <details className="admin-tool-panel admin-tool-panel--primary" open>
-      <summary>Create Task</summary>
+      <summary>タスク作成</summary>
       <div className="admin-tool-panel__body admin-tool-panel__body--primary">
-        <p>Defaults to the current date and off time for fast task creation.</p>
+        <p>現在日時を初期値にして、素早くタスクを作成できます。</p>
       </div>
       <form
         className="admin-inline-form admin-inline-form--primary"
@@ -267,27 +267,27 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
         }}
       >
         <label>
-          <span>Scope</span>
+          <span>対象区分</span>
           <select value={form.scope_key} onChange={(event) => updateField("scope_key", event.target.value)}>
-            <option value="central_dirt">Central Dirt</option>
-            <option value="central_turf">Central Turf</option>
-            <option value="local">Local</option>
+            <option value="central_dirt">中央ダート</option>
+            <option value="central_turf">中央芝</option>
+            <option value="local">地方</option>
           </select>
         </label>
         <label>
-          <span>Race ID</span>
+          <span>レースID</span>
           <input value={form.race_id} onChange={(event) => updateField("race_id", event.target.value)} />
         </label>
         <label>
-          <span>Location</span>
+          <span>開催場</span>
           <input value={form.location} onChange={(event) => updateField("location", event.target.value)} />
         </label>
         <label>
-          <span>Race Date</span>
+          <span>レース日</span>
           <input type="date" value={form.race_date} onChange={(event) => updateField("race_date", event.target.value)} />
         </label>
         <label>
-          <span>Off Time</span>
+          <span>発走時刻</span>
           <input
             type="datetime-local"
             step={300}
@@ -296,15 +296,15 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
           />
         </label>
         <label>
-          <span>Distance</span>
+          <span>距離</span>
           <input type="number" step={100} value={form.target_distance} onChange={(event) => updateField("target_distance", event.target.value)} />
         </label>
         <label>
-          <span>Track</span>
+          <span>馬場</span>
           <TrackConditionSelect value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)} />
         </label>
         <label>
-          <span>Lead Minutes</span>
+          <span>前倒し分</span>
           <input type="number" value={form.lead_minutes} onChange={(event) => updateField("lead_minutes", event.target.value)} />
         </label>
         <label>
@@ -326,18 +326,18 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
           />
         </label>
         <label className="admin-inline-form__wide">
-          <span>Notes</span>
+          <span>メモ</span>
           <textarea rows={3} value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
         </label>
         <div className="admin-inline-form__actions">
           <button type="button" disabled={busy} onClick={applyParsedNotes}>
-            Auto Fill From Notes
+            メモから自動補完
           </button>
           {parseMessage ? <span>{parseMessage}</span> : null}
         </div>
         <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
-            {busy ? "Creating..." : "Create"}
+            {busy ? "作成中..." : "作成"}
           </button>
         </div>
       </form>
@@ -351,7 +351,7 @@ function ImportArchiveForm({ onSubmit, busy }) {
 
   return (
     <details className="admin-tool-panel">
-      <summary>Import Archive</summary>
+      <summary>アーカイブ取込</summary>
       <form
         className="admin-inline-form"
         onSubmit={(event) => {
@@ -360,16 +360,16 @@ function ImportArchiveForm({ onSubmit, busy }) {
         }}
       >
         <label className="admin-inline-form__wide">
-          <span>Archive ZIP</span>
+          <span>アーカイブZIP</span>
           <input type="file" accept=".zip,application/zip" onChange={(event) => setArchiveFile(event.target.files?.[0] || null)} />
         </label>
         <label className="admin-inline-form__wide admin-inline-form__checkbox">
           <input type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} />
-          <span>Overwrite existing files</span>
+          <span>既存ファイルを上書き</span>
         </label>
         <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
-            {busy ? "Importing..." : "Import"}
+            {busy ? "取込中..." : "取込"}
           </button>
         </div>
       </form>
@@ -410,16 +410,16 @@ function EditJobForm({ job, onSubmit, busy }) {
   function applyParsedNotes() {
     const parsed = parseRaceMemo(form.notes, form.race_date);
     if (!Object.keys(parsed.updates || {}).length) {
-      setParseMessage(parsed.message || "No fields updated.");
+      setParseMessage(parsed.message || "更新できる項目はありませんでした。");
       return;
     }
     setForm((prev) => ({ ...prev, ...parsed.updates }));
-    setParseMessage(parsed.message || "Fields updated from notes.");
+    setParseMessage(parsed.message || "メモから項目を補完しました。");
   }
 
   return (
     <details className="admin-inline-panel">
-      <summary>Edit</summary>
+      <summary>編集</summary>
       <form
         className="admin-inline-form"
         onSubmit={(event) => {
@@ -428,19 +428,19 @@ function EditJobForm({ job, onSubmit, busy }) {
         }}
       >
         <label>
-          <span>Race ID</span>
+          <span>レースID</span>
           <input value={form.race_id} onChange={(event) => updateField("race_id", event.target.value)} />
         </label>
         <label>
-          <span>Location</span>
+          <span>開催場</span>
           <input value={form.location} onChange={(event) => updateField("location", event.target.value)} />
         </label>
         <label>
-          <span>Race Date</span>
+          <span>レース日</span>
           <input type="date" value={form.race_date} onChange={(event) => updateField("race_date", event.target.value)} />
         </label>
         <label>
-          <span>Off Time</span>
+          <span>発走時刻</span>
           <input
             type="datetime-local"
             step={300}
@@ -449,30 +449,30 @@ function EditJobForm({ job, onSubmit, busy }) {
           />
         </label>
         <label>
-          <span>Distance</span>
+          <span>距離</span>
           <input type="number" step={100} value={form.target_distance} onChange={(event) => updateField("target_distance", event.target.value)} />
         </label>
         <label>
-          <span>Track</span>
+          <span>馬場</span>
           <TrackConditionSelect value={form.target_track_condition} onChange={(event) => updateField("target_track_condition", event.target.value)} />
         </label>
         <label>
-          <span>Lead Minutes</span>
+          <span>前倒し分</span>
           <input type="number" value={form.lead_minutes} onChange={(event) => updateField("lead_minutes", event.target.value)} />
         </label>
         <label className="admin-inline-form__wide">
-          <span>Notes</span>
+          <span>メモ</span>
           <textarea value={form.notes} onChange={(event) => updateField("notes", event.target.value)} rows={3} />
         </label>
         <div className="admin-inline-form__actions">
           <button type="button" disabled={busy} onClick={applyParsedNotes}>
-            Auto Fill From Notes
+            メモから自動補完
           </button>
           {parseMessage ? <span>{parseMessage}</span> : null}
         </div>
         <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
-            {busy ? "Saving..." : "Save"}
+            {busy ? "保存中..." : "保存"}
           </button>
         </div>
       </form>
@@ -484,11 +484,11 @@ function OpsPanel({ busy, onReset }) {
   return (
     <article className="admin-tool-panel admin-tool-panel--compact">
       <div className="admin-tool-panel__body">
-        <h3>Reset LLM State</h3>
-        <p>Low-frequency maintenance action for recovery and debugging only.</p>
+        <h3>LLM状態リセット</h3>
+        <p>復旧や調査でのみ使う低頻度のメンテナンス操作です。</p>
         <div className="admin-toolbar">
           <button type="button" disabled={busy} onClick={onReset}>
-            {busy ? "Resetting..." : "Reset LLM State"}
+            {busy ? "リセット中..." : "LLM状態をリセット"}
           </button>
         </div>
       </div>
@@ -497,7 +497,7 @@ function OpsPanel({ busy, onReset }) {
 }
 
 function JobCard({ job, onAction, busyAction }) {
-  const actualText = [job.actual_top1, job.actual_top2, job.actual_top3].filter(Boolean).join(" / ") || "Not settled";
+  const actualText = [job.actual_top1, job.actual_top2, job.actual_top3].filter(Boolean).join(" / ") || "未確定";
   const title = `${job.location || ""}${job.race_id ? ` ${job.race_id}` : ""}`.trim() || job.job_id;
   const workspaceUrl =
     job.current_run_id && job.scope_key
@@ -517,9 +517,9 @@ function JobCard({ job, onAction, busyAction }) {
       </div>
 
       <div className="admin-job-card__meta">
-        <span>Date {job.race_date || "-"}</span>
-        <span>Off {job.scheduled_off_time || "-"}</span>
-        <span>Run {job.current_run_id || "-"}</span>
+        <span>日付 {job.race_date || "-"}</span>
+        <span>発走 {job.scheduled_off_time || "-"}</span>
+        <span>実行ID {job.current_run_id || "-"}</span>
       </div>
 
       <div className="admin-job-card__steps">
@@ -531,19 +531,19 @@ function JobCard({ job, onAction, busyAction }) {
       </div>
 
       <div className="admin-job-card__meta admin-job-card__meta--stack">
-        <span>Actual {actualText}</span>
+        <span>結果 {actualText}</span>
         <span className={statusClass(notify.tone)}>{notify.label}</span>
-        {job.notes ? <span>Notes {job.notes}</span> : null}
+        {job.notes ? <span>メモ {job.notes}</span> : null}
       </div>
 
       <div className="admin-job-card__actions">
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
-          {busy ? "Processing..." : "Process Now"}
+          {busy ? "処理中..." : "今すぐ実行"}
         </button>
         <button type="button" disabled={busy} onClick={() => onAction("delete", job)}>
-          Delete
+          削除
         </button>
-        {workspaceUrl ? <a href={workspaceUrl}>Workspace</a> : null}
+        {workspaceUrl ? <a href={workspaceUrl}>ワークスペース</a> : null}
       </div>
 
       <EditJobForm job={job} busy={busy} onSubmit={(payload) => onAction("edit", job, payload)} />
@@ -581,7 +581,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     })
       .then((response) => {
         if (response.status === 403) {
-          throw new Error("Admin token invalid.");
+          throw new Error("管理トークンが無効です。");
         }
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
@@ -594,11 +594,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
       })
       .catch((error) => {
         if (!alive) return;
-        if ((error?.message || "").includes("Admin token invalid")) {
+        if ((error?.message || "").includes("管理トークンが無効")) {
           window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
           setToken("");
         }
-        setState({ loading: false, error: error?.message || "Failed to load admin jobs.", data: null });
+        setState({ loading: false, error: error?.message || "管理タスクの読み込みに失敗しました。", data: null });
       });
 
     return () => {
@@ -653,21 +653,21 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
   async function runAction(kind, job, payload = {}) {
     const jobId = String(job?.job_id || "").trim();
     if (!jobId) return;
-    if (kind === "delete" && !window.confirm(`Delete task ${jobId}?`)) return;
+    if (kind === "delete" && !window.confirm(`タスク ${jobId} を削除しますか？`)) return;
     setBusyAction(jobId);
     setFlashMessage("");
 
     try {
       await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
       const messages = {
-        process_now: `Task ${jobId} started.`,
-        delete: `Task ${jobId} deleted.`,
-        edit: `Task ${jobId} updated.`,
+        process_now: `タスク ${jobId} の処理を開始しました。`,
+        delete: `タスク ${jobId} を削除しました。`,
+        edit: `タスク ${jobId} を更新しました。`,
       };
-      setFlashMessage(messages[kind] || "Action completed.");
+      setFlashMessage(messages[kind] || "操作が完了しました。");
       setReloadTick((value) => value + 1);
     } catch (error) {
-      setState((prev) => ({ ...prev, error: error?.message || "Action failed." }));
+      setState((prev) => ({ ...prev, error: error?.message || "操作に失敗しました。" }));
     } finally {
       setBusyAction("");
     }
@@ -679,11 +679,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     try {
       const data = await action();
       if (kind === "scan_due") {
-        setFlashMessage(`Queued ${data.queued_count || 0} due tasks.`);
+        setFlashMessage(`期限到来タスクを ${data.queued_count || 0} 件キューに追加しました。`);
       } else if (kind === "run_due_now") {
-        setFlashMessage(`Processed due tasks. processed=${data.processed_count || 0}, settled=${data.settled_count || 0}`);
+        setFlashMessage(`期限到来タスクを処理しました。実行 ${data.processed_count || 0} 件、精算 ${data.settled_count || 0} 件。`);
       } else if (kind === "topup_today_all_llm") {
-        setFlashMessage(`Topped up all LLM bankrolls by ${data.amount_yen || 0} yen.`);
+        setFlashMessage(`全LLMの当日資金に ${data.amount_yen || 0} 円を追加しました。`);
       } else if (kind === "daily_summary_share") {
         const intentUrl = String(data?.intent_url || "").trim();
         if (intentUrl) {
@@ -692,7 +692,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
             window.location.href = intentUrl;
           }
         }
-        setFlashMessage(`Opened daily summary share for ${data.target_date_label || data.target_date || "today"}.`);
+        setFlashMessage(`${data.target_date_label || data.target_date || "対象日"} の日次サマリー共有を開きました。`);
       } else if (kind === "generate_daily_report") {
         const publicUrl = String(data?.public_url || "").trim();
         if (publicUrl) {
@@ -703,16 +703,16 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         }
         setFlashMessage(`${data.target_date_label || data.target_date || "対象日"} の日報を保存しました。`);
       } else if (kind === "create") {
-        setFlashMessage(`Created task ${data.job_id || ""}.`);
+        setFlashMessage(`タスク ${data.job_id || ""} を作成しました。`);
         setCreateFormResetTick((value) => value + 1);
       } else if (kind === "import_archive") {
-        setFlashMessage(`Archive imported. written=${data.written || 0}, skipped=${data.skipped || 0}`);
+        setFlashMessage(`アーカイブを取り込みました。書き込み ${data.written || 0} 件、スキップ ${data.skipped || 0} 件。`);
       } else if (kind === "reset_llm_state") {
-        setFlashMessage(data.output_text || "LLM state reset completed.");
+        setFlashMessage(data.output_text || "LLM状態のリセットが完了しました。");
       }
       setReloadTick((value) => value + 1);
     } catch (error) {
-      setState((prev) => ({ ...prev, error: error?.message || "Action failed." }));
+      setState((prev) => ({ ...prev, error: error?.message || "操作に失敗しました。" }));
     } finally {
       setBusyAction("");
     }
@@ -721,12 +721,12 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
   const summaryItems = useMemo(() => {
     const summary = state.data?.summary || {};
     return [
-      { key: "total", label: "Tasks", value: summary.total || 0, tone: "neutral" },
-      { key: "scheduled", label: "Scheduled", value: summary.scheduled || 0, tone: "neutral" },
-      { key: "processing", label: "Processing", value: summary.processing || 0, tone: "active" },
-      { key: "ready", label: "Ready", value: summary.ready || 0, tone: "good" },
-      { key: "settled", label: "Settled", value: summary.settled || 0, tone: "neutral" },
-      { key: "failed", label: "Failed", value: summary.failed || 0, tone: "danger" },
+      { key: "total", label: "総数", value: summary.total || 0, tone: "neutral" },
+      { key: "scheduled", label: "予定", value: summary.scheduled || 0, tone: "neutral" },
+      { key: "processing", label: "処理中", value: summary.processing || 0, tone: "active" },
+      { key: "ready", label: "準備完了", value: summary.ready || 0, tone: "good" },
+      { key: "settled", label: "精算済み", value: summary.settled || 0, tone: "neutral" },
+      { key: "failed", label: "失敗", value: summary.failed || 0, tone: "danger" },
     ];
   }, [state.data]);
 
@@ -738,38 +738,38 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     <main className="admin-jobs-page">
       <div className="admin-jobs-page__shell">
         <PageSectionHeader
-          kicker="Admin Jobs"
-          title="Task Console"
-          subtitle="Manage race tasks, trigger processing, import archives, and run maintenance actions."
-          meta={[`${(state.data?.jobs || []).length} visible`, showSettled ? "showing settled" : "hiding settled"]}
+          kicker="管理タスク"
+          title="タスク管理"
+          subtitle="レースタスクの管理、処理実行、アーカイブ取込、保守操作をまとめて行えます。"
+          meta={[`表示 ${(state.data?.jobs || []).length} 件`, showSettled ? "精算済みを表示" : "精算済みを非表示"]}
         />
 
         <section className="admin-toolbar">
           <button type="button" onClick={() => setShowSettled((value) => !value)}>
-            {showSettled ? "Hide Settled" : "Show Settled"}
+            {showSettled ? "精算済みを隠す" : "精算済みを表示"}
           </button>
           <button type="button" onClick={() => setReloadTick((value) => value + 1)}>
-            Refresh
+            再読み込み
           </button>
           <button type="button" disabled={busyAction === "scan_due"} onClick={() => runToolbarAction("scan_due", () => postJson("/api/admin/jobs/scan_due", {}))}>
-            {busyAction === "scan_due" ? "Scanning..." : "Scan Due"}
+            {busyAction === "scan_due" ? "確認中..." : "期限到来を確認"}
           </button>
           <button type="button" disabled={busyAction === "run_due_now"} onClick={() => runToolbarAction("run_due_now", () => postJson("/api/admin/jobs/run_due_now", {}))}>
-            {busyAction === "run_due_now" ? "Running..." : "Run Due Now"}
+            {busyAction === "run_due_now" ? "実行中..." : "期限到来を実行"}
           </button>
           <button
             type="button"
             disabled={busyAction === "topup_today_all_llm"}
             onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
           >
-            {busyAction === "topup_today_all_llm" ? "Applying..." : "Top Up All LLM"}
+            {busyAction === "topup_today_all_llm" ? "反映中..." : "全LLM追加入金"}
           </button>
           <button
             type="button"
             disabled={busyAction === "daily_summary_share"}
             onClick={() => runToolbarAction("daily_summary_share", () => postJson("/api/admin/jobs/daily_summary_share", {}))}
           >
-            {busyAction === "daily_summary_share" ? "Preparing..." : "Daily Summary Tweet"}
+            {busyAction === "daily_summary_share" ? "準備中..." : "日次サマリー共有"}
           </button>
           <button
             type="button"
@@ -789,7 +789,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         </section>
 
         <details className="admin-tool-panel admin-tool-panel--secondary">
-          <summary>Rare Tools</summary>
+          <summary>補助ツール</summary>
           <div className="admin-tool-grid">
             <ImportArchiveForm busy={busyAction === "import_archive"} onSubmit={(payload) => runToolbarAction("import_archive", () => postForm("/api/admin/jobs/import_archive", payload))} />
             <OpsPanel busy={busyAction === "reset_llm_state"} onReset={() => runToolbarAction("reset_llm_state", () => postJson("/api/admin/ops/reset_llm_state", {}))} />
@@ -807,9 +807,9 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
 
         {state.loading ? (
           <section className="public-screen-state__panel">
-            <span className="public-screen-state__eyebrow">Loading</span>
-            <h1>Loading tasks</h1>
-            <p>Fetching the latest task list and status summary.</p>
+            <span className="public-screen-state__eyebrow">読み込み中</span>
+            <h1>タスクを読み込んでいます</h1>
+            <p>最新のタスク一覧と状態サマリーを取得しています。</p>
           </section>
         ) : null}
 
@@ -823,9 +823,9 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
 
         {!state.loading && !state.data?.jobs?.length ? (
           <section className="public-screen-state__panel">
-            <span className="public-screen-state__eyebrow">Empty</span>
-            <h1>No tasks</h1>
-            <p>Create a task, import an archive, or scan due races to get started.</p>
+            <span className="public-screen-state__eyebrow">空です</span>
+            <h1>タスクはありません</h1>
+            <p>タスク作成、アーカイブ取込、または期限到来確認から開始してください。</p>
           </section>
         ) : null}
       </div>

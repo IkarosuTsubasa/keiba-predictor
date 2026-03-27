@@ -14,6 +14,7 @@ from public_share_copy import (
     PUBLIC_SHARE_MAX_CHARS as SHARE_COPY_MAX_CHARS,
     PUBLIC_SHARE_URL as SHARE_COPY_URL,
 )
+from site_copy import load_site_copy
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,18 +30,15 @@ PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
 PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
 PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
-PUBLIC_META_TITLE = "いかいもAI競馬"
-PUBLIC_META_DESCRIPTION = "4つのAIが同時に競馬予想"
-PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
-PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬 #競馬"
-PUBLIC_SHARE_MAX_CHARS = 130
-
-
-PUBLIC_META_TITLE = "いかいもAI競馬"
-PUBLIC_META_DESCRIPTION = "4つのAIが同時に競馬予想を公開する競馬分析サイト"
-PUBLIC_SHARE_DETAIL_LABEL = "全モデル・全買い目はこちら（無料公開中）"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬 #競馬"
+SITE_COPY = load_site_copy()
+SITE_NAME = str(SITE_COPY.get("site", {}).get("name") or "いかいもAI競馬")
+PUBLIC_META_TITLE = str(SITE_COPY.get("site", {}).get("home_page_title") or SITE_NAME)
+PUBLIC_META_DESCRIPTION = str(
+    SITE_COPY.get("site", {}).get("home_page_description") or "競馬分析サイト"
+)
+PUBLIC_PAGES_COPY = dict(SITE_COPY.get("public_pages", {}) or {})
+ROUTE_META_COPY = dict(SITE_COPY.get("route_meta", {}) or {})
+HOME_COPY = dict(SITE_COPY.get("home", {}) or {})
 # Public share copy must come from public_share_copy as the single source of truth.
 # Keep literal share strings out of this file to avoid accidental edits while changing meta or public-page logic.
 PUBLIC_SHARE_URL = SHARE_COPY_URL
@@ -90,70 +88,53 @@ def load_public_index_html():
 
 PUBLIC_PAGE_META = {
     PUBLIC_BASE_PATH: {
-        "title": "いかいもAI競馬 | 独自モデルとLLMで競馬予想を比較・検証する分析サイト",
-        "description": "独自の定量モデルで有力馬を抽出し、複数のLLMで買い目構成を比較。レースごとの予想、結果、回収率、振り返りまで公開する競馬分析サイトです。",
-    },
-    f"{PUBLIC_BASE_PATH}/history": {
-        "title": "履歴分析 | いかいもAI競馬",
-        "description": "LLMと定量モデルの過去成績をまとめて振り返る公開ヒストリーページです。",
-    },
-    f"{PUBLIC_BASE_PATH}/reports": {
-        "title": "私の日報 | いかいもAI競馬",
-        "description": "対象日のAI買い目、結果、定量モデルの振り返りを記事形式で蓄積する日報ページです。",
-    },
-    f"{PUBLIC_BASE_PATH}/about": {
-        "title": "このサイトについて | いかいもAI競馬",
-        "description": "独自の定量モデル、複数のLLM、公開検証までをどう組み合わせているかを紹介するページです。",
-    },
-    f"{PUBLIC_BASE_PATH}/guide": {
-        "title": "ガイド | いかいもAI競馬",
-        "description": "トップ、レース詳細、履歴分析をどう読み進めればよいかをまとめた利用ガイドです。",
-    },
-    f"{PUBLIC_BASE_PATH}/methodology": {
-        "title": "分析方法 | いかいもAI競馬",
-        "description": "独自モデルで有力馬を抽出し、LLMで買い目構成を比較し、結果と履歴で検証する流れを紹介します。",
-    },
-    f"{PUBLIC_BASE_PATH}/privacy": {
-        "title": "プライバシーポリシー | いかいもAI競馬",
-        "description": "Cookie、アクセス情報、広告配信に関する当サイトのプライバシーポリシーです。",
-    },
-    f"{PUBLIC_BASE_PATH}/terms": {
-        "title": "利用規約 | いかいもAI競馬",
-        "description": "いかいもAI競馬の利用条件、禁止事項、免責範囲を記載した利用規約です。",
-    },
-    f"{PUBLIC_BASE_PATH}/disclaimer": {
-        "title": "免責事項 | いかいもAI競馬",
-        "description": "予想情報、投票判断、情報の正確性、責任範囲に関する免責事項を案内します。",
-    },
-    f"{PUBLIC_BASE_PATH}/contact": {
-        "title": "お問い合わせ | いかいもAI競馬",
-        "description": "掲載内容や運営に関する連絡先と、お問い合わせ時の案内を掲載しています。",
-    },
-    CONSOLE_BASE_PATH: {
-        "title": "管理コンソール | いかいもAI競馬",
-        "description": "管理者向けコンソールです。",
-        "noindex": True,
-    },
-    f"{CONSOLE_BASE_PATH}/workspace": {
-        "title": "Workspace | いかいもAI競馬",
-        "description": "管理者向けワークスペースです。",
-        "noindex": True,
-    },
+        "title": PUBLIC_META_TITLE,
+        "description": PUBLIC_META_DESCRIPTION,
+    }
 }
+
+for page in PUBLIC_PAGES_COPY.values():
+    page_path = str(page.get("path") or "").strip()
+    page_title = str(page.get("title") or "").strip()
+    page_description = str(page.get("meta_description") or "").strip()
+    if not page_path or not page_title or not page_description:
+        continue
+    PUBLIC_PAGE_META[page_path] = {
+        "title": f"{page_title} | {SITE_NAME}",
+        "description": page_description,
+    }
+
+for route_meta in ROUTE_META_COPY.values():
+    route_path = str(route_meta.get("path") or "").strip()
+    route_title = str(route_meta.get("title") or "").strip()
+    route_description = str(route_meta.get("description") or "").strip()
+    if not route_path or not route_title or not route_description:
+        continue
+    PUBLIC_PAGE_META[route_path] = {
+        "title": route_title,
+        "description": route_description,
+        "noindex": bool(route_meta.get("noindex")),
+    }
 
 
 def _public_page_meta(path=""):
     normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
     if normalized_path.startswith(f"{PUBLIC_BASE_PATH}/race/"):
         meta = PUBLIC_PAGE_META[PUBLIC_BASE_PATH].copy()
-        meta["title"] = "レース詳細 | いかいもAI競馬"
-        meta["description"] = "各レースの買い目、印、モデル別の推奨馬を見やすく整理した詳細ページです。"
+        meta["title"] = str(ROUTE_META_COPY.get("race_detail", {}).get("title") or f"レース詳細 | {SITE_NAME}")
+        meta["description"] = str(
+            ROUTE_META_COPY.get("race_detail", {}).get("description")
+            or "各レースの買い目、印、モデル別の推奨馬を見やすく整理した詳細ページです。"
+        )
         meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
         return meta
     if normalized_path.startswith(f"{PUBLIC_BASE_PATH}/reports/"):
-        meta = PUBLIC_PAGE_META[f"{PUBLIC_BASE_PATH}/reports"].copy()
-        meta["title"] = "私の日報 | いかいもAI競馬"
-        meta["description"] = "保存された日報記事の詳細ページです。"
+        meta = PUBLIC_PAGE_META.get(f"{PUBLIC_BASE_PATH}/reports", PUBLIC_PAGE_META[PUBLIC_BASE_PATH]).copy()
+        meta["title"] = str(ROUTE_META_COPY.get("report_detail", {}).get("title") or f"私の日報 | {SITE_NAME}")
+        meta["description"] = str(
+            ROUTE_META_COPY.get("report_detail", {}).get("description")
+            or "保存された日報記事の詳細ページです。"
+        )
         meta["canonical_url"] = f"{PUBLIC_SITE_URL}{normalized_path}"
         return meta
     meta = PUBLIC_PAGE_META.get(normalized_path, PUBLIC_PAGE_META[PUBLIC_BASE_PATH]).copy()
@@ -189,7 +170,7 @@ def inject_public_meta_tags(content="", path=""):
     meta_block = f"""
     <link rel="canonical" href="{html.escape(canonical_url)}" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="いかいもAI競馬" />
+    <meta property="og:site_name" content="{html.escape(SITE_NAME)}" />
     <meta property="og:title" content="{html.escape(meta_title)}" />
     <meta property="og:description" content="{html.escape(meta_description)}" />
     <meta property="og:url" content="{html.escape(canonical_url)}" />
@@ -214,6 +195,11 @@ def _public_home_intro_html(payload=None):
     hero = dict(payload.get("hero", {}) or {})
     lead_race = dict(hero.get("lead_race", {}) or {})
     leader = dict(hero.get("leader", {}) or {})
+    home_hero = dict(HOME_COPY.get("hero", {}) or {})
+    featured_section = dict(HOME_COPY.get("featured_section", {}) or {})
+    featured_cards = list(HOME_COPY.get("featured_items", []) or [])
+    method_section = dict(HOME_COPY.get("method_section", {}) or {})
+    method_cards = list(HOME_COPY.get("method_steps", []) or [])
 
     def _parse_main_horse(mark_text=""):
         matched = re.search(r"◎\s*([0-9]+)", _safe_text(mark_text))
@@ -252,7 +238,7 @@ def _public_home_intro_html(payload=None):
         if float(stats.get("agreement_ratio", 0.0) or 0.0) >= 0.75:
             tags.append("高一致")
         elif int(stats.get("unique_main_count", 0) or 0) >= 3 or int(stats.get("no_bet_count", 0) or 0) >= 2:
-            tags.append("分歧あり")
+            tags.append("見解差あり")
         if int(stats.get("top_count", 0) or 0) >= 2 and float(stats.get("agreement_ratio", 0.0) or 0.0) >= 0.5:
             tags.append("軸向き")
         if int(stats.get("unique_main_count", 0) or 0) >= 3 or int(stats.get("no_bet_count", 0) or 0) >= 1:
@@ -290,7 +276,7 @@ def _public_home_intro_html(payload=None):
                 <article class="public-home-static-intro__content-card">
                   <span>{html.escape(_safe_text(item.get('category')))}</span>
                   <strong>{html.escape(_safe_text(item.get('title')))}</strong>
-                  <p>{html.escape(_safe_text(item.get('excerpt')))}</p>
+                  <p>{html.escape(_safe_text(item.get('excerpt') or item.get('description')))}</p>
                   <div class="public-home-static-intro__content-tags">{tags_html}</div>
                   <a href="{html.escape(_safe_text(item.get('href')))}">{html.escape(_safe_text(item.get('cta')) or '続きを読む')}</a>
                 </article>
@@ -305,7 +291,7 @@ def _public_home_intro_html(payload=None):
     target_date_label = _target_date_heading(target_date, payload.get("target_date_label"))
     is_today = bool(target_date) and target_date == _tokyo_today_key()
     summary_heading = "本日のサマリー" if is_today else f"{target_date_label}のサマリー"
-    guide_cta_label = "レース一覧を見る"
+    guide_cta_label = _safe_text(HOME_COPY.get("list_cta_label")) or "レース一覧を見る"
     race_list_href = f"{PUBLIC_BASE_PATH}?date={html.escape(target_date)}" if target_date else PUBLIC_BASE_PATH
     lead_race_title = _safe_text(lead_race.get("race_title")) or f"{target_date_label}の注目レース"
     leader_label = _safe_text(leader.get("label")) or "各モデル"
@@ -323,60 +309,6 @@ def _public_home_intro_html(payload=None):
         f"{leader_label}を含む各モデルの判断差と買い目構成の違いを、同じ導線で確認できます。"
     )
     reason_text = _recommendation_reason(lead_stats, lead_meta, leader_label)
-
-    featured_cards = [
-        {
-            "category": "分析方法",
-            "title": "定量モデルとLLMの役割分担を読み解く",
-            "excerpt": "定量モデルがどこまで土台をつくり、LLM比較がどの局面で効いてくるのかを、公開フローに沿って整理した解説です。",
-            "tags": ["分析方法", "モデル比較", "公開フロー"],
-            "href": f"{PUBLIC_BASE_PATH}/methodology",
-            "cta": "続きを読む",
-        },
-        {
-            "category": "ガイド",
-            "title": "初めてでも迷わないトップページの読み方",
-            "excerpt": "見どころ、深掘り分析、公開レースのどこから読めばよいかをまとめた導入ガイドです。",
-            "tags": ["ガイド", "導入", "比較の見方"],
-            "href": f"{PUBLIC_BASE_PATH}/guide",
-            "cta": "続きを読む",
-        },
-        {
-            "category": "検証",
-            "title": "履歴分析でモデル差と再現性を確かめる",
-            "excerpt": "単日の当たり外れではなく、期間で見たときにどのモデルがどんな局面で強いかを確認するための入口です。",
-            "tags": ["履歴分析", "再現性", "検証"],
-            "href": f"{PUBLIC_BASE_PATH}/history",
-            "cta": "続きを読む",
-        },
-    ]
-
-    method_cards = [
-        {
-            "category": "Step 1",
-            "title": "独自定量モデルで有力馬を抽出",
-            "excerpt": "過去成績、条件適性、想定オッズ、位置取りのバランスから、各レースの有力候補と評価順の輪郭を整理します。",
-            "tags": ["定量モデル", "評価順", "有力馬"],
-            "href": f"{PUBLIC_BASE_PATH}/methodology",
-            "cta": "分析方法を見る",
-        },
-        {
-            "category": "Step 2",
-            "title": "LLMで買い目構成を比較",
-            "excerpt": "同じ定量評価を受け取りながらも、複数のLLMが券種、点数、見送り判断の違いをどう出すかを並べて確認します。",
-            "tags": ["LLM比較", "券種", "判断差"],
-            "href": f"{PUBLIC_BASE_PATH}/methodology",
-            "cta": "分析方法を見る",
-        },
-        {
-            "category": "Step 3",
-            "title": "結果と履歴で継続検証",
-            "excerpt": "公開した予想は結果とともに追跡し、単日だけでなく履歴分析までつなげてモデル差と再現性を見ていきます。",
-            "tags": ["結果", "回収率", "履歴分析"],
-            "href": f"{PUBLIC_BASE_PATH}/history",
-            "cta": "履歴分析を見る",
-        },
-    ]
 
     metrics_html = "".join(
         [
@@ -591,24 +523,24 @@ def _public_home_intro_html(payload=None):
   <div class="public-home-static-intro__inner">
     <div class="public-home-static-intro__hero">
       <div class="public-home-static-intro__copy">
-        <span class="public-home-static-intro__eyebrow">独自モデル × 複数LLM比較 × レース検証</span>
-        <h1>定量モデルとLLM比較でレースを検証する競馬分析サイト</h1>
-        <p>いかいもAI競馬では、独自の定量モデルで各レースの有力馬と確率の偏りを抽出し、さらに複数のLLMで判断差を比較・公開しています。予想を並べるだけでなく、結果・回収率・レース後の振り返りまで継続して検証します。</p>
+        <span class="public-home-static-intro__eyebrow">{html.escape(_safe_text(home_hero.get("eyebrow")))}</span>
+        <h1>{html.escape(_safe_text(home_hero.get("title")))}</h1>
+        <p>{html.escape(_safe_text(home_hero.get("description")))}</p>
         <div class="public-home-static-intro__actions">
           <a class="public-home-static-intro__primary" href="{race_list_href}">{html.escape(guide_cta_label)}</a>
         </div>
       </div>
     </div>
     <section class="public-home-static-intro__section">
-      <span class="public-home-static-intro__section-eyebrow">Featured Content</span>
-      <h2>最新の深掘り分析</h2>
-      <p>分析方法、読み方、履歴検証の3方向から、公開レースをどう読むかを整理した内容をまとめています。</p>
+      <span class="public-home-static-intro__section-eyebrow">{html.escape(_safe_text(featured_section.get("eyebrow")))}</span>
+      <h2>{html.escape(_safe_text(featured_section.get("title")))}</h2>
+      <p>{html.escape(_safe_text(featured_section.get("description")))}</p>
       <div class="public-home-static-intro__content-grid">{_cards_html(featured_cards)}</div>
     </section>
     <section class="public-home-static-intro__section">
-      <span class="public-home-static-intro__section-eyebrow">Method</span>
-      <h2>予想の作り方</h2>
-      <p>定量モデルで有力馬を抽出し、LLMで買い目構成を比較し、その後の結果と履歴まで同じ流れで検証します。</p>
+      <span class="public-home-static-intro__section-eyebrow">{html.escape(_safe_text(method_section.get("eyebrow")))}</span>
+      <h2>{html.escape(_safe_text(method_section.get("title")))}</h2>
+      <p>{html.escape(_safe_text(method_section.get("description")))}</p>
       <div class="public-home-static-intro__content-grid">{_cards_html(method_cards)}</div>
     </section>
   </div>

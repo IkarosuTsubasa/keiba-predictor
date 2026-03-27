@@ -363,10 +363,10 @@ def _build_reason_tags(pred_rank, bet_types_text):
     except (TypeError, ValueError):
         rank_val = 999
     if rank_val <= 2:
-        tags.append("综合上位")
+        tags.append("総合上位")
     bt_list = [x.strip().lower() for x in str(bet_types_text or "").split(",") if x.strip()]
     if any(x in ("wide", "quinella") for x in bt_list):
-        tags.append("连系适性")
+        tags.append("連系適性")
     return tags
 
 

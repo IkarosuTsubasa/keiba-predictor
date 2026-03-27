@@ -1,83 +1,7 @@
-const HOME_HERO_COPY = {
-  eyebrow: "独自モデル × 複数LLM比較 × レース検証",
-  title: "定量モデルとLLM比較でレースを検証する競馬分析サイト",
-  description:
-    "いかいもAI競馬では、独自の定量モデルで各レースの有力馬と確率の偏りを抽出し、さらに複数のLLMで判断差を比較・公開しています。予想を並べるだけでなく、結果・回収率・レース後の振り返りまで継続して検証します。",
-};
-
-export const METHOD_SUMMARY_STEPS = [
-  {
-    step: "Step 1",
-    title: "独自定量モデルで有力馬を抽出",
-    description:
-      "過去成績、条件適性、想定オッズ、位置取りのバランスから、各レースの有力候補と評価順の輪郭を整理します。",
-  },
-  {
-    step: "Step 2",
-    title: "LLMで買い目構成を比較",
-    description:
-      "同じ定量評価を受け取りながらも、複数のLLMが券種、点数、見送り判断の違いをどう出すかを並べて確認します。",
-  },
-  {
-    step: "Step 3",
-    title: "結果と履歴で継続検証",
-    description:
-      "公開した予想は結果とともに追跡し、単日だけでなく履歴分析までつなげてモデル差と再現性を見ていきます。",
-  },
-];
-
-export const FEATURED_CONTENT_ITEMS = [
-  {
-    id: "methodology",
-    title: "定量モデルとLLMの役割分担を読み解く",
-    category: "分析方法",
-    excerpt:
-      "定量モデルがどこまで土台をつくり、LLM比較がどの局面で効いてくるのかを、公開フローに沿って整理した解説です。",
-    tags: ["分析方法", "モデル比較", "公開フロー"],
-    href: "/keiba/methodology",
-  },
-  {
-    id: "guide",
-    title: "初めてでも迷わないトップページの読み方",
-    category: "ガイド",
-    excerpt:
-      "見どころ、深掘り分析、公開レースのどこから読めばよいかをまとめた導入ガイドです。",
-    tags: ["ガイド", "導入", "比較の見方"],
-    href: "/keiba/guide",
-  },
-  {
-    id: "history",
-    title: "履歴分析でモデル差と再現性を確かめる",
-    category: "検証",
-    excerpt:
-      "単日の当たり外れではなく、期間で見たときにどのモデルがどんな局面で強いかを確認するための入口です。",
-    tags: ["履歴分析", "再現性", "検証"],
-    href: "/keiba/history",
-  },
-];
-
-export const BEGINNER_GUIDE_LINKS = [
-  {
-    title: "このサイトについて",
-    note: "公開ビューの役割と全体像を確認",
-    href: "/keiba/about",
-  },
-  {
-    title: "読み方ガイド",
-    note: "見どころ、比較、履歴分析の読み方",
-    href: "/keiba/guide",
-  },
-  {
-    title: "分析方針",
-    note: "定量モデルとLLMの役割分担",
-    href: "/keiba/methodology",
-  },
-  {
-    title: "履歴分析",
-    note: "月間・年間・累計の比較を見る",
-    href: "/keiba/history",
-  },
-];
+import {
+  HOME_HERO_COPY,
+  HOME_LIST_CTA_LABEL,
+} from "./siteCopy";
 
 function safeText(value) {
   return String(value || "").trim();
@@ -136,7 +60,7 @@ export function buildTargetDateContext(data) {
     guideHeading: `${baseHeading}の見どころ`,
     raceBoardTitle: `${baseHeading}の公開レース`,
     dailyRoiTitle: `${baseHeading} ROI`,
-    listCtaLabel: "レース一覧を見る",
+    listCtaLabel: HOME_LIST_CTA_LABEL,
   };
 }
 
@@ -208,7 +132,7 @@ function buildAnalysisTags(stats) {
   if (stats.agreementRatio >= 0.75) {
     tags.push("高一致");
   } else if (stats.uniqueMainCount >= 3 || stats.noBetCount >= 2) {
-    tags.push("分歧あり");
+    tags.push("見解差あり");
   }
 
   if (stats.topCount >= 2 && stats.agreementRatio >= 0.5) {
@@ -366,11 +290,11 @@ export function buildEditorialGuide(data, search = "") {
     highlights: [
       createHighlight("注目", featuredRace, featuredSummary, search, featuredStats.topHorse ? "高一致" : "軸向き"),
       createHighlight(
-        "分歧",
+        "見解差",
         divergenceRace,
         divergenceSummary,
         search,
-        divergenceStats.uniqueMainCount > 2 ? "分歧あり" : "波乱注意",
+        divergenceStats.uniqueMainCount > 2 ? "見解差あり" : "波乱注意",
       ),
       createHighlight("軸", solidRace, solidSummary, search, solidStats.topHorse ? "軸向き" : "高一致"),
     ],

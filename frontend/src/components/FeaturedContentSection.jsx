@@ -1,15 +1,13 @@
 import React from "react";
-import { FEATURED_CONTENT_ITEMS } from "../lib/homepage";
+import { FEATURED_CONTENT_ITEMS, FEATURED_CONTENT_SECTION } from "../lib/siteCopy";
 
 export default function FeaturedContentSection() {
   return (
     <section className="home-section-card" id="home-featured">
       <div className="home-section-head">
-        <span className="home-section-eyebrow">Featured Content</span>
-        <h2>最新の深掘り分析</h2>
-        <p>
-          分析方法、読み方、履歴検証の3方向から、公開レースをどう読むかを整理した内容をまとめています。
-        </p>
+        <span className="home-section-eyebrow">{FEATURED_CONTENT_SECTION.eyebrow}</span>
+        <h2>{FEATURED_CONTENT_SECTION.title}</h2>
+        <p>{FEATURED_CONTENT_SECTION.description}</p>
       </div>
 
       <div className="home-featured-grid">
@@ -25,7 +23,7 @@ export default function FeaturedContentSection() {
                 <span key={tag}>{tag}</span>
               ))}
             </div>
-            <a href={item.href}>続きを読む</a>
+            <a href={item.href}>{item.cta}</a>
           </article>
         ))}
       </div>

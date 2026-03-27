@@ -26,7 +26,7 @@ export default function AppHeader({
                 alt="いかいもAI競馬"
               />
               <div className="app-header__brand-copy">
-                <span className="app-header__tag">競馬予測サイト</span>
+                <span className="app-header__tag">競馬分析サイト</span>
                 <strong className="app-header__title">いかいもAI競馬</strong>
               </div>
             </a>
