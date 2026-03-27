@@ -262,6 +262,38 @@ export default function App() {
     );
   }
 
+  if (isReportsPage) {
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "reports",
+        }}
+      >
+        <div className="public-content-stack">
+          <DailyReportsPage appBasePath={APP_BASE_PATH} />
+        </div>
+      </PublicFrame>
+    );
+  }
+
+  if (isReportDetail) {
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "reportDetail",
+        }}
+      >
+        <div className="public-content-stack">
+          <DailyReportDetailPage slug={reportSlug} appBasePath={APP_BASE_PATH} />
+        </div>
+      </PublicFrame>
+    );
+  }
+
   if (loading) {
     return <LoadingState />;
   }
@@ -290,38 +322,6 @@ export default function App() {
       >
         <div className="public-content-stack">
           <HistoryPage data={data} />
-        </div>
-      </PublicFrame>
-    );
-  }
-
-  if (isReportsPage) {
-    return (
-      <PublicFrame
-        headerProps={{ showFilters: false }}
-        sideNavProps={{
-          pathname: normalizedPath,
-          mode: "reports",
-        }}
-      >
-        <div className="public-content-stack">
-          <DailyReportsPage appBasePath={APP_BASE_PATH} />
-        </div>
-      </PublicFrame>
-    );
-  }
-
-  if (isReportDetail) {
-    return (
-      <PublicFrame
-        headerProps={{ showFilters: false }}
-        sideNavProps={{
-          pathname: normalizedPath,
-          mode: "reportDetail",
-        }}
-      >
-        <div className="public-content-stack">
-          <DailyReportDetailPage slug={reportSlug} appBasePath={APP_BASE_PATH} />
         </div>
       </PublicFrame>
     );
