@@ -102,6 +102,7 @@ jobs:
               "predictions_v3_premium.csv",
               "predictions_v4_gemini.csv",
               "predictions_v5_stacking.csv",
+              "predictions_v6_kiwami.csv",
           ]
           missing_files = [name for name in required_files if not (work_dir / name).exists()]
 

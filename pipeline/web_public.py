@@ -25,6 +25,7 @@ PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
 PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
+PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
 PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
 PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
@@ -1029,6 +1030,14 @@ def build_public_index_response(path="", home_intro_payload=None):
 
 
 def register_public_static_routes(app: FastAPI) -> None:
+    @app.get(PUBLIC_ADS_TXT_PATH)
+    @app.get(f"{PUBLIC_BASE_PATH}/ads.txt")
+    def public_ads_txt():
+        ads_path = PUBLIC_FRONTEND_DIST_DIR / "ads.txt"
+        if ads_path.exists():
+            return FileResponse(ads_path, media_type="text/plain; charset=utf-8")
+        raise HTTPException(status_code=404, detail="ads.txt not found")
+
     @app.get(PUBLIC_SITE_ICON_PATH)
     @app.get("/site-icon.png")
     def public_site_icon():
