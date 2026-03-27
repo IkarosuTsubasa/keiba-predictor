@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,129 @@ from race_job_runner import (
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
+
+
+def _normalize_name(value):
+    return "".join(str(value or "").split())
+
+
+def _read_csv_rows(path: Path):
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        return rows, list(reader.fieldnames or [])
+
+
+def _write_csv_rows(path: Path, fieldnames, rows):
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(fieldnames or []))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+
+def _pick_first_field(fieldnames, candidates):
+    for name in candidates:
+        if name in fieldnames:
+            return name
+    return ""
+
+
+def reconcile_workspace_entries(workspace: Path):
+    odds_path = workspace / "odds.csv"
+    shutuba_path = workspace / "shutuba.csv"
+    if not odds_path.exists() or not shutuba_path.exists():
+        return {
+            "status": "skipped",
+            "reason": "odds.csv or shutuba.csv missing",
+            "changed": False,
+        }
+
+    odds_rows, odds_fields = _read_csv_rows(odds_path)
+    shutuba_rows, shutuba_fields = _read_csv_rows(shutuba_path)
+    odds_name_field = _pick_first_field(odds_fields, ("name", "HorseName", "horse_name"))
+    shutuba_name_field = _pick_first_field(shutuba_fields, ("HorseName", "horse_name", "name"))
+    if not odds_name_field or not shutuba_name_field:
+        return {
+            "status": "skipped",
+            "reason": "name columns missing",
+            "changed": False,
+        }
+
+    odds_names = []
+    odds_name_set = set()
+    for row in odds_rows:
+        name = _normalize_name(row.get(odds_name_field, ""))
+        if name and name not in odds_name_set:
+            odds_name_set.add(name)
+            odds_names.append(name)
+
+    shutuba_names = []
+    shutuba_name_set = set()
+    shutuba_display = {}
+    for row in shutuba_rows:
+        raw_name = str(row.get(shutuba_name_field, "") or "").strip()
+        name = _normalize_name(raw_name)
+        if not name:
+            continue
+        if name not in shutuba_name_set:
+            shutuba_name_set.add(name)
+            shutuba_names.append(name)
+        if name not in shutuba_display and raw_name:
+            shutuba_display[name] = raw_name
+
+    if not odds_name_set or not shutuba_name_set:
+        return {
+            "status": "skipped",
+            "reason": "no usable names",
+            "changed": False,
+            "odds_horses": len(odds_name_set),
+            "shutuba_horses": len(shutuba_name_set),
+        }
+
+    missing_in_odds = [name for name in shutuba_names if name not in odds_name_set]
+    extra_in_odds = [name for name in odds_names if name not in shutuba_name_set]
+
+    if not missing_in_odds:
+        return {
+            "status": "ok",
+            "changed": False,
+            "odds_horses": len(odds_name_set),
+            "shutuba_horses": len(shutuba_name_set),
+            "extra_in_odds": [name for name in extra_in_odds[:8]],
+        }
+
+    filtered_rows = [
+        row
+        for row in shutuba_rows
+        if _normalize_name(row.get(shutuba_name_field, "")) in odds_name_set
+    ]
+    filtered_name_set = {
+        _normalize_name(row.get(shutuba_name_field, ""))
+        for row in filtered_rows
+        if _normalize_name(row.get(shutuba_name_field, ""))
+    }
+    if not filtered_rows or not filtered_name_set:
+        return {
+            "status": "failed",
+            "reason": "reconciliation would remove all shutuba rows",
+            "changed": False,
+            "odds_horses": len(odds_name_set),
+            "shutuba_horses": len(shutuba_name_set),
+            "missing_in_odds": [shutuba_display.get(name, name) for name in missing_in_odds[:8]],
+        }
+
+    _write_csv_rows(shutuba_path, shutuba_fields, filtered_rows)
+    return {
+        "status": "filtered",
+        "changed": True,
+        "odds_horses": len(odds_name_set),
+        "shutuba_horses_before": len(shutuba_name_set),
+        "shutuba_horses_after": len(filtered_name_set),
+        "removed_names": [shutuba_display.get(name, name) for name in missing_in_odds[:12]],
+        "extra_in_odds": [name for name in extra_in_odds[:8]],
+        "removed_rows": max(0, len(shutuba_rows) - len(filtered_rows)),
+    }
 
 
 def _load_meta(workspace: Path):
@@ -75,6 +199,39 @@ def run_batch(workspace_dir: str):
     process_log = []
     output_paths = {}
     completed_predictors = []
+
+    reconcile_result = reconcile_workspace_entries(workspace)
+    process_log.append(
+        {
+            "step": "reconcile_workspace_entries",
+            "status": reconcile_result.get("status", ""),
+            "details": reconcile_result,
+        }
+    )
+    _emit_batch_log("reconcile_workspace_entries", **reconcile_result)
+    if reconcile_result.get("status") == "failed":
+        failure_message = str(reconcile_result.get("reason", "") or "workspace reconciliation failed")
+        failure_summary = {
+            "status": "failed",
+            "scope_key": scope_key,
+            "surface": surface,
+            "distance": distance,
+            "track_condition": track_cond_label,
+            "completed_predictors": list(completed_predictors),
+            "output_paths": dict(output_paths),
+            "failed_predictor": "",
+            "failed_stage": "reconcile_workspace_entries",
+            "failure_message": failure_message,
+            "process_log": process_log,
+        }
+        _write_batch_summary(workspace, failure_summary)
+        _emit_batch_log(
+            "batch_failed",
+            failed_predictor="",
+            failed_stage="reconcile_workspace_entries",
+            message=failure_message,
+        )
+        raise RuntimeError(failure_message)
 
     for spec in list_predictors():
         script_name = _safe_text(spec.get("script_name"))
