@@ -92,11 +92,15 @@ export default function PageSectionHeader({
   title,
   subtitle = "",
   meta = [],
+  actions = [],
 }) {
   const visibleMeta = (meta || [])
     .filter(Boolean)
     .map(normalizeMetaItem)
     .filter((item) => item.value && item.key !== "generated-at");
+  const visibleActions = (actions || []).filter(
+    (item) => item && typeof item === "object" && item.href && item.label,
+  );
 
   return (
     <div className="page-section-header">
@@ -114,6 +118,19 @@ export default function PageSectionHeader({
           >
             {subtitle}
           </AutoFitLine>
+        ) : null}
+        {visibleActions.length ? (
+          <div className="page-section-header__actions">
+            {visibleActions.map((item) => (
+              <a
+                key={`${item.href}-${item.label}`}
+                className="page-section-header__action"
+                href={item.href}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
         ) : null}
       </div>
       {visibleMeta.length ? (

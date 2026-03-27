@@ -51,6 +51,11 @@ from llm.policy_runtime import (
     normalize_policy_engine,
     resolve_policy_model,
 )
+from llm.daily_report_runtime import (
+    REPORT_ENGINE_LABELS as DAILY_REPORT_ENGINE_LABELS,
+    generate_daily_report_document,
+    normalize_report_engine as normalize_daily_report_engine,
+)
 from llm_state import reset_llm_state as reset_llm_state_files
 from local_env import load_local_env
 from race_job_store import (
@@ -1996,6 +2001,7 @@ def build_public_board_payload(date_text="", scope_key=""):
     payload["placeholder_race_count"] = len(placeholder_races)
     payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
+    payload["daily_report"] = _find_daily_report_for_date(target_date)
     return payload
 
 
@@ -2244,6 +2250,267 @@ def build_daily_summary_share_payload(date_text=""):
             for item in ranked_cards
         ],
     }
+
+
+def _daily_reports_dir():
+    path = BASE_DIR / "data" / "_shared" / "daily_reports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _daily_report_slug(target_date="", engine="openai"):
+    date_key = re.sub(r"[^0-9]", "", str(target_date or "").strip())[:8] or datetime.now().strftime("%Y%m%d")
+    engine_key = re.sub(r"[^a-z0-9_-]+", "-", str(engine or "").strip().lower()).strip("-") or "openai"
+    stamp = datetime.now().strftime("%H%M%S")
+    return f"{date_key}-{engine_key}-{stamp}"
+
+
+def _daily_report_path(slug=""):
+    safe_slug = re.sub(r"[^a-zA-Z0-9_-]+", "", str(slug or "").strip())
+    if not safe_slug:
+        return None
+    return _daily_reports_dir() / f"{safe_slug}.json"
+
+
+def _load_daily_report_record(slug=""):
+    path = _daily_report_path(slug)
+    if path is None or (not path.exists()):
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _load_daily_report_records(limit=None):
+    items = []
+    for path in _daily_reports_dir().glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload.setdefault("slug", path.stem)
+        items.append(payload)
+    items.sort(
+        key=lambda item: (
+            str(item.get("created_at", "") or ""),
+            str(item.get("slug", "") or ""),
+        ),
+        reverse=True,
+    )
+    if limit is not None:
+        try:
+            limit_value = max(1, int(limit))
+        except (TypeError, ValueError):
+            limit_value = 50
+        items = items[:limit_value]
+    return items
+
+
+def _daily_report_compact_record(record):
+    item = dict(record or {})
+    return {
+        "slug": str(item.get("slug", "") or "").strip(),
+        "target_date": str(item.get("target_date", "") or "").strip(),
+        "target_date_label": str(item.get("target_date_label", "") or "").strip(),
+        "created_at": str(item.get("created_at", "") or "").strip(),
+        "engine": str(item.get("engine", "") or "").strip(),
+        "engine_label": str(item.get("engine_label", "") or "").strip(),
+        "model": str(item.get("model", "") or "").strip(),
+        "title": str(item.get("title", "") or "").strip(),
+        "lead": str(item.get("lead", "") or "").strip(),
+        "summary": str(item.get("summary", "") or "").strip(),
+        "tags": list(item.get("tags", []) or []),
+        "mode": str(item.get("mode", "") or "").strip(),
+        "public_url": f"{PUBLIC_BASE_PATH}/reports/{str(item.get('slug', '') or '').strip()}",
+    }
+
+
+def _find_daily_report_for_date(target_date=""):
+    date_key = str(target_date or "").strip()
+    if not date_key:
+        return {}
+    for item in _load_daily_report_records(limit=200):
+        if str(item.get("target_date", "") or "").strip() != date_key:
+            continue
+        return _daily_report_compact_record(item)
+    return {}
+
+
+def _daily_report_source_payload(date_text="", scope_key=""):
+    requested_date = _normalize_report_date_text(date_text) or _daily_summary_jst_date_text()
+    board = build_public_board_payload(date_text=requested_date, scope_key=scope_key)
+    target_date = str(board.get("target_date", "") or "").strip()
+    if not target_date:
+        raise ValueError("daily report target date not available")
+
+    ranked_cards = _daily_summary_ranked_cards(board.get("summary_cards", []))
+    predictor_summary = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
+    predictor_cards = sorted(
+        [dict(item or {}) for item in list((predictor_summary or {}).get("cards", []) or []) if int((item or {}).get("samples", 0) or 0) > 0],
+        key=lambda item: (
+            -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
+            -(float(item.get("top3_hit_rate", 0) or 0.0)),
+            str(item.get("predictor_id", "") or ""),
+        ),
+    )
+    best_ticket = dict(_daily_summary_best_ticket(target_date) or {})
+    if best_ticket:
+        best_ticket["bet_type_label"] = _DAILY_SUMMARY_BET_TYPE_LABELS.get(
+            str(best_ticket.get("bet_type", "") or "").strip().lower(),
+            str(best_ticket.get("bet_type", "") or "").strip() or "的中",
+        )
+        best_ticket["multiplier_text"] = _daily_summary_format_multiplier(best_ticket.get("multiplier"))
+        best_ticket["payout_yen_text"] = report_format_yen_text(best_ticket.get("payout_yen", 0))
+
+    llm_cards = []
+    for item in ranked_cards[:4]:
+        settled_races = int(item.get("settled_races", 0) or item.get("races", 0) or 0)
+        hit_races = int(item.get("hit_races", 0) or 0)
+        llm_cards.append(
+            {
+                "engine": str(item.get("engine", "") or "").strip(),
+                "label": str(item.get("label", "") or item.get("engine", "") or "").strip(),
+                "races": int(item.get("races", 0) or 0),
+                "settled_races": settled_races,
+                "hit_races": hit_races,
+                "hit_races_text": f"{hit_races}/{settled_races}レース" if settled_races > 0 else "-",
+                "profit_yen": int(item.get("profit_yen", 0) or 0),
+                "profit_yen_text": report_format_yen_text(item.get("profit_yen", 0)),
+                "stake_yen": int(item.get("stake_yen", 0) or 0),
+                "stake_yen_text": report_format_yen_text(item.get("stake_yen", 0)),
+                "payout_yen": int(item.get("payout_yen", 0) or 0),
+                "payout_yen_text": report_format_yen_text(item.get("payout_yen", 0)),
+                "roi_text": report_format_percent_text(_daily_summary_roi_value(item)) if _daily_summary_roi_value(item) >= 0 else "-",
+            }
+        )
+
+    predictor_rows = []
+    for item in predictor_cards[:6]:
+        predictor_rows.append(
+            {
+                "predictor_id": str(item.get("predictor_id", "") or "").strip(),
+                "label": str(item.get("label", "") or "").strip(),
+                "samples": int(item.get("samples", 0) or 0),
+                "top1_hit_rate_text": str(item.get("top1_hit_rate_text", "") or "-").strip() or "-",
+                "top3_hit_rate_text": str(item.get("top3_hit_rate_text", "") or "-").strip() or "-",
+                "top5_to_top3_hit_rate_text": str(item.get("top5_to_top3_hit_rate_text", "") or "-").strip() or "-",
+            }
+        )
+
+    condensed_races = []
+    for row in list(board.get("races", []) or []):
+        cards = []
+        for card in list((row or {}).get("cards", []) or [])[:4]:
+            cards.append(
+                {
+                    "label": str(card.get("label", "") or card.get("engine", "") or "").strip(),
+                    "decision_text": str(card.get("decision_text", "") or "").strip(),
+                    "marks_text": str(card.get("marks_text", "") or "").strip(),
+                    "ticket_plan_text": str(card.get("ticket_plan_text", "") or "").strip(),
+                    "result_text": str(card.get("result_text", "") or "").strip(),
+                    "roi_text": str(card.get("roi_text", "") or "").strip(),
+                }
+            )
+        predictor_compare = []
+        for card in list((row or {}).get("predictor_compare_cards", []) or [])[:4]:
+            predictor_compare.append(
+                {
+                    "label": str(card.get("label", "") or "").strip(),
+                    "marks_text": str(card.get("marks_text", "") or "").strip(),
+                }
+            )
+        condensed_races.append(
+            {
+                "race_title": str(row.get("race_title", "") or "").strip(),
+                "status_label": str(((row or {}).get("display_status") or {}).get("label", "") or "").strip(),
+                "actual_text": str(row.get("actual_text", "") or "").strip(),
+                "cards": cards,
+                "predictor_compare_cards": predictor_compare,
+            }
+        )
+        if len(condensed_races) >= 8:
+            break
+
+    all_time_llm = list(
+        ((((board.get("history", {}) or {}).get("llm", {}) or {}).get("periods", {}).get("all_time", {}).get("cards", [])) or [])
+    )
+    all_time_predictor = list(
+        ((((board.get("history", {}) or {}).get("predictor", {}) or {}).get("periods", {}).get("all_time", {}).get("cards", [])) or [])
+    )
+
+    return {
+        "requested_date": requested_date,
+        "target_date": target_date,
+        "target_date_label": str(board.get("target_date_label", "") or "").strip(),
+        "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
+        "totals": {
+            "race_count": int(((board.get("totals", {}) or {}).get("race_count", 0) or 0)),
+            "settled_count": int(((board.get("totals", {}) or {}).get("settled_count", 0) or 0)),
+        },
+        "llm_cards": llm_cards,
+        "best_ticket": best_ticket,
+        "best_engine": str((llm_cards[0] or {}).get("label", "") or "").strip() if llm_cards else "",
+        "predictor_leader": dict((predictor_summary or {}).get("top5to3_leader", {}) or {}),
+        "predictor_cards": predictor_rows,
+        "races": condensed_races,
+        "all_time_llm": [
+            {
+                "label": str(item.get("label", "") or "").strip(),
+                "roi_text": str(item.get("roi_text", "") or "").strip(),
+                "profit_yen_text": report_format_yen_text(item.get("profit_yen", 0)),
+                "runs": int(item.get("runs", 0) or 0),
+            }
+            for item in all_time_llm[:4]
+        ],
+        "all_time_predictor": [
+            {
+                "label": str(item.get("label", "") or "").strip(),
+                "top1_hit_rate_text": str(item.get("top1_hit_rate_text", "") or "-").strip() or "-",
+                "top5_to_top3_hit_rate_text": str(item.get("top5_to_top3_hit_rate_text", "") or "-").strip() or "-",
+                "samples": int(item.get("samples", 0) or 0),
+            }
+            for item in all_time_predictor[:6]
+        ],
+    }
+
+
+def generate_and_store_daily_report(date_text="", scope_key="", policy_engine="", model=""):
+    source_payload = _daily_report_source_payload(date_text=date_text, scope_key=scope_key)
+    engine = normalize_daily_report_engine(policy_engine or os.environ.get("DAILY_REPORT_ENGINE", "openai"))
+    generation = generate_daily_report_document(
+        source_payload,
+        policy_engine=engine,
+        model=model,
+        timeout_s=120 if engine == "grok" else 90,
+    )
+    document = dict(generation.get("document", {}) or {})
+    slug = _daily_report_slug(source_payload.get("target_date", ""), engine)
+    record = {
+        "slug": slug,
+        "target_date": str(source_payload.get("target_date", "") or "").strip(),
+        "target_date_label": str(source_payload.get("target_date_label", "") or "").strip(),
+        "created_at": str(generation.get("generated_at", "") or datetime.now().isoformat(timespec="seconds")),
+        "engine": engine,
+        "engine_label": DAILY_REPORT_ENGINE_LABELS.get(engine, engine),
+        "model": str(generation.get("model", "") or "").strip(),
+        "mode": str(generation.get("mode", "") or "").strip(),
+        "fallback_reason": str(generation.get("fallback_reason", "") or "").strip(),
+        "llm_latency_ms": int(generation.get("llm_latency_ms", 0) or 0),
+        "title": str(document.get("title", "") or "").strip(),
+        "lead": str(document.get("lead", "") or "").strip(),
+        "summary": str(document.get("summary", "") or "").strip(),
+        "tags": list(document.get("tags", []) or []),
+        "markdown": str(document.get("markdown", "") or "").strip(),
+        "sections": list(document.get("sections", []) or []),
+        "snapshot": source_payload,
+        "public_url": f"{PUBLIC_BASE_PATH}/reports/{slug}",
+    }
+    path = _daily_report_path(slug)
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return record
 
 _JOB_STEP_LABELS = {
     "odds": "オッズ",
@@ -2697,6 +2964,19 @@ def public_history_spa():
     return build_public_index_response(f"{PUBLIC_BASE_PATH}/history")
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/reports", response_class=HTMLResponse)
+def public_reports_spa():
+    return build_public_index_response(f"{PUBLIC_BASE_PATH}/reports")
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/reports/{{report_slug}}", response_class=HTMLResponse)
+def public_report_detail_spa(report_slug: str):
+    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "", str(report_slug or "").strip())
+    if not normalized:
+        return build_public_index_response(f"{PUBLIC_BASE_PATH}/reports")
+    return build_public_index_response(f"{PUBLIC_BASE_PATH}/reports/{normalized}")
+
+
 @app.get(f"{PUBLIC_BASE_PATH}/about", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/guide", response_class=HTMLResponse)
 @app.get(f"{PUBLIC_BASE_PATH}/methodology", response_class=HTMLResponse)
@@ -2768,6 +3048,35 @@ def sitemap_xml():
 def public_board_api(date: str = "", scope_key: str = ""):
     return JSONResponse(
         build_public_board_payload(date_text=date, scope_key=scope_key),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get(f"{PUBLIC_API_BASE_PATH}/reports")
+def public_reports_api(limit: int = 60):
+    return JSONResponse(
+        {
+            "items": [_daily_report_compact_record(item) for item in _load_daily_report_records(limit=limit)],
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get(f"{PUBLIC_API_BASE_PATH}/reports/{{report_slug}}")
+def public_report_detail_api(report_slug: str):
+    record = _load_daily_report_record(report_slug)
+    if not record:
+        return JSONResponse({"ok": False, "error": "report not found"}, status_code=404)
+    return JSONResponse(
+        {"ok": True, "item": record},
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -3365,6 +3674,40 @@ async def admin_jobs_daily_summary_share_api(request: Request):
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     return JSONResponse({"ok": True, **summary})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/generate_daily_report")
+async def admin_jobs_generate_daily_report_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    date_text = str((payload or {}).get("date_text", "") or "").strip()
+    policy_engine = str((payload or {}).get("policy_engine", "") or "").strip()
+    model = str((payload or {}).get("model", "") or "").strip()
+    try:
+        record = generate_and_store_daily_report(
+            date_text=date_text,
+            scope_key="",
+            policy_engine=policy_engine,
+            model=model,
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse(
+        {
+            "ok": True,
+            "slug": str(record.get("slug", "") or "").strip(),
+            "title": str(record.get("title", "") or "").strip(),
+            "target_date": str(record.get("target_date", "") or "").strip(),
+            "target_date_label": str(record.get("target_date_label", "") or "").strip(),
+            "engine": str(record.get("engine", "") or "").strip(),
+            "engine_label": str(record.get("engine_label", "") or "").strip(),
+            "mode": str(record.get("mode", "") or "").strip(),
+            "fallback_reason": str(record.get("fallback_reason", "") or "").strip(),
+            "public_url": str(record.get("public_url", "") or "").strip(),
+        }
+    )
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/topup_today_all_llm")

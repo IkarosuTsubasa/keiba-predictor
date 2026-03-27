@@ -3,6 +3,8 @@ import AdminJobsPage from "./components/AdminJobsPage";
 import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
 import BeginnerGuideSection from "./components/BeginnerGuideSection";
+import DailyReportDetailPage from "./components/DailyReportDetailPage";
+import DailyReportsPage from "./components/DailyReportsPage";
 import FeaturedContentSection from "./components/FeaturedContentSection";
 import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
@@ -249,6 +251,23 @@ function extractRaceDetailId(pathname) {
   }
 }
 
+function extractReportSlug(pathname) {
+  const normalized = String(pathname || "").replace(/\/+$/, "");
+  const prefix = `${APP_BASE_PATH}/reports/`;
+  if (!normalized.startsWith(prefix)) {
+    return "";
+  }
+  const slug = normalized.slice(prefix.length);
+  if (!slug) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(slug);
+  } catch {
+    return slug;
+  }
+}
+
 function useBoardData(search, enabled = true) {
   const [state, setState] = useState({
     loading: enabled,
@@ -359,6 +378,9 @@ export default function App() {
   const isAdminWorkspace = normalizedPath === ADMIN_WORKSPACE_PATH;
   const isAdminConsole = normalizedPath === ADMIN_CONSOLE_PATH;
   const isHistoryPage = normalizedPath === `${APP_BASE_PATH}/history`;
+  const isReportsPage = normalizedPath === `${APP_BASE_PATH}/reports`;
+  const reportSlug = extractReportSlug(normalizedPath);
+  const isReportDetail = Boolean(reportSlug);
   const raceDetailId = extractRaceDetailId(normalizedPath);
   const isRaceDetail = Boolean(raceDetailId);
   const staticPage = PUBLIC_PAGE_CONTENT[normalizedPath] || null;
@@ -381,16 +403,20 @@ export default function App() {
       document.title = `履歴分析 | ${SITE_NAME}`;
       return;
     }
+    if (isReportsPage || isReportDetail) {
+      document.title = `私の日報 | ${SITE_NAME}`;
+      return;
+    }
     if (staticPage) {
       document.title = `${staticPage.title} | ${SITE_NAME}`;
       return;
     }
     document.title = HOME_PAGE_TITLE;
-  }, [isAdminConsole, isAdminWorkspace, isHistoryPage, isRaceDetail, staticPage]);
+  }, [isAdminConsole, isAdminWorkspace, isHistoryPage, isRaceDetail, isReportsPage, isReportDetail, staticPage]);
 
   const { loading, error, data } = useBoardData(
     search,
-    !isAdminConsole && !isAdminWorkspace && !staticPage,
+    !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail,
   );
   const targetDateContext = data ? buildTargetDateContext(data) : null;
   const races = data?.races || [];
@@ -454,6 +480,38 @@ export default function App() {
       >
         <div className="public-content-stack">
           <HistoryPage data={data} />
+        </div>
+      </PublicFrame>
+    );
+  }
+
+  if (isReportsPage) {
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "reports",
+        }}
+      >
+        <div className="public-content-stack">
+          <DailyReportsPage appBasePath={APP_BASE_PATH} />
+        </div>
+      </PublicFrame>
+    );
+  }
+
+  if (isReportDetail) {
+    return (
+      <PublicFrame
+        headerProps={{ showFilters: false }}
+        sideNavProps={{
+          pathname: normalizedPath,
+          mode: "reportDetail",
+        }}
+      >
+        <div className="public-content-stack">
+          <DailyReportDetailPage slug={reportSlug} appBasePath={APP_BASE_PATH} />
         </div>
       </PublicFrame>
     );
@@ -540,6 +598,16 @@ export default function App() {
             kicker="Race Board"
             title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
             subtitle="比較用の導読を確認したあとに、各レースの印、買い目、結果、回収率をレース単位とモデル単位の両方から見比べられます。"
+            actions={
+              data?.daily_report?.public_url
+                ? [
+                    {
+                      href: data.daily_report.public_url,
+                      label: "日報を見る",
+                    },
+                  ]
+                : []
+            }
             meta={[
               {
                 key: "target-date",

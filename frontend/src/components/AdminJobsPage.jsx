@@ -693,6 +693,15 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           }
         }
         setFlashMessage(`Opened daily summary share for ${data.target_date_label || data.target_date || "today"}.`);
+      } else if (kind === "generate_daily_report") {
+        const publicUrl = String(data?.public_url || "").trim();
+        if (publicUrl) {
+          const popup = window.open(publicUrl, "_blank", "noopener,noreferrer");
+          if (!popup) {
+            window.location.href = publicUrl;
+          }
+        }
+        setFlashMessage(`${data.target_date_label || data.target_date || "対象日"} の日報を保存しました。`);
       } else if (kind === "create") {
         setFlashMessage(`Created task ${data.job_id || ""}.`);
         setCreateFormResetTick((value) => value + 1);
@@ -761,6 +770,13 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
             onClick={() => runToolbarAction("daily_summary_share", () => postJson("/api/admin/jobs/daily_summary_share", {}))}
           >
             {busyAction === "daily_summary_share" ? "Preparing..." : "Daily Summary Tweet"}
+          </button>
+          <button
+            type="button"
+            disabled={busyAction === "generate_daily_report"}
+            onClick={() => runToolbarAction("generate_daily_report", () => postJson("/api/admin/jobs/generate_daily_report", {}))}
+          >
+            {busyAction === "generate_daily_report" ? "生成中..." : "私の日報を生成"}
           </button>
         </section>
 

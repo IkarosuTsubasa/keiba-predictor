@@ -53,6 +53,12 @@ export default function PublicSideNav({
       note: "月間・年間・累計の比較",
       active: normalizedPath === "/keiba/history",
     },
+    {
+      href: "/keiba/reports",
+      label: "私の日報",
+      note: "日次の振り返りアーカイブ",
+      active: normalizedPath === "/keiba/reports" || normalizedPath.startsWith("/keiba/reports/"),
+    },
   ];
 
   const detailItems =
@@ -84,6 +90,8 @@ export default function PublicSideNav({
       ? detailTitle || "レース詳細"
       : mode === "history"
         ? "履歴分析"
+        : mode === "reports" || mode === "reportDetail"
+          ? "私の日報"
         : mode === "static"
           ? "インフォメーション"
           : "トップページ";
@@ -93,6 +101,10 @@ export default function PublicSideNav({
       ? "このレースの買い目、定量比較、結果を一つの流れで確認できます。"
       : mode === "history"
         ? "期間ごとの成績比較と定量モデルの傾向をまとめて確認できます。"
+        : mode === "reports"
+          ? "保存済みの日報を一覧で確認し、対象日ごとの振り返りを読み返せます。"
+          : mode === "reportDetail"
+            ? "AIモデル結果と定量モデルの振り返りを記事形式で確認できます。"
         : mode === "static"
           ? "サイトの考え方と利用上の案内をまとめています。"
           : "見どころ、深掘り分析、公開レースの順に読み進められます。";
