@@ -342,6 +342,11 @@ def main():
     assert key_2000 != key_50000, "cache key should change when bankroll or race budget changes"
     place_only_prompt_payload = _build_prompt_payload(place_only_input)
     assert all(str(item.get("bet_type", "")) == "place" for item in list(place_only_prompt_payload.get("candidate_tickets", []) or [])), "prompt candidate_tickets should already respect allowed_types"
+    assert str(place_only_prompt_payload.get("model_summary", {}).get("consensus_anchor", {}).get("horse_no", "")) == "1", "prompt should expose quantitative consensus anchor"
+    assert len(list(place_only_prompt_payload.get("model_summary", {}).get("predictor_top_picks", []) or [])) >= 5, "prompt should expose per-predictor top picks"
+    assert any(str(item.get("horse_no", "")) == "1" for item in list(place_only_prompt_payload.get("horse_summary", []) or [])), "horse_summary should include consensus-led horses"
+    first_horse_row = list(place_only_prompt_payload.get("horse_summary", []) or [])[0]
+    assert "predictors_support" in first_horse_row and "rank_std" in first_horse_row, "horse_summary should expose quantitative support details"
 
     out1 = call_gemini_policy(
         input=input_2000,

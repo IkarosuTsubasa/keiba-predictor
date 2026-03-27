@@ -188,16 +188,25 @@ def _build_horse_signal_map(predictions, consensus_rows):
         rank_std = _safe_float(consensus.get("rank_std", 0.0), 0.0)
         disagreement = _clamp(rank_std / max(1.0, field_size / 3.0))
         agreement = _clamp(1.0 - disagreement)
-        support_score = _clamp(0.45 * top3_prob + 0.20 * win_prob + 0.20 * rank_score + 0.15 * top3_vote_ratio)
+        anchor_strength = _clamp(0.55 * top1_vote_ratio + 0.45 * top3_vote_ratio)
+        support_score = _clamp(
+            0.35 * top3_prob
+            + 0.10 * win_prob
+            + 0.15 * rank_score
+            + 0.20 * top1_vote_ratio
+            + 0.15 * top3_vote_ratio
+            - 0.05 * disagreement
+        )
         out[horse_no] = {
             "horse_no": horse_no,
             "horse_name": str(item.get("horse_name", "") or ""),
             "top3_prob": top3_prob,
             "win_prob": win_prob,
-            "place_prob": _clamp(top3_prob * (0.96 + 0.08 * agreement), 0.0, 0.95),
+            "place_prob": _clamp(top3_prob * (0.95 + 0.08 * agreement) * (0.95 + 0.06 * anchor_strength), 0.0, 0.95),
             "rank_score": rank_score,
             "top1_vote_ratio": top1_vote_ratio,
             "top3_vote_ratio": top3_vote_ratio,
+            "anchor_strength": anchor_strength,
             "agreement": agreement,
             "disagreement": disagreement,
             "support_score": support_score,
@@ -215,15 +224,16 @@ def _score_single_candidate(item, signal_map, bet_type):
     if odds_used <= 0:
         return 0.0, 0.0, 0.0
     implied_prob = _clamp(1.0 / odds_used) if odds_used > 0 else 0.0
+    anchor_strength = float(signal.get("anchor_strength", 0.0) or 0.0)
     if bet_type == "win":
-        raw_p_hit = signal.get("win_prob", 0.0) * (0.90 + 0.15 * signal.get("agreement", 0.0))
+        raw_p_hit = signal.get("win_prob", 0.0) * (0.88 + 0.16 * signal.get("agreement", 0.0)) * (0.88 + 0.18 * anchor_strength)
         p_hit = _clamp(min(raw_p_hit, implied_prob * 3.0 + 0.03), 0.0, 0.45)
     else:
-        raw_p_hit = signal.get("place_prob", 0.0) * (0.94 + 0.08 * signal.get("agreement", 0.0))
+        raw_p_hit = signal.get("place_prob", 0.0) * (0.93 + 0.09 * signal.get("agreement", 0.0)) * (0.90 + 0.12 * anchor_strength)
         p_hit = _clamp(min(raw_p_hit, implied_prob * 1.8 + 0.08), 0.0, 0.92)
     ev = round(p_hit * odds_used - 1.0, 6)
     ev_for_score = max(-1.0, min(1.5, ev))
-    score = round(ev_for_score * 0.45 + p_hit * 0.30 + signal.get("support_score", 0.0) * 0.25, 6)
+    score = round(ev_for_score * 0.42 + p_hit * 0.23 + signal.get("support_score", 0.0) * 0.35, 6)
     return round(p_hit, 6), ev, score
 
 
@@ -233,16 +243,17 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
         return 0.0, 0.0, 0.0
     agreement = sum(float(signal.get("agreement", 0.0) or 0.0) for signal in signals) / float(len(signals))
     support = sum(float(signal.get("support_score", 0.0) or 0.0) for signal in signals) / float(len(signals))
+    anchor_strength = sum(float(signal.get("anchor_strength", 0.0) or 0.0) for signal in signals) / float(len(signals))
     place_probs = [float(signal.get("place_prob", 0.0) or 0.0) for signal in signals]
     win_probs = [float(signal.get("win_prob", 0.0) or 0.0) for signal in signals]
     if bet_type == "wide":
-        p_hit = 0.72 * place_probs[0] * place_probs[1] * (0.85 + 0.15 * agreement)
+        p_hit = 0.72 * place_probs[0] * place_probs[1] * (0.84 + 0.16 * agreement) * (0.90 + 0.10 * anchor_strength)
     elif bet_type == "quinella":
-        p_hit = 0.42 * place_probs[0] * place_probs[1] * (0.82 + 0.18 * agreement)
+        p_hit = 0.42 * place_probs[0] * place_probs[1] * (0.82 + 0.18 * agreement) * (0.90 + 0.10 * anchor_strength)
     elif bet_type == "exacta":
-        p_hit = 0.34 * win_probs[0] * place_probs[1] * (0.82 + 0.18 * agreement)
+        p_hit = 0.34 * win_probs[0] * place_probs[1] * (0.82 + 0.18 * agreement) * (0.89 + 0.10 * anchor_strength)
     elif bet_type == "trio":
-        p_hit = 0.26 * place_probs[0] * place_probs[1] * place_probs[2] * (0.82 + 0.18 * agreement)
+        p_hit = 0.26 * place_probs[0] * place_probs[1] * place_probs[2] * (0.82 + 0.18 * agreement) * (0.89 + 0.10 * anchor_strength)
     else:
         p_hit = 0.0
     implied_prob = _clamp(1.0 / float(odds_used)) if float(odds_used) > 0 else 0.0
@@ -255,7 +266,7 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
     p_hit = _clamp(min(p_hit, implied_prob * 3.5 + 0.02), 0.0, type_cap)
     ev = round(p_hit * float(odds_used) - 1.0, 6)
     ev_for_score = max(-1.0, min(1.8, ev))
-    score = round(ev_for_score * 0.50 + p_hit * 0.20 + support * 0.30, 6)
+    score = round(ev_for_score * 0.42 + p_hit * 0.18 + support * 0.40, 6)
     return round(p_hit, 6), ev, score
 
 
@@ -465,6 +476,72 @@ def _clone_prediction_row(item):
         "risk_score": round(float(item.get("risk_score", 0.0) or 0.0), 6),
         "source_row": dict(item.get("source_row", {}) or {}),
     }
+
+
+def _build_consensus_primary_predictions(multi_predictor, reference_predictions):
+    multi_predictor = dict(multi_predictor or {})
+    consensus_rows = list(multi_predictor.get("consensus", []) or [])
+    if not consensus_rows:
+        return [_clone_prediction_row(item) for item in list(reference_predictions or [])]
+
+    reference_items = [_clone_prediction_row(item) for item in list(reference_predictions or [])]
+    reference_map = {}
+    for idx, item in enumerate(reference_items, start=1):
+        horse_no = str(item.get("horse_no", "") or "").strip()
+        if horse_no and horse_no not in reference_map:
+            row = dict(item)
+            row["_reference_rank"] = idx
+            reference_map[horse_no] = row
+
+    consensus_map = _build_consensus_map(consensus_rows)
+    merged = []
+    seen = set()
+    predictor_count_cap = max(
+        1.0,
+        max(float(row.get("predictor_count", 0) or 0) for row in consensus_rows) if consensus_rows else 1.0,
+    )
+
+    for item in reference_items:
+        horse_no = str(item.get("horse_no", "") or "").strip()
+        if not horse_no or horse_no in seen:
+            continue
+        seen.add(horse_no)
+        consensus = dict(consensus_map.get(horse_no, {}) or {})
+        reference_rank = float(reference_map.get(horse_no, {}).get("_reference_rank", len(reference_items) + 1))
+        consensus_rank = float(consensus.get("avg_pred_rank", reference_rank) or reference_rank)
+        top1_ratio = float(consensus.get("top1_votes", 0) or 0) / predictor_count_cap
+        top3_ratio = float(consensus.get("top3_votes", 0) or 0) / predictor_count_cap
+        blended_rank = 0.65 * reference_rank + 0.35 * consensus_rank - 0.35 * top1_ratio - 0.15 * top3_ratio
+        merged.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": str(consensus.get("horse_name", "") or item.get("horse_name", "") or ""),
+                "pred_rank": int(item.get("pred_rank", 0) or 0),
+                "top3_prob_model": round(0.7 * float(item.get("top3_prob_model", 0.0) or 0.0) + 0.3 * float(consensus.get("avg_top3_prob_model", item.get("top3_prob_model", 0.0)) or 0.0), 6),
+                "rank_score_norm": round(0.7 * float(item.get("rank_score_norm", 0.0) or 0.0) + 0.3 * float(consensus.get("avg_rank_score_norm", item.get("rank_score_norm", 0.0)) or 0.0), 6),
+                "win_odds": round(float(consensus.get("win_odds", item.get("win_odds", 0.0)) or 0.0), 6),
+                "place_odds": round(float(consensus.get("place_odds", item.get("place_odds", 0.0)) or 0.0), 6),
+                "confidence_score": round(float(item.get("confidence_score", 0.5) or 0.5), 6),
+                "stability_score": round(float(item.get("stability_score", 0.5) or 0.5), 6),
+                "risk_score": round(float(item.get("risk_score", 0.5) or 0.5), 6),
+                "win_prob_est": round(float(item.get("win_prob_est", 0.0) or 0.0), 6),
+                "source_row": dict(item.get("source_row", {}) or {}),
+                "_blended_rank": blended_rank,
+            }
+        )
+
+    merged.sort(
+        key=lambda row: (
+            float(row.get("_blended_rank", 999.0) or 999.0),
+            -float(row.get("top3_prob_model", 0.0) or 0.0),
+            -float(row.get("rank_score_norm", 0.0) or 0.0),
+            str(row.get("horse_no", "") or ""),
+        )
+    )
+    for idx, row in enumerate(merged, start=1):
+        row["pred_rank"] = idx
+        row.pop("_blended_rank", None)
+    return merged
 
 
 def _choose_primary_predictions(multi_predictor, fallback_predictions):
@@ -745,7 +822,7 @@ def build_policy_input_payload(
     multi_predictor = build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map)
     pred_rows = load_csv_rows_flexible(pred_path)
     fallback_predictions = build_policy_prediction_rows_fn(pred_rows, name_to_no_map, win_odds_map, place_odds_map) if pred_rows else []
-    predictions, selected_predictor_id = _choose_primary_predictions(multi_predictor, fallback_predictions)
+    selected_ranking, selected_predictor_id = _choose_primary_predictions(multi_predictor, fallback_predictions)
     selected_predictions = _load_selected_predictor_predictions(
         selected_predictor_id,
         run_row,
@@ -756,8 +833,8 @@ def build_policy_input_payload(
         win_odds_map,
         place_odds_map,
     )
-    if selected_predictions:
-        predictions = selected_predictions
+    reference_predictions = selected_predictions or selected_ranking or fallback_predictions
+    predictions = _build_consensus_primary_predictions(multi_predictor, reference_predictions)
     if not predictions:
         return None, "No valid prediction rows could be built for policy input."
     allowed_types = []

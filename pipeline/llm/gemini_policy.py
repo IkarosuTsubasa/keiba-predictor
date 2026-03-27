@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v15"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v20"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v21"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -595,6 +595,27 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
                 "avg_rank_score_norm": round(float(row.get("avg_rank_score_norm", 0.0) or 0.0), 6),
             }
         )
+    predictor_top_picks = []
+    for row in list(multi_predictor.get("summaries", []) or [])[:8]:
+        top_horses = []
+        for item in list(row.get("top_horses", []) or [])[:5]:
+            top_horses.append(
+                {
+                    "horse_no": _normalize_horse_no_text(item.get("horse_no", "")),
+                    "horse_name": str(item.get("horse_name", "") or ""),
+                    "pred_rank": int(item.get("pred_rank", 0) or 0),
+                }
+            )
+        predictor_top_picks.append(
+            {
+                "predictor_id": str(row.get("predictor_id", "") or ""),
+                "predictor_label": str(row.get("predictor_label", "") or ""),
+                "top_choice_horse_no": _normalize_horse_no_text(row.get("top_choice_horse_no", "")),
+                "top_choice_horse_name": str(row.get("top_choice_horse_name", "") or ""),
+                "top_choice_top3_prob_model": round(float(row.get("top_choice_top3_prob_model", 0.0) or 0.0), 6),
+                "top_horses": top_horses,
+            }
+        )
     performance = dict(multi_predictor.get("performance", {}) or {})
     scope_history = list(performance.get("current_scope_history", []) or [])
     compact_perf = []
@@ -619,6 +640,17 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
             }
         )
     ai = _model_dump(input_obj.ai)
+    consensus_anchor = dict(consensus_rows[0]) if consensus_rows else {}
+    if consensus_anchor:
+        consensus_anchor = {
+            "horse_no": str(consensus_anchor.get("horse_no", "") or ""),
+            "horse_name": str(consensus_anchor.get("horse_name", "") or ""),
+            "top1_votes": int(consensus_anchor.get("top1_votes", 0) or 0),
+            "top3_votes": int(consensus_anchor.get("top3_votes", 0) or 0),
+            "avg_pred_rank": round(float(consensus_anchor.get("avg_pred_rank", 0.0) or 0.0), 3),
+            "avg_top3_prob_model": round(float(consensus_anchor.get("avg_top3_prob_model", 0.0) or 0.0), 6),
+            "avg_rank_score_norm": round(float(consensus_anchor.get("avg_rank_score_norm", 0.0) or 0.0), 6),
+        }
     return {
         "ai_confidence": {
             "gap": round(float(ai.get("gap", 0.0) or 0.0), 6),
@@ -631,7 +663,9 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
             for key, value in dict(input_obj.multi_model_ai or {}).items()
             if str(key or "") in ("consensus_gap", "top1_vote_margin", "disagreement_score", "favorite_strength")
         },
+        "consensus_anchor": consensus_anchor,
         "consensus_top": consensus_rows,
+        "predictor_top_picks": predictor_top_picks,
         "marks_top5": marks_top5,
         "predictor_scope_performance": compact_perf,
     }
@@ -668,7 +702,11 @@ def _compact_horse_summary(input_obj: RacePolicyInput) -> List[Dict[str, Any]]:
                 "place_odds": round(float(row.place_odds or fact.get("place_odds", 0.0) or 0.0), 6),
                 "top1_votes": int(consensus.get("top1_votes", 0) or 0),
                 "top3_votes": int(consensus.get("top3_votes", 0) or 0),
+                "predictor_count": int(consensus.get("predictor_count", 0) or 0),
                 "avg_pred_rank": round(float(consensus.get("avg_pred_rank", 0.0) or 0.0), 3),
+                "rank_std": round(float(consensus.get("rank_std", 0.0) or 0.0), 3),
+                "predictors_support_ids": [str(x) for x in list(consensus.get("predictors_support_ids", []) or [])[:6] if str(x or "").strip()],
+                "predictors_support": [str(x) for x in list(consensus.get("predictors_support", []) or [])[:6] if str(x or "").strip()],
                 "context_fit": _trim_text(
                     fact.get("context_fit")
                     or fact.get("fit_note")
@@ -1182,10 +1220,17 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- bet のときは selected_tickets を最優先で正しく返してください\n\n"
 
         "== 判断基準 ==\n"
-        "1. candidate_tickets の edge（ev / score / p_hit）\n"
-        "2. model_summary の合意度と不一致の質\n"
-        "3. horse_summary の文脈適性\n"
+        "1. model_summary の量化モデル合意度。consensus_anchor と predictor_top_picks を見て、どの馬が広く支持されているかを把握すること\n"
+        "2. horse_summary の top1_votes / top3_votes / rank_std / predictors_support を見て、量化モデルの支持が厚い馬を優先候補にすること\n"
+        "3. その上で candidate_tickets の edge（ev / score / p_hit）を比較し、量化モデルの見立てと整合する候補を優先すること\n"
         "4. portfolio_summary と予算制約に基づく当日資金配分\n\n"
+
+        "== 量化モデル参照ルール ==\n"
+        "- このタスクでは量化模型の見立てを必ず参照すること\n"
+        "- candidate_tickets の edge だけで決めず、量化モデルの支持がある馬を優先的に含めること\n"
+        "- consensus_anchor の馬、または predictor_top_picks で複数モデルが上位評価している馬は、買い目の軸候補として強く考慮すること\n"
+        "- ただし量化モデルの共識だけで固定せず、candidate_tickets の edge やオッズ妙味も合わせて最終判断すること\n"
+        "- 量化モデルの支持が薄い馬を中心に買う場合は、相応の edge やオッズ妙味があるときに限ること\n\n"
 
         "== 制約 ==\n"
         f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
