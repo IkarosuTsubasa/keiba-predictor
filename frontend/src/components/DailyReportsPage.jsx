@@ -18,6 +18,18 @@ function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
 }
 
+function ErrorState({ title = "", details = [] }) {
+  const lines = (details || []).filter(Boolean);
+  return (
+    <div className="daily-report-error">
+      <p className="daily-report-error__title">{title}</p>
+      {lines.length ? (
+        <pre className="daily-report-error__details">{lines.join("\n")}</pre>
+      ) : null}
+    </div>
+  );
+}
+
 function ReportCard({ item, featured = false }) {
   const href = String(item?.public_url || "").trim() || "/keiba/reports";
   const className = `daily-report-card${featured ? " daily-report-card--featured" : ""}`;
@@ -38,27 +50,51 @@ function ReportCard({ item, featured = false }) {
   );
 }
 
+async function parseJsonSafely(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export default function DailyReportsPage({ appBasePath = "/keiba" }) {
-  const [state, setState] = useState({ loading: true, error: "", items: [] });
+  const [state, setState] = useState({
+    loading: true,
+    errorTitle: "",
+    errorDetails: [],
+    items: [],
+  });
 
   useEffect(() => {
     let alive = true;
-    setState({ loading: true, error: "", items: [] });
-    fetch(`${appBasePath}/api/public/reports`, {
+    const url = `${appBasePath}/api/public/reports`;
+    setState({ loading: true, errorTitle: "", errorDetails: [], items: [] });
+    fetch(url, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     })
-      .then((response) => {
+      .then(async (response) => {
+        const payload = await parseJsonSafely(response);
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          const backendError = String(payload?.error || "").trim();
+          throw {
+            title: "日報一覧の読み込みに失敗しました。",
+            details: [
+              `HTTP ${response.status}`,
+              backendError ? `error: ${backendError}` : "",
+              `url: ${url}`,
+            ].filter(Boolean),
+          };
         }
-        return response.json();
+        return payload;
       })
       .then((payload) => {
         if (!alive) return;
         setState({
           loading: false,
-          error: "",
+          errorTitle: "",
+          errorDetails: [],
           items: Array.isArray(payload?.items) ? payload.items : [],
         });
       })
@@ -66,7 +102,10 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
         if (!alive) return;
         setState({
           loading: false,
-          error: error?.message || "日報一覧の読み込みに失敗しました。",
+          errorTitle: String(error?.title || error?.message || "日報一覧の読み込みに失敗しました。"),
+          errorDetails: Array.isArray(error?.details)
+            ? error.details
+            : [`url: ${url}`],
           items: [],
         });
       });
@@ -83,10 +122,10 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
       <div className="daily-reports-hero">
         <div className="daily-reports-hero__copy">
           <span className="daily-reports-hero__eyebrow">私の日報</span>
-          <h1>日次アーカイブ</h1>
+          <h1>日報アーカイブ</h1>
           <p>
-            対象日の AI モデル結果、定量モデルの命中傾向、振り返りコメントを
-            記事形式で蓄積しています。
+            対象日の AI モデル成績、予測モデルの命中傾向、回収率の振り返りコメントを
+            記事形式で確認できます。
           </p>
         </div>
         <div className="daily-reports-hero__meta">
@@ -96,9 +135,11 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
       </div>
 
       {state.loading ? <EmptyState>日報一覧を読み込んでいます。</EmptyState> : null}
-      {state.error ? <EmptyState>{state.error}</EmptyState> : null}
+      {state.errorTitle ? (
+        <ErrorState title={state.errorTitle} details={state.errorDetails} />
+      ) : null}
 
-      {!state.loading && !state.error && latest ? (
+      {!state.loading && !state.errorTitle && latest ? (
         <section className="daily-report-panel">
           <div className="daily-report-panel__head">
             <div>
@@ -110,7 +151,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
         </section>
       ) : null}
 
-      {!state.loading && !state.error ? (
+      {!state.loading && !state.errorTitle ? (
         <section className="daily-report-panel">
           <div className="daily-report-panel__head">
             <div>

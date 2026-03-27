@@ -18,6 +18,18 @@ function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
 }
 
+function ErrorState({ title = "", details = [] }) {
+  const lines = (details || []).filter(Boolean);
+  return (
+    <div className="daily-report-error">
+      <p className="daily-report-error__title">{title}</p>
+      {lines.length ? (
+        <pre className="daily-report-error__details">{lines.join("\n")}</pre>
+      ) : null}
+    </div>
+  );
+}
+
 function parseMarkdown(markdown) {
   const text = String(markdown || "").replace(/\r\n/g, "\n").trim();
   if (!text) return [];
@@ -154,27 +166,52 @@ function MarkdownArticle({ markdown = "" }) {
   );
 }
 
+async function parseJsonSafely(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba" }) {
-  const [state, setState] = useState({ loading: true, error: "", item: null });
+  const [state, setState] = useState({
+    loading: true,
+    errorTitle: "",
+    errorDetails: [],
+    item: null,
+  });
 
   useEffect(() => {
     let alive = true;
-    setState({ loading: true, error: "", item: null });
-    fetch(`${appBasePath}/api/public/reports/${encodeURIComponent(slug)}`, {
+    const url = `${appBasePath}/api/public/reports/${encodeURIComponent(slug)}`;
+    setState({ loading: true, errorTitle: "", errorDetails: [], item: null });
+    fetch(url, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     })
-      .then((response) => {
+      .then(async (response) => {
+        const payload = await parseJsonSafely(response);
         if (!response.ok) {
-          throw new Error(response.status === 404 ? "日報が見つかりません。" : `HTTP ${response.status}`);
+          const backendError = String(payload?.error || "").trim();
+          const title = response.status === 404 ? "日報が見つかりません。" : "日報の読み込みに失敗しました。";
+          throw {
+            title,
+            details: [
+              `HTTP ${response.status}`,
+              backendError ? `error: ${backendError}` : "",
+              `url: ${url}`,
+            ].filter(Boolean),
+          };
         }
-        return response.json();
+        return payload;
       })
       .then((payload) => {
         if (!alive) return;
         setState({
           loading: false,
-          error: "",
+          errorTitle: "",
+          errorDetails: [],
           item: payload?.item || null,
         });
       })
@@ -182,7 +219,10 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
         if (!alive) return;
         setState({
           loading: false,
-          error: error?.message || "日報の読み込みに失敗しました。",
+          errorTitle: String(error?.title || error?.message || "日報の読み込みに失敗しました。"),
+          errorDetails: Array.isArray(error?.details)
+            ? error.details
+            : [`url: ${url}`],
           item: null,
         });
       });
@@ -206,10 +246,13 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
     );
   }
 
-  if (state.error || !state.item) {
+  if (state.errorTitle || !state.item) {
     return (
       <section className="daily-report-detail-page">
-        <EmptyState>{state.error || "日報が見つかりません。"}</EmptyState>
+        <ErrorState
+          title={state.errorTitle || "日報が見つかりません。"}
+          details={state.errorDetails}
+        />
       </section>
     );
   }

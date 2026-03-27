@@ -5580,6 +5580,31 @@ body {
   padding: 20px 0;
 }
 
+.daily-report-error {
+  padding: 20px 0;
+  display: grid;
+  gap: 10px;
+}
+
+.daily-report-error__title {
+  margin: 0;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.daily-report-error__details {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #14161c;
+  color: #f7f7fb;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 900px) {
   .daily-report-detail-hero__meta {
     grid-template-columns: 1fr;
