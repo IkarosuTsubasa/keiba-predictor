@@ -2253,13 +2253,17 @@ def build_daily_summary_share_payload(date_text=""):
 
 
 def _daily_reports_dir():
-    path = BASE_DIR.parent / "data" / "reports"
+    path = BASE_DIR / "data" / "reports"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _legacy_daily_reports_dir():
     return BASE_DIR / "data" / "_shared" / "daily_reports"
+
+
+def _legacy_root_daily_reports_dir():
+    return BASE_DIR.parent / "data" / "reports"
 
 
 def _daily_report_date_key(value=""):
@@ -2341,6 +2345,7 @@ def _load_daily_report_records(limit=None):
     for directory, source_priority in (
         (_daily_reports_dir(), 2),
         (_legacy_daily_reports_dir(), 1),
+        (_legacy_root_daily_reports_dir(), 1),
     ):
         if not directory.exists():
             continue
