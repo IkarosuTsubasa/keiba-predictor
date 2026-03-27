@@ -93,6 +93,18 @@ python pipeline/optimize_predictor_params.py
 python pipeline/offline_eval.py
 ```
 
+### Periodic cleanup
+Conservative cleanup for runtime caches and non-web-facing experimental artifacts.
+```
+cd pipeline
+python cleanup_periodic_storage.py --dry-run
+python cleanup_periodic_storage.py
+```
+- Keeps web-facing run history and race snapshots
+- Cleans stale job workspaces, orphan job artifacts, policy caches, and old experimental files
+- Add `--include-offline-research` to also remove old `offline_eval.csv`, `context_dataset.csv`, `context_summary.csv`, and `history_races.csv`
+- Add `--include-legacy-debug` to also remove old `bet_engine_v*_cfg_*.json`
+
 ## Configuration
 - Runtime config: `pipeline/config_<scope>.json`
 - Predictor config: `pipeline/predictor_config_<scope>.json`
