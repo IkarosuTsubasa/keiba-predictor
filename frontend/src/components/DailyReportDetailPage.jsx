@@ -16,6 +16,17 @@ function ErrorState({ title = "", details = [] }) {
   );
 }
 
+function buildReportShareText({ title = "", url = "" }) {
+  return [
+    "いかいもAI競馬",
+    String(title || "").trim() || "私の日報",
+    String(url || "").trim(),
+    "#競馬 #AI競馬",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function renderInline(text, keyPrefix = "inline") {
   const source = String(text || "");
   if (!source) return "";
@@ -257,14 +268,44 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
   const item = state.item || {};
   const tags = Array.isArray(item?.tags) ? item.tags : [];
   const markdown = String(item?.markdown || "").trim();
+  const shareUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${appBasePath}/reports/${encodeURIComponent(slug)}`
+      : `${appBasePath}/reports/${encodeURIComponent(slug)}`;
+  const shareText = buildReportShareText({
+    title: item?.title || "私の日報",
+    url: shareUrl,
+  });
+
+  const handleShare = async () => {
+    const text = String(shareText || "").trim();
+    if (!text) return;
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch {
+        // Fallback to X intent below when native share is cancelled or unavailable.
+      }
+    }
+    const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+    if (typeof window !== "undefined") {
+      window.open(intentUrl, "_blank", "noopener,noreferrer");
+    }
+  };
 
   return (
     <section className="daily-report-detail-page">
       <div className="daily-report-detail-hero">
         <div className="daily-report-detail-hero__copy">
-          <a className="race-detail-back-link" href={`${appBasePath}/reports`}>
-            日報一覧へ戻る
-          </a>
+          <div className="daily-report-detail-hero__actions">
+            <a className="race-detail-back-link" href={`${appBasePath}/reports`}>
+              日報一覧へ戻る
+            </a>
+            <button type="button" className="daily-report-share-button" onClick={handleShare}>
+              シェアする
+            </button>
+          </div>
           <span className="daily-report-detail-hero__eyebrow">私の日報</span>
           <h1>{renderInline(item?.title || "-", "hero-title")}</h1>
           <p>{renderInline(item?.lead || item?.summary || "日報の本文はまだありません。", "hero-lead")}</p>
