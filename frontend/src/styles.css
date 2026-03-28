@@ -3246,6 +3246,28 @@ body {
   padding-top: 24px;
 }
 
+.site-footer__ad-shell {
+  width: min(1440px, calc(100vw - 32px));
+  margin: 0 auto 14px;
+  padding: 16px 18px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(243, 243, 245, 0.96), rgba(255, 255, 255, 0.96)),
+    var(--surface-panel);
+}
+
+.site-footer__ad-slot {
+  width: min(100%, var(--ad-width));
+  min-height: var(--ad-height);
+  overflow: hidden;
+}
+
+.site-footer__ad-slot > div {
+  width: 100%;
+  min-height: var(--ad-height);
+}
+
 .site-footer__inner {
   width: min(1440px, calc(100vw - 32px));
   margin: 0 auto;
@@ -3324,6 +3346,7 @@ body {
 
   .racing-intel-page__shell,
   .app-header,
+  .site-footer__ad-shell,
   .site-footer__inner {
     width: min(100vw - 20px, 100%);
   }
@@ -4033,6 +4056,7 @@ body {
   .secondary-stats-panel,
   .public-static-page__hero,
   .public-static-page__section,
+  .site-footer__ad-shell,
   .site-footer__inner {
     padding: 18px;
   }
