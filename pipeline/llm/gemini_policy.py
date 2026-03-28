@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v16"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v25"
+POLICY_CACHE_VERSION = "gemini_policy_v18"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v27"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -591,6 +591,17 @@ def _compact_race_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
 
 def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
     multi_predictor = dict(input_obj.multi_predictor or {})
+    meta = dict(multi_predictor.get("meta", {}) or {})
+    profiles = []
+    for row in list(multi_predictor.get("profiles", []) or [])[:8]:
+        profiles.append(
+            {
+                "predictor_id": str(row.get("predictor_id", "") or ""),
+                "predictor_label": str(row.get("predictor_label", "") or ""),
+                "style_ja": str(row.get("style_ja", "") or ""),
+                "strengths_ja": [str(item) for item in list(row.get("strengths_ja", []) or [])[:3] if str(item or "").strip()],
+            }
+        )
     consensus_rows = []
     for row in list(multi_predictor.get("consensus", []) or [])[: min(10, max(1, int(input_obj.field_size or 0)))]:
         consensus_rows.append(
@@ -688,6 +699,17 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
                 "top3_prob_model": round(float(row.top3_prob_model or 0.0), 6),
             }
         )
+    primary_predictor_id = str(meta.get("primary_predictor_id", "") or "")
+    primary_predictor_label = str(meta.get("primary_predictor_label", "") or "")
+    if (not primary_predictor_id) and predictor_top_picks:
+        primary_predictor_id = str(predictor_top_picks[0].get("predictor_id", "") or "")
+    if (not primary_predictor_label) and predictor_top_picks:
+        primary_predictor_label = str(predictor_top_picks[0].get("predictor_label", "") or "")
+    primary_predictor = {
+        "predictor_id": primary_predictor_id,
+        "predictor_label": primary_predictor_label,
+        "top_horses": marks_top5,
+    }
     ai = _model_dump(input_obj.ai)
     consensus_anchor = dict(consensus_rows[0]) if consensus_rows else {}
     if consensus_anchor:
@@ -712,6 +734,8 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
             for key, value in dict(input_obj.multi_model_ai or {}).items()
             if str(key or "") in ("consensus_gap", "top1_vote_margin", "disagreement_score", "favorite_strength")
         },
+        "primary_predictor": primary_predictor,
+        "profiles": profiles,
         "consensus_anchor": consensus_anchor,
         "consensus_top": consensus_rows,
         "predictor_top_picks": predictor_top_picks,
@@ -1314,38 +1338,50 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     if daily_plan_text:
         daily_plan_text += "\n"
     return (
-        "あなたは公開用の馬券方針AIです。\n"
+        "あなたは量化モデル主導の公開用馬券補助AIです。\n"
+        "レース方向の判断は量化モデルが担当し、あなたはその方向を説明し、候補内で印と購入配分を整える役目です。\n"
         "最優先の目的は、この1レースでユーザーに見せられる命中率の高い買い方を選ぶことです。\n"
-        "回収期待や高配当狙いは補助材料であり、命中率を落としてまで優先してはいけません。\n"
+        "回収期待や高配当狙いは補助材料であり、量化モデルが示した方向を崩してまで優先してはいけません。\n"
         "無理に参加する必要はありません。命中の形を作りにくければ no_bet を選んでください。\n\n"
 
         "== 役割 ==\n"
-        "- あなたの仕事は candidate_tickets から選ぶことと、各候補への stake_yen 配分だけです\n"
+        "- あなたの仕事は candidate_tickets から選ぶことと、各候補への stake_yen 配分、そして量化判断を要約する印の整理です\n"
         "- candidate_tickets に存在しない組み合わせを出力してはいけません\n"
         "- 候補探索は上流で完了済みです。あなたは候補池の最終選択者です\n"
-        "- marks / focus_points / key_horses / enabled_bet_types / ticket_plan などの表示系フィールドは主目的ではありません\n"
+        "- レース方向の再予測は禁止です。勝ち馬像そのものを二次判定するのではなく、量化モデルの主軸を説明すること\n"
+        "- marks / focus_points / key_horses / enabled_bet_types / ticket_plan は、量化モデル主軸をユーザーに見せるための出力です\n"
         "- bet のときは selected_tickets を最優先で正しく返してください\n\n"
 
-        "== 対戦条件 ==\n"
-        "- あなたは他のLLMと同じ条件で成績を競っています\n"
-        "- 一時的に高配当を狙えても、命中が続かなければ対戦では負けます\n"
+        "== 公開方針 ==\n"
+        "- この出力は公開サイトでそのままユーザーに見られる前提です\n"
+        "- まずユーザーが納得しやすい命中率を優先し、その上で買い方の個性を出すこと\n"
+        "- 一時的な高配当狙いより、継続して当たりやすい構成を優先すること\n"
         "- 馬連や三連複は回収期待があっても命中率が低くなりやすいので、その弱点を必ず考慮すること\n"
         "- 的中率を無視して高配当券種ばかり選ぶのは禁止です\n\n"
 
         "== 判断基準 ==\n"
-        "1. まず model_summary の predictor_horse_probs を見て、6本の量化モデルが全馬をどう評価しているかを確認すること\n"
-        "2. 6本のモデルで top3_prob が高い馬、複数モデルで強く評価されている馬、逆に割れている馬を見て、自分なりの印を決めること\n"
-        "3. その上で horse_summary の top1_votes / top3_votes / rank_std / predictors_support を補助的に使い、支持の厚さとブレを確認すること\n"
-        "4. 最後に candidate_tickets の p_hit / quant_support_score / score を見て、まず命中しやすい買い方を優先すること\n"
-        "5. EV や portfolio_summary は補助情報であり、命中率の高い候補同士の比較にだけ使うこと\n\n"
+        "1. まず model_summary.primary_predictor と marks_top5 を見て、今回の量化主軸を確認すること\n"
+        "2. model_summary.profiles を見て、各モデルの得意分野を把握すること\n"
+        "3. horse_summary を使って、量化主軸の馬たちの支持の厚さとブレを確認すること\n"
+        "4. 量化モデルの本命は top3 確率ベースの主軸であり、1着固定の保証ではないことを前提に読むこと\n"
+        "5. model_summary.predictor_horse_probs や consensus_top は補助情報として使い、主軸をひっくり返さず確信度だけを調整すること\n"
+        "6. 本命を機械的に頭固定せず、odds・支持の厚さ・券種ごとの命中率を合わせて買い方を決めること\n"
+        "7. profiles の個性は『どの観点が今回効いていそうか』を説明するために使い、主軸変更の理由にしてはいけない\n"
+        "8. candidate_tickets の p_hit / quant_support_score / score を見て、量化主軸に沿った中で命中しやすい買い方を優先すること\n"
+        "9. EV は同じ方向の候補同士を並べ替える補助情報に留めること\n"
+        "10. portfolio_summary は買いすぎ防止の補助情報であり、本場の主方向や主方案を変える理由にしてはいけない\n\n"
 
         "== 量化モデル最優先ルール ==\n"
-        "- このタスクでは6本の量化モデル結果を第一優先の材料として扱うこと\n"
-        "- まず6本の量化モデルから印の軸を作り、その後で odds と candidate_tickets を使って買い方を決めること\n"
-        "- predictor_horse_probs には各モデルの全馬評価が入っているので、上位数頭だけでなく全体の並びも確認すること\n"
-        "- consensus_anchor は参考にしてよいが、それだけで機械的に固定せず、6本それぞれの結果を必ず読むこと\n"
+        "- このタスクでは model_summary.primary_predictor と marks_top5 がレース方向の基準である\n"
+        "- まず量化モデルの主軸を受け入れ、その後で candidate_tickets の中から買い方と金額を整えること\n"
+        "- model_summary.profiles に書かれた各モデルの個性は、印やコメントの説明補助にだけ使うこと\n"
+        "- predictor_horse_probs には各モデルの全馬評価が入っているが、用途は主軸の裏取りと強弱確認であり、主軸の差し替えではない\n"
+        "- consensus_anchor は参考にしてよいが、primary_predictor の方向を上書きするために使ってはいけない\n"
+        "- 量化モデルの本命は『最も3着内に入りやすい主軸候補』であり、『1着固定の断定』として扱ってはいけない\n"
+        "- 単勝・馬単・馬連など1着や順序の厳しさが増す券種ほど、本命固定を弱めて相手や券種の相性を見て調整すること\n"
         "- candidate_tickets は候補池であり、量化モデルの読みを無視して edge だけで決めてはいけない\n"
-        "- 量化モデルの支持が薄い馬を主軸にする場合は、命中率を十分に保てる根拠があるときに限ること\n"
+        "- marks・key_horses・focus_points は量化主軸の説明であり、主軸と逆方向の印を打たないこと\n"
+        "- 量化モデルの支持が薄い馬を主軸に昇格させてはいけない。補助扱いに留めること\n"
         "- 単勝・複勝・ワイドで命中の形を作れる局面では、それらを優先すること\n\n"
         "- 馬連・三連複・馬単のような低命中寄りの券種は、十分な根拠がない限り点数も金額も抑えること\n"
         "- wide / place / win で十分戦える局面では、無理に低命中券種へ寄せないこと\n\n"
@@ -1359,12 +1395,16 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- selected_tickets の id は candidate_tickets の id と完全一致であること\n"
         "- selected_tickets の合計金額は race_budget_yen 以下\n"
         "- bankroll_yen は上限管理用の情報であり、終日配分の都合で命中率を落とさないこと\n"
+        "- 主方案はまず命中率重視で構成すること\n"
+        "- 挑戦的な一枚を入れる場合でも、主方案が成立した後の補助1点までに留めること\n"
+        "- 挑戦票の stake_yen は主方案の各票より大きくしてはいけない\n"
         "- selected_tickets を実行可能に構成できないなら no_bet を返すこと\n"
         "- JSON のみ出力\n\n"
 
         "== 出力方針 ==\n"
         "- bet_decision が bet のときは selected_tickets を必須にする\n"
         "- selected_tickets は [{\"id\":\"candidate_id\",\"stake_yen\":300}] 形式で返す\n"
+        "- まず命中率重視の主方案を作り、挑戦票を入れるなら最後に軽く添えること\n"
         "- comment は必ず自然な日本語で、短い1文にすること\n"
         "- comment は人間が馬券を買う前にメモするような口調にすること\n"
         "- comment では EV / score / candidate_tickets / 優位性 など機械的な言い回しを使わないこと\n"

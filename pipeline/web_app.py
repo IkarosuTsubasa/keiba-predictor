@@ -657,6 +657,33 @@ def build_predictor_performance_context(scope_key, run_id, run_row, predictor_id
 
 
 def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map):
+    predictor_profiles = {
+        "main": {
+            "style_ja": "総合バランス型",
+            "strengths_ja": ["指数と安定感のバランスを取りながら軸候補を整理しやすい"],
+        },
+        "v2_opus": {
+            "style_ja": "能力比較特化型",
+            "strengths_ja": ["馬ごとの能力差や地力の序列を見極める補助に向く"],
+        },
+        "v3_premium": {
+            "style_ja": "堅実精度型",
+            "strengths_ja": ["高確率帯を優先して上位の安定感を確認しやすい"],
+        },
+        "v4_gemini": {
+            "style_ja": "文脈適性型",
+            "strengths_ja": ["馬場・距離・条件替わりへの適応差を補足しやすい"],
+        },
+        "v5_stacking": {
+            "style_ja": "統合安定型",
+            "strengths_ja": ["複数特徴の統合結果からブレの少ない並びを出しやすい"],
+        },
+        "v6_kiwami": {
+            "style_ja": "主軸高精度型",
+            "strengths_ja": ["今回の主方向を決める基準モデルとして上位精度を詰めやすい"],
+        },
+    }
+
     def _mean(values):
         values = [float(v) for v in list(values or [])]
         if not values:
@@ -706,8 +733,8 @@ def build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, wi
                 "predictor_id": spec["id"],
                 "predictor_label": spec["label"],
                 "available": True,
-                "style_ja": "",
-                "strengths_ja": [],
+                "style_ja": str(predictor_profiles.get(spec["id"], {}).get("style_ja", "") or ""),
+                "strengths_ja": list(predictor_profiles.get(spec["id"], {}).get("strengths_ja", []) or []),
                 "row_count": len(ranking),
             }
         )

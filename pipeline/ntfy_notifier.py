@@ -74,68 +74,56 @@ def _build_auth_header():
 def _select_share_candidate(scope_key, run_id):
     import web_app  # local import to avoid circular imports
 
-    def _has_marks(marks_map):
-        for horse_no, symbol in dict(marks_map or {}).items():
-            if str(horse_no or "").strip() and str(symbol or "").strip():
-                return True
-        return False
+    def _normalize_horse_no_text(value):
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            return str(int(float(text)))
+        except (TypeError, ValueError):
+            return text
+
+    def _build_v6_marks_text(resolved_scope_key, resolved_run_id, row):
+        odds_path = web_app.resolve_run_asset_path(resolved_scope_key, resolved_run_id, row, "odds_path", "odds")
+        fuku_odds_path = web_app.resolve_run_asset_path(resolved_scope_key, resolved_run_id, row, "fuku_odds_path", "fuku_odds")
+        name_to_no_map = web_app.load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
+        win_odds_map = web_app.load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
+        place_odds_map = web_app.load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
+        predictor_context = web_app.build_multi_predictor_context(
+            resolved_scope_key,
+            resolved_run_id,
+            row,
+            name_to_no_map,
+            win_odds_map,
+            place_odds_map,
+        )
+        for item in list((predictor_context or {}).get("predictor_rankings", []) or []):
+            predictor_id = str(item.get("predictor_id", "") or "").strip()
+            if predictor_id != "v6_kiwami":
+                continue
+            marks_map = {}
+            ranking = list(item.get("ranking", []) or [])
+            for symbol, rank_item in zip(("◎", "○", "▲", "△", "☆"), ranking[:5]):
+                horse_no = _normalize_horse_no_text((rank_item or {}).get("horse_no", ""))
+                if horse_no:
+                    marks_map[horse_no] = symbol
+            if marks_map:
+                return web_app.report_format_marks_text(marks_map)
+        return "印なし"
 
     run_row = web_app.resolve_run(run_id, scope_key)
     if run_row is None:
         raise LookupError(f"run row not found for run_id={run_id}")
-    preferred_engine = preferred_ntfy_engine()
-    payload_map = {}
-    for payload in web_app.load_policy_payloads(scope_key, run_id, run_row):
-        engine = web_app.normalize_policy_engine((payload or {}).get("policy_engine", ""))
-        if engine:
-            payload_map[engine] = payload
-    if not payload_map:
-        raise LookupError(f"policy payloads not found for run_id={run_id}")
-    ordered_engines = list(getattr(web_app, "REPORT_LLM_BATTLE_ORDER", ("gemini", "deepseek", "openai", "grok")))
-    candidate_engines = [engine for engine in ordered_engines if engine in payload_map]
-    if preferred_engine and preferred_engine in payload_map:
-        candidate_engines = [preferred_engine] + [engine for engine in candidate_engines if engine != preferred_engine]
-
-    candidates = []
-    for engine in candidate_engines:
-        payload = payload_map.get(engine)
-        if payload is None:
-            continue
-        ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=engine) or list(
-            web_app.report_policy_primary_budget(payload).get("tickets", []) or []
-        )
-        marks_map = web_app.report_policy_marks_map(payload)
-        candidates.append(
-            {
-                "engine": engine,
-                "payload": payload,
-                "ticket_rows": list(ticket_rows or []),
-                "marks_map": marks_map,
-                "has_marks": _has_marks(marks_map),
-            }
-        )
-
-    if not candidates:
-        raise LookupError(f"policy payloads not found for run_id={run_id}")
-
-    chosen = max(
-        enumerate(candidates),
-        key=lambda item: (
-            1 if item[1]["has_marks"] and item[1]["ticket_rows"] else 0,
-            1 if item[1]["has_marks"] else 0,
-            1 if item[1]["ticket_rows"] else 0,
-            -item[0],
-        ),
-    )[1]
-
-    chosen_engine = chosen["engine"]
-    chosen_payload = chosen["payload"]
-    chosen_ticket_rows = chosen["ticket_rows"]
-    chosen_marks_map = chosen["marks_map"]
-
-    share_text = web_app.build_public_share_text(run_row, chosen_engine, chosen_marks_map, chosen_ticket_rows)
+    resolved_scope_key = web_app.normalize_scope_key(scope_key) or str(scope_key or "").strip()
+    resolved_run_id = str(run_id or run_row.get("run_id") or "").strip()
+    location = str(run_row.get("location", "") or "").strip()
+    race_no = web_app.report_race_no_text(run_row.get("race_id")) if hasattr(web_app, "report_race_no_text") else ""
+    header = " ".join(part for part in (location, race_no) if str(part or "").strip())
+    marks_text = _build_v6_marks_text(resolved_scope_key, resolved_run_id, run_row)
+    share_lines = [line for line in (header, "極 KIWAMI", marks_text) if str(line or "").strip()]
+    share_text = "\n".join(share_lines).strip()
     return {
-        "engine": chosen_engine,
+        "engine": "v6_kiwami",
         "run_row": dict(run_row or {}),
         "share_text": str(share_text or "").strip(),
     }

@@ -882,7 +882,7 @@ def build_policy_input_payload(
         place_odds_map,
     )
     reference_predictions = selected_predictions or selected_ranking or fallback_predictions
-    predictions = _build_consensus_primary_predictions(multi_predictor, reference_predictions)
+    predictions = [_clone_prediction_row(item) for item in list(reference_predictions or [])]
     if not predictions:
         return None, "No valid prediction rows could be built for policy input."
     allowed_types = []
