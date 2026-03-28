@@ -74,6 +74,12 @@ def _build_auth_header():
 def _select_share_candidate(scope_key, run_id):
     import web_app  # local import to avoid circular imports
 
+    def _has_marks(marks_map):
+        for horse_no, symbol in dict(marks_map or {}).items():
+            if str(horse_no or "").strip() and str(symbol or "").strip():
+                return True
+        return False
+
     run_row = web_app.resolve_run(run_id, scope_key)
     if run_row is None:
         raise LookupError(f"run row not found for run_id={run_id}")
@@ -90,11 +96,7 @@ def _select_share_candidate(scope_key, run_id):
     if preferred_engine and preferred_engine in payload_map:
         candidate_engines = [preferred_engine] + [engine for engine in candidate_engines if engine != preferred_engine]
 
-    chosen_engine = ""
-    chosen_payload = None
-    chosen_ticket_rows = []
-    chosen_marks_map = {}
-
+    candidates = []
     for engine in candidate_engines:
         payload = payload_map.get(engine)
         if payload is None:
@@ -102,20 +104,34 @@ def _select_share_candidate(scope_key, run_id):
         ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=engine) or list(
             web_app.report_policy_primary_budget(payload).get("tickets", []) or []
         )
-        if ticket_rows:
-            chosen_engine = engine
-            chosen_payload = payload
-            chosen_ticket_rows = list(ticket_rows)
-            chosen_marks_map = web_app.report_policy_marks_map(payload)
-            break
-
-    if not chosen_engine:
-        chosen_engine = candidate_engines[0]
-        chosen_payload = payload_map.get(chosen_engine) or {}
-        chosen_ticket_rows = web_app.load_policy_run_ticket_rows(run_id, policy_engine=chosen_engine) or list(
-            web_app.report_policy_primary_budget(chosen_payload).get("tickets", []) or []
+        marks_map = web_app.report_policy_marks_map(payload)
+        candidates.append(
+            {
+                "engine": engine,
+                "payload": payload,
+                "ticket_rows": list(ticket_rows or []),
+                "marks_map": marks_map,
+                "has_marks": _has_marks(marks_map),
+            }
         )
-        chosen_marks_map = web_app.report_policy_marks_map(chosen_payload)
+
+    if not candidates:
+        raise LookupError(f"policy payloads not found for run_id={run_id}")
+
+    chosen = max(
+        enumerate(candidates),
+        key=lambda item: (
+            1 if item[1]["has_marks"] and item[1]["ticket_rows"] else 0,
+            1 if item[1]["has_marks"] else 0,
+            1 if item[1]["ticket_rows"] else 0,
+            -item[0],
+        ),
+    )[1]
+
+    chosen_engine = chosen["engine"]
+    chosen_payload = chosen["payload"]
+    chosen_ticket_rows = chosen["ticket_rows"]
+    chosen_marks_map = chosen["marks_map"]
 
     share_text = web_app.build_public_share_text(run_row, chosen_engine, chosen_marks_map, chosen_ticket_rows)
     return {

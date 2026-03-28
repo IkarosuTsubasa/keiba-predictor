@@ -844,6 +844,51 @@ def _public_share_runtime_html():
     return Array.from(root.querySelectorAll(".model-card"));
   };
 
+  const cardHasMarksForShare = (card) => {
+    const presetText = String(card?.dataset?.shareText || "").trim();
+    if (presetText) {
+      return !/[\r\n]印なし(?:[\r\n]|$)/.test(`\n${presetText}\n`);
+    }
+    if (card.matches(".model-card")) {
+      const marksText = card.querySelector(".model-block:nth-child(3) p")?.innerText || "";
+      return String(marksText).trim() && !String(marksText).includes("印なし");
+    }
+    const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
+    const subMarks = Array.from(card.querySelectorAll(".ai-pick-summary__submark")).length;
+    return (mainHorse && mainHorse !== "-") || subMarks > 0;
+  };
+
+  const cardHasTicketsForShare = (card) => {
+    const presetText = String(card?.dataset?.shareText || "").trim();
+    if (presetText) {
+      return /(単勝|複勝|ワイド|馬連|馬単|3連複)/.test(presetText) && !/買い目なし/.test(presetText);
+    }
+    if (card.matches(".model-card")) {
+      const ticketText = card.querySelector(".model-block p")?.innerText || "";
+      return String(ticketText).trim() && !String(ticketText).includes("買い目なし");
+    }
+    return Array.from(card.querySelectorAll(".bet-preview-list li")).some((item) => {
+      const text = item.textContent?.trim() || "";
+      return text && !text.includes("買い目なし");
+    });
+  };
+
+  const pickCardForShare = (cards) => {
+    const scored = Array.from(cards || []).map((card) => ({
+      card,
+      score: (cardHasMarksForShare(card) ? 2 : 0) + (cardHasTicketsForShare(card) ? 1 : 0),
+    }));
+    if (!scored.length) {
+      return null;
+    }
+    const bestScore = Math.max(...scored.map((item) => item.score));
+    const candidates = scored.filter((item) => item.score === bestScore).map((item) => item.card);
+    if (!candidates.length) {
+      return scored[0].card;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  };
+
   const mountLegacyShareButton = (summary) => {
     if (!summary || summary.dataset.shareMounted === "1") {
       return;
@@ -867,7 +912,7 @@ def _public_share_runtime_html():
       if (!cards.length) {
         return;
       }
-      const selected = cards[Math.floor(Math.random() * cards.length)];
+      const selected = pickCardForShare(cards);
       const text = buildShareText(title.textContent || "", selected);
       if (!text) {
         return;
@@ -906,7 +951,7 @@ def _public_share_runtime_html():
       if (!cards.length) {
         return;
       }
-      const selected = cards[Math.floor(Math.random() * cards.length)];
+      const selected = pickCardForShare(cards);
       const text = buildShareText(title.textContent || "", selected);
       if (!text) {
         return;

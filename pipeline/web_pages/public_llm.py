@@ -101,6 +101,37 @@ def _share_ticket_lines(ticket_rows, *, to_int_or_none):
     return lines
 
 
+def _share_ticket_target_text(bet_type, target):
+    bet_type_text = safe_text(bet_type).lower()
+    text = safe_text(target)
+    if not text:
+        return "-"
+    parts = [part.strip() for part in text.split("-") if part.strip()]
+    if bet_type_text == "exacta" and len(parts) == 2:
+        return f"{parts[0]}→{parts[1]}"
+    return "-".join(parts) if parts else text
+
+
+def _share_ticket_segments(ticket_rows, *, to_int_or_none):
+    segments = []
+    for row in list(ticket_rows or []):
+        bet_type_key = safe_text(row.get("bet_type")).lower()
+        bet_type = BET_TYPE_TEXT_MAP.get(bet_type_key, safe_text(row.get("bet_type")) or "-")
+        target_text = _share_ticket_target_text(
+            bet_type_key,
+            safe_text(row.get("horse_no")) or safe_text(row.get("target")),
+        )
+        amount = to_int_or_none(row.get("amount_yen"))
+        if amount is None:
+            amount = to_int_or_none(row.get("stake_yen"))
+        amount_text = f"¥{int(amount)}" if amount is not None else ""
+        core = f"{bet_type}{target_text}"
+        segment = f"{core}{amount_text}" if amount_text else core
+        if segment and segment not in segments:
+            segments.append(segment)
+    return segments
+
+
 def _share_marks_text(marks_map, *, to_int_or_none):
     if not marks_map:
         return "印なし"
@@ -110,6 +141,27 @@ def _share_marks_text(marks_map, *, to_int_or_none):
     ordered.sort(key=lambda item: (item[0], item[1], item[2]))
     parts = [f"{symbol}{horse_no}" for _, _, horse_no, symbol in ordered if horse_no and symbol]
     return " ".join(parts) if parts else "印なし"
+
+
+def _share_marks_variants(marks_map, *, to_int_or_none):
+    marks_text = _share_marks_text(marks_map, to_int_or_none=to_int_or_none)
+    if marks_text == "印なし":
+        return [("印なし", 0)]
+    parts = [part for part in marks_text.split() if part]
+    variants = []
+    for keep in (len(parts), 4, 3, 2, 1):
+        if keep <= 0:
+            continue
+        text = " ".join(parts[:keep]).strip()
+        if text and all(existing_text != text for existing_text, _ in variants):
+            variants.append((text, min(len(parts), keep)))
+    return variants or [("印なし", 0)]
+
+
+def _compose_share_text(lines, tail_lines):
+    merged = [str(line or "").strip() for line in list(lines or []) if str(line or "").strip()]
+    merged.extend(str(line or "").strip() for line in list(tail_lines or []) if str(line or "").strip())
+    return "\n".join(merged).strip()
 
 
 def build_public_share_text(
@@ -126,33 +178,65 @@ def build_public_share_text(
 ):
     del engine
     header = _share_hashtag_race_label(run_row)
-    marks_text = _share_marks_text(marks_map, to_int_or_none=to_int_or_none)
     share_url_text = share_url(run_row) if callable(share_url) else share_url
-    tail_lines = [share_detail_label, str(share_url_text or "").strip(), share_hashtag]
-    base_lines = [header, "", marks_text, "", PUBLIC_SHARE_TICKETS_LABEL]
-    ticket_lines = _share_ticket_lines(ticket_rows, to_int_or_none=to_int_or_none)
-    lines = list(base_lines)
-    for ticket_line in ticket_lines:
-        candidate = "\n".join(lines + [ticket_line, "", *tail_lines])
-        if len(candidate) > int(max_chars):
-            break
-        lines.append(ticket_line)
-    if len(lines) == len(base_lines):
-        placeholder = "買い目なし"
-        candidate = "\n".join(base_lines + [placeholder, "", *tail_lines])
-        if len(candidate) <= int(max_chars):
-            lines.append(placeholder)
-    text = "\n".join(lines + ["", *tail_lines])
-    if len(text) <= int(max_chars):
-        return text
-    fallback_lines = [header, "", marks_text, "", *tail_lines]
-    text = "\n".join(fallback_lines)
-    if len(text) <= int(max_chars):
-        return text
-    tail_len = len("\n".join(["", *tail_lines]))
-    compact_marks = marks_text[: max(0, int(max_chars) - len(header) - tail_len - 4)]
-    compact_lines = [header, "", compact_marks or "印なし", "", *tail_lines]
-    return "\n".join(compact_lines)
+    tail_variants = [
+        ([share_detail_label, str(share_url_text or "").strip(), share_hashtag], 1),
+        ([str(share_url_text or "").strip(), share_hashtag], 0),
+        ([str(share_url_text or "").strip()], 0),
+    ]
+    ticket_segments = _share_ticket_segments(ticket_rows, to_int_or_none=to_int_or_none)
+    marks_variants = _share_marks_variants(marks_map, to_int_or_none=to_int_or_none)
+    ticket_label_variants = [PUBLIC_SHARE_TICKETS_LABEL, "買い目", ""]
+
+    best_text = ""
+    best_score = None
+
+    for marks_variant_index, (marks_text, marks_count) in enumerate(marks_variants):
+        for tail_lines, detail_score in tail_variants:
+            for label_index, ticket_label in enumerate(ticket_label_variants):
+                chosen_segments = []
+                if ticket_segments:
+                    for segment in ticket_segments:
+                        next_segments = chosen_segments + [segment]
+                        joined_segments = " / ".join(next_segments)
+                        ticket_line = f"{ticket_label} {joined_segments}".strip() if ticket_label else joined_segments
+                        candidate = _compose_share_text([header, marks_text, ticket_line], tail_lines)
+                        if len(candidate) > int(max_chars):
+                            break
+                        chosen_segments = next_segments
+                else:
+                    placeholder = f"{ticket_label} 買い目なし".strip() if ticket_label else "買い目なし"
+                    candidate = _compose_share_text([header, marks_text, placeholder], tail_lines)
+                    if len(candidate) <= int(max_chars):
+                        chosen_segments = ["買い目なし"]
+
+                lines = [header, marks_text]
+                if chosen_segments:
+                    joined_segments = " / ".join(chosen_segments)
+                    lines.append(f"{ticket_label} {joined_segments}".strip() if ticket_label else joined_segments)
+                candidate_text = _compose_share_text(lines, tail_lines)
+                if len(candidate_text) > int(max_chars):
+                    continue
+
+                score = (
+                    len(chosen_segments),
+                    marks_count,
+                    detail_score,
+                    -marks_variant_index,
+                    -label_index,
+                    len(candidate_text),
+                )
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_text = candidate_text
+
+    if best_text:
+        return best_text
+
+    fallback_text = _compose_share_text([header, "印なし"], [str(share_url_text or "").strip()])
+    if len(fallback_text) <= int(max_chars):
+        return fallback_text
+    return _compose_share_text([header], [str(share_url_text or "").strip()])[: int(max_chars)]
 
 
 def public_result_triplet_text(actual_names):

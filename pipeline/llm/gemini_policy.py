@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v15"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v24"
+POLICY_CACHE_VERSION = "gemini_policy_v16"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v25"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -982,8 +982,9 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
         candidates,
         key=lambda c: (
             -float(c.score or 0.0),
-            -float(c.ev or 0.0),
             -float(c.p_hit or 0.0),
+            -float(c.quant_support_score or 0.0),
+            -float(c.ev or 0.0),
             str(c.id or ""),
         ),
     )
@@ -992,7 +993,13 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     high_odds_threshold = float(constraints.high_odds_threshold or 10.0)
     has_value = any(float(c.ev) > 0.0 for c in candidates)
     has_combo_value = any(str(c.bet_type) in ("wide", "quinella", "exacta", "trio") and float(c.ev) > 0.0 for c in candidates)
-    longshot_candidates = [c for c in candidates if float(c.odds_used) >= high_odds_threshold and float(c.ev) > 0.0]
+    longshot_candidates = [
+        c
+        for c in candidates
+        if float(c.odds_used) >= high_odds_threshold
+        and float(c.p_hit or 0.0) >= 0.12
+        and float(c.quant_support_score or 0.0) >= 0.55
+    ]
     top_key = str(predictions[0].horse_no) if predictions else (horses[0] if horses else "")
     second_key = str(predictions[1].horse_no) if len(predictions) >= 2 else ""
     third_key = str(predictions[2].horse_no) if len(predictions) >= 3 else ""
@@ -1066,17 +1073,57 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
             },
         )
 
-    prioritized = [c for c in ranked_candidates if float(c.ev or 0.0) > 0.0]
+    hit_thresholds = {
+        "place": 0.28,
+        "wide": 0.16,
+        "win": 0.12,
+        "quinella": 0.10,
+        "exacta": 0.08,
+        "trio": 0.05,
+    }
+    prioritized = [
+        c
+        for c in ranked_candidates
+        if float(c.p_hit or 0.0) >= hit_thresholds.get(str(c.bet_type or "").strip().lower(), 0.12)
+        and float(c.quant_support_score or 0.0) >= 0.45
+    ]
+    if not prioritized:
+        prioritized = [c for c in ranked_candidates if float(c.p_hit or 0.0) >= 0.12]
     if not prioritized:
         prioritized = ranked_candidates[:]
-    enabled = []
+
+    hit_type_rank = {"place": 0, "wide": 1, "win": 2, "quinella": 3, "exacta": 4, "trio": 5}
+    best_by_type = {}
     for cand in prioritized:
         bet_type = str(cand.bet_type or "").strip().lower()
-        if (not bet_type) or (bet_type in enabled):
+        if not bet_type:
             continue
-        enabled.append(bet_type)
-        if len(enabled) >= 3:
-            break
+        current = best_by_type.get(bet_type)
+        candidate_key = (
+            float(cand.p_hit or 0.0),
+            float(cand.score or 0.0),
+            float(cand.quant_support_score or 0.0),
+            -float(cand.odds_used or 0.0),
+        )
+        current_key = (
+            float(current.p_hit or 0.0),
+            float(current.score or 0.0),
+            float(current.quant_support_score or 0.0),
+            -float(current.odds_used or 0.0),
+        ) if current is not None else None
+        if current is None or candidate_key > current_key:
+            best_by_type[bet_type] = cand
+    enabled = [
+        bet_type
+        for bet_type, _ in sorted(
+            best_by_type.items(),
+            key=lambda item: (
+                -float(item[1].p_hit or 0.0),
+                -float(item[1].score or 0.0),
+                hit_type_rank.get(item[0], 99),
+            ),
+        )[:3]
+    ]
     if not enabled and ranked_candidates:
         enabled = [str(ranked_candidates[0].bet_type or "").strip().lower()]
 
@@ -1087,7 +1134,13 @@ def deterministic_policy(input_obj: RacePolicyInput, fallback_reason: str = "") 
     only_win = enabled == ["win"]
     combo_only = bool(enabled) and all(item in multi_leg_types for item in enabled)
 
-    strong_edge = bool(prioritized and float(prioritized[0].ev or 0.0) > 0.12)
+    strong_edge = bool(
+        prioritized
+        and (
+            float(prioritized[0].p_hit or 0.0) >= 0.38
+            or float(prioritized[0].quant_support_score or 0.0) >= 0.68
+        )
+    )
     weak_conf = float(ai.gap) < 0.03 or float(ai.confidence_score) < 0.56 or float(ai.stability_score) < 0.48
     participation_level = "small_bet" if weak_conf and not strong_edge else "normal_bet"
     max_ticket_count = min(
@@ -1261,9 +1314,10 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     if daily_plan_text:
         daily_plan_text += "\n"
     return (
-        "あなたは当日の馬券ポートフォリオ最適化AIです。\n"
-        "目的はこの1レース単体の的中ではなく、当日終了時の期待資金成長を最大化することです。\n"
-        "無理に参加する必要はありません。優位が弱ければ no_bet を選んでください。\n\n"
+        "あなたは公開用の馬券方針AIです。\n"
+        "最優先の目的は、この1レースでユーザーに見せられる命中率の高い買い方を選ぶことです。\n"
+        "回収期待や高配当狙いは補助材料であり、命中率を落としてまで優先してはいけません。\n"
+        "無理に参加する必要はありません。命中の形を作りにくければ no_bet を選んでください。\n\n"
 
         "== 役割 ==\n"
         "- あなたの仕事は candidate_tickets から選ぶことと、各候補への stake_yen 配分だけです\n"
@@ -1282,8 +1336,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "1. まず model_summary の predictor_horse_probs を見て、6本の量化モデルが全馬をどう評価しているかを確認すること\n"
         "2. 6本のモデルで top3_prob が高い馬、複数モデルで強く評価されている馬、逆に割れている馬を見て、自分なりの印を決めること\n"
         "3. その上で horse_summary の top1_votes / top3_votes / rank_std / predictors_support を補助的に使い、支持の厚さとブレを確認すること\n"
-        "4. 最後に candidate_tickets の edge（ev / score / p_hit）と odds を見て、命中率を落としすぎない買い方を選ぶこと\n"
-        "5. portfolio_summary と予算制約に基づく当日資金配分\n\n"
+        "4. 最後に candidate_tickets の p_hit / quant_support_score / score を見て、まず命中しやすい買い方を優先すること\n"
+        "5. EV や portfolio_summary は補助情報であり、命中率の高い候補同士の比較にだけ使うこと\n\n"
 
         "== 量化モデル最優先ルール ==\n"
         "- このタスクでは6本の量化モデル結果を第一優先の材料として扱うこと\n"
@@ -1291,7 +1345,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- predictor_horse_probs には各モデルの全馬評価が入っているので、上位数頭だけでなく全体の並びも確認すること\n"
         "- consensus_anchor は参考にしてよいが、それだけで機械的に固定せず、6本それぞれの結果を必ず読むこと\n"
         "- candidate_tickets は候補池であり、量化モデルの読みを無視して edge だけで決めてはいけない\n"
-        "- 量化モデルの支持が薄い馬を主軸にする場合は、odds 妙味や買い方の理由が明確なときに限ること\n\n"
+        "- 量化モデルの支持が薄い馬を主軸にする場合は、命中率を十分に保てる根拠があるときに限ること\n"
+        "- 単勝・複勝・ワイドで命中の形を作れる局面では、それらを優先すること\n\n"
         "- 馬連・三連複・馬単のような低命中寄りの券種は、十分な根拠がない限り点数も金額も抑えること\n"
         "- wide / place / win で十分戦える局面では、無理に低命中券種へ寄せないこと\n\n"
 
@@ -1303,7 +1358,7 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- 購入単位は100円刻み\n"
         "- selected_tickets の id は candidate_tickets の id と完全一致であること\n"
         "- selected_tickets の合計金額は race_budget_yen 以下\n"
-        "- bankroll_yen は当日全体の運用資金であり、この1レースで大半を使い切らないこと\n"
+        "- bankroll_yen は上限管理用の情報であり、終日配分の都合で命中率を落とさないこと\n"
         "- selected_tickets を実行可能に構成できないなら no_bet を返すこと\n"
         "- JSON のみ出力\n\n"
 

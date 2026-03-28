@@ -236,7 +236,16 @@ def _score_single_candidate(item, signal_map, bet_type):
     quant_support_score = round(float(signal.get("support_score", 0.0) or 0.0), 6)
     quant_anchor_strength = round(anchor_strength, 6)
     quant_agreement = round(float(signal.get("agreement", 0.0) or 0.0), 6)
-    score = round(ev_for_score * 0.42 + p_hit * 0.20 + quant_support_score * 0.38, 6)
+    type_bias = {"place": 0.05, "win": 0.0}.get(str(bet_type or "").strip().lower(), 0.0)
+    score = round(
+        p_hit * 0.52
+        + quant_support_score * 0.24
+        + quant_anchor_strength * 0.14
+        + quant_agreement * 0.08
+        + ev_for_score * 0.02
+        + type_bias,
+        6,
+    )
     return round(p_hit, 6), ev, score, quant_support_score, quant_anchor_strength, quant_agreement
 
 
@@ -274,29 +283,47 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
     quant_agreement = round(float(agreement or 0.0), 6)
     type_penalty = {
         "wide": 1.00,
-        "quinella": 0.94,
-        "exacta": 0.88,
-        "trio": 0.82,
+        "quinella": 0.86,
+        "exacta": 0.72,
+        "trio": 0.58,
     }.get(bet_type, 1.0)
+    type_bias = {
+        "wide": 0.03,
+        "quinella": 0.0,
+        "exacta": -0.04,
+        "trio": -0.08,
+    }.get(bet_type, 0.0)
     low_hit_floor = {
-        "wide": 0.16,
-        "quinella": 0.12,
-        "exacta": 0.08,
-        "trio": 0.06,
+        "wide": 0.20,
+        "quinella": 0.14,
+        "exacta": 0.10,
+        "trio": 0.08,
     }.get(bet_type, 0.10)
-    low_hit_penalty = max(0.0, low_hit_floor - float(p_hit or 0.0)) * 0.8
-    score = round((ev_for_score * 0.40 + p_hit * 0.24 + quant_support_score * 0.36 - low_hit_penalty) * type_penalty, 6)
+    low_hit_penalty = max(0.0, low_hit_floor - float(p_hit or 0.0)) * 1.15
+    score = round(
+        (
+            p_hit * 0.50
+            + quant_support_score * 0.24
+            + quant_anchor_strength * 0.14
+            + quant_agreement * 0.08
+            + ev_for_score * 0.04
+            - low_hit_penalty
+        )
+        * type_penalty
+        + type_bias,
+        6,
+    )
     return round(p_hit, 6), ev, score, quant_support_score, quant_anchor_strength, quant_agreement
 
 
 def _trim_candidates(candidates):
     quotas = {
         "win": 8,
-        "place": 8,
-        "wide": 20,
-        "quinella": 16,
-        "exacta": 18,
-        "trio": 12,
+        "place": 10,
+        "wide": 24,
+        "quinella": 10,
+        "exacta": 8,
+        "trio": 6,
     }
     grouped = {}
     for candidate in list(candidates or []):
@@ -307,8 +334,9 @@ def _trim_candidates(candidates):
         items.sort(
             key=lambda item: (
                 -float(item.get("score", 0.0) or 0.0),
-                -float(item.get("ev", 0.0) or 0.0),
                 -float(item.get("p_hit", 0.0) or 0.0),
+                -float(item.get("quant_support_score", 0.0) or 0.0),
+                -float(item.get("ev", 0.0) or 0.0),
                 float(item.get("odds_used", 0.0) or 0.0),
                 str(item.get("id", "")),
             )
@@ -317,8 +345,9 @@ def _trim_candidates(candidates):
     selected.sort(
         key=lambda item: (
             -float(item.get("score", 0.0) or 0.0),
-            -float(item.get("ev", 0.0) or 0.0),
             -float(item.get("p_hit", 0.0) or 0.0),
+            -float(item.get("quant_support_score", 0.0) or 0.0),
+            -float(item.get("ev", 0.0) or 0.0),
             float(item.get("odds_used", 0.0) or 0.0),
             str(item.get("id", "")),
         )
@@ -735,7 +764,7 @@ def _daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs):
     jobs = [dict(item or {}) for item in list(load_race_jobs(base_dir) or []) if isinstance(item, dict)]
     if not jobs:
         return {
-            "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+            "budget_scope_note": "このサイトでは終日の回収よりも、このレースで当てに行ける形を優先します。資金上限だけ守ってください。",
         }
 
     active_status_exclusions = {"settled", "failed", "deleted"}
@@ -753,7 +782,7 @@ def _daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs):
 
     if not planned_jobs:
         return {
-            "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+            "budget_scope_note": "このサイトでは終日の回収よりも、このレースで当てに行ける形を優先します。資金上限だけ守ってください。",
         }
 
     def _job_sort_key(job):
@@ -797,7 +826,7 @@ def _daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs):
         "remaining_races_for_day": remaining_count,
         "active_races_for_day": active_count,
         "race_sequence_for_day": sequence_for_day,
-        "budget_scope_note": "この資金は当日十数レースに配分する前提です。1レースで使い切らず、終日運用を優先してください。",
+        "budget_scope_note": "このサイトでは終日の回収よりも、このレースで当てに行ける形を優先します。資金上限だけ守ってください。",
     }
 
 
