@@ -2,6 +2,7 @@ import json
 import os
 import traceback
 import zipfile
+from collections import Counter
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -174,21 +175,77 @@ def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
     return out
 
 
-def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs):
-    scan_due_candidates = scan_due_race_job_diagnostics(base_dir)
+def _diagnostic_reason_counts(items):
+    counter = Counter()
+    for item in list(items or []):
+        reason = str((item or {}).get("reason", "") or "").strip() or "unknown"
+        counter[reason] += 1
+    return dict(sorted(counter.items()))
+
+
+def _diagnostic_sample(items, *, limit=8, preferred_reasons=None):
+    preferred = {str(x).strip() for x in list(preferred_reasons or []) if str(x).strip()}
+    sample = []
+    for item in list(items or []):
+        row = dict(item or {})
+        reason = str(row.get("reason", "") or "").strip()
+        if preferred and reason not in preferred:
+            continue
+        sample.append(
+            {
+                "job_id": str(row.get("job_id", "") or "").strip(),
+                "status": str(row.get("status", "") or "").strip(),
+                "race_id": str(row.get("race_id", "") or "").strip(),
+                "run_id": str(row.get("run_id", "") or "").strip(),
+                "reason": reason,
+            }
+        )
+        if len(sample) >= limit:
+            return sample
+    if preferred:
+        return _diagnostic_sample(items, limit=limit, preferred_reasons=None)
+    return sample[:limit]
+
+
+def _log_diagnostic_summary(event, items, *, sample_reasons=None):
     print(
         "[web_app] "
         + json.dumps(
             {
                 "ts": datetime.now().isoformat(timespec="seconds"),
-                "event": "scan_due_candidates",
-                "count": len(scan_due_candidates),
-                "items": scan_due_candidates,
+                "event": event,
+                "count": len(list(items or [])),
+                "reason_counts": _diagnostic_reason_counts(items),
+                "sample": _diagnostic_sample(items, preferred_reasons=sample_reasons),
             },
             ensure_ascii=False,
         ),
         flush=True,
     )
+
+
+def _compact_run_due_summary(summary):
+    row = dict(summary or {})
+    return {
+        "queued_count": int(row.get("queued_count", 0) or 0),
+        "processed_count": int(row.get("processed_count", 0) or 0),
+        "settled_count": int(row.get("settled_count", 0) or 0),
+        "scan_due_candidate_count": int(row.get("scan_due_candidate_count", 0) or 0),
+        "scan_due_reason_counts": _diagnostic_reason_counts(row.get("scan_due_candidates", [])),
+        "auto_settle_candidate_count": int(row.get("auto_settle_candidate_count", 0) or 0),
+        "auto_settle_reason_counts": _diagnostic_reason_counts(row.get("auto_settle_candidates", [])),
+        "queued_job_ids": list(row.get("queued_job_ids", []) or [])[:8],
+        "processed_job_ids": list(row.get("processed_job_ids", []) or [])[:8],
+        "settled_job_ids": list(row.get("settled_job_ids", []) or [])[:8],
+        "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
+        "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
+        "errors": list(row.get("errors", []) or [])[:5],
+    }
+
+
+def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs):
+    scan_due_candidates = scan_due_race_job_diagnostics(base_dir)
+    _log_diagnostic_summary("scan_due_candidates", scan_due_candidates, sample_reasons=("eligible",))
     changed = scan_due_race_jobs(base_dir)
     process_results = []
     settle_results = []
@@ -200,19 +257,7 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
         load_race_jobs=lambda: load_race_jobs(base_dir),
         now_dt=auto_settle_now,
     )
-    print(
-        "[web_app] "
-        + json.dumps(
-            {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "event": "auto_settle_candidates",
-                "count": len(auto_settle_candidates),
-                "items": auto_settle_candidates,
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
+    _log_diagnostic_summary("auto_settle_candidates", auto_settle_candidates, sample_reasons=("eligible",))
 
     while True:
         job_id = pick_next_process_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
@@ -466,6 +511,6 @@ def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_ra
             load_race_jobs=load_race_jobs,
         )
         ok = not bool(list(summary.get("errors", []) or []))
-        return JSONResponse({"ok": ok, "skipped": False, **summary}, status_code=200 if ok else 500)
+        return JSONResponse({"ok": ok, "skipped": False, **_compact_run_due_summary(summary)}, status_code=200 if ok else 500)
     finally:
         _release_run_due_lock(lock_path)
