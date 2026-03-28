@@ -17,6 +17,7 @@ import RaceDetailPage from "./components/RaceDetailPage";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 import TodayBoardContent from "./components/TodayBoardContent";
+import { trackPageView } from "./lib/analytics";
 import { buildTargetDateContext } from "./lib/homepage";
 import { matchRaceIdentifier } from "./lib/publicRace";
 import { HOME_PAGE_TITLE, PUBLIC_PAGE_CONTENT, SITE_NAME } from "./lib/siteCopy";
@@ -223,6 +224,15 @@ export default function App() {
     }
     document.title = HOME_PAGE_TITLE;
   }, [isAdminConsole, isAdminWorkspace, isHistoryPage, isRaceDetail, isReportsPage, isReportDetail, staticPage]);
+
+  useEffect(() => {
+    if (isAdminConsole || isAdminWorkspace) {
+      return;
+    }
+
+    const pagePath = search ? `${normalizedPath}?${search}` : normalizedPath;
+    trackPageView(pagePath, document.title);
+  }, [isAdminConsole, isAdminWorkspace, normalizedPath, search]);
 
   const { loading, error, data } = useBoardData(
     search,
