@@ -1025,7 +1025,7 @@ def register_public_static_routes(app: FastAPI) -> None:
             return FileResponse(ads_path, media_type="text/plain; charset=utf-8")
         raise HTTPException(status_code=404, detail="ads.txt not found")
 
-    @app.get(f"{PUBLIC_BASE_PATH}/affiliate/{asset_path:path}")
+    @app.get(f"{PUBLIC_BASE_PATH}/affiliate/{{asset_path:path}}")
     @app.get("/affiliate/{asset_path:path}")
     def public_affiliate_asset(asset_path: str):
         relative_path = Path(asset_path)
