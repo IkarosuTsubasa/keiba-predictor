@@ -4443,6 +4443,17 @@ body {
   gap: 10px;
 }
 
+.race-detail-native-banner {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.race-detail-native-banner > div {
+  width: 100%;
+  min-height: 88px;
+}
+
 .race-detail-panel--consensus .race-detail-panel__eyebrow,
 .race-detail-panel--result .race-detail-panel__eyebrow {
   font-size: 9px;
@@ -4720,6 +4731,10 @@ body {
 
   .race-detail-result-list strong {
     text-align: left;
+  }
+
+  .race-detail-native-banner > div {
+    min-height: 72px;
   }
 }
 

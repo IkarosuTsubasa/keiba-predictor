@@ -1,6 +1,7 @@
 ﻿import React, { useMemo } from "react";
 import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
+import RaceDetailNativeBanner from "./RaceDetailNativeBanner";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
@@ -317,6 +318,8 @@ export default function RaceDetailPage({ race, search = "" }) {
               <p className="race-detail-result-placeholder">{resultText}</p>
             )}
           </section>
+
+          <RaceDetailNativeBanner />
         </div>
       </div>
     </section>
