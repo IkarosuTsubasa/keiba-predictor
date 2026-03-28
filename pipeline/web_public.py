@@ -847,7 +847,7 @@ def _public_share_runtime_html():
   const cardHasMarksForShare = (card) => {
     const presetText = String(card?.dataset?.shareText || "").trim();
     if (presetText) {
-      return !/[\r\n]印なし(?:[\r\n]|$)/.test(`\n${presetText}\n`);
+      return !/[\\r\\n]印なし(?:[\\r\\n]|$)/.test(`\\n${presetText}\\n`);
     }
     if (card.matches(".model-card")) {
       const marksText = card.querySelector(".model-block:nth-child(3) p")?.innerText || "";
