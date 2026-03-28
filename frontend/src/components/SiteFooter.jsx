@@ -1,7 +1,5 @@
 ﻿import React from "react";
 
-import FooterAdBanner from "./FooterAdBanner";
-
 const FOOTER_LINKS = [
   { href: "/keiba/privacy", label: "プライバシーポリシー" },
   { href: "/keiba/terms", label: "利用規約" },
@@ -12,7 +10,6 @@ const FOOTER_LINKS = [
 export default function SiteFooter() {
   return (
     <footer className="site-footer">
-      <FooterAdBanner />
       <div className="site-footer__inner">
         <div className="site-footer__brand">
           <strong className="site-footer__title">いかいもAI競馬</strong>
