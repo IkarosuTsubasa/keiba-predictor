@@ -5630,22 +5630,27 @@ body {
 }
 
 .daily-report-share-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   appearance: none;
-  border: 0;
+  border: 1px solid rgba(15, 18, 24, 0.18);
   border-radius: 999px;
-  padding: 12px 18px;
-  background: rgba(26, 35, 126, 0.08);
-  color: var(--primary);
-  font: inherit;
-  font-weight: 700;
+  background: #111827;
+  color: #ffffff;
   cursor: pointer;
   transition:
     transform 0.18s ease,
-    background-color 0.18s ease;
+    background 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .daily-report-share-button:hover {
-  background: rgba(26, 35, 126, 0.14);
+  background: #0f172a;
+  border-color: rgba(15, 18, 24, 0.28);
   transform: translateY(-1px);
 }
 

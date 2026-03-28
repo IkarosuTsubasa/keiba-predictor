@@ -280,18 +280,48 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
   const handleShare = async () => {
     const text = String(shareText || "").trim();
     if (!text) return;
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    const isMobileShare =
+      (typeof navigator !== "undefined" &&
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")) ||
+      (typeof window !== "undefined" &&
+        window.matchMedia &&
+        window.matchMedia("(max-width: 760px)").matches) ||
+      (typeof window !== "undefined" && "ontouchstart" in window);
+
+    if (isMobileShare && typeof navigator !== "undefined" && typeof navigator.share === "function") {
       try {
         await navigator.share({ text });
         return;
       } catch {
-        // Fallback to X intent below when native share is cancelled or unavailable.
+        // Fallback to X intent below.
       }
     }
     const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-    if (typeof window !== "undefined") {
-      window.open(intentUrl, "_blank", "noopener,noreferrer");
+    if (typeof window === "undefined") {
+      return;
     }
+    if (isMobileShare) {
+      window.location.href = intentUrl;
+      return;
+    }
+    const width = 720;
+    const height = 640;
+    const left = Math.max(0, Math.round((window.screen.width - width) / 2));
+    const top = Math.max(0, Math.round((window.screen.height - height) / 2));
+    const popup = window.open(
+      intentUrl,
+      "ikaimo-share",
+      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
+    );
+    if (popup && !popup.closed) {
+      try {
+        popup.focus();
+      } catch {
+        // Ignore popup focus errors.
+      }
+      return;
+    }
+    window.location.href = intentUrl;
   };
 
   return (
@@ -302,8 +332,16 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
             <a className="race-detail-back-link" href={`${appBasePath}/reports`}>
               日報一覧へ戻る
             </a>
-            <button type="button" className="daily-report-share-button" onClick={handleShare}>
-              シェアする
+            <button
+              type="button"
+              className="daily-report-share-button"
+              onClick={handleShare}
+              aria-label="Xでシェア"
+              title="Xでシェア"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.847h-7.406l-5.8-7.584-6.636 7.584H.478l8.6-9.83L0 1.153h7.594l5.243 6.932 6.064-6.932Zm-1.29 19.494h2.04L6.486 3.24H4.298l13.313 17.407Z" />
+              </svg>
             </button>
           </div>
           <span className="daily-report-detail-hero__eyebrow">私の日報</span>
