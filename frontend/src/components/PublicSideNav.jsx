@@ -135,7 +135,7 @@ export default function PublicSideNav({
         {shouldShowTargetFilter ? (
           <div className="public-side-nav__section public-side-nav__section--filter">
             <div className="public-side-nav__filter-intro">
-              <span className="public-side-nav__section-label public-side-nav__section-label--primary">
+              <span className="public-side-nav__filter-title">
                 レース一覧
               </span>
               <p className="public-side-nav__filter-note">

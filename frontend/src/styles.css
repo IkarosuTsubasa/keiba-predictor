@@ -5739,7 +5739,8 @@ body {
 .public-side-nav__filter-title {
   color: var(--primary);
   font-family: "Manrope", "Noto Sans JP", sans-serif;
-  font-size: 20px;
+  font-size: 19px;
+  font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.03em;
 }
