@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 POLICY_CACHE_VERSION = "gemini_policy_v15"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v23"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v24"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -1272,11 +1272,17 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- marks / focus_points / key_horses / enabled_bet_types / ticket_plan などの表示系フィールドは主目的ではありません\n"
         "- bet のときは selected_tickets を最優先で正しく返してください\n\n"
 
+        "== 対戦条件 ==\n"
+        "- あなたは他のLLMと同じ条件で成績を競っています\n"
+        "- 一時的に高配当を狙えても、命中が続かなければ対戦では負けます\n"
+        "- 馬連や三連複は回収期待があっても命中率が低くなりやすいので、その弱点を必ず考慮すること\n"
+        "- 的中率を無視して高配当券種ばかり選ぶのは禁止です\n\n"
+
         "== 判断基準 ==\n"
         "1. まず model_summary の predictor_horse_probs を見て、6本の量化モデルが全馬をどう評価しているかを確認すること\n"
         "2. 6本のモデルで top3_prob が高い馬、複数モデルで強く評価されている馬、逆に割れている馬を見て、自分なりの印を決めること\n"
         "3. その上で horse_summary の top1_votes / top3_votes / rank_std / predictors_support を補助的に使い、支持の厚さとブレを確認すること\n"
-        "4. 最後に candidate_tickets の edge（ev / score / p_hit）と odds を見て、どの買い方にするかを決めること\n"
+        "4. 最後に candidate_tickets の edge（ev / score / p_hit）と odds を見て、命中率を落としすぎない買い方を選ぶこと\n"
         "5. portfolio_summary と予算制約に基づく当日資金配分\n\n"
 
         "== 量化モデル最優先ルール ==\n"
@@ -1286,6 +1292,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- consensus_anchor は参考にしてよいが、それだけで機械的に固定せず、6本それぞれの結果を必ず読むこと\n"
         "- candidate_tickets は候補池であり、量化モデルの読みを無視して edge だけで決めてはいけない\n"
         "- 量化モデルの支持が薄い馬を主軸にする場合は、odds 妙味や買い方の理由が明確なときに限ること\n\n"
+        "- 馬連・三連複・馬単のような低命中寄りの券種は、十分な根拠がない限り点数も金額も抑えること\n"
+        "- wide / place / win で十分戦える局面では、無理に低命中券種へ寄せないこと\n\n"
 
         "== 制約 ==\n"
         f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"

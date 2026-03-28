@@ -359,6 +359,8 @@ def main():
     place_only_prompt_text = _make_prompt(place_only_input)
     assert "predictor_horse_probs" in place_only_prompt_text, "prompt should explicitly include all-horse predictor probabilities"
     assert "量化モデル最優先ルール" in place_only_prompt_text, "prompt should explicitly declare quantitative-model-first rule"
+    assert "他のLLMと同じ条件で成績を競っています" in place_only_prompt_text, "prompt should explicitly mention competition against other LLMs"
+    assert "命中が続かなければ対戦では負けます" in place_only_prompt_text, "prompt should explicitly warn against low-hit-rate chasing"
 
     out1 = call_gemini_policy(
         input=input_2000,

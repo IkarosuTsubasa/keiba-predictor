@@ -272,7 +272,20 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
     quant_support_score = round(float(support or 0.0), 6)
     quant_anchor_strength = round(float(anchor_strength or 0.0), 6)
     quant_agreement = round(float(agreement or 0.0), 6)
-    score = round(ev_for_score * 0.42 + p_hit * 0.18 + quant_support_score * 0.40, 6)
+    type_penalty = {
+        "wide": 1.00,
+        "quinella": 0.94,
+        "exacta": 0.88,
+        "trio": 0.82,
+    }.get(bet_type, 1.0)
+    low_hit_floor = {
+        "wide": 0.16,
+        "quinella": 0.12,
+        "exacta": 0.08,
+        "trio": 0.06,
+    }.get(bet_type, 0.10)
+    low_hit_penalty = max(0.0, low_hit_floor - float(p_hit or 0.0)) * 0.8
+    score = round((ev_for_score * 0.40 + p_hit * 0.24 + quant_support_score * 0.36 - low_hit_penalty) * type_penalty, 6)
     return round(p_hit, 6), ev, score, quant_support_score, quant_anchor_strength, quant_agreement
 
 
