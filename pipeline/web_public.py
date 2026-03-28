@@ -1025,6 +1025,17 @@ def register_public_static_routes(app: FastAPI) -> None:
             return FileResponse(ads_path, media_type="text/plain; charset=utf-8")
         raise HTTPException(status_code=404, detail="ads.txt not found")
 
+    @app.get(f"{PUBLIC_BASE_PATH}/affiliate/{asset_path:path}")
+    @app.get("/affiliate/{asset_path:path}")
+    def public_affiliate_asset(asset_path: str):
+        relative_path = Path(asset_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise HTTPException(status_code=404, detail="affiliate asset not found")
+        asset_file = PUBLIC_FRONTEND_DIST_DIR / "affiliate" / relative_path
+        if asset_file.exists() and asset_file.is_file():
+            return FileResponse(asset_file)
+        raise HTTPException(status_code=404, detail="affiliate asset not found")
+
     @app.get(PUBLIC_SITE_ICON_PATH)
     @app.get("/site-icon.png")
     def public_site_icon():
