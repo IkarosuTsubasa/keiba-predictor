@@ -55,24 +55,53 @@ def _parse_mismatch_values(message: str, key: str):
     return [item.strip() for item in tail.split(",") if item.strip()]
 
 
-def _should_tolerate_validation_mismatch(message: str, reconcile_result: dict):
-    text = str(message or "").strip()
-    if not text.startswith("odds/predictions horse_name mismatch:"):
-        return False, []
-    missing_names = _parse_mismatch_values(text, "missing_horse_name")
-    extra_names = _parse_mismatch_values(text, "extra_horse_name")
-    if not missing_names or extra_names:
-        return False, missing_names
+def _collect_tolerated_odds_horse_nos(workspace: Path, reconcile_result: dict):
     allowed_names = {
         _normalize_name(name)
         for name in list((reconcile_result or {}).get("extra_in_odds") or [])
         if _normalize_name(name)
     }
     if not allowed_names:
-        return False, missing_names
-    if any(_normalize_name(name) not in allowed_names for name in missing_names):
-        return False, missing_names
-    return True, missing_names
+        return set(), set()
+    odds_path = workspace / "odds.csv"
+    if not odds_path.exists():
+        return allowed_names, set()
+    odds_rows, odds_fields = _read_csv_rows(odds_path)
+    odds_name_field = _pick_first_field(odds_fields, ("name", "HorseName", "horse_name"))
+    odds_no_field = _pick_first_field(odds_fields, ("horse_no", "HorseNo", "horse_number", "馬番"))
+    allowed_nos = set()
+    if odds_name_field and odds_no_field:
+        for row in odds_rows:
+            name = _normalize_name(row.get(odds_name_field, ""))
+            horse_no = str(row.get(odds_no_field, "") or "").strip()
+            if name in allowed_names and horse_no:
+                allowed_nos.add(horse_no)
+    return allowed_names, allowed_nos
+
+
+def _should_tolerate_validation_mismatch(message: str, reconcile_result: dict, workspace: Path):
+    text = str(message or "").strip()
+    allowed_names, allowed_nos = _collect_tolerated_odds_horse_nos(workspace, reconcile_result)
+
+    if text.startswith("odds/predictions horse_name mismatch:"):
+        missing_names = _parse_mismatch_values(text, "missing_horse_name")
+        extra_names = _parse_mismatch_values(text, "extra_horse_name")
+        if not missing_names or extra_names or not allowed_names:
+            return False, missing_names
+        if any(_normalize_name(name) not in allowed_names for name in missing_names):
+            return False, missing_names
+        return True, missing_names
+
+    if text.startswith("odds/predictions horse_no mismatch:"):
+        missing_nos = _parse_mismatch_values(text, "missing_horse_no")
+        extra_nos = _parse_mismatch_values(text, "extra_horse_no")
+        if not missing_nos or extra_nos or not allowed_nos:
+            return False, missing_nos
+        if any(str(no).strip() not in allowed_nos for no in missing_nos):
+            return False, missing_nos
+        return True, missing_nos
+
+    return False, []
 
 
 def reconcile_workspace_entries(workspace: Path):
@@ -438,7 +467,7 @@ def run_batch(workspace_dir: str):
             output_path=str(pred_latest_path),
         )
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
-        tolerated, tolerated_missing = _should_tolerate_validation_mismatch(msg, reconcile_result)
+        tolerated, tolerated_missing = _should_tolerate_validation_mismatch(msg, reconcile_result, workspace)
         if not ok and tolerated:
             process_log.append(
                 {
