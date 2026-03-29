@@ -44,6 +44,37 @@ def _pick_first_field(fieldnames, candidates):
     return ""
 
 
+def _parse_mismatch_values(message: str, key: str):
+    text = str(message or "").strip()
+    marker = f"{key}="
+    start = text.find(marker)
+    if start < 0:
+        return []
+    tail = text[start + len(marker) :]
+    tail = tail.split(";", 1)[0].strip()
+    return [item.strip() for item in tail.split(",") if item.strip()]
+
+
+def _should_tolerate_validation_mismatch(message: str, reconcile_result: dict):
+    text = str(message or "").strip()
+    if not text.startswith("odds/predictions horse_name mismatch:"):
+        return False, []
+    missing_names = _parse_mismatch_values(text, "missing_horse_name")
+    extra_names = _parse_mismatch_values(text, "extra_horse_name")
+    if not missing_names or extra_names:
+        return False, missing_names
+    allowed_names = {
+        _normalize_name(name)
+        for name in list((reconcile_result or {}).get("extra_in_odds") or [])
+        if _normalize_name(name)
+    }
+    if not allowed_names:
+        return False, missing_names
+    if any(_normalize_name(name) not in allowed_names for name in missing_names):
+        return False, missing_names
+    return True, missing_names
+
+
 def reconcile_workspace_entries(workspace: Path):
     odds_path = workspace / "odds.csv"
     shutuba_path = workspace / "shutuba.csv"
@@ -407,6 +438,25 @@ def run_batch(workspace_dir: str):
             output_path=str(pred_latest_path),
         )
         ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
+        tolerated, tolerated_missing = _should_tolerate_validation_mismatch(msg, reconcile_result)
+        if not ok and tolerated:
+            process_log.append(
+                {
+                    "step": f"predictor_{spec['id']}_validation",
+                    "status": "tolerated",
+                    "details": {
+                        "message": msg,
+                        "tolerated_missing_horses": tolerated_missing,
+                    },
+                }
+            )
+            _emit_batch_log(
+                "predictor_validate_tolerated",
+                predictor_id=spec["id"],
+                message=msg,
+                tolerated_missing_horses=tolerated_missing,
+            )
+            ok = True
         if not ok:
             failure_summary = {
                 "status": "failed",
