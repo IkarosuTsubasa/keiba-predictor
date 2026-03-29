@@ -55,6 +55,22 @@ function parseRaceMemo(text, raceDate) {
 
   const updates = {};
   let hitCount = 0;
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstLine = String(lines[0] || "").trim();
+
+  if (
+    lines.length >= 2 &&
+    firstLine &&
+    !/^\d{1,2}:\d{2}\s*発走/.test(firstLine) &&
+    !/^\d+回\s*[^\s]+\s+\d+日目/.test(firstLine) &&
+    !/[/:：]/.test(firstLine)
+  ) {
+    updates.race_name = firstLine;
+    hitCount += 1;
+  }
 
   const timeMatch = raw.match(/(\d{1,2}:\d{2})\s*発走/);
   if (timeMatch?.[1] && String(raceDate || "").trim()) {
@@ -146,6 +162,7 @@ function createDefaultCreateJobForm() {
   return {
     scope_key: "local",
     race_id: "",
+    race_name: "",
     location: "",
     race_date: formatDateInputValue(now),
     scheduled_off_time: formatDateTimeLocalValue(now),
@@ -279,6 +296,10 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
           <input value={form.race_id} onChange={(event) => updateField("race_id", event.target.value)} />
         </label>
         <label>
+          <span>レース名</span>
+          <input value={form.race_name} onChange={(event) => updateField("race_name", event.target.value)} />
+        </label>
+        <label>
           <span>開催場</span>
           <input value={form.location} onChange={(event) => updateField("location", event.target.value)} />
         </label>
@@ -380,6 +401,7 @@ function ImportArchiveForm({ onSubmit, busy }) {
 function EditJobForm({ job, onSubmit, busy }) {
   const [form, setForm] = useState({
     race_id: job.race_id || "",
+    race_name: job.race_name || "",
     location: job.location || "",
     race_date: job.race_date || "",
     scheduled_off_time: job.scheduled_off_time || "",
@@ -393,6 +415,7 @@ function EditJobForm({ job, onSubmit, busy }) {
   useEffect(() => {
     setForm({
       race_id: job.race_id || "",
+      race_name: job.race_name || "",
       location: job.location || "",
       race_date: job.race_date || "",
       scheduled_off_time: job.scheduled_off_time || "",
@@ -430,6 +453,10 @@ function EditJobForm({ job, onSubmit, busy }) {
         <label>
           <span>レースID</span>
           <input value={form.race_id} onChange={(event) => updateField("race_id", event.target.value)} />
+        </label>
+        <label>
+          <span>レース名</span>
+          <input value={form.race_name} onChange={(event) => updateField("race_name", event.target.value)} />
         </label>
         <label>
           <span>開催場</span>
@@ -512,6 +539,7 @@ function JobCard({ job, onAction, busyAction }) {
         <div>
           <span className="admin-job-card__eyebrow">{job.scope_label || "-"}</span>
           <h3>{title}</h3>
+          {job.race_name ? <p>{job.race_name}</p> : null}
         </div>
         <span className={statusClass(job.status_tone)}>{job.status_label || job.status || "-"}</span>
       </div>

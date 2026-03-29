@@ -435,6 +435,7 @@ def build_public_board_payload(
                 "scope_key": report_scope_key,
                 "scope_label": public_scope_label_ja(report_scope_key),
                 "race_title": format_race_label(run_row),
+                "race_name": safe_text(job_meta.get("race_name")) or safe_text(run_row.get("trigger_race")),
                 "date_label": public_date_label(safe_text(run_row.get("race_date")) or target_date, parse_run_date=parse_run_date),
                 "actual_text": actual_text,
                 "location": safe_text(job_meta.get("location")) or safe_text(run_row.get("location")),

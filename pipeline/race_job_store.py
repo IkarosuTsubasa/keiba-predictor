@@ -32,6 +32,7 @@ def _job_step_field(step_name, suffix):
 
 def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
+    row.setdefault("race_name", "")
     row.setdefault("ntfy_notify_status", "")
     row.setdefault("ntfy_notify_run_id", "")
     row.setdefault("ntfy_notify_engine", "")
@@ -338,6 +339,7 @@ def create_job(
     *,
     race_id="",
     scope_key="",
+    race_name="",
     location="",
     race_date="",
     scheduled_off_time="",
@@ -359,6 +361,7 @@ def create_job(
         "job_id": _build_job_id(race_id),
         "race_id": str(race_id or "").strip(),
         "scope_key": str(scope_key or "").strip(),
+        "race_name": str(race_name or "").strip(),
         "location": str(location or "").strip(),
         "race_date": str(race_date or "").strip(),
         "scheduled_off_time": _dt_text(off_dt),

@@ -6419,3 +6419,37 @@ body {
     display: grid;
   }
 }
+
+.admin-job-card__head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.race-card-header__title-group {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.race-card-header__subtitle {
+  width: 100%;
+  max-width: 100%;
+  margin: 6px 0 0;
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: "Work Sans", "Noto Sans JP", sans-serif;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.race-detail-hero__title {
+  width: 100%;
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}

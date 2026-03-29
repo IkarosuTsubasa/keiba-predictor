@@ -34,6 +34,7 @@ def create_job_from_files(args):
         BASE_DIR,
         race_id=race_id,
         scope_key=scope_key,
+        race_name=args.race_name,
         location=args.location,
         race_date=args.race_date,
         scheduled_off_time=args.scheduled_off_time,
@@ -101,6 +102,7 @@ def main():
     create_parser = subparsers.add_parser("create", help="Create a race job from local CSV files")
     create_parser.add_argument("--scope-key", required=True)
     create_parser.add_argument("--race-id", required=True)
+    create_parser.add_argument("--race-name", default="")
     create_parser.add_argument("--location", default="")
     create_parser.add_argument("--race-date", default="")
     create_parser.add_argument("--scheduled-off-time", required=True)

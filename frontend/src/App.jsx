@@ -378,7 +378,10 @@ export default function App() {
           pathname: normalizedPath,
           mode: "detail",
           detailHref: `${normalizedPath}${buildQuery(search)}`,
-          detailTitle: selectedRace?.display_header?.title || "レース詳細",
+          detailTitle:
+            selectedRace?.display_header?.detail_title ||
+            selectedRace?.display_header?.title ||
+            "レース詳細",
           data,
           search,
           onApplyFilters: navigateWithSearch,

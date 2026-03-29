@@ -1,4 +1,5 @@
 ﻿import React, { useMemo } from "react";
+import AutoFitLine from "./AutoFitLine";
 import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 import RaceDetailAffiliateCard from "./RaceDetailAffiliateCard";
@@ -219,6 +220,9 @@ export default function RaceDetailPage({ race, search = "" }) {
     (sum, card) => sum + parsePlanCount(card?.ticket_plan_text),
     0,
   );
+  const detailTitle = String(
+    race?.display_header?.detail_title || race?.display_header?.title || "-",
+  ).trim() || "-";
 
   return (
     <section className="race-detail-page">
@@ -228,7 +232,14 @@ export default function RaceDetailPage({ race, search = "" }) {
             予測一覧に戻る
           </a>
           <span className="race-detail-hero__eyebrow">レース詳細</span>
-          <h1>{race?.display_header?.title || "-"}</h1>
+          <AutoFitLine
+            as="h1"
+            className="race-detail-hero__title"
+            maxFontSize={44}
+            minFontSize={14}
+          >
+            {detailTitle}
+          </AutoFitLine>
           {badges.length ? (
             <div className="race-detail-hero__badges">
               {badges.map((item) => (

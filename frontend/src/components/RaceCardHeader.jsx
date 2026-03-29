@@ -1,5 +1,7 @@
 import React from "react";
 
+import AutoFitLine from "./AutoFitLine";
+
 function isTrackConditionBadge(value) {
   return ["良", "稍重", "重", "不良"].includes(String(value || "").trim());
 }
@@ -34,6 +36,7 @@ function resolveStatus(race) {
 export default function RaceCardHeader({ race, actions = null }) {
   const status = resolveStatus(race);
   const title = String(race?.display_header?.title || "-");
+  const subtitle = String(race?.display_header?.subtitle || "").trim();
   const badges = Array.isArray(race?.display_header?.badges)
     ? race.display_header.badges.filter(
         (item) => item && !isTrackConditionBadge(item),
@@ -49,8 +52,18 @@ export default function RaceCardHeader({ race, actions = null }) {
   return (
     <header className="race-card-header">
       <div className="race-card-header__main">
-        <div>
+        <div className="race-card-header__title-group">
           <h3>{title}</h3>
+          {subtitle ? (
+            <AutoFitLine
+              as="p"
+              className="race-card-header__subtitle"
+              maxFontSize={16}
+              minFontSize={10}
+            >
+              {subtitle}
+            </AutoFitLine>
+          ) : null}
           {badges.length ? (
             <div className="race-card-header__badges">
               {badges.map((item) => (

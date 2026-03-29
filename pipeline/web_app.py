@@ -1804,12 +1804,14 @@ def _build_public_placeholder_races(target_date="", scope_key=""):
         location = str(job.get("location", "") or "").strip()
         race_no = _race_no_text(race_id)
         race_title = f"{location}{race_no}".strip() if location else (race_no or race_id)
+        race_name = str(job.get("race_name", "") or "").strip()
         placeholder_rows.append(
             {
                 "scope_key": job_scope_key,
                 "scope_label": _scope_display_name(job_scope_key),
                 "race_id": race_id,
                 "race_title": race_title or race_id,
+                "race_name": race_name,
                 "date_label": _public_date_label(race_date),
                 "location": location,
                 "scheduled_off_time": str(job.get("scheduled_off_time", "") or "").strip(),
@@ -1880,6 +1882,14 @@ def _public_display_status(row, variant):
     return {"label": "確定待ち", "tone": "open"}
 
 
+def _public_display_race_name(row):
+    race_name = str((row or {}).get("race_name", "") or "").strip()
+    race_title = str((row or {}).get("race_title", "") or "").strip()
+    if not race_name or race_name == race_title or race_name in race_title:
+        return ""
+    return race_name
+
+
 def _public_display_header(row, variant):
     badges = []
     scheduled_off_time = str((row or {}).get("scheduled_off_time", "") or "").strip()
@@ -1893,8 +1903,13 @@ def _public_display_header(row, variant):
         track_condition = str((row or {}).get("track_condition", "") or "").strip()
         if track_condition:
             badges.append(track_condition)
+    title = str((row or {}).get("race_title", "") or "").strip() or "-"
+    race_name = _public_display_race_name(row)
+    detail_title = f"{title} {race_name}".strip() if race_name else title
     return {
-        "title": str((row or {}).get("race_title", "") or "").strip() or "-",
+        "title": title,
+        "subtitle": race_name,
+        "detail_title": detail_title,
         "badges": badges,
     }
 
@@ -2738,6 +2753,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "scope_key": str(hydrated.get("scope_key", "") or "").strip(),
                 "scope_label": _scope_display_name(hydrated.get("scope_key", "")),
                 "race_id": str(hydrated.get("race_id", "") or "").strip(),
+                "race_name": str(hydrated.get("race_name", "") or "").strip(),
                 "race_date": str(hydrated.get("race_date", "") or "").strip(),
                 "location": str(hydrated.get("location", "") or "").strip(),
                 "scheduled_off_time": str(hydrated.get("scheduled_off_time", "") or "").strip(),
@@ -3540,6 +3556,7 @@ async def admin_jobs_edit_api(request: Request):
         return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
 
     race_id = normalize_race_id((payload or {}).get("race_id", ""))
+    race_name = str((payload or {}).get("race_name", "") or "").strip()
     location = str((payload or {}).get("location", "") or "").strip()
     race_date = str((payload or {}).get("race_date", "") or "").strip() or _default_job_race_date_text()
     scheduled_off_time = str((payload or {}).get("scheduled_off_time", "") or "").strip()
@@ -3577,6 +3594,7 @@ async def admin_jobs_edit_api(request: Request):
 
     def _edit_job(row, now_text):
         row["race_id"] = race_id
+        row["race_name"] = race_name
         row["location"] = location
         row["race_date"] = race_date
         row["scheduled_off_time"] = scheduled_off_time
@@ -3619,6 +3637,7 @@ async def admin_jobs_create_api(
     request: Request,
     scope_key: str = Form(""),
     race_id: str = Form(""),
+    race_name: str = Form(""),
     location: str = Form(""),
     race_date: str = Form(""),
     scheduled_off_time: str = Form(""),
@@ -3666,6 +3685,7 @@ async def admin_jobs_create_api(
         BASE_DIR,
         race_id=race_id,
         scope_key=scope_norm,
+        race_name=race_name,
         location=location,
         race_date=race_date,
         scheduled_off_time=scheduled_off_time,
