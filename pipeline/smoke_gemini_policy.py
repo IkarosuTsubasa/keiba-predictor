@@ -332,8 +332,8 @@ def main():
     os.environ["GEMINI_POLICY_MOCK"] = "1"
     os.environ.pop("GEMINI_API_KEY", None)
     prompt_lock_info = get_prompt_policy_lock_info()
-    assert str(prompt_lock_info.get("version", "")) == "gemini_policy_lock_v1", "prompt policy lock version should stay stable"
-    assert str(prompt_lock_info.get("sha256", "")) == "527efc104208a0cb4d4a537a8b491f9230c55399d798b6bdbfa8c3dd2f254389", "protected prompt policy blocks changed; require explicit user approval"
+    assert str(prompt_lock_info.get("version", "")) == "gemini_policy_lock_v2", "prompt policy lock version should stay stable"
+    assert str(prompt_lock_info.get("sha256", "")) == "b02d44f6e5e77806492e4bfa0d7dbaa1195f9e409fc4c6b02343e06cc2f403df", "protected prompt policy blocks changed; require explicit user approval"
 
     policy_input = _build_smoke_input()
     input_2000 = _clone_with_budget(policy_input, 2000, 800)
@@ -366,7 +366,9 @@ def main():
     assert "この出力は公開サイトでそのままユーザーに見られる前提です" in place_only_prompt_text, "prompt should explicitly mention public-site display goal"
     assert "portfolio_summary は買いすぎ防止の補助情報" in place_only_prompt_text, "prompt should explicitly limit portfolio_summary to overbet prevention"
     assert "挑戦的な一枚を入れる場合でも、主方案が成立した後の補助1点までに留めること" in place_only_prompt_text, "prompt should explicitly limit challenge tickets"
-    assert "量化モデルの本命は『最も3着内に入りやすい主軸候補』" in place_only_prompt_text, "prompt should explicitly avoid treating quantitative favorite as fixed winner"
+    assert "前5位の馬は本命・対抗・相手の中心候補として必ず重点的に扱うこと" in place_only_prompt_text, "prompt should explicitly focus on quantitative top5"
+    assert "本命や印は量化前5位の中で組み替えてよい" in place_only_prompt_text, "prompt should explicitly allow favorite/marks reordering inside top5"
+    assert "量化前5位の外から主軸を作るのは、よほど強い理由がある場合を除いて避けること" in place_only_prompt_text, "prompt should explicitly discourage building the axis outside quantitative top5"
     assert "1レースで使い切ってはいけない" in place_only_prompt_text, "prompt should explicitly ban spending the whole bankroll on one race"
     assert "推奨投入目安" in place_only_prompt_text, "prompt should explicitly provide day-budget spending guidance"
 
