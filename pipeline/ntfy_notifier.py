@@ -131,7 +131,10 @@ def _select_share_candidate(scope_key, run_id):
     resolved_run_id = str(run_id or run_row.get("run_id") or "").strip()
     location = str(run_row.get("location", "") or "").strip()
     race_no = web_app.report_race_no_text(run_row.get("race_id")) if hasattr(web_app, "report_race_no_text") else ""
-    header_body = " ".join(part for part in (location, race_no) if str(part or "").strip())
+    venue = "".join(location.split())
+    if venue and not venue.endswith("競馬"):
+        venue = f"{venue}競馬"
+    header_body = " ".join(part for part in (venue, race_no) if str(part or "").strip())
     header = f"#{header_body}" if header_body else ""
     marks_text = _build_v6_marks_text(resolved_scope_key, resolved_run_id, run_row)
     public_url = _build_public_race_url(run_row)
