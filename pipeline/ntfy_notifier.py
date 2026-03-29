@@ -55,6 +55,18 @@ def build_x_intent_url(share_text):
     return f"https://twitter.com/intent/tweet?text={quote(str(share_text or ''), safe='')}"
 
 
+def _build_public_race_url(run_row):
+    row = dict(run_row or {})
+    run_id = str(row.get("run_id", "") or "").strip()
+    if not run_id:
+        return f"{_public_site_url()}{_public_base_path()}"
+    race_url = f"{_public_site_url()}{_public_base_path()}/race/{quote(run_id, safe='')}"
+    race_date = str(row.get("date", "") or row.get("race_date", "") or "").strip()
+    if race_date:
+        return f"{race_url}?date={quote(race_date, safe='')}"
+    return race_url
+
+
 def _basic_auth_header(username, password):
     raw = f"{username}:{password}".encode("utf-8")
     return "Basic " + base64.b64encode(raw).decode("ascii")
@@ -114,18 +126,31 @@ def _select_share_candidate(scope_key, run_id):
     run_row = web_app.resolve_run(run_id, scope_key)
     if run_row is None:
         raise LookupError(f"run row not found for run_id={run_id}")
+
     resolved_scope_key = web_app.normalize_scope_key(scope_key) or str(scope_key or "").strip()
     resolved_run_id = str(run_id or run_row.get("run_id") or "").strip()
     location = str(run_row.get("location", "") or "").strip()
     race_no = web_app.report_race_no_text(run_row.get("race_id")) if hasattr(web_app, "report_race_no_text") else ""
-    header = " ".join(part for part in (location, race_no) if str(part or "").strip())
+    header_body = " ".join(part for part in (location, race_no) if str(part or "").strip())
+    header = f"#{header_body}" if header_body else ""
     marks_text = _build_v6_marks_text(resolved_scope_key, resolved_run_id, run_row)
-    share_lines = [line for line in (header, "極 KIWAMI", marks_text) if str(line or "").strip()]
-    share_text = "\n".join(share_lines).strip()
+    public_url = _build_public_race_url(run_row)
+    share_text = "\n".join(
+        [
+            header,
+            "",
+            marks_text,
+            "",
+            "全モデル・全買い目はこちら（無料公開中）",
+            public_url,
+            "#いかいもAI競馬 #競馬",
+        ]
+    ).strip()
     return {
         "engine": "v6_kiwami",
         "run_row": dict(run_row or {}),
-        "share_text": str(share_text or "").strip(),
+        "share_text": share_text,
+        "public_url": public_url,
     }
 
 
@@ -146,6 +171,7 @@ def build_ntfy_share_notification(scope_key, run_id):
         "engine": str(candidate.get("engine", "") or "").strip(),
         "share_text": share_text,
         "intent_url": build_x_intent_url(share_text),
+        "public_url": str(candidate.get("public_url", "") or "").strip(),
         "workspace_url": build_workspace_url(scope_key, run_id),
         "title": title,
     }
@@ -172,7 +198,7 @@ def publish_ntfy_share_notification(scope_key, run_id):
         "topic": topic,
         "message": notification["share_text"],
         "title": notification["title"],
-        "click": notification["workspace_url"],
+        "click": notification["public_url"] or notification["workspace_url"],
         "tags": ["horse_racing", "signal_strength"],
         "actions": [
             {
@@ -225,6 +251,7 @@ def publish_ntfy_share_notification(scope_key, run_id):
         "engine": notification["engine"],
         "share_text": notification["share_text"],
         "intent_url": notification["intent_url"],
+        "public_url": notification["public_url"],
         "workspace_url": notification["workspace_url"],
         "topic": topic,
         "message_id": str(payload.get("id", "") or "").strip(),
