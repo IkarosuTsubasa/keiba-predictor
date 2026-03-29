@@ -9,6 +9,7 @@ from llm.gemini_policy import (
     _make_prompt,
     _sanitize_output,
     call_gemini_policy,
+    get_prompt_policy_lock_info,
     get_last_call_meta,
     get_policy_cache_key,
 )
@@ -330,6 +331,9 @@ def _clone_with_budget(policy_input, bankroll_yen, race_budget_yen):
 def main():
     os.environ["GEMINI_POLICY_MOCK"] = "1"
     os.environ.pop("GEMINI_API_KEY", None)
+    prompt_lock_info = get_prompt_policy_lock_info()
+    assert str(prompt_lock_info.get("version", "")) == "gemini_policy_lock_v1", "prompt policy lock version should stay stable"
+    assert str(prompt_lock_info.get("sha256", "")) == "527efc104208a0cb4d4a537a8b491f9230c55399d798b6bdbfa8c3dd2f254389", "protected prompt policy blocks changed; require explicit user approval"
 
     policy_input = _build_smoke_input()
     input_2000 = _clone_with_budget(policy_input, 2000, 800)
