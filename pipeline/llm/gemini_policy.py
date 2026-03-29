@@ -1325,6 +1325,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     planned_races_for_day = int(race_context.get("planned_races_for_day", 0) or 0)
     remaining_races_for_day = int(race_context.get("remaining_races_for_day", 0) or 0)
     race_sequence_for_day = int(race_context.get("race_sequence_for_day", 0) or 0)
+    bankroll_yen = int(constraints.bankroll_yen or 0)
+    race_budget_yen = int(constraints.race_budget_yen or 0)
     daily_plan_lines = []
     if budget_scope_note:
         daily_plan_lines.append(f"- {budget_scope_note}")
@@ -1337,6 +1339,20 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
     daily_plan_text = "\n".join(daily_plan_lines)
     if daily_plan_text:
         daily_plan_text += "\n"
+    remaining_for_budget = max(1, remaining_races_for_day or planned_races_for_day or 1)
+    suggested_race_spend_yen = 0
+    if bankroll_yen > 0:
+        suggested_race_spend_yen = max(100, (bankroll_yen // remaining_for_budget // 100) * 100)
+        if race_budget_yen > 0:
+            suggested_race_spend_yen = min(suggested_race_spend_yen, race_budget_yen)
+    bankroll_guidance_lines = [
+        "- bankroll_yen は当日全体の運用資金であり、1レースで使い切ってはいけない",
+    ]
+    if remaining_for_budget > 1:
+        bankroll_guidance_lines.append(f"- 今日はこのレースを含めて残り{remaining_for_budget}レース想定なので、後半レース用の資金を必ず残すこと")
+    if suggested_race_spend_yen > 0:
+        bankroll_guidance_lines.append(f"- このレースの推奨投入目安は {suggested_race_spend_yen}円前後で、強い根拠がない限りそれを大きく超えないこと")
+    bankroll_guidance_text = "\n".join(bankroll_guidance_lines) + "\n"
     return (
         "あなたは量化モデル主導の公開用馬券補助AIです。\n"
         "レース方向の判断は量化モデルが担当し、あなたはその方向を説明し、候補内で印と購入配分を整える役目です。\n"
@@ -1357,7 +1373,8 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- まずユーザーが納得しやすい命中率を優先し、その上で買い方の個性を出すこと\n"
         "- 一時的な高配当狙いより、継続して当たりやすい構成を優先すること\n"
         "- 馬連や三連複は回収期待があっても命中率が低くなりやすいので、その弱点を必ず考慮すること\n"
-        "- 的中率を無視して高配当券種ばかり選ぶのは禁止です\n\n"
+        "- 的中率を無視して高配当券種ばかり選ぶのは禁止です\n"
+        "- 当日は十数レースを戦う前提なので、この1レースで資金を使い切らないこと\n\n"
 
         "== 判断基準 ==\n"
         "1. まず model_summary.primary_predictor と marks_top5 を見て、今回の量化主軸を確認すること\n"
@@ -1387,14 +1404,14 @@ def _make_prompt(input_obj: RacePolicyInput) -> str:
         "- wide / place / win で十分戦える局面では、無理に低命中券種へ寄せないこと\n\n"
 
         "== 制約 ==\n"
-        f"- 現在の残り本金: {int(constraints.bankroll_yen)}円\n"
-        f"- このレースの上限: {int(constraints.race_budget_yen)}円\n"
+        f"- 現在の残り本金: {bankroll_yen}円\n"
+        f"- このレースの上限: {race_budget_yen}円\n"
         f"{daily_plan_text}"
         f"- 最大購入点数: {int(constraints.max_tickets_per_race)}\n"
         "- 購入単位は100円刻み\n"
         "- selected_tickets の id は candidate_tickets の id と完全一致であること\n"
         "- selected_tickets の合計金額は race_budget_yen 以下\n"
-        "- bankroll_yen は上限管理用の情報であり、終日配分の都合で命中率を落とさないこと\n"
+        f"{bankroll_guidance_text}"
         "- 主方案はまず命中率重視で構成すること\n"
         "- 挑戦的な一枚を入れる場合でも、主方案が成立した後の補助1点までに留めること\n"
         "- 挑戦票の stake_yen は主方案の各票より大きくしてはいけない\n"

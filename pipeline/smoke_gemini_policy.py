@@ -363,6 +363,8 @@ def main():
     assert "portfolio_summary は買いすぎ防止の補助情報" in place_only_prompt_text, "prompt should explicitly limit portfolio_summary to overbet prevention"
     assert "挑戦的な一枚を入れる場合でも、主方案が成立した後の補助1点までに留めること" in place_only_prompt_text, "prompt should explicitly limit challenge tickets"
     assert "量化モデルの本命は『最も3着内に入りやすい主軸候補』" in place_only_prompt_text, "prompt should explicitly avoid treating quantitative favorite as fixed winner"
+    assert "1レースで使い切ってはいけない" in place_only_prompt_text, "prompt should explicitly ban spending the whole bankroll on one race"
+    assert "推奨投入目安" in place_only_prompt_text, "prompt should explicitly provide day-budget spending guidance"
 
     out1 = call_gemini_policy(
         input=input_2000,
