@@ -158,20 +158,10 @@ function roundToFiveMinutes(date) {
 }
 
 function createDefaultCreateJobForm() {
-  const now = roundToFiveMinutes(new Date());
   return {
-    scope_key: "local",
-    race_id: "",
-    race_name: "",
-    location: "",
-    race_date: formatDateInputValue(now),
-    scheduled_off_time: formatDateTimeLocalValue(now),
-    target_distance: "1600",
-    target_track_condition: "\u826f",
+    archive_file: null,
     lead_minutes: "30",
     notes: "",
-    kachiuma_file: null,
-    shutuba_file: null,
   };
 }
 
@@ -356,6 +346,57 @@ function CreateJobForm({ onSubmit, busy, resetToken = 0 }) {
           </button>
           {parseMessage ? <span>{parseMessage}</span> : null}
         </div>
+        <div className="admin-inline-form__actions">
+          <button type="submit" disabled={busy}>
+            {busy ? "作成中..." : "作成"}
+          </button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
+function ZipCreateJobForm({ onSubmit, busy, resetToken = 0 }) {
+  const [form, setForm] = useState(createDefaultCreateJobForm);
+
+  useEffect(() => {
+    setForm(createDefaultCreateJobForm());
+  }, [resetToken]);
+
+  function updateField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  return (
+    <details className="admin-tool-panel admin-tool-panel--primary" open>
+      <summary>タスク作成</summary>
+      <div className="admin-tool-panel__body admin-tool-panel__body--primary">
+        <p>race_id.zip をアップロードすると、cron がレース情報を自動取得して補完します。</p>
+      </div>
+      <form
+        className="admin-inline-form admin-inline-form--primary"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(form);
+        }}
+      >
+        <label className="admin-inline-form__wide">
+          <span>レースZIP</span>
+          <input
+            key={`task-archive-${resetToken}`}
+            type="file"
+            accept=".zip,application/zip"
+            onChange={(event) => updateField("archive_file", event.target.files?.[0] || null)}
+          />
+        </label>
+        <label>
+          <span>予測開始前(分)</span>
+          <input type="number" value={form.lead_minutes} onChange={(event) => updateField("lead_minutes", event.target.value)} />
+        </label>
+        <label className="admin-inline-form__wide">
+          <span>メモ</span>
+          <textarea rows={3} value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
+        </label>
         <div className="admin-inline-form__actions">
           <button type="submit" disabled={busy}>
             {busy ? "作成中..." : "作成"}
@@ -564,7 +605,21 @@ function JobCard({ job, onAction, busyAction }) {
         {job.notes ? <span>メモ {job.notes}</span> : null}
       </div>
 
+      {job.meta_error || job.meta_source_url ? (
+        <div className="admin-job-card__meta admin-job-card__meta--stack">
+          {job.meta_error ? <span>取得エラー {job.meta_error}</span> : null}
+          {job.meta_source_url ? (
+            <a href={job.meta_source_url} target="_blank" rel="noreferrer">
+              netkeiba
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="admin-job-card__actions">
+        <button type="button" disabled={busy} onClick={() => onAction("fetch_info", job)}>
+          {busy ? "取得中..." : "情報取得"}
+        </button>
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
           {busy ? "処理中..." : "今すぐ実行"}
         </button>
@@ -688,6 +743,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     try {
       await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
       const messages = {
+        fetch_info: `タスク ${jobId} の情報を取得しました。`,
         process_now: `タスク ${jobId} の処理を開始しました。`,
         delete: `タスク ${jobId} を削除しました。`,
         edit: `タスク ${jobId} を更新しました。`,
@@ -749,6 +805,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
   const summaryItems = useMemo(() => {
     const summary = state.data?.summary || {};
     return [
+      { key: "waiting_input_info", label: "情報補完待ち", value: summary.waiting_input_info || 0, tone: "neutral" },
       { key: "total", label: "総数", value: summary.total || 0, tone: "neutral" },
       { key: "scheduled", label: "予定", value: summary.scheduled || 0, tone: "neutral" },
       { key: "processing", label: "処理中", value: summary.processing || 0, tone: "active" },
@@ -809,7 +866,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         </section>
 
         <section className="admin-tool-hero">
-          <CreateJobForm
+          <ZipCreateJobForm
             busy={busyAction === "create"}
             resetToken={createFormResetTick}
             onSubmit={(payload) => runToolbarAction("create", () => postForm("/api/admin/jobs/create", payload))}

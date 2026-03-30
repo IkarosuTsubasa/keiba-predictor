@@ -10,6 +10,7 @@ ARTIFACT_DIR_NAME = "race_job_artifacts"
 REQUIRED_ARTIFACT_TYPES = ("kachiuma", "shutuba")
 STATUS_FLOW = (
     "uploaded",
+    "waiting_input_info",
     "scheduled",
     "queued_process",
     "processing",
@@ -33,6 +34,11 @@ def _job_step_field(step_name, suffix):
 def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
     row.setdefault("race_name", "")
+    row.setdefault("race_number", "")
+    row.setdefault("meta_source_url", "")
+    row.setdefault("meta_fetched_at", "")
+    row.setdefault("meta_error", "")
+    row.setdefault("meta_retry_count", "0")
     row.setdefault("ntfy_notify_status", "")
     row.setdefault("ntfy_notify_run_id", "")
     row.setdefault("ntfy_notify_engine", "")
@@ -196,6 +202,8 @@ def derive_job_display_state(job):
         return {"code": "ready", "label": "处理完成", "tone": "good"}
     if row.get("predictor_status") == "succeeded":
         return {"code": "predictor_ready", "label": "预测已生成", "tone": "good"}
+    if legacy_status == "waiting_input_info":
+        return {"code": "waiting_input_info", "label": "情報補完待ち", "tone": "muted"}
     if legacy_status == "scheduled":
         return {"code": "scheduled", "label": "已排程", "tone": "muted"}
     if legacy_status == "uploaded":
@@ -297,12 +305,28 @@ def compute_initial_status(job):
     row = dict(job or {})
     artifact_map = _artifact_index(row.get("artifacts", []))
     has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
+    scope_key = str(row.get("scope_key", "") or "").strip()
     off_dt = _parse_dt(row.get("scheduled_off_time", ""))
-    if has_required and off_dt:
+    target_distance = parse_int_text(row.get("target_distance", ""))
+    track_condition = str(row.get("target_track_condition", "") or "").strip()
+    if has_required and scope_key and off_dt and target_distance and track_condition:
         return "scheduled"
     if has_required:
-        return "uploaded"
+        return "waiting_input_info"
     return "uploaded"
+
+
+def parse_int_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    digits = re.sub(r"\D", "", text)
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
 
 
 def _derive_process_after_dt(job):
@@ -362,6 +386,7 @@ def create_job(
         "race_id": str(race_id or "").strip(),
         "scope_key": str(scope_key or "").strip(),
         "race_name": str(race_name or "").strip(),
+        "race_number": "",
         "location": str(location or "").strip(),
         "race_date": str(race_date or "").strip(),
         "scheduled_off_time": _dt_text(off_dt),
@@ -389,6 +414,10 @@ def create_job(
         "error_message": "",
         "last_process_output": "",
         "last_settlement_output": "",
+        "meta_source_url": "",
+        "meta_fetched_at": "",
+        "meta_error": "",
+        "meta_retry_count": "0",
         "ntfy_notify_status": "",
         "ntfy_notify_run_id": "",
         "ntfy_notify_engine": "",
@@ -438,9 +467,9 @@ def scan_due_jobs(base_dir, now_text=""):
         job = initialize_job_step_fields(job)
         status = str(job.get("status", "")).strip().lower()
         expected_status = compute_initial_status(job)
-        if status == "uploaded" and expected_status == "scheduled":
-            job["status"] = "scheduled"
-            status = "scheduled"
+        if status == "uploaded" and expected_status in ("waiting_input_info", "scheduled"):
+            job["status"] = expected_status
+            status = expected_status
             dirty = True
         process_dt = _parse_dt(job.get("process_after_time", ""))
         if process_dt is None:
@@ -476,13 +505,15 @@ def scan_due_diagnostics(base_dir, now_text=""):
         artifact_map = _artifact_index(row.get("artifacts", []))
         has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
         expected_status = compute_initial_status(row)
-        effective_status = "scheduled" if status == "uploaded" and expected_status == "scheduled" else status
+        effective_status = expected_status if status == "uploaded" and expected_status in ("waiting_input_info", "scheduled") else status
         process_dt = _parse_dt(row.get("process_after_time", ""))
         derived_process_dt = _derive_process_after_dt(row) if process_dt is None else process_dt
         reason = "eligible"
         if effective_status != "scheduled":
             if not has_required:
                 reason = "missing_artifacts"
+            elif effective_status == "waiting_input_info":
+                reason = "wait_input_info"
             elif not _parse_dt(row.get("scheduled_off_time", "")):
                 reason = "missing_off_time"
             else:

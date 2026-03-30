@@ -64,6 +64,7 @@ from race_job_store import (
     create_job as create_race_job,
     delete_job as delete_race_job,
     derive_job_display_state as derive_race_job_display_state,
+    get_job as get_race_job,
     hydrate_job_step_states as hydrate_race_job_step_states,
     initialize_job_step_fields as initialize_race_job_step_fields,
     load_jobs as load_race_jobs,
@@ -174,6 +175,8 @@ def run_due_jobs_once():
         scan_due_race_jobs=scan_due_race_jobs,
         scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
         load_race_jobs=load_race_jobs,
+        update_race_job=update_race_job,
+        compute_race_job_initial_status=compute_race_job_initial_status,
     )
 
 
@@ -2704,6 +2707,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
     summary = {
         "total": len(jobs),
         "uploaded": 0,
+        "waiting_input_info": 0,
         "scheduled": 0,
         "processing": 0,
         "ready": 0,
@@ -2717,6 +2721,8 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
         status = str(hydrated.get("status", "") or "").strip().lower()
         if status == "uploaded":
             summary["uploaded"] += 1
+        elif status == "waiting_input_info":
+            summary["waiting_input_info"] += 1
         elif status == "scheduled":
             summary["scheduled"] += 1
         elif status in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
@@ -2754,6 +2760,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "scope_label": _scope_display_name(hydrated.get("scope_key", "")),
                 "race_id": str(hydrated.get("race_id", "") or "").strip(),
                 "race_name": str(hydrated.get("race_name", "") or "").strip(),
+                "race_number": str(hydrated.get("race_number", "") or "").strip(),
                 "race_date": str(hydrated.get("race_date", "") or "").strip(),
                 "location": str(hydrated.get("location", "") or "").strip(),
                 "scheduled_off_time": str(hydrated.get("scheduled_off_time", "") or "").strip(),
@@ -2771,6 +2778,10 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "ntfy_notified_at": str(hydrated.get("ntfy_notified_at", "") or "").strip(),
                 "ntfy_notify_error": str(hydrated.get("ntfy_notify_error", "") or "").strip(),
                 "notes": str(hydrated.get("notes", "") or "").strip(),
+                "meta_source_url": str(hydrated.get("meta_source_url", "") or "").strip(),
+                "meta_fetched_at": str(hydrated.get("meta_fetched_at", "") or "").strip(),
+                "meta_error": str(hydrated.get("meta_error", "") or "").strip(),
+                "meta_retry_count": str(hydrated.get("meta_retry_count", "") or "").strip(),
                 "step_badges": step_badges,
                 "process_log": _race_job_process_log_entries(hydrated),
             }
@@ -3036,6 +3047,79 @@ def _import_history_zip(base_dir, archive_bytes, overwrite=False):
         archive_bytes=archive_bytes,
         overwrite=overwrite,
     )
+
+
+def _extract_task_archive_members(archive_bytes):
+    found = {}
+    with zipfile.ZipFile(BytesIO(archive_bytes), "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            raw_name = str(info.filename or "").replace("\\", "/").strip("/")
+            base_name = Path(raw_name).name.lower()
+            if base_name == "kachiuma.csv":
+                found["kachiuma"] = {
+                    "filename": Path(raw_name).name,
+                    "content": zf.read(info),
+                }
+            elif base_name == "shutuba.csv":
+                found["shutuba"] = {
+                    "filename": Path(raw_name).name,
+                    "content": zf.read(info),
+                }
+    missing = [name for name in ("kachiuma", "shutuba") if name not in found]
+    if missing:
+        raise ValueError(f"archive missing files: {', '.join(missing)}")
+    return found
+
+
+def _create_job_from_task_archive(*, archive_bytes, archive_filename, lead_minutes, notes):
+    race_id = normalize_race_id(Path(str(archive_filename or "").strip()).stem)
+    if not race_id:
+        raise ValueError("archive filename must contain race_id")
+    members = _extract_task_archive_members(archive_bytes)
+    job = create_race_job(
+        BASE_DIR,
+        race_id=race_id,
+        scope_key="",
+        race_name="",
+        location="",
+        race_date="",
+        scheduled_off_time="",
+        target_surface="",
+        target_distance="",
+        target_track_condition="",
+        lead_minutes=lead_minutes,
+        notes=notes,
+        artifacts=[],
+    )
+    try:
+        artifact_payloads = []
+        for artifact_type in ("kachiuma", "shutuba"):
+            member = members[artifact_type]
+            artifact_payloads.append(
+                save_race_job_artifact(
+                    BASE_DIR,
+                    job["job_id"],
+                    artifact_type,
+                    member["filename"],
+                    member["content"],
+                )
+            )
+
+        def _attach_artifacts(row, now_text):
+            row["artifacts"] = artifact_payloads
+            row["status"] = compute_race_job_initial_status(row)
+            row["updated_at"] = now_text
+
+        updated = update_race_job(BASE_DIR, job["job_id"], _attach_artifacts)
+    except Exception:
+        try:
+            delete_race_job(BASE_DIR, job["job_id"])
+        except Exception:
+            pass
+        raise
+    return updated or job
 
 
 @app.get("/", include_in_schema=False)
@@ -3530,6 +3614,50 @@ async def admin_jobs_process_now_api(request: Request):
     )
 
 
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/fetch_info")
+async def admin_jobs_fetch_info_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    job_id = str((payload or {}).get("job_id", "") or "").strip()
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    try:
+        job = web_admin_tasks.autofill_job_input_info(
+            base_dir=BASE_DIR,
+            job_id=job_id,
+            get_race_job=get_race_job,
+            update_race_job=update_race_job,
+            compute_initial_status=compute_race_job_initial_status,
+        )
+    except LookupError:
+        return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+    except Exception as exc:
+        error_text = str(exc or "").strip()
+
+        def _mark_error(row, now_text):
+            try:
+                retry_count = int(str(row.get("meta_retry_count", "0") or "0").strip() or "0")
+            except ValueError:
+                retry_count = 0
+            row["meta_retry_count"] = str(retry_count + 1)
+            row["meta_error"] = error_text
+            row["meta_fetched_at"] = now_text
+
+        update_race_job(BASE_DIR, job_id, _mark_error)
+        return JSONResponse({"ok": False, "error": error_text, "job_id": job_id}, status_code=500)
+    return JSONResponse(
+        {
+            "ok": True,
+            "job_id": job_id,
+            "status": str((job or {}).get("status", "") or "").strip(),
+            "scope_key": str((job or {}).get("scope_key", "") or "").strip(),
+            "race_name": str((job or {}).get("race_name", "") or "").strip(),
+        }
+    )
+
+
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/delete")
 async def admin_jobs_delete_api(request: Request):
     supplied = _admin_supplied_token(request)
@@ -3604,8 +3732,10 @@ async def admin_jobs_edit_api(request: Request):
         row["notes"] = notes
         row["process_after_time"] = _recompute_process_after_text(scheduled_off_time, lead_value)
         current_status = str(row.get("status", "") or "").strip().lower()
-        if current_status in ("uploaded", "scheduled"):
+        if current_status in ("uploaded", "waiting_input_info", "scheduled"):
             row["status"] = compute_race_job_initial_status(row)
+            if row["status"] == "scheduled":
+                row["meta_error"] = ""
         row["updated_at"] = now_text
 
     job = update_race_job(BASE_DIR, job_id, _edit_job)
@@ -3645,12 +3775,46 @@ async def admin_jobs_create_api(
     target_track_condition: str = Form(""),
     lead_minutes: str = Form("30"),
     notes: str = Form(""),
+    archive_file: UploadFile = File(None),
     kachiuma_file: UploadFile = File(None),
     shutuba_file: UploadFile = File(None),
 ):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+
+    if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
+        kachiuma_missing = True
+    else:
+        kachiuma_missing = False
+    if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
+        shutuba_missing = True
+    else:
+        shutuba_missing = False
+    try:
+        lead_value = int(str(lead_minutes or "30").strip() or "30")
+    except ValueError:
+        lead_value = 30
+
+    archive_name = str(getattr(archive_file, "filename", "") or "").strip()
+    if archive_file is not None and archive_name:
+        if not archive_name.lower().endswith(".zip"):
+            return JSONResponse({"ok": False, "error": "archive_file must be zip"}, status_code=400)
+        try:
+            archive_bytes = await archive_file.read()
+            job = _create_job_from_task_archive(
+                archive_bytes=archive_bytes,
+                archive_filename=archive_name,
+                lead_minutes=lead_value,
+                notes=notes,
+            )
+        except zipfile.BadZipFile:
+            return JSONResponse({"ok": False, "error": "invalid zip archive"}, status_code=400)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": True, "job_id": str(job.get("job_id", "") or "").strip()})
 
     race_id = normalize_race_id(race_id)
     scope_norm = normalize_scope_key(scope_key)
@@ -3670,14 +3834,10 @@ async def admin_jobs_create_api(
     target_track_condition = str(target_track_condition or "").strip()
     if target_track_condition not in ("良", "稍重", "重", "不良"):
         return JSONResponse({"ok": False, "error": "invalid target_track_condition"}, status_code=400)
-    if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
+    if kachiuma_missing:
         return JSONResponse({"ok": False, "error": "kachiuma_file required"}, status_code=400)
-    if shutuba_file is None or not str(getattr(shutuba_file, "filename", "") or "").strip():
+    if shutuba_missing:
         return JSONResponse({"ok": False, "error": "shutuba_file required"}, status_code=400)
-    try:
-        lead_value = int(str(lead_minutes or "30").strip() or "30")
-    except ValueError:
-        lead_value = 30
 
     target_surface = _target_surface_from_scope(scope_norm)
     artifact_payloads = []
@@ -3856,6 +4016,8 @@ def internal_run_due(request: Request):
         scan_due_race_jobs=scan_due_race_jobs,
         scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
         load_race_jobs=load_race_jobs,
+        update_race_job=update_race_job,
+        compute_race_job_initial_status=compute_race_job_initial_status,
     )
 
 
