@@ -3775,7 +3775,7 @@ async def admin_jobs_create_api(
     target_track_condition: str = Form(""),
     lead_minutes: str = Form("30"),
     notes: str = Form(""),
-    archive_file: UploadFile = File(None),
+    archive_file: list[UploadFile] = File(None),
     kachiuma_file: UploadFile = File(None),
     shutuba_file: UploadFile = File(None),
 ):
@@ -3796,25 +3796,50 @@ async def admin_jobs_create_api(
     except ValueError:
         lead_value = 30
 
-    archive_name = str(getattr(archive_file, "filename", "") or "").strip()
-    if archive_file is not None and archive_name:
-        if not archive_name.lower().endswith(".zip"):
-            return JSONResponse({"ok": False, "error": "archive_file must be zip"}, status_code=400)
-        try:
-            archive_bytes = await archive_file.read()
-            job = _create_job_from_task_archive(
-                archive_bytes=archive_bytes,
-                archive_filename=archive_name,
-                lead_minutes=lead_value,
-                notes=notes,
-            )
-        except zipfile.BadZipFile:
-            return JSONResponse({"ok": False, "error": "invalid zip archive"}, status_code=400)
-        except ValueError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-        return JSONResponse({"ok": True, "job_id": str(job.get("job_id", "") or "").strip()})
+    archive_files = [
+        item for item in list(archive_file or []) if str(getattr(item, "filename", "") or "").strip()
+    ]
+    if archive_files:
+        created = []
+        errors = []
+        for upload in archive_files:
+            archive_name = str(getattr(upload, "filename", "") or "").strip()
+            if not archive_name.lower().endswith(".zip"):
+                errors.append({"filename": archive_name, "error": "archive_file must be zip"})
+                continue
+            try:
+                archive_bytes = await upload.read()
+                job = _create_job_from_task_archive(
+                    archive_bytes=archive_bytes,
+                    archive_filename=archive_name,
+                    lead_minutes=lead_value,
+                    notes=notes,
+                )
+                created.append(
+                    {
+                        "filename": archive_name,
+                        "job_id": str((job or {}).get("job_id", "") or "").strip(),
+                        "race_id": str((job or {}).get("race_id", "") or "").strip(),
+                    }
+                )
+            except zipfile.BadZipFile:
+                errors.append({"filename": archive_name, "error": "invalid zip archive"})
+            except ValueError as exc:
+                errors.append({"filename": archive_name, "error": str(exc)})
+            except Exception as exc:
+                errors.append({"filename": archive_name, "error": str(exc)})
+        if not created:
+            status_code = 400 if errors else 500
+            return JSONResponse({"ok": False, "error": "no archive tasks created", "errors": errors}, status_code=status_code)
+        return JSONResponse(
+            {
+                "ok": True,
+                "job_id": str((created[0] or {}).get("job_id", "") or "").strip(),
+                "created_count": len(created),
+                "created_jobs": created,
+                "errors": errors,
+            }
+        )
 
     race_id = normalize_race_id(race_id)
     scope_norm = normalize_scope_key(scope_key)

@@ -159,7 +159,7 @@ function roundToFiveMinutes(date) {
 
 function createDefaultCreateJobForm() {
   return {
-    archive_file: null,
+    archive_file: [],
     lead_minutes: "30",
     notes: "",
   };
@@ -385,8 +385,9 @@ function ZipCreateJobForm({ onSubmit, busy, resetToken = 0 }) {
           <input
             key={`task-archive-${resetToken}`}
             type="file"
+            multiple
             accept=".zip,application/zip"
-            onChange={(event) => updateField("archive_file", event.target.files?.[0] || null)}
+            onChange={(event) => updateField("archive_file", Array.from(event.target.files || []))}
           />
         </label>
         <label>
@@ -710,6 +711,17 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     const formData = new FormData();
     Object.entries(values).forEach(([key, value]) => {
       if (value === undefined || value === null || value === "") return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (item === undefined || item === null || item === "") return;
+          if (typeof File !== "undefined" && item instanceof File) {
+            formData.append(key, item);
+          } else {
+            formData.append(key, String(item));
+          }
+        });
+        return;
+      }
       if (typeof File !== "undefined" && value instanceof File) {
         formData.append(key, value);
       } else if (typeof value === "boolean") {
@@ -788,6 +800,10 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         setFlashMessage(`${data.target_date_label || data.target_date || "対象日"} の日報を保存しました。`);
       } else if (kind === "create") {
         setFlashMessage(`タスク ${data.job_id || ""} を作成しました。`);
+        const createdCount = Number(data?.created_count || 0);
+        if (createdCount > 1) {
+          setFlashMessage(`${createdCount} 件のタスクを作成しました。`);
+        }
         setCreateFormResetTick((value) => value + 1);
       } else if (kind === "import_archive") {
         setFlashMessage(`アーカイブを取り込みました。書き込み ${data.written || 0} 件、スキップ ${data.skipped || 0} 件。`);
