@@ -64,6 +64,53 @@ export function buildTargetDateContext(data) {
   };
 }
 
+function extractClockText(value) {
+  const matched = safeText(value).match(/(\d{2}:\d{2})/);
+  return matched ? matched[1] : "";
+}
+
+function buildNextPredictionPublishLabel(race) {
+  const estimatedClock = extractClockText(race?.display_body?.message);
+  if (estimatedClock) {
+    return `${estimatedClock}頃公開`;
+  }
+
+  const offClock = extractClockText(race?.scheduled_off_time);
+  if (!offClock) {
+    return "公開時刻調整中";
+  }
+
+  const [hourText, minuteText] = offClock.split(":");
+  const totalMinutes = Math.max(
+    0,
+    Number(hourText || 0) * 60 + Number(minuteText || 0) - 25,
+  );
+  const publishHour = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const publishMinute = String(totalMinutes % 60).padStart(2, "0");
+  return `${publishHour}:${publishMinute}頃公開`;
+}
+
+export function buildNextPredictionSummary(data) {
+  const races = Array.isArray(data?.races) ? data.races : [];
+  const nextRace = races.find(
+    (race) => safeText(race?.display_variant).toLowerCase() === "placeholder",
+  );
+
+  if (!nextRace) {
+    return null;
+  }
+
+  return {
+    label: "次の予測",
+    title:
+      safeText(nextRace?.display_header?.detail_title) ||
+      safeText(nextRace?.display_header?.title) ||
+      safeText(nextRace?.race_title) ||
+      "次回レース",
+    publishLabel: buildNextPredictionPublishLabel(nextRace),
+  };
+}
+
 function parseMainHorse(marksText) {
   const matched = safeText(marksText).match(/◎\s*([0-9]+)/);
   return matched ? matched[1] : "";

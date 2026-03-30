@@ -18,7 +18,7 @@ import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 import TodayBoardContent from "./components/TodayBoardContent";
 import { trackPageView } from "./lib/analytics";
-import { buildTargetDateContext } from "./lib/homepage";
+import { buildNextPredictionSummary, buildTargetDateContext } from "./lib/homepage";
 import { matchRaceIdentifier } from "./lib/publicRace";
 import { HOME_PAGE_TITLE, PUBLIC_PAGE_CONTENT, SITE_NAME } from "./lib/siteCopy";
 
@@ -128,7 +128,7 @@ function useBoardData(search, enabled = true) {
 
 function LoadingState() {
   return (
-    <main className="public-screen-state">
+    <section className="public-screen-state">
       <section className="public-screen-state__panel">
         <span className="public-screen-state__eyebrow">読み込み中</span>
         <div className="public-screen-state__loader" aria-hidden="true">
@@ -140,13 +140,13 @@ function LoadingState() {
         <h1 className="public-screen-state__loading-title">公開レースを読み込んでいます</h1>
         <p>最新の公開データを取得しています。しばらくお待ちください。</p>
       </section>
-    </main>
+    </section>
   );
 }
 
 function ErrorState({ error, onRetry }) {
   return (
-    <main className="public-screen-state">
+    <section className="public-screen-state">
       <section className="public-screen-state__panel public-screen-state__panel--error">
         <span className="public-screen-state__eyebrow">エラー</span>
         <h1>公開情報を表示できませんでした</h1>
@@ -155,7 +155,7 @@ function ErrorState({ error, onRetry }) {
           再読み込み
         </button>
       </section>
-    </main>
+    </section>
   );
 }
 
@@ -170,6 +170,31 @@ function PublicFrame({ headerProps = {}, sideNavProps = {}, children }) {
       <SiteFooter />
     </main>
   );
+}
+
+function resolvePublicSideNavMode({
+  isHistoryPage,
+  isReportsPage,
+  isReportDetail,
+  isRaceDetail,
+  staticPage,
+}) {
+  if (isHistoryPage) {
+    return "history";
+  }
+  if (isReportsPage) {
+    return "reports";
+  }
+  if (isReportDetail) {
+    return "reportDetail";
+  }
+  if (isRaceDetail) {
+    return "detail";
+  }
+  if (staticPage) {
+    return "static";
+  }
+  return "home";
 }
 
 export default function App() {
@@ -234,11 +259,28 @@ export default function App() {
     trackPageView(pagePath, document.title);
   }, [isAdminConsole, isAdminWorkspace, normalizedPath, search]);
 
+  const shouldLoadPublicHeaderData = !isAdminConsole && !isAdminWorkspace;
+  const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
   const { loading, error, data } = useBoardData(
     search,
     !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail,
   );
   const targetDateContext = data ? buildTargetDateContext(data) : null;
+  const nextPredictionSource = headerData || data;
+  const nextPrediction = nextPredictionSource
+    ? buildNextPredictionSummary(nextPredictionSource)
+    : null;
+  const publicHeaderProps = { showFilters: false, nextPrediction };
+  const basePublicSideNavProps = {
+    pathname: normalizedPath,
+    mode: resolvePublicSideNavMode({
+      isHistoryPage,
+      isReportsPage,
+      isReportDetail,
+      isRaceDetail,
+      staticPage,
+    }),
+  };
   const races = data?.races || [];
   const selectedRace = isRaceDetail
     ? races.find((race) => matchRaceIdentifier(race, raceDetailId))
@@ -262,7 +304,7 @@ export default function App() {
   if (staticPage) {
     return (
       <PublicFrame
-        headerProps={{ showFilters: false }}
+        headerProps={publicHeaderProps}
         sideNavProps={{ pathname: normalizedPath, mode: "static" }}
       >
         <div className="public-content-stack">
@@ -275,7 +317,7 @@ export default function App() {
   if (isReportsPage) {
     return (
       <PublicFrame
-        headerProps={{ showFilters: false }}
+        headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
           mode: "reports",
@@ -291,7 +333,7 @@ export default function App() {
   if (isReportDetail) {
     return (
       <PublicFrame
-        headerProps={{ showFilters: false }}
+        headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
           mode: "reportDetail",
@@ -305,22 +347,40 @@ export default function App() {
   }
 
   if (loading) {
-    return <LoadingState />;
+    return (
+      <PublicFrame
+        headerProps={publicHeaderProps}
+        sideNavProps={{
+          ...basePublicSideNavProps,
+          detailHref: isRaceDetail ? `${normalizedPath}${buildQuery(search)}` : "",
+        }}
+      >
+        <LoadingState />
+      </PublicFrame>
+    );
   }
 
   if (error || !data) {
     return (
-      <ErrorState
-        error={error}
-        onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))}
-      />
+      <PublicFrame
+        headerProps={publicHeaderProps}
+        sideNavProps={{
+          ...basePublicSideNavProps,
+          detailHref: isRaceDetail ? `${normalizedPath}${buildQuery(search)}` : "",
+        }}
+      >
+        <ErrorState
+          error={error}
+          onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))}
+        />
+      </PublicFrame>
     );
   }
 
   if (isHistoryPage) {
     return (
       <PublicFrame
-        headerProps={{ showFilters: false }}
+        headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
           mode: "history",
@@ -341,7 +401,7 @@ export default function App() {
     if (!selectedRace) {
       return (
         <PublicFrame
-          headerProps={{ showFilters: false }}
+          headerProps={publicHeaderProps}
           sideNavProps={{
             pathname: normalizedPath,
             mode: "detail",
@@ -373,7 +433,7 @@ export default function App() {
 
     return (
       <PublicFrame
-        headerProps={{ showFilters: false }}
+        headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
           mode: "detail",
@@ -397,7 +457,7 @@ export default function App() {
 
   return (
     <PublicFrame
-      headerProps={{ showFilters: false }}
+      headerProps={publicHeaderProps}
       sideNavProps={{
         pathname: normalizedPath,
         mode: "home",

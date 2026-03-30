@@ -13,11 +13,25 @@ export default function AppHeader({
   search,
   onApplyFilters,
   showFilters = true,
+  nextPrediction = null,
 }) {
+  const innerClassName = [
+    "app-header__inner",
+    showFilters ? "" : "app-header__inner--single",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const brandRowClassName = [
+    "app-header__brand-row",
+    showFilters ? "" : "app-header__brand-row--single",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <header className="app-header">
-      <div className="app-header__inner">
-        <div className="app-header__brand-row">
+      <div className={innerClassName}>
+        <div className={brandRowClassName}>
           <div className="app-header__brand">
             <a className="app-header__brand-link" href="/keiba">
               <img
@@ -39,11 +53,30 @@ export default function AppHeader({
               </a>
             ))}
           </nav>
+
+          {nextPrediction?.title ? (
+            <section
+              className="app-header__next-prediction"
+              aria-label={nextPrediction.label || "次の予測"}
+            >
+              <span className="app-header__next-prediction-label">
+                {nextPrediction.label || "次の予測"}
+              </span>
+              <strong className="app-header__next-prediction-title">
+                {nextPrediction.title}
+              </strong>
+              <span className="app-header__next-prediction-time">
+                {nextPrediction.publishLabel || "公開時刻調整中"}
+              </span>
+            </section>
+          ) : null}
         </div>
 
         {showFilters ? (
-          <div className="app-header__filters">
-            <FilterBar data={data} search={search} onApply={onApplyFilters} />
+          <div className="app-header__aside">
+            <div className="app-header__filters">
+              <FilterBar data={data} search={search} onApply={onApplyFilters} />
+            </div>
           </div>
         ) : null}
       </div>
