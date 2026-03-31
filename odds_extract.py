@@ -240,6 +240,57 @@ def extract_json_payload(text):
         return None
 
 
+def normalize_charset_name(value):
+    raw = str(value or "").strip().strip("\"'").lower()
+    if not raw:
+        return ""
+    aliases = {
+        "x-euc-jp": "euc-jp",
+        "euc_jp": "euc-jp",
+        "shift-jis": "cp932",
+        "shift_jis": "cp932",
+        "windows-31j": "cp932",
+        "ms932": "cp932",
+        "sjis": "cp932",
+    }
+    return aliases.get(raw, raw)
+
+
+def extract_declared_charset(raw):
+    if not raw:
+        return ""
+    head = raw[:4096].decode("latin-1", errors="ignore")
+    patterns = (
+        r"<meta[^>]+charset=['\"]?\s*([A-Za-z0-9._-]+)",
+        r"<meta[^>]+content=['\"][^'\"]*charset=([A-Za-z0-9._-]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, head, flags=re.IGNORECASE)
+        if match:
+            charset = normalize_charset_name(match.group(1))
+            if charset:
+                return charset
+    return ""
+
+
+def build_decode_candidates(raw, response_charset=""):
+    candidates = []
+    ignored = {"iso-8859-1", "latin-1", "latin1"}
+
+    def add(value):
+        charset = normalize_charset_name(value)
+        if charset in ignored:
+            return
+        if charset and charset not in candidates:
+            candidates.append(charset)
+
+    add(extract_declared_charset(raw))
+    add(response_charset)
+    for fallback in ("utf-8", "euc-jp", "cp932"):
+        add(fallback)
+    return candidates
+
+
 def fetch_text_url(url, timeout=15):
     req = Request(
         url,
@@ -253,7 +304,16 @@ def fetch_text_url(url, timeout=15):
     )
     with urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
-    for enc in ("utf-8", "euc-jp", "cp932"):
+        response_charset = normalize_charset_name(getattr(resp, "headers", {}).get_content_charset())
+    declared_charset = extract_declared_charset(raw)
+    if declared_charset:
+        try:
+            return raw.decode(declared_charset)
+        except UnicodeDecodeError:
+            return raw.decode(declared_charset, errors="replace")
+    for enc in build_decode_candidates(raw, response_charset):
+        if enc == declared_charset:
+            continue
         try:
             return raw.decode(enc)
         except UnicodeDecodeError:
