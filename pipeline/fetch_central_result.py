@@ -217,6 +217,29 @@ def parse_payouts(soup):
 
 def decode_html_text(html_text):
     if isinstance(html_text, bytes):
+        head = html_text[:4096]
+        charset_match = re.search(br"charset=['\"]?\s*([A-Za-z0-9_\-]+)", head, flags=re.IGNORECASE)
+        if charset_match:
+            declared = charset_match.group(1).decode("ascii", errors="ignore").strip().lower()
+            charset_aliases = {
+                "shift-jis": "cp932",
+                "shift_jis": "cp932",
+                "sjis": "cp932",
+                "windows-31j": "cp932",
+                "x-sjis": "cp932",
+                "euc-jp": "euc_jp",
+                "euc_jp": "euc_jp",
+                "utf-8": "utf-8",
+                "utf8": "utf-8",
+            }
+            preferred_encoding = charset_aliases.get(declared, declared)
+            try:
+                return html_text.decode(preferred_encoding)
+            except Exception:
+                try:
+                    return html_text.decode(preferred_encoding, errors="replace")
+                except Exception:
+                    pass
         dammit = UnicodeDammit(
             html_text,
             ["utf-8", "euc-jp", "cp932", "shift_jis"],
