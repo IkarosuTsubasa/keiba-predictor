@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import sys
+import zipfile
 
 from run_pipeline import ROOT_DIR, extract_race_id, run_script, sleep_between_scrapes, start_shared_chrome
 
@@ -9,7 +10,7 @@ from run_pipeline import ROOT_DIR, extract_race_id, run_script, sleep_between_sc
 def prompt_value(label):
     value = input(label).strip()
     if not value:
-        print("缺少输入，已取消。")
+        print("必填值不能为空。")
         sys.exit(1)
     return value
 
@@ -22,9 +23,9 @@ def ensure_updated(path, previous_mtime):
     try:
         current_mtime = path.stat().st_mtime
     except OSError as exc:
-        raise RuntimeError(f"{path.name} 无法读取时间戳: {exc}") from exc
+        raise RuntimeError(f"{path.name} 修改时间检查失败: {exc}") from exc
     if current_mtime <= previous_mtime:
-        raise RuntimeError(f"{path.name} 没有更新，请检查抓取是否成功。")
+        raise RuntimeError(f"{path.name} 没有更新，请检查抓取流程是否实际执行。")
 
 
 def save_outputs_to_race_dir(race_id, *paths):
@@ -38,9 +39,17 @@ def save_outputs_to_race_dir(race_id, *paths):
     return race_dir, saved_paths
 
 
+def save_outputs_to_zip(race_id, *paths):
+    zip_path = ROOT_DIR / f"{race_id}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in paths:
+            zf.write(path, arcname=path.name)
+    return zip_path
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="只生成本地的 kachiuma.csv 和 shutuba.csv。"
+        description="只生成本地的 kachiuma.csv 和 shutuba.csv，并最终打包为 race_id.zip。",
     )
     parser.add_argument("--race-url", help="race_card.py 使用的比赛 URL")
     parser.add_argument("--history-url", help="new_history.py 使用的历史检索 URL")
@@ -51,7 +60,7 @@ def main():
 
     race_id = extract_race_id(race_url)
     if not race_id:
-        print("Race URL 里缺少 race_id，已取消。")
+        print("Race URL 里缺少 race_id，无法继续。")
         sys.exit(1)
 
     shutuba_path = ROOT_DIR / "shutuba.csv"
@@ -59,7 +68,7 @@ def main():
     shutuba_before = shutuba_path.stat().st_mtime if shutuba_path.exists() else None
     kachiuma_before = kachiuma_path.stat().st_mtime if kachiuma_path.exists() else None
 
-    print(f"开始生成输入文件，race_id={race_id}")
+    print(f"开始抓取输入 CSV，race_id={race_id}")
     start_shared_chrome()
     scrape_env = {}
     if not os.environ.get("PIPELINE_HORSE_FETCH_WORKERS", "").strip():
@@ -87,13 +96,16 @@ def main():
     ensure_updated(shutuba_path, shutuba_before)
     ensure_updated(kachiuma_path, kachiuma_before)
     race_dir, saved_paths = save_outputs_to_race_dir(race_id, shutuba_path, kachiuma_path)
+    zip_path = save_outputs_to_zip(race_id, shutuba_path, kachiuma_path)
 
     print("")
-    print("已生成以下文件：")
+    print("生成成功:")
     print(f"- {shutuba_path}")
     print(f"- {kachiuma_path}")
     print("")
-    print(f"Race CSV 已复制到: {race_dir}")
+    print(f"ZIP 输出: {zip_path}")
+    print("")
+    print(f"Race CSV 目录副本: {race_dir}")
     for saved_path in saved_paths:
         print(f"- {saved_path}")
 

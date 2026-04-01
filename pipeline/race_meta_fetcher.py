@@ -167,6 +167,29 @@ def fetch_html(url, timeout=30):
 
 def _decode_html_text(html_text):
     if isinstance(html_text, bytes):
+        head = html_text[:4096]
+        charset_match = re.search(br"charset=['\"]?\s*([A-Za-z0-9_\-]+)", head, flags=re.IGNORECASE)
+        if charset_match:
+            declared = charset_match.group(1).decode("ascii", errors="ignore").strip().lower()
+            charset_aliases = {
+                "shift-jis": "cp932",
+                "shift_jis": "cp932",
+                "sjis": "cp932",
+                "windows-31j": "cp932",
+                "x-sjis": "cp932",
+                "euc-jp": "euc_jp",
+                "euc_jp": "euc_jp",
+                "utf-8": "utf-8",
+                "utf8": "utf-8",
+            }
+            preferred_encoding = charset_aliases.get(declared, declared)
+            try:
+                return html_text.decode(preferred_encoding)
+            except Exception:
+                try:
+                    return html_text.decode(preferred_encoding, errors="replace")
+                except Exception:
+                    pass
         dammit = UnicodeDammit(
             html_text,
             ["utf-8", "euc-jp", "cp932", "shift_jis"],
@@ -190,13 +213,23 @@ def _node_text(node):
     return _clean_text(node.get_text(" ", strip=True))
 
 
+def _select_first(root, selectors):
+    if root is None:
+        return None
+    for selector in selectors:
+        node = root.select_one(selector)
+        if node is not None:
+            return node
+    return None
+
+
 def _extract_time_text(text):
     match = re.search(r"(\d{1,2}:\d{2})\s*発走", str(text or ""))
     return match.group(1) if match else ""
 
 
 def _extract_surface_distance(text):
-    match = re.search(r"([芝ダ障])\s*(\d{3,4})m", str(text or ""))
+    match = re.search(r"([芝ダ障])\s*(\d{3,4})[mｍ]", str(text or ""))
     if not match:
         return "", ""
     surface = match.group(1)
@@ -225,6 +258,52 @@ def _extract_location(data2_node, race_id):
     return infer_location_from_race_id(race_id)
 
 
+def _extract_location_from_text(text, race_id):
+    cleaned = _clean_text(text)
+    for venue in sorted(KNOWN_VENUES, key=len, reverse=True):
+        if venue and venue in cleaned:
+            return venue
+    return infer_location_from_race_id(race_id)
+
+
+def _extract_race_name(soup, container, race_id):
+    selectors = (".RaceName", "h1.RaceName", "div.RaceName")
+    for root in (container, soup):
+        text = _node_text(_select_first(root, selectors))
+        if text:
+            return text
+    title_text = _node_text(getattr(soup, "title", None))
+    if title_text:
+        title_text = re.split(r"[|｜]", title_text, maxsplit=1)[0]
+        title_text = re.sub(r"^\d+\s*R\s*", "", title_text, flags=re.IGNORECASE)
+        title_text = _clean_text(title_text)
+        if title_text and title_text != race_number_text(race_id):
+            return title_text
+    return ""
+
+
+def _extract_data_block_text(soup, container, class_name):
+    selector = f".{class_name}"
+    for root in (container, soup):
+        text = _node_text(_select_first(root, (selector,)))
+        if text:
+            return text
+    return ""
+
+
+def _missing_meta_fields(payload):
+    missing = []
+    if not str(payload.get("race_name", "") or "").strip():
+        missing.append("race_name")
+    if not str(payload.get("location", "") or "").strip():
+        missing.append("location")
+    if not str(payload.get("scheduled_off_time", "") or "").strip():
+        missing.append("scheduled_off_time")
+    if not str(payload.get("target_distance", "") or "").strip():
+        missing.append("target_distance")
+    return missing
+
+
 def _scope_key_for_source_and_surface(source, surface):
     source_text = str(source or "").strip().lower()
     if source_text == "local":
@@ -243,21 +322,28 @@ def _target_surface_value(surface):
 def parse_race_page(html_text, race_id="", source="", source_url=""):
     decoded_text = _decode_html_text(html_text)
     soup = BeautifulSoup(decoded_text, "html.parser")
-    container = soup.select_one(".RaceList_Item02")
-    race_name = ""
-    data1_text = ""
+    container = _select_first(soup, (".RaceList_Item02", ".RaceList_Item01", "#RaceList"))
+    page_text = _node_text(soup)
+    race_name = _extract_race_name(soup, container, race_id)
+    data1_text = _extract_data_block_text(soup, container, "RaceData01")
+    data2_text = _extract_data_block_text(soup, container, "RaceData02")
     location = infer_location_from_race_id(race_id)
     if container is not None:
-        race_name = _node_text(container.select_one(".RaceName"))
-        data1_text = _node_text(container.select_one(".RaceData01"))
         location = _extract_location(container.select_one(".RaceData02"), race_id) or location
+    if not location:
+        location = _extract_location_from_text(data2_text or page_text, race_id)
+    combined_text = _clean_text(" ".join(part for part in (data1_text, data2_text, page_text) if part))
     surface_text, distance_text = _extract_surface_distance(data1_text)
+    if not distance_text:
+        surface_text, distance_text = _extract_surface_distance(combined_text)
     source_text = str(source or "").strip().lower() or infer_source_from_race_id(race_id)
-    track_condition = _extract_track_condition(data1_text)
+    track_condition = _extract_track_condition(data1_text or combined_text)
     race_date = _jst_today_text()
     time_text = _extract_time_text(data1_text)
+    if not time_text:
+        time_text = _extract_time_text(combined_text)
     scheduled_off_time = f"{race_date}T{time_text}:00" if time_text else ""
-    return {
+    payload = {
         "race_id": normalize_race_id(race_id),
         "race_name": race_name,
         "location": location,
@@ -271,8 +357,10 @@ def parse_race_page(html_text, race_id="", source="", source_url=""):
         "surface_text": surface_text,
         "source": source_text,
         "source_url": str(source_url or "").strip(),
-        "meta_complete": bool(race_name and location and scheduled_off_time and distance_text),
+        "meta_complete": False,
     }
+    payload["meta_complete"] = not _missing_meta_fields(payload)
+    return payload
 
 
 def fetch_race_meta(race_id, source="", timeout=30):
@@ -292,7 +380,8 @@ def fetch_race_meta(race_id, source="", timeout=30):
             )
             if payload.get("meta_complete"):
                 return payload
-            last_error = RuntimeError(f"race meta incomplete for source={candidate}")
+            missing_fields = ",".join(_missing_meta_fields(payload)) or "unknown"
+            last_error = RuntimeError(f"race meta incomplete for source={candidate} missing={missing_fields}")
         except Exception as exc:
             last_error = exc
     if last_error is not None:
