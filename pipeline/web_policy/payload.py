@@ -318,11 +318,11 @@ def _score_combo_candidate(legs, signal_map, bet_type, odds_used):
 
 def _trim_candidates(candidates):
     quotas = {
-        "win": 8,
-        "place": 10,
-        "wide": 24,
-        "quinella": 10,
-        "exacta": 8,
+        "win": 18,
+        "place": 18,
+        "wide": 100,
+        "quinella": 50,
+        "exacta": 25,
         "trio": 6,
     }
     grouped = {}
