@@ -19,10 +19,24 @@ from race_meta_fetcher import fetch_race_meta
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
 AUTO_SETTLE_DELAY_MINUTES = 20
 JST_OFFSET = timedelta(hours=9)
+RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
+ACTIVE_RUN_DUE_JOB_STATUSES = {
+    "queued_process",
+    "processing",
+    "waiting_v5",
+    "queued_policy",
+    "processing_policy",
+    "queued_settle",
+    "settling",
+}
 
 
 def _run_due_lock_path(base_dir):
     return Path(base_dir) / "data" / "_shared" / "run_due.lock"
+
+
+def _run_due_cleanup_state_path(base_dir):
+    return Path(base_dir) / "data" / "_shared" / RUN_DUE_CLEANUP_STATE_FILE
 
 
 def _acquire_run_due_lock(base_dir):
@@ -63,6 +77,87 @@ def _release_run_due_lock(lock_path):
         lock_path.unlink()
     except FileNotFoundError:
         pass
+
+
+def _load_run_due_cleanup_state(base_dir):
+    state_path = _run_due_cleanup_state_path(base_dir)
+    if not state_path.exists():
+        return {}
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_run_due_cleanup_state(base_dir, payload):
+    state_path = _run_due_cleanup_state_path(base_dir)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(payload or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _active_run_due_jobs(load_race_jobs, base_dir):
+    active_jobs = []
+    for job in list(load_race_jobs(base_dir) or []):
+        status = str(job.get("status", "") or "").strip().lower()
+        if status not in ACTIVE_RUN_DUE_JOB_STATUSES:
+            continue
+        active_jobs.append(
+            {
+                "job_id": str(job.get("job_id", "") or "").strip(),
+                "status": status,
+                "race_id": str(job.get("race_id", "") or "").strip(),
+                "run_id": str(job.get("current_run_id", "") or "").strip(),
+            }
+        )
+    return active_jobs
+
+
+def _maybe_run_daily_cleanup(*, base_dir, load_race_jobs):
+    jst_now = _jst_now()
+    jst_date = jst_now.date().isoformat()
+    active_jobs = _active_run_due_jobs(load_race_jobs, base_dir)
+    if active_jobs:
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "active_jobs_remaining",
+            "jst_date": jst_date,
+            "active_job_count": len(active_jobs),
+            "active_job_ids": [str(item.get("job_id", "") or "").strip() for item in active_jobs[:8]],
+            "active_jobs": active_jobs[:8],
+        }
+
+    cleanup_state = _load_run_due_cleanup_state(base_dir)
+    last_cleanup_jst_date = str(cleanup_state.get("last_cleanup_jst_date", "") or "").strip()
+    if last_cleanup_jst_date == jst_date:
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "already_cleaned_today",
+            "jst_date": jst_date,
+            "last_cleanup_at": str(cleanup_state.get("last_cleanup_at", "") or "").strip(),
+            "last_cleanup_jst_date": last_cleanup_jst_date,
+        }
+
+    from cleanup_runtime_artifacts import cleanup as cleanup_runtime_artifacts
+
+    summary = cleanup_runtime_artifacts()
+    cleanup_record = {
+        "last_cleanup_at": datetime.now().isoformat(timespec="seconds"),
+        "last_cleanup_jst_date": jst_date,
+        "last_cleanup_totals": dict(summary.get("totals", {}) or {}),
+    }
+    _save_run_due_cleanup_state(base_dir, cleanup_record)
+    return {
+        "attempted": True,
+        "ran": True,
+        "reason": "",
+        "jst_date": jst_date,
+        "last_cleanup_at": cleanup_record["last_cleanup_at"],
+        "last_cleanup_jst_date": cleanup_record["last_cleanup_jst_date"],
+        "totals": cleanup_record["last_cleanup_totals"],
+    }
 
 
 def pick_next_process_job_id(*, load_race_jobs):
@@ -328,6 +423,7 @@ def _log_diagnostic_summary(event, items, *, sample_reasons=None):
 
 def _compact_run_due_summary(summary):
     row = dict(summary or {})
+    cleanup = dict(row.get("cleanup", {}) or {})
     return {
         "autofill_count": int(row.get("autofill_count", 0) or 0),
         "queued_count": int(row.get("queued_count", 0) or 0),
@@ -343,8 +439,20 @@ def _compact_run_due_summary(summary):
         "settled_job_ids": list(row.get("settled_job_ids", []) or [])[:8],
         "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
         "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
+        "cleanup": {
+            "attempted": bool(cleanup.get("attempted")),
+            "ran": bool(cleanup.get("ran")),
+            "reason": str(cleanup.get("reason", "") or "").strip(),
+            "jst_date": str(cleanup.get("jst_date", "") or "").strip(),
+            "last_cleanup_at": str(cleanup.get("last_cleanup_at", "") or "").strip(),
+            "active_job_count": int(cleanup.get("active_job_count", 0) or 0),
+            "active_job_ids": list(cleanup.get("active_job_ids", []) or [])[:8],
+            "totals": dict(cleanup.get("totals", {}) or {}),
+        },
         "errors": list(row.get("errors", []) or [])[:5],
     }
+
+
 def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs, update_race_job, compute_race_job_initial_status):
     autofilled_jobs, autofill_errors = _autofill_waiting_input_info_jobs(
         base_dir=base_dir,
@@ -542,6 +650,46 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
             )
             errors.append({"kind": "auto_settle", "job_id": job_id, "error": str(exc)})
 
+    cleanup_summary = {}
+    try:
+        cleanup_summary = _maybe_run_daily_cleanup(
+            base_dir=base_dir,
+            load_race_jobs=load_race_jobs,
+        )
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_cleanup",
+                    "cleanup": cleanup_summary,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    except Exception as exc:
+        cleanup_summary = {
+            "attempted": True,
+            "ran": False,
+            "reason": "cleanup_failed",
+            "error": str(exc),
+        }
+        errors.append({"kind": "cleanup", "error": str(exc)})
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_cleanup_error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
     return {
         "autofill_count": len(autofilled_jobs),
         "autofilled_jobs": autofilled_jobs,
@@ -560,6 +708,7 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
         "auto_settle_candidates": auto_settle_candidates,
         "auto_settle_attempted": auto_settle_attempted,
         "auto_settle_skipped": auto_settle_skipped,
+        "cleanup": cleanup_summary,
         "errors": errors,
     }
 

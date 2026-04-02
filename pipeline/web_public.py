@@ -25,6 +25,7 @@ CONSOLE_BASE_PATH = f"{PUBLIC_BASE_PATH}/console"
 PUBLIC_API_BASE_PATH = f"{PUBLIC_BASE_PATH}/api/public"
 PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
+PUBLIC_APPLE_TOUCH_ICON_PATH = f"{PUBLIC_BASE_PATH}/apple-touch-icon.png"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
 PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
@@ -68,6 +69,7 @@ def prefix_public_html_routes(content=""):
         ('action="/llm_today"', f'action="{PUBLIC_BASE_PATH}"'),
         ('href="/site-icon.png"', f'href="{PUBLIC_SITE_ICON_PATH}"'),
         ('href="/favicon.ico"', f'href="{PUBLIC_FAVICON_PATH}"'),
+        ('href="/apple-touch-icon.png"', f'href="{PUBLIC_APPLE_TOUCH_ICON_PATH}"'),
     )
     for source, target in replacements:
         html_text = html_text.replace(source, target)
@@ -1051,6 +1053,14 @@ def register_public_static_routes(app: FastAPI) -> None:
         if icon_path.exists():
             return FileResponse(icon_path, media_type="image/png")
         raise HTTPException(status_code=404, detail="favicon not found")
+
+    @app.get(PUBLIC_APPLE_TOUCH_ICON_PATH)
+    @app.get("/apple-touch-icon.png")
+    def public_apple_touch_icon():
+        icon_path = PUBLIC_FRONTEND_DIST_DIR / "site-icon.png"
+        if icon_path.exists():
+            return FileResponse(icon_path, media_type="image/png")
+        raise HTTPException(status_code=404, detail="apple touch icon not found")
 
     @app.get(PUBLIC_OG_IMAGE_PATH)
     @app.get("/og.png")
