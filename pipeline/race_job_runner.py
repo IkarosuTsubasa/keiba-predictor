@@ -15,6 +15,7 @@ from urllib.parse import quote
 from local_env import load_local_env
 from prediction_validation import validate_odds_predictions
 from predictor_catalog import list_predictors, snapshot_prediction_path
+from race_meta_fetcher import fetch_race_meta
 from race_job_store import get_job, initialize_job_step_fields, set_job_step_state, update_job
 from surface_scope import get_data_dir, migrate_legacy_data
 from v5_remote_tasks import create_task as create_v5_remote_task
@@ -490,6 +491,71 @@ def _job_race_date(job):
     return str((job or {}).get("race_date", "") or "").strip()
 
 
+def _refresh_job_meta_before_processing(base_path, job_id, job):
+    row = dict(job or {})
+    race_id = str(row.get("race_id", "") or "").strip()
+    scope_key = str(row.get("scope_key", "") or "").strip()
+    if not race_id or not scope_key:
+        return row, {"status": "skipped", "reason": "missing_race_id_or_scope_key"}
+
+    try:
+        payload = fetch_race_meta(race_id, source=scope_key, timeout=30)
+    except Exception as exc:
+        error_text = str(exc or "").strip()
+
+        def _mark_refresh_error(current, now_text):
+            try:
+                retry_count = int(str(current.get("meta_retry_count", "0") or "0").strip() or "0")
+            except ValueError:
+                retry_count = 0
+            current["meta_retry_count"] = str(retry_count + 1)
+            current["meta_error"] = error_text
+            current["meta_fetched_at"] = now_text
+
+        updated = update_job(base_path, job_id, _mark_refresh_error) or row
+        _log_runner_event(
+            "preprocess_meta_refresh_failed",
+            job_id=job_id,
+            race_id=race_id,
+            scope_key=scope_key,
+            error=error_text,
+        )
+        return updated, {"status": "failed", "error": error_text}
+
+    previous_track = str(row.get("target_track_condition", "") or "").strip()
+    payload_scope_key = str(payload.get("scope_key", "") or "").strip()
+
+    def _apply(current, now_text):
+        target_track_condition = str(payload.get("target_track_condition", "") or "").strip()
+        if target_track_condition:
+            current["target_track_condition"] = target_track_condition
+        current["meta_source_url"] = str(payload.get("source_url", "") or "").strip()
+        current["meta_fetched_at"] = now_text
+        current["meta_error"] = ""
+
+    updated = update_job(base_path, job_id, _apply) or row
+    refreshed_track = str((updated or {}).get("target_track_condition", "") or "").strip()
+    refresh_summary = {
+        "status": "refreshed",
+        "track_condition_before": previous_track,
+        "track_condition_after": refreshed_track,
+        "source_url": str(payload.get("source_url", "") or "").strip(),
+    }
+    if payload_scope_key and payload_scope_key != scope_key:
+        refresh_summary["payload_scope_key"] = payload_scope_key
+        refresh_summary["scope_key_kept"] = scope_key
+    _log_runner_event(
+        "preprocess_meta_refreshed",
+        job_id=job_id,
+        race_id=race_id,
+        scope_key=scope_key,
+        track_condition_before=previous_track,
+        track_condition_after=refreshed_track,
+        payload_scope_key=payload_scope_key or None,
+    )
+    return updated, refresh_summary
+
+
 def normalize_track_condition_label(value):
     raw = str(value or "").strip()
     raw_lower = raw.lower()
@@ -859,6 +925,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         )
         _log_memory_checkpoint("process_job_done", job_id=job_id, run_id=run_id, mode="policy_only")
         return result
+    job, meta_refresh_summary = _refresh_job_meta_before_processing(base_path, job_id, job)
     artifact_map = {
         str(item.get("artifact_type", "")).strip().lower(): dict(item)
         for item in list(job.get("artifacts", []) or [])
@@ -897,6 +964,13 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         "run_id": "",
         "policy_engines": [],
     }
+    summary["process_log"].append(
+        {
+            "step": "refresh_race_meta_before_processing",
+            "code": 0 if str((meta_refresh_summary or {}).get("status", "") or "").strip() != "failed" else -1,
+            "output": json.dumps(meta_refresh_summary or {}, ensure_ascii=False),
+        }
+    )
     workspace_root = _shared_workspace_dir(base_path)
     with tempfile.TemporaryDirectory(prefix=f"{job_id}_", dir=str(workspace_root)) as tmp_dir:
         workspace = Path(tmp_dir)
