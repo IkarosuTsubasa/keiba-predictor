@@ -11,9 +11,9 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-POLICY_CACHE_VERSION = "gemini_policy_v20"
-POLICY_PROMPT_VERSION = "gemini_policy_prompt_v31"
-PROMPT_POLICY_LOCK_VERSION = "gemini_policy_lock_v5"
+POLICY_CACHE_VERSION = "gemini_policy_v21"
+POLICY_PROMPT_VERSION = "gemini_policy_prompt_v32"
+PROMPT_POLICY_LOCK_VERSION = "gemini_policy_lock_v6"
 _MODULE_DIR = Path(__file__).resolve().parent
 _PIPELINE_DIR = _MODULE_DIR.parent
 DEFAULT_CACHE_DIR = _PIPELINE_DIR / "data" / "policy_cache_gemini"
@@ -57,13 +57,13 @@ PROMPT_LOCKED_JUDGMENT = (
     "1. まず predictor_scope_performance と profiles を見て、このレースではどの predictor をより信頼するか、どの predictor を補助参考にするかを自分で決めること。既定の優先順位は置かず、毎レース判断し直すこと\n"
     "2. predictor_horse_probs を見て、どの馬が複数 predictor で上位に来ているか、どの馬で predictor 間の見解が割れているかを把握すること\n"
     "3. 量化モデルの順位は3着内確率ベースの証拠であり、1着固定の保証でも最終結論でもないことを前提に読むこと\n"
-    "4. horse_summary と horse_facts を使って、支持の厚さ、ブレ、オッズ、適性を確認し、本命・対抗・相手候補を自分で構成すること\n"
+    "4. predictor_horse_probs と candidate_tickets の odds を使って、各 predictor の並びと市場オッズを確認し、本命・対抗・相手候補を自分で構成すること\n"
     "5. 本命や印は量化上位を参考にしつつ自主的に組み替えてよい。必要なら量化上位の並びを崩してもよいが、根拠があること\n"
     "6. portfolio_summary と当日の進行情報を見て、このレースでは保守的に入るか、均衡型で入るか、やや攻めるかを自分で判断すること\n"
     "7. 目標は高命中と中程度に安定した回収であり、極端な穴狙いにも極端な当てに行くだけの形にも寄せすぎないこと\n"
     "8. 買い方は人間らしく、1頭決め打ちだけで閉じず、通常は軸1頭または軸2頭と相手2-4頭程度の形を意識して組み立てること\n"
-    "9. candidate_tickets の p_hit / quant_support_score / score / odds を使い、あなたが定めた主方向に沿って買い方を構成すること\n"
-    "10. EV は候補の並べ替えに使ってよいが、命中率と整合しない極端な期待値狙いに流れないこと\n"
+    "9. candidate_tickets の odds と組み合わせを使い、あなたが定めた主方向に沿って買い方を構成すること\n"
+    "10. オッズだけを見て極端な一発狙いに流れず、命中の形と整合する買い方を優先すること\n"
     "11. 他のLLMと同じ結論に寄せる必要はありません。同じ input から自分の判断を出し、説明可能な一貫性を優先すること\n\n"
 )
 
@@ -74,7 +74,7 @@ PROMPT_LOCKED_QUANT_RULES = (
     "- 主参考 predictor を1つ決めてもよいし、主参考1つと補助参考1つを組み合わせてもよいが、理由なく毎回同じ predictor に固定してはいけない\n"
     "- predictor_horse_probs には各 predictor の全馬評価が入っているので、上位の強弱確認だけでなく、中位以下の押し上げ候補や支持のズレの検討にも使ってよい\n"
     "- 量化上位を軽視してはいけないが、その並びをそのまま写す必要もない。オッズ、支持の厚さ、ブレ、券種ごとの命中率を合わせて最終判断すること\n"
-    "- candidate_tickets は候補池であり、あなたの判断を実行可能な形に落とすためのものです。score や edge を機械的に上からなぞるのではなく、あなたの主方向と整合する候補を選ぶこと\n"
+    "- candidate_tickets は実行可能な候補池です。含まれる odds と組み合わせを見て、あなたの主方向と整合する候補を選ぶこと\n"
     "- marks・key_horses・focus_points は、あなたが最終的に信じた馬と買い方を説明するための出力です\n"
     "- 量化上位の外から主軸を作る場合は、predictor 間の分歧、オッズ、支持の偏り、当日の運用方針などの根拠が必要です\n"
     "- 人間らしい印と買い方を優先し、毎回1-2頭だけに極端に寄せず、軸と相手群の構造を作ること\n"
@@ -206,10 +206,8 @@ class RacePolicyInput(BaseModel):
     odds_full: Dict[str, Any] = Field(default_factory=dict)
     prediction_field_guide: Dict[str, str] = Field(default_factory=dict)
     multi_predictor: Dict[str, Any] = Field(default_factory=dict)
-    horse_facts: List[Dict[str, Any]] = Field(default_factory=list)
     portfolio_history: Dict[str, Any] = Field(default_factory=dict)
     candidates: List[PolicyCandidate] = Field(default_factory=list)
-    candidates_meta: Dict[str, Any] = Field(default_factory=dict)
     constraints: PolicyConstraints
 
 
@@ -424,9 +422,7 @@ def _input_context_digest(input_obj: RacePolicyInput) -> str:
         "odds_full": dict(input_obj.odds_full or {}),
         "prediction_field_guide": dict(input_obj.prediction_field_guide or {}),
         "multi_predictor": dict(input_obj.multi_predictor or {}),
-        "horse_facts": list(input_obj.horse_facts or []),
         "portfolio_history": dict(input_obj.portfolio_history or {}),
-        "candidates_meta": dict(input_obj.candidates_meta or {}),
         "constraints": {
             "bankroll_yen": int(input_obj.constraints.bankroll_yen or 0),
             "race_budget_yen": int(input_obj.constraints.race_budget_yen or 0),
@@ -751,13 +747,16 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
     scope_history = list(performance.get("current_scope_history", []) or [])
     compact_perf = []
     for row in scope_history[:6]:
+        top1_hit_rate = row.get("hit_rate", row.get("top1_hit_rate"))
+        predicted_top3_hit_rate = row.get("top3_rate", row.get("top3_hit_rate"))
         compact_perf.append(
             {
                 "predictor_id": str(row.get("predictor_id", "") or row.get("name", "") or ""),
-                "hit_rate": row.get("hit_rate"),
-                "top3_rate": row.get("top3_rate"),
-                "roi": row.get("roi"),
-                "sample_size": row.get("sample_size"),
+                "top1_hit_rate": top1_hit_rate,
+                "predicted_top3_hit_rate": predicted_top3_hit_rate,
+                "top1_in_top3_rate": row.get("top1_in_top3_rate"),
+                "predicted_top3_exact_rate": row.get("top3_exact_rate"),
+                "top5_coverage_rate": row.get("top5_to_top3_hit_rate"),
             }
         )
     return {
@@ -765,55 +764,6 @@ def _compact_model_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
         "predictor_horse_probs": predictor_horse_probs,
         "predictor_scope_performance": compact_perf,
     }
-
-
-def _compact_horse_summary(input_obj: RacePolicyInput) -> List[Dict[str, Any]]:
-    fact_map = {}
-    for row in list(input_obj.horse_facts or []):
-        horse_no = _normalize_horse_no_text(row.get("horse_no", ""))
-        if horse_no:
-            fact_map[horse_no] = dict(row or {})
-    consensus_map = {}
-    for row in list((input_obj.multi_predictor or {}).get("consensus", []) or []):
-        horse_no = _normalize_horse_no_text(row.get("horse_no", ""))
-        if horse_no:
-            consensus_map[horse_no] = dict(row or {})
-    out = []
-    seen = set()
-    for row in list(input_obj.predictions or []):
-        horse_no = _normalize_horse_no_text(row.horse_no)
-        if (not horse_no) or (horse_no in seen):
-            continue
-        seen.add(horse_no)
-        fact = fact_map.get(horse_no, {})
-        consensus = consensus_map.get(horse_no, {})
-        out.append(
-            {
-                "horse_no": horse_no,
-                "horse_name": str(row.horse_name or fact.get("horse_name", "") or ""),
-                "pred_rank": int(row.pred_rank or 0),
-                "top3_prob_model": round(float(row.top3_prob_model or 0.0), 6),
-                "rank_score_norm": round(float(row.rank_score_norm or 0.0), 6),
-                "win_odds": round(float(row.win_odds or fact.get("win_odds", 0.0) or 0.0), 6),
-                "place_odds": round(float(row.place_odds or fact.get("place_odds", 0.0) or 0.0), 6),
-                "top1_votes": int(consensus.get("top1_votes", 0) or 0),
-                "top3_votes": int(consensus.get("top3_votes", 0) or 0),
-                "predictor_count": int(consensus.get("predictor_count", 0) or 0),
-                "avg_pred_rank": round(float(consensus.get("avg_pred_rank", 0.0) or 0.0), 3),
-                "rank_std": round(float(consensus.get("rank_std", 0.0) or 0.0), 3),
-                "predictors_support_ids": [str(x) for x in list(consensus.get("predictors_support_ids", []) or [])[:6] if str(x or "").strip()],
-                "predictors_support": [str(x) for x in list(consensus.get("predictors_support", []) or [])[:6] if str(x or "").strip()],
-                "context_fit": _trim_text(
-                    fact.get("context_fit")
-                    or fact.get("fit_note")
-                    or fact.get("style_note")
-                    or fact.get("memo")
-                    or "",
-                    limit=60,
-                ),
-            }
-        )
-    return out
 
 
 def _compact_portfolio_summary(input_obj: RacePolicyInput) -> Dict[str, Any]:
@@ -867,12 +817,6 @@ def _compact_candidate_tickets(input_obj: RacePolicyInput) -> List[Dict[str, Any
                 "bet_type": bet_type,
                 "legs": _canonical_legs_for_bet_type(bet_type, list(cand.legs or [])),
                 "odds": round(float(cand.odds_used or 0.0), 6),
-                "p_hit": round(float(cand.p_hit or 0.0), 6),
-                "ev": round(float(cand.ev or 0.0), 6),
-                "score": round(float(cand.score or 0.0), 6),
-                "quant_support_score": round(float(cand.quant_support_score or 0.0), 6),
-                "quant_anchor_strength": round(float(cand.quant_anchor_strength or 0.0), 6),
-                "quant_agreement": round(float(cand.quant_agreement or 0.0), 6),
             }
         )
     return out
@@ -883,8 +827,6 @@ def _build_prompt_payload(input_obj: RacePolicyInput) -> Dict[str, Any]:
     return {
         "race_summary": _compact_race_summary(input_obj),
         "model_summary": _compact_model_summary(input_obj),
-        "horse_summary": _compact_horse_summary(input_obj),
-        "candidate_pool_meta": dict(input_obj.candidates_meta or {}),
         "candidate_tickets": _compact_candidate_tickets(input_obj),
         "portfolio_summary": _compact_portfolio_summary(input_obj),
         "constraints": {

@@ -332,8 +332,8 @@ def main():
     os.environ["GEMINI_POLICY_MOCK"] = "1"
     os.environ.pop("GEMINI_API_KEY", None)
     prompt_lock_info = get_prompt_policy_lock_info()
-    assert str(prompt_lock_info.get("version", "")) == "gemini_policy_lock_v3", "prompt policy lock version should stay stable"
-    assert str(prompt_lock_info.get("sha256", "")) == "54b415f8e5c7fb47eb269c14a7cf06e7e8980357115c5895fb64ab7dbcc210ea", "protected prompt policy blocks changed; require explicit user approval"
+    assert str(prompt_lock_info.get("version", "")) == "gemini_policy_lock_v6", "prompt policy lock version should stay stable"
+    assert str(prompt_lock_info.get("sha256", "")) == "126ebbb11764511b822dea67f4c157d29e82bc1b009f0db9e6904d2df141c51e", "protected prompt policy blocks changed; require explicit user approval"
 
     policy_input = _build_smoke_input()
     input_2000 = _clone_with_budget(policy_input, 2000, 800)
@@ -347,33 +347,35 @@ def main():
     assert key_2000 != key_50000, "cache key should change when bankroll or race budget changes"
     place_only_prompt_payload = _build_prompt_payload(place_only_input)
     assert all(str(item.get("bet_type", "")) == "place" for item in list(place_only_prompt_payload.get("candidate_tickets", []) or [])), "prompt candidate_tickets should already respect allowed_types"
-    assert str(place_only_prompt_payload.get("model_summary", {}).get("consensus_anchor", {}).get("horse_no", "")) == "1", "prompt should expose quantitative consensus anchor"
-    assert len(list(place_only_prompt_payload.get("model_summary", {}).get("predictor_top_picks", []) or [])) >= 5, "prompt should expose per-predictor top picks"
     predictor_horse_probs = list(place_only_prompt_payload.get("model_summary", {}).get("predictor_horse_probs", []) or [])
     assert len(predictor_horse_probs) >= 5, "prompt should expose all-horse quantitative views for each predictor"
     first_predictor_row = predictor_horse_probs[0]
     assert len(list(first_predictor_row.get("horses", []) or [])) >= 5, "each predictor view should include multiple horses"
     first_prob_row = list(first_predictor_row.get("horses", []) or [])[0]
-    assert sorted(first_prob_row.keys()) == ["horse_name", "horse_no", "top3_prob"], "predictor horse rows should stay minimal"
-    assert any(str(item.get("horse_no", "")) == "1" for item in list(place_only_prompt_payload.get("horse_summary", []) or [])), "horse_summary should include consensus-led horses"
-    first_horse_row = list(place_only_prompt_payload.get("horse_summary", []) or [])[0]
-    assert "predictors_support" in first_horse_row and "rank_std" in first_horse_row, "horse_summary should expose quantitative support details"
+    assert sorted(first_prob_row.keys()) == ["horse_no", "top3_prob"], "predictor horse rows should stay minimal"
+    assert "predictor_scope_performance" in place_only_prompt_payload.get("model_summary", {}), "prompt should expose predictor scope performance field"
+    predictor_scope_performance = list(place_only_prompt_payload.get("model_summary", {}).get("predictor_scope_performance", []) or [])
+    if predictor_scope_performance:
+        first_perf_row = predictor_scope_performance[0]
+        assert "sample_size" not in first_perf_row, "predictor scope performance should not expose sample size"
+        assert "roi" not in first_perf_row, "predictor scope performance should not expose roi"
+        assert "top1_hit_rate" in first_perf_row, "predictor scope performance should expose top1_hit_rate"
+        assert "predicted_top3_hit_rate" in first_perf_row, "predictor scope performance should expose predicted_top3_hit_rate"
+        assert "predicted_top3_exact_rate" in first_perf_row, "predictor scope performance should expose predicted_top3_exact_rate"
+        assert "top5_coverage_rate" in first_perf_row, "predictor scope performance should expose top5_coverage_rate"
     first_candidate_row = list(place_only_prompt_payload.get("candidate_tickets", []) or [])[0]
-    assert "quant_support_score" in first_candidate_row and "quant_anchor_strength" in first_candidate_row, "candidate_tickets should expose quantitative ticket support"
+    assert sorted(first_candidate_row.keys()) == ["bet_type", "id", "legs", "odds"], "candidate_tickets should only expose executable ids and odds"
+    assert "horse_summary" not in place_only_prompt_payload, "prompt payload should no longer expose horse_summary"
+    assert "candidate_pool_meta" not in place_only_prompt_payload, "prompt payload should no longer expose candidate_pool_meta"
     place_only_prompt_text = _make_prompt(place_only_input)
     assert "predictor_horse_probs" in place_only_prompt_text, "prompt should explicitly include all-horse predictor probabilities"
-    assert "量化モデル最優先ルール" in place_only_prompt_text, "prompt should explicitly declare quantitative-model-first rule"
     assert "この出力は公開サイトでそのままユーザーに見られる前提です" in place_only_prompt_text, "prompt should explicitly mention public-site display goal"
-    assert "portfolio_summary は買いすぎ防止の補助情報" in place_only_prompt_text, "prompt should explicitly limit portfolio_summary to overbet prevention"
     assert "挑戦的な一枚を入れる場合でも、主方案が成立した後の補助1点までに留めること" in place_only_prompt_text, "prompt should explicitly limit challenge tickets"
     assert "predictor_scope_performance と profiles を見て" in place_only_prompt_text, "prompt should explicitly allow choosing the reference predictor from historical performance"
-    assert "主参考 predictor の前5位、および複数 predictor が強く支持する馬は本命・対抗・相手の中心候補として重点的に扱うこと" in place_only_prompt_text, "prompt should explicitly focus on quantitative top5"
-    assert "本命や印は前5位の中で自主的に組み替えてよく、odds・支持の厚さ・券種ごとの命中率を合わせて買い方を決めること" in place_only_prompt_text, "prompt should explicitly allow favorite/marks reordering inside top5"
-    assert "量化前5位の外から主軸を作るのは、よほど強い理由がある場合を除いて避けること" in place_only_prompt_text, "prompt should explicitly discourage building the axis outside quantitative top5"
-    assert "理由なく毎回 v6 固定にしてはいけない" in place_only_prompt_text, "prompt should explicitly avoid blindly anchoring on v6"
-    assert "通常は軸1頭と相手2-4頭程度の形を意識して組み立てること" in place_only_prompt_text, "prompt should explicitly enforce a more human-like axis-plus-opponents structure"
-    assert "1レースで使い切ってはいけない" in place_only_prompt_text, "prompt should explicitly ban spending the whole bankroll on one race"
-    assert "推奨投入目安" in place_only_prompt_text, "prompt should explicitly provide day-budget spending guidance"
+    assert "candidate_tickets の odds と組み合わせを使い" in place_only_prompt_text, "prompt should only use candidate odds and legs"
+    assert "predictor_horse_probs と candidate_tickets の odds を使って" in place_only_prompt_text, "prompt should build opinions from predictor rankings and raw odds"
+    assert "通常は軸1頭または軸2頭と相手2-4頭程度の形を意識して組み立てること" in place_only_prompt_text, "prompt should explicitly enforce a more human-like axis-plus-opponents structure"
+    assert "この1レースで資金を使い切らないこと" in place_only_prompt_text, "prompt should explicitly ban spending the whole bankroll on one race"
 
     out1 = call_gemini_policy(
         input=input_2000,

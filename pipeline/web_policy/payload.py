@@ -795,40 +795,6 @@ def _first_non_empty(item, keys):
     return ""
 
 
-def _build_horse_facts(predictions, consensus_rows):
-    consensus_map = _build_consensus_map(consensus_rows)
-    facts = []
-    for item in list(predictions or []):
-        horse_no = str(item.get("horse_no", "") or "").strip()
-        if not horse_no:
-            continue
-        consensus = dict(consensus_map.get(horse_no, {}) or {})
-        odds = _safe_float(item.get("win_odds", 0.0), 0.0)
-        implied_prob = _safe_float(_first_non_empty(item, ("implied_prob_win", "win_prob_est")), 0.0)
-        if implied_prob <= 0 and odds > 0:
-            implied_prob = 1.0 / odds
-        facts.append(
-            {
-                "horse_no": horse_no,
-                "horse_name": str(item.get("horse_name", "") or ""),
-                "pred_rank": int(item.get("pred_rank", 0) or 0),
-                "consensus_avg_rank": round(_safe_float(consensus.get("avg_pred_rank", 0.0), 0.0), 4),
-                "consensus_rank_std": round(_safe_float(consensus.get("rank_std", 0.0), 0.0), 4),
-                "consensus_top1_votes": int(consensus.get("top1_votes", 0) or 0),
-                "consensus_top3_votes": int(consensus.get("top3_votes", 0) or 0),
-                "last_ti": round(_safe_float(_first_non_empty(item, ("ti_last", "adj_ti_last", "f_ti_last")), 0.0), 6),
-                "recent_ti_mean": round(_safe_float(_first_non_empty(item, ("ti_mean3", "ti_mean5", "adj_ti_mean5", "f_ti_mean5")), 0.0), 6),
-                "career_runs": int(_safe_float(_first_non_empty(item, ("history_count", "f_career_races", "dist_exp_count")), 0.0)),
-                "surface_exp_ratio": round(_safe_float(_first_non_empty(item, ("surface_exp_ratio", "f_surface_exp_ratio")), 0.0), 6),
-                "jockey_score": round(_safe_float(_first_non_empty(item, ("jockey_score", "jscore_last", "jockey_win_course")), 0.0), 6),
-                "odds": round(odds, 6),
-                "implied_prob": round(_clamp(implied_prob), 6),
-                "rest_days": int(_safe_float(_first_non_empty(item, ("rest_days",)), 0.0)),
-            }
-        )
-    return facts
-
-
 def _ledger_date_to_job_date_text(ledger_date=""):
     digits = "".join(ch for ch in str(ledger_date or "").strip() if ch.isdigit())
     if len(digits) >= 8:
@@ -1009,7 +975,6 @@ def build_policy_input_payload(
     race_context = _build_race_context(run_row, scope_key, len(predictions))
     race_context.update(_daily_budget_plan_context(base_dir, ledger_date, run_row, load_race_jobs))
     multi_model_ai = _build_multi_model_ai(predictions, multi_predictor)
-    horse_facts = _build_horse_facts(predictions, multi_predictor.get("consensus", []))
     payload = {
         "race_id": str((run_row or {}).get("race_id", "") or ""),
         "scope_key": str(scope_key or ""),
@@ -1079,18 +1044,8 @@ def build_policy_input_payload(
         ),
         "prediction_field_guide": build_prediction_field_guide(),
         "multi_predictor": multi_predictor,
-        "horse_facts": horse_facts,
         "portfolio_history": build_history_context(base_dir, ledger_date, lookback_days=14, recent_ticket_limit=8, policy_engine=policy_engine),
         "candidates": candidates,
-        "candidates_meta": {
-            "shortlist_count": len(candidates),
-            "allowed_types": list(allowed_types),
-            "selection_policy": "scored_shortlist_v1",
-            "counts_by_type": {
-                bet_type: sum(1 for item in candidates if str(item.get("bet_type", "") or "") == bet_type)
-                for bet_type in list(allowed_types)
-            },
-        },
         "constraints": {
             "bankroll_yen": bankroll_yen,
             "race_budget_yen": bankroll_yen,
