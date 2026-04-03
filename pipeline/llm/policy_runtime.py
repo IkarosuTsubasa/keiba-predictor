@@ -113,6 +113,11 @@ def get_policy_cache_key(
     return _build_cache_key(input_obj, engine, resolved_model)
 
 
+def build_policy_prompt_input(input: RacePolicyInput) -> Dict[str, Any]:
+    input_obj = _gemini._model_validate(RacePolicyInput, input)
+    return _gemini._build_prompt_payload(input_obj)
+
+
 def _update_last_meta(meta: Dict[str, Any], output: RacePolicyOutput, policy_engine: str, policy_model: str) -> None:
     global _LAST_CALL_META
     _LAST_CALL_META = {
@@ -861,6 +866,7 @@ __all__ = [
     "call_openai_policy",
     "call_policy",
     "deterministic_policy",
+    "build_policy_prompt_input",
     "get_last_call_meta",
     "get_policy_cache_key",
     "normalize_policy_engine",

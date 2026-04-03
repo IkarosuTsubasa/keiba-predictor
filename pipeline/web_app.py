@@ -46,6 +46,7 @@ from gemini_portfolio import (
 )
 from llm.policy_runtime import (
     DEFAULT_GEMINI_MODEL,
+    build_policy_prompt_input,
     call_policy,
     get_last_call_meta,
     normalize_policy_engine,
@@ -1046,6 +1047,7 @@ def execute_policy_buy(scope_key, run_row, run_id, policy_engine="gemini", polic
         resolve_pred_path=resolve_pred_path,
         resolve_run_asset_path=resolve_run_asset_path,
         build_policy_input_payload=build_policy_input_payload,
+        build_policy_prompt_input=build_policy_prompt_input,
         call_policy=call_policy,
         resolve_policy_timeout=resolve_policy_timeout,
         get_last_call_meta=get_last_call_meta,

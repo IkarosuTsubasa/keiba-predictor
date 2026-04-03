@@ -35,6 +35,9 @@ RACE_DIR_PATTERNS = (
     "siliconflow_policy_*.json",
     "runner_filter_summary_*.json",
 )
+PROMPT_INPUT_PATTERNS = (
+    "*_policy_input_*.json",
+)
 OFFLINE_RESEARCH_FILES = (
     "offline_eval.csv",
     "context_dataset.csv",
@@ -174,6 +177,11 @@ def _collect_legacy_debug_paths(scope_dir: Path):
 
 def _collect_race_dir_paths(scope_dir: Path):
     for pattern in RACE_DIR_PATTERNS:
+        yield from scope_dir.rglob(pattern)
+
+
+def _collect_prompt_input_paths(scope_dir: Path):
+    for pattern in PROMPT_INPUT_PATTERNS:
         yield from scope_dir.rglob(pattern)
 
 
@@ -398,6 +406,7 @@ def cleanup(
     cache_cutoff = now - timedelta(days=max(1, int(cache_days or 14)))
     experimental_cutoff = now - timedelta(days=max(1, int(experimental_days or 14)))
     research_cutoff = now - timedelta(days=max(1, int(research_days or 30)))
+    prompt_input_cutoff = now - timedelta(days=max(1, int(referenced_artifact_days or 3)))
 
     archived_jobs_summary = _archive_old_jobs(
         job_retention_days=job_retention_days,
@@ -431,6 +440,7 @@ def cleanup(
     removed_experimental_files = []
     removed_legacy_debug_files = []
     removed_legacy_race_files = []
+    removed_prompt_input_files = []
     removed_offline_research_files = []
     for scope_dir in _iter_scope_dirs():
         removed_experimental_files.extend(
@@ -442,6 +452,9 @@ def cleanup(
             )
         removed_legacy_race_files.extend(
             _remove_old_files(_collect_race_dir_paths(scope_dir), experimental_cutoff, dry_run)
+        )
+        removed_prompt_input_files.extend(
+            _remove_old_files(_collect_prompt_input_paths(scope_dir), prompt_input_cutoff, dry_run)
         )
         if include_offline_research:
             research_paths = [scope_dir / name for name in OFFLINE_RESEARCH_FILES]
@@ -468,6 +481,7 @@ def cleanup(
         "removed_experimental_files": removed_experimental_files,
         "removed_legacy_debug_files": removed_legacy_debug_files,
         "removed_legacy_race_files": removed_legacy_race_files,
+        "removed_prompt_input_files": removed_prompt_input_files,
         "removed_offline_research_files": removed_offline_research_files,
     }
     summary["totals"] = {
@@ -484,6 +498,7 @@ def cleanup(
         "experimental_files": len(removed_experimental_files),
         "legacy_debug_files": len(removed_legacy_debug_files),
         "legacy_race_files": len(removed_legacy_race_files),
+        "prompt_input_files": len(removed_prompt_input_files),
         "offline_research_files": len(removed_offline_research_files),
     }
     return summary

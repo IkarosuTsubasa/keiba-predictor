@@ -120,6 +120,18 @@ def save_policy_payload(*, base_dir, scope_key, run_id, race_id, payload, policy
     return path
 
 
+def save_policy_prompt_input(*, base_dir, scope_key, run_id, race_id, prompt_input, policy_engine, normalize_scope_key, get_data_dir, normalize_policy_engine):
+    scope_norm = normalize_scope_key(scope_key)
+    if not scope_norm:
+        return None
+    race_dir = get_data_dir(base_dir, scope_norm) / str(race_id or "")
+    race_dir.mkdir(parents=True, exist_ok=True)
+    engine = normalize_policy_engine(policy_engine)
+    path = race_dir / f"{engine}_policy_input_{run_id}_{race_id}.json"
+    path.write_text(json.dumps(prompt_input, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def execute_policy_buy(
     *,
     base_dir,
@@ -135,6 +147,7 @@ def execute_policy_buy(
     resolve_pred_path,
     resolve_run_asset_path,
     build_policy_input_payload,
+    build_policy_prompt_input,
     call_policy,
     resolve_policy_timeout,
     get_last_call_meta,
@@ -168,6 +181,18 @@ def execute_policy_buy(
     )
     if error:
         raise ValueError(error)
+    prompt_input = build_policy_prompt_input(context["input"])
+    prompt_input_path = save_policy_prompt_input(
+        base_dir=base_dir,
+        scope_key=scope_norm,
+        run_id=run_id,
+        race_id=(run_row or {}).get("race_id", ""),
+        prompt_input=prompt_input,
+        policy_engine=engine,
+        normalize_scope_key=normalize_scope_key,
+        get_data_dir=get_data_dir,
+        normalize_policy_engine=normalize_policy_engine,
+    )
     policy_output = call_policy(
         input=context["input"],
         policy_engine=engine,
@@ -209,6 +234,7 @@ def execute_policy_buy(
         "gemini_model": resolved_model if engine == "gemini" else "",
         "policy_budget_reuse": False,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "prompt_input_path": str(prompt_input_path or ""),
         "budgets": [
             {
                 "budget_yen": 0,
