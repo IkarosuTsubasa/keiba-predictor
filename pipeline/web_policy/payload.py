@@ -526,6 +526,95 @@ def _clone_prediction_row(item):
     }
 
 
+def _build_equalized_reference_predictions(multi_predictor, fallback_predictions):
+    multi_predictor = dict(multi_predictor or {})
+    ranking_blocks = list(multi_predictor.get("predictor_rankings", []) or [])
+    aggregates = {}
+    order = []
+
+    for block in ranking_blocks:
+        ranking = list(block.get("ranking", []) or [])
+        if not ranking:
+            continue
+        for idx, item in enumerate(ranking, start=1):
+            row = _clone_prediction_row(item)
+            horse_no = str(row.get("horse_no", "") or "").strip()
+            if not horse_no:
+                continue
+            if horse_no not in aggregates:
+                aggregates[horse_no] = {
+                    "horse_no": horse_no,
+                    "horse_name": str(row.get("horse_name", "") or ""),
+                    "top3_prob_sum": 0.0,
+                    "rank_score_sum": 0.0,
+                    "confidence_sum": 0.0,
+                    "stability_sum": 0.0,
+                    "risk_sum": 0.0,
+                    "win_prob_sum": 0.0,
+                    "rank_sum": 0.0,
+                    "count": 0,
+                    "win_odds": round(float(row.get("win_odds", 0.0) or 0.0), 6),
+                    "place_odds": round(float(row.get("place_odds", 0.0) or 0.0), 6),
+                    "source_row": dict(row.get("source_row", {}) or {}),
+                }
+                order.append(horse_no)
+            agg = aggregates[horse_no]
+            agg["top3_prob_sum"] += float(row.get("top3_prob_model", 0.0) or 0.0)
+            agg["rank_score_sum"] += float(row.get("rank_score_norm", 0.0) or 0.0)
+            agg["confidence_sum"] += float(row.get("confidence_score", 0.0) or 0.0)
+            agg["stability_sum"] += float(row.get("stability_score", 0.0) or 0.0)
+            agg["risk_sum"] += float(row.get("risk_score", 0.0) or 0.0)
+            agg["win_prob_sum"] += float(row.get("win_prob_est", 0.0) or 0.0)
+            agg["rank_sum"] += float(idx)
+            agg["count"] += 1
+            if not agg["horse_name"]:
+                agg["horse_name"] = str(row.get("horse_name", "") or "")
+            if float(agg.get("win_odds", 0.0) or 0.0) <= 0.0 and float(row.get("win_odds", 0.0) or 0.0) > 0.0:
+                agg["win_odds"] = round(float(row.get("win_odds", 0.0) or 0.0), 6)
+            if float(agg.get("place_odds", 0.0) or 0.0) <= 0.0 and float(row.get("place_odds", 0.0) or 0.0) > 0.0:
+                agg["place_odds"] = round(float(row.get("place_odds", 0.0) or 0.0), 6)
+            if not agg["source_row"] and row.get("source_row"):
+                agg["source_row"] = dict(row.get("source_row", {}) or {})
+
+    if not aggregates:
+        return [_clone_prediction_row(item) for item in list(fallback_predictions or [])]
+
+    rows = []
+    for horse_no in order:
+        agg = dict(aggregates.get(horse_no, {}) or {})
+        count = max(1, int(agg.get("count", 0) or 0))
+        rows.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": str(agg.get("horse_name", "") or ""),
+                "pred_rank": 0,
+                "top3_prob_model": round(float(agg.get("top3_prob_sum", 0.0) or 0.0) / float(count), 6),
+                "rank_score_norm": round(float(agg.get("rank_score_sum", 0.0) or 0.0) / float(count), 6),
+                "win_odds": round(float(agg.get("win_odds", 0.0) or 0.0), 6),
+                "place_odds": round(float(agg.get("place_odds", 0.0) or 0.0), 6),
+                "confidence_score": round(float(agg.get("confidence_sum", 0.0) or 0.0) / float(count), 6),
+                "stability_score": round(float(agg.get("stability_sum", 0.0) or 0.0) / float(count), 6),
+                "risk_score": round(float(agg.get("risk_sum", 0.0) or 0.0) / float(count), 6),
+                "win_prob_est": round(float(agg.get("win_prob_sum", 0.0) or 0.0) / float(count), 6),
+                "source_row": dict(agg.get("source_row", {}) or {}),
+                "_avg_rank": round(float(agg.get("rank_sum", 0.0) or 0.0) / float(count), 6),
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            float(row.get("_avg_rank", 999.0) or 999.0),
+            -float(row.get("top3_prob_model", 0.0) or 0.0),
+            -float(row.get("rank_score_norm", 0.0) or 0.0),
+            str(row.get("horse_no", "") or ""),
+        )
+    )
+    for idx, row in enumerate(rows, start=1):
+        row["pred_rank"] = idx
+        row.pop("_avg_rank", None)
+    return rows
+
+
 def _build_consensus_primary_predictions(multi_predictor, reference_predictions):
     multi_predictor = dict(multi_predictor or {})
     consensus_rows = list(multi_predictor.get("consensus", []) or [])
@@ -870,18 +959,8 @@ def build_policy_input_payload(
     multi_predictor = build_multi_predictor_context(scope_key, run_id, run_row, name_to_no_map, win_odds_map, place_odds_map)
     pred_rows = load_csv_rows_flexible(pred_path)
     fallback_predictions = build_policy_prediction_rows_fn(pred_rows, name_to_no_map, win_odds_map, place_odds_map) if pred_rows else []
-    selected_ranking, selected_predictor_id = _choose_primary_predictions(multi_predictor, fallback_predictions)
-    selected_predictions = _load_selected_predictor_predictions(
-        selected_predictor_id,
-        run_row,
-        pred_path,
-        load_csv_rows_flexible,
-        build_policy_prediction_rows_fn,
-        name_to_no_map,
-        win_odds_map,
-        place_odds_map,
-    )
-    reference_predictions = selected_predictions or selected_ranking or fallback_predictions
+    equalized_predictions = _build_equalized_reference_predictions(multi_predictor, fallback_predictions)
+    reference_predictions = equalized_predictions or [_clone_prediction_row(item) for item in list(fallback_predictions or [])]
     predictions = [_clone_prediction_row(item) for item in list(reference_predictions or [])]
     if not predictions:
         return None, "No valid prediction rows could be built for policy input."
@@ -916,8 +995,8 @@ def build_policy_input_payload(
     bankroll = summarize_bankroll(base_dir, ledger_date, policy_engine=policy_engine)
     bankroll_yen = max(0, int(bankroll.get("available_bankroll_yen", 0) or 0))
     multi_predictor_meta = dict(multi_predictor.get("meta", {}) or {})
-    multi_predictor_meta["primary_predictor_id"] = selected_predictor_id
-    multi_predictor_meta["compatibility_primary_predictor_id"] = selected_predictor_id
+    multi_predictor_meta.pop("primary_predictor_id", None)
+    multi_predictor_meta.pop("compatibility_primary_predictor_id", None)
     multi_predictor_meta["predictor_rankings_nonempty"] = all(
         len(list(block.get("ranking", []) or [])) > 0 for block in list(multi_predictor.get("predictor_rankings", []) or [])
     )
