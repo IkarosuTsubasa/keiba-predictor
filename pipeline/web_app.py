@@ -3129,6 +3129,11 @@ def index():
     return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
 
 
+@app.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
+def healthz():
+    return Response(status_code=200)
+
+
 @app.get(CONSOLE_BASE_PATH, response_class=HTMLResponse)
 def console_spa():
     return build_public_index_response(CONSOLE_BASE_PATH)
