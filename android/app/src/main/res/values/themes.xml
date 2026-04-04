@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.IkaimoKeiba" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/accent_color</item>
+        <item name="colorPrimaryContainer">@color/track_color</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/accent_color_dark</item>
+        <item name="android:statusBarColor">@color/surface_color</item>
+        <item name="android:navigationBarColor">@color/surface_color</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.IkaimoKeiba.AlertDialog</item>
+    </style>
+
+    <style name="ThemeOverlay.IkaimoKeiba.AlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorPrimary">@color/accent_color</item>
+    </style>
+
+    <style name="Widget.IkaimoKeiba.BottomNavigation.ActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@color/track_color</item>
+    </style>
+</resources>

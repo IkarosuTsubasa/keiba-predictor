@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">いかいもAI競馬</string>
+
+    <string name="nav_races">レース</string>
+    <string name="nav_history">履歴分析</string>
+    <string name="nav_reports">日報</string>
+    <string name="nav_more">その他</string>
+
+    <string name="title_races">レース一覧</string>
+    <string name="title_race_detail">レース詳細</string>
+    <string name="title_history">履歴分析</string>
+    <string name="title_reports">私の日報</string>
+    <string name="title_report_detail">日報詳細</string>
+
+    <string name="subtitle_races">当日公開レースと詳細ページを表示します</string>
+    <string name="subtitle_history">期間別の比較と振り返りを確認できます</string>
+    <string name="subtitle_reports">保存済みの日報アーカイブを確認できます</string>
+    <string name="subtitle_more">サイト利用に関する案内ページを開けます</string>
+    <string name="subtitle_more_native">ご利用案内とお問い合わせを確認できます</string>
+
+    <string name="more_privacy">プライバシーポリシー</string>
+    <string name="more_privacy_description">個人情報の取り扱い方針を確認できます</string>
+    <string name="more_terms">利用規約</string>
+    <string name="more_terms_description">サービスの利用条件と禁止事項を確認できます</string>
+    <string name="more_disclaimer">免責事項</string>
+    <string name="more_disclaimer_description">予想情報と掲載データの注意事項を確認できます</string>
+    <string name="more_contact">お問い合わせ</string>
+    <string name="more_contact_description">ご意見やご連絡先を確認できます</string>
+    <string name="ad_badge">広告</string>
+    <string name="notification_channel_name">更新通知</string>
+    <string name="notification_channel_description">レース更新や日報公開のお知らせを表示します</string>
+
+    <string name="retry">再試行</string>
+    <string name="launch_reload">再読み込み</string>
+    <string name="launch_reload_hint">読み込みに時間がかかっています</string>
+    <string name="web_load_error">ページの読み込みに失敗しました。</string>
+    <string name="external_open_error">%1$s を開けませんでした。</string>
+    <string name="launch_eyebrow">Loading</string>
+    <string name="launch_message">公開ページを読み込んでいます</string>
+</resources>

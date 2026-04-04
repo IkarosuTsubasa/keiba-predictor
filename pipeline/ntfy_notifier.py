@@ -11,11 +11,20 @@ from local_env import load_local_env
 
 BASE_DIR = Path(__file__).resolve().parent
 load_local_env(BASE_DIR, override=False)
+_FCM_APP = None
+
+
+def _flag_env(name):
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def ntfy_notify_enabled():
-    raw = str(os.environ.get("PIPELINE_NTFY_NOTIFY_ENABLED", "") or "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    return _flag_env("PIPELINE_NTFY_NOTIFY_ENABLED")
+
+
+def fcm_notify_enabled():
+    return _flag_env("PIPELINE_FCM_NOTIFY_ENABLED")
 
 
 def ntfy_server_url():
@@ -27,8 +36,24 @@ def ntfy_topic():
     return str(os.environ.get("PIPELINE_NTFY_TOPIC", "") or "").strip().strip("/")
 
 
+def fcm_topic():
+    return str(os.environ.get("PIPELINE_FCM_TOPIC", "keiba-public-updates") or "").strip().strip("/")
+
+
 def preferred_ntfy_engine():
     return str(os.environ.get("PIPELINE_NTFY_ENGINE", "") or "").strip().lower()
+
+
+def _fcm_credentials_path():
+    explicit = str(os.environ.get("PIPELINE_FCM_SERVICE_ACCOUNT_FILE", "") or "").strip()
+    fallback = str(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "") or "").strip()
+    value = explicit or fallback
+    if not value:
+        return ""
+    path = Path(value)
+    if not path.is_absolute():
+        path = (BASE_DIR / path).resolve()
+    return str(path)
 
 
 def _public_site_url():
@@ -81,6 +106,36 @@ def _build_auth_header():
     if username and password:
         return _basic_auth_header(username, password)
     return ""
+
+
+def _get_firebase_app():
+    global _FCM_APP
+
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+    except ImportError as exc:
+        raise RuntimeError("firebase-admin is not installed") from exc
+
+    if _FCM_APP is not None:
+        return _FCM_APP
+
+    try:
+        _FCM_APP = firebase_admin.get_app()
+        return _FCM_APP
+    except ValueError:
+        pass
+
+    credentials_path = _fcm_credentials_path()
+    if credentials_path:
+        cred_file = Path(credentials_path)
+        if not cred_file.exists():
+            raise RuntimeError(f"fcm service account file not found: {cred_file}")
+        _FCM_APP = firebase_admin.initialize_app(credentials.Certificate(str(cred_file)))
+        return _FCM_APP
+
+    _FCM_APP = firebase_admin.initialize_app()
+    return _FCM_APP
 
 
 def _select_share_candidate(scope_key, run_id):
@@ -160,16 +215,35 @@ def _select_share_candidate(scope_key, run_id):
     }
 
 
+def _prediction_complete_text(run_row, run_id):
+    row = dict(run_row or {})
+    location = str(row.get("location", "") or "").strip()
+    race_no = ""
+    try:
+        import web_app  # local import to avoid circular imports
+
+        race_no = web_app.report_race_no_text(row.get("race_id")) if hasattr(web_app, "report_race_no_text") else ""
+    except Exception:
+        race_no = str(row.get("race_id", "") or "").strip()
+    venue = "".join(location.split())
+    if venue and not venue.endswith("競馬"):
+        venue = f"{venue}競馬"
+    race_name = str(row.get("race_name", "") or row.get("trigger_race", "") or "").strip()
+    core = " ".join(part for part in (venue, race_no, race_name) if str(part or "").strip())
+    if core:
+        return f"#{core} の予測が完了しました"
+    resolved_run_id = str(run_id or row.get("run_id") or "").strip()
+    return f"#{resolved_run_id} の予測が完了しました"
+
+
 def build_ntfy_share_notification(scope_key, run_id):
     candidate = _select_share_candidate(scope_key, run_id)
     run_row = dict(candidate.get("run_row", {}) or {})
     race_id = str(run_row.get("race_id", "") or "").strip()
     location = str(run_row.get("location", "") or "").strip()
-    race_date = str(run_row.get("date", "") or run_row.get("race_date", "") or "").strip()
-    title_parts = [part for part in (location, race_id) if part]
+    race_name = str(run_row.get("race_name", "") or run_row.get("trigger_race", "") or "").strip()
+    title_parts = [part for part in (location, race_id, race_name) if part]
     title = " ".join(title_parts) if title_parts else f"预测完成 {run_id}"
-    if race_date:
-        title = f"{title} {race_date}"
     share_text = str(candidate.get("share_text", "") or "").strip()
     if not share_text:
         raise ValueError(f"share text not available for run_id={run_id}")
@@ -180,6 +254,17 @@ def build_ntfy_share_notification(scope_key, run_id):
         "public_url": str(candidate.get("public_url", "") or "").strip(),
         "workspace_url": build_workspace_url(scope_key, run_id),
         "title": title,
+    }
+
+
+def build_fcm_prediction_notification(scope_key, run_id):
+    candidate = _select_share_candidate(scope_key, run_id)
+    run_row = dict(candidate.get("run_row", {}) or {})
+    body = _prediction_complete_text(run_row, run_id)
+    return {
+        "engine": str(candidate.get("engine", "") or "").strip(),
+        "title": "🐴予測が完了しました",
+        "body": body,
     }
 
 
@@ -261,4 +346,101 @@ def publish_ntfy_share_notification(scope_key, run_id):
         "workspace_url": notification["workspace_url"],
         "topic": topic,
         "message_id": str(payload.get("id", "") or "").strip(),
+    }
+
+
+def publish_fcm_prediction_notification(scope_key, run_id):
+    if not fcm_notify_enabled():
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "disabled",
+        }
+
+    topic = fcm_topic()
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
+
+    notification = build_fcm_prediction_notification(scope_key, run_id)
+
+    try:
+        from firebase_admin import messaging
+    except ImportError as exc:
+        raise RuntimeError("firebase-admin is not installed") from exc
+
+    app = _get_firebase_app()
+    message = messaging.Message(
+        topic=topic,
+        notification=messaging.Notification(
+            title=notification["title"],
+            body=notification["body"],
+        ),
+        android=messaging.AndroidConfig(
+            priority="high",
+        ),
+    )
+    message_id = str(messaging.send(message, app=app) or "").strip()
+    return {
+        "ok": True,
+        "engine": notification["engine"],
+        "title": notification["title"],
+        "body": notification["body"],
+        "topic": topic,
+        "message_id": message_id,
+    }
+
+
+def publish_share_notifications(scope_key, run_id):
+    channel_results = {}
+    errors = []
+    engine = ""
+    sent_any = False
+
+    for channel_name, sender in (
+        ("ntfy", publish_ntfy_share_notification),
+        ("fcm", publish_fcm_prediction_notification),
+    ):
+        try:
+            result = sender(scope_key, run_id)
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "skipped": False,
+                "reason": "error",
+                "error": str(exc or "").strip(),
+            }
+            errors.append(f"{channel_name}: {result['error']}")
+        channel_results[channel_name] = result
+        if result.get("ok") and not result.get("skipped"):
+            sent_any = True
+            if not engine:
+                engine = str(result.get("engine", "") or "").strip()
+
+    if sent_any:
+        ntfy_result = channel_results.get("ntfy") or {}
+        return {
+            "ok": True,
+            "engine": engine,
+            "topic": str(ntfy_result.get("topic", "") or "").strip(),
+            "message_id": str(ntfy_result.get("message_id", "") or "").strip(),
+            "channels": channel_results,
+        }
+
+    if errors:
+        raise RuntimeError("; ".join(error for error in errors if error))
+
+    reasons = [
+        str((channel_results.get(name) or {}).get("reason", "") or "").strip()
+        for name in ("ntfy", "fcm")
+    ]
+    reason = ",".join(part for part in reasons if part) or "skipped"
+    return {
+        "ok": False,
+        "skipped": True,
+        "reason": reason,
+        "channels": channel_results,
     }

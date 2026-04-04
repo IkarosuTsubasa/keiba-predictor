@@ -1,5 +1,6 @@
 beautifulsoup4
 fastapi
+firebase-admin
 google-genai
 lightgbm
 numpy
