@@ -571,7 +571,7 @@ export default function App() {
               {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
             </>
           )}
-          <TodayBoardContent data={data} races={races} />
+          <TodayBoardContent data={data} races={races} appShell={isAppShell} />
         </section>
 
         {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}

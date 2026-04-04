@@ -15,10 +15,15 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.gms.ads.AdListener
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.MobileAds
 import com.google.android.material.snackbar.Snackbar
 import com.ikaimo.keiba.app.databinding.ActivityMainBinding
 
@@ -26,43 +31,78 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    private val baseWebUri: Uri by lazy { Uri.parse(BuildConfig.BASE_WEB_URL) }
-    private val baseHost: String by lazy { baseWebUri.host.orEmpty() }
+    private val baseHost: String by lazy { Uri.parse(BuildConfig.BASE_WEB_URL).host.orEmpty() }
 
     private var suppressBottomNavEvents = false
     private var currentTopLevel = TopLevelTab.RACES
-    private var currentMorePage: MorePage = MorePage.PRIVACY
-    private var moreDialog: AlertDialog? = null
+    private var launchOverlayDismissed = false
+    private var bannerAdView: AdView? = null
+    private var pendingOverrideUrl: String? = null
+    private var pendingOverrideTitle: String? = null
+    private val launchReloadRunnable =
+        Runnable {
+            if (launchOverlayDismissed) return@Runnable
+            binding.launchOverlayHint.visibility = View.VISIBLE
+            binding.launchOverlayReloadButton.visibility = View.VISIBLE
+        }
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            NotificationPermissionHelper.markPrompted(this)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        EdgeToEdgeUi.apply(window, binding.root, binding.toolbar, binding.bottomChrome)
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)
+        binding.launchOverlayReloadButton.setOnClickListener {
+            retryInitialLoad()
+        }
 
         configureWebView()
         configureSwipeRefresh()
         configureBottomNavigation()
         configureBackHandling()
+        MobileAds.initialize(this)
+        configureBannerAd()
+        maybeRequestNotificationPermission()
+
+        launchOverlayDismissed =
+            savedInstanceState?.getBoolean(STATE_LAUNCH_OVERLAY_DISMISSED, false) == true
+        if (launchOverlayDismissed) {
+            binding.launchOverlay.visibility = View.GONE
+            binding.launchOverlay.alpha = 0f
+        }
 
         if (savedInstanceState == null) {
-            loadTopLevelPage(TopLevelTab.RACES, resetToRoot = true)
+            if (!handleStartDestination(intent, resetToRoot = true)) {
+                loadTopLevelPage(TopLevelTab.RACES, resetToRoot = true)
+            }
         } else {
             binding.webView.restoreState(savedInstanceState)
             syncChromeFromUrl(binding.webView.url)
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleStartDestination(intent, resetToRoot = true)
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_LAUNCH_OVERLAY_DISMISSED, launchOverlayDismissed)
         binding.webView.saveState(outState)
     }
 
     override fun onDestroy() {
-        moreDialog?.dismiss()
-        moreDialog = null
+        cancelLaunchReloadAffordance()
+        bannerAdView?.destroy()
+        bannerAdView = null
         binding.webView.apply {
             stopLoading()
             loadUrl("about:blank")
@@ -71,6 +111,16 @@ class MainActivity : AppCompatActivity() {
             destroy()
         }
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        bannerAdView?.pause()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        bannerAdView?.resume()
     }
 
     private fun configureWebView() {
@@ -82,7 +132,12 @@ class MainActivity : AppCompatActivity() {
             domStorageEnabled = true
             databaseEnabled = true
             loadsImagesAutomatically = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            mixedContentMode =
+                if (BuildConfig.ALLOW_INSECURE_WEB_CONTENT) {
+                    WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                } else {
+                    WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                }
             cacheMode = WebSettings.LOAD_DEFAULT
             useWideViewPort = true
             loadWithOverviewMode = true
@@ -92,56 +147,146 @@ class MainActivity : AppCompatActivity() {
             userAgentString = "${userAgentString} IkaimoKeibaAndroid/0.1"
         }
 
-        binding.webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                binding.progressIndicator.progress = newProgress
-                binding.progressIndicator.isIndeterminate = false
-                binding.progressIndicator.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-                binding.swipeRefresh.isRefreshing = newProgress in 1..99 && binding.swipeRefresh.isRefreshing
-            }
-        }
-
-        binding.webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val target = request?.url ?: return false
-                if (!request.isForMainFrame) return false
-                return handleUri(target)
+        binding.webView.webChromeClient =
+            object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    binding.progressIndicator.progress = newProgress
+                    binding.progressIndicator.isIndeterminate = false
+                    binding.progressIndicator.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+                    binding.swipeRefresh.isRefreshing = newProgress in 1..99 && binding.swipeRefresh.isRefreshing
+                }
             }
 
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                binding.progressIndicator.visibility = View.VISIBLE
-                syncChromeFromUrl(url)
-            }
+        binding.webView.webViewClient =
+            object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val target = request?.url ?: return false
+                    if (!request.isForMainFrame) return false
+                    return handleUri(target)
+                }
 
-            override fun onPageFinished(view: WebView?, url: String?) {
-                binding.progressIndicator.visibility = View.GONE
-                binding.swipeRefresh.isRefreshing = false
-                syncChromeFromUrl(url)
-            }
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    binding.progressIndicator.visibility = View.VISIBLE
+                    scheduleLaunchReloadAffordance()
+                    syncChromeFromUrl(url)
+                }
 
-            override fun onReceivedError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                error: WebResourceError?,
-            ) {
-                if (request?.isForMainFrame != true) return
-                binding.progressIndicator.visibility = View.GONE
-                binding.swipeRefresh.isRefreshing = false
-                Snackbar.make(
-                    binding.root,
-                    getString(R.string.web_load_error),
-                    Snackbar.LENGTH_LONG,
-                ).setAction(R.string.retry) {
-                    binding.webView.reload()
-                }.show()
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    binding.progressIndicator.visibility = View.GONE
+                    binding.swipeRefresh.isRefreshing = false
+                    syncChromeFromUrl(url)
+                    dismissLaunchOverlay()
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?,
+                ) {
+                    if (request?.isForMainFrame != true) return
+                    binding.progressIndicator.visibility = View.GONE
+                    binding.swipeRefresh.isRefreshing = false
+                    dismissLaunchOverlay()
+                    Snackbar.make(
+                        binding.root,
+                        getString(R.string.web_load_error),
+                        Snackbar.LENGTH_LONG,
+                    ).setAction(R.string.retry) {
+                        binding.webView.reload()
+                    }.show()
+                }
             }
-        }
 
         binding.webView.setDownloadListener(
             DownloadListener { url, _, _, _, _ ->
                 openExternal(Uri.parse(url))
             },
         )
+    }
+
+    private fun dismissLaunchOverlay() {
+        if (launchOverlayDismissed) return
+        launchOverlayDismissed = true
+        cancelLaunchReloadAffordance()
+        binding.launchOverlay.animate()
+            .alpha(0f)
+            .setDuration(220L)
+            .withEndAction {
+                binding.launchOverlay.visibility = View.GONE
+            }
+            .start()
+    }
+
+    private fun scheduleLaunchReloadAffordance() {
+        if (launchOverlayDismissed) return
+        cancelLaunchReloadAffordance()
+        binding.launchOverlayHint.visibility = View.GONE
+        binding.launchOverlayReloadButton.visibility = View.GONE
+        binding.launchOverlay.postDelayed(launchReloadRunnable, LAUNCH_RELOAD_DELAY_MS)
+    }
+
+    private fun cancelLaunchReloadAffordance() {
+        binding.launchOverlay.removeCallbacks(launchReloadRunnable)
+    }
+
+    private fun retryInitialLoad() {
+        cancelLaunchReloadAffordance()
+        binding.launchOverlayHint.visibility = View.GONE
+        binding.launchOverlayReloadButton.visibility = View.GONE
+        val currentUrl = binding.webView.url?.takeIf { it.isNotBlank() }
+        val overrideUrl = pendingOverrideUrl?.takeIf { it.isNotBlank() }
+        when {
+            !currentUrl.isNullOrBlank() -> binding.webView.loadUrl(currentUrl)
+            !overrideUrl.isNullOrBlank() -> binding.webView.loadUrl(overrideUrl)
+            else -> loadTopLevelPage(currentTopLevel, resetToRoot = true)
+        }
+    }
+
+    private fun configureBannerAd() {
+        val adUnitId = BuildConfig.BANNER_AD_UNIT_ID.trim()
+        if (adUnitId.isEmpty()) {
+            binding.bannerHost.visibility = View.GONE
+            return
+        }
+
+        val adView =
+            AdView(this).apply {
+                this.adUnitId = adUnitId
+                adListener =
+                    object : AdListener() {
+                        override fun onAdLoaded() {
+                            binding.bannerHost.visibility = View.VISIBLE
+                        }
+
+                        override fun onAdFailedToLoad(error: LoadAdError) {
+                            binding.bannerHost.visibility = View.GONE
+                        }
+                    }
+            }
+
+        bannerAdView = adView
+        binding.bannerHost.removeAllViews()
+        binding.bannerHost.addView(
+            adView,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+
+        binding.bannerHost.post {
+            val adWidthPx =
+                binding.bannerHost.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+            val density = resources.displayMetrics.density
+            val adWidthDp = (adWidthPx / density).toInt().coerceAtLeast(1)
+            adView.setAdSize(
+                AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
+                    this,
+                    adWidthDp,
+                ),
+            )
+            adView.loadAd(AdRequest.Builder().build())
+        }
     }
 
     private fun configureSwipeRefresh() {
@@ -171,7 +316,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 R.id.menu_more -> {
-                    showMoreMenu()
+                    openMoreScreen()
                     false
                 }
 
@@ -182,10 +327,54 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemReselectedListener { item ->
             if (suppressBottomNavEvents) return@setOnItemReselectedListener
             when (item.itemId) {
-                R.id.menu_more -> showMoreMenu()
+                R.id.menu_more -> openMoreScreen()
                 else -> binding.webView.scrollTo(0, 0)
             }
         }
+    }
+
+    private fun openMoreScreen() {
+        startActivity(Intent(this, MoreActivity::class.java))
+    }
+
+    private fun handleStartDestination(intent: Intent?, resetToRoot: Boolean): Boolean {
+        if (handleExplicitWebDestination(intent)) {
+            return true
+        }
+
+        val destination = intent?.getStringExtra(AppNavigation.EXTRA_START_DESTINATION) ?: return false
+        val tab =
+            when (destination) {
+                AppNavigation.DEST_HISTORY -> TopLevelTab.HISTORY
+                AppNavigation.DEST_REPORTS -> TopLevelTab.REPORTS
+                else -> TopLevelTab.RACES
+            }
+        loadTopLevelPage(tab, resetToRoot = resetToRoot)
+        intent.removeExtra(AppNavigation.EXTRA_START_DESTINATION)
+        setIntent(intent)
+        return true
+    }
+
+    private fun handleExplicitWebDestination(intent: Intent?): Boolean {
+        intent?.let {
+            val url = intent.getStringExtra(AppNavigation.EXTRA_WEB_URL)?.trim().orEmpty()
+            if (url.isBlank()) return false
+
+            val normalizedUrl = AppWeb.normalizeInAppUrl(url, BuildConfig.BASE_WEB_URL) ?: return false
+            pendingOverrideUrl = normalizedUrl
+            pendingOverrideTitle =
+                intent.getStringExtra(AppNavigation.EXTRA_WEB_TITLE)?.trim()?.ifBlank { null }
+            binding.webView.loadUrl(normalizedUrl)
+            intent.removeExtra(AppNavigation.EXTRA_WEB_URL)
+            intent.removeExtra(AppNavigation.EXTRA_WEB_TITLE)
+            setIntent(intent)
+        }
+        return true
+    }
+
+    private fun maybeRequestNotificationPermission() {
+        if (!NotificationPermissionHelper.shouldRequestOnLaunch(this)) return
+        requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun configureBackHandling() {
@@ -193,11 +382,6 @@ class MainActivity : AppCompatActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    val dialog = moreDialog
-                    if (dialog?.isShowing == true) {
-                        dialog.dismiss()
-                        return
-                    }
                     if (binding.webView.canGoBack()) {
                         binding.webView.goBack()
                     } else {
@@ -208,72 +392,28 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showMoreMenu() {
-        val showingDialog = moreDialog
-        if (showingDialog?.isShowing == true) {
-            return
-        }
-
-        val labels = MorePage.entries.map { getString(it.labelRes) }.toTypedArray()
-        val checkedIndex = MorePage.entries.indexOf(currentMorePage).coerceAtLeast(0)
-
-        val dialog =
-            MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.more_dialog_title)
-            .setSingleChoiceItems(labels, checkedIndex, null)
-            .setNegativeButton(android.R.string.cancel) { dialog, _ ->
-                syncBottomNavigation(currentTopLevel)
-                dialog.dismiss()
-            }
-            .setPositiveButton(R.string.open_page) { dialog, _ ->
-                val selectedIndex =
-                    (dialog as androidx.appcompat.app.AlertDialog).listView.checkedItemPosition
-                        .coerceIn(0, MorePage.entries.lastIndex)
-                currentMorePage = MorePage.entries[selectedIndex]
-                loadMorePage(currentMorePage)
-            }
-            .setOnCancelListener {
-                syncBottomNavigation(currentTopLevel)
-            }
-            .create()
-
-        dialog.setCanceledOnTouchOutside(true)
-        dialog.setOnDismissListener {
-            moreDialog = null
-            syncBottomNavigation(currentTopLevel)
-        }
-        moreDialog = dialog
-        dialog.show()
-    }
-
     private fun loadTopLevelPage(tab: TopLevelTab, resetToRoot: Boolean) {
         currentTopLevel = tab
         syncBottomNavigation(tab)
 
         if (!resetToRoot) return
 
-        val targetUrl = when (tab) {
-            TopLevelTab.RACES -> withAppMarker(BuildConfig.BASE_WEB_URL)
-            TopLevelTab.HISTORY -> withAppMarker("${BuildConfig.BASE_WEB_URL}/history")
-            TopLevelTab.REPORTS -> withAppMarker("${BuildConfig.BASE_WEB_URL}/reports")
-            TopLevelTab.MORE -> withAppMarker(currentMorePage.url)
-        }
+        val targetUrl =
+            when (tab) {
+                TopLevelTab.RACES -> withAppMarker(BuildConfig.BASE_WEB_URL)
+                TopLevelTab.HISTORY -> withAppMarker("${BuildConfig.BASE_WEB_URL}/history")
+                TopLevelTab.REPORTS -> withAppMarker("${BuildConfig.BASE_WEB_URL}/reports")
+            }
         binding.webView.loadUrl(targetUrl)
     }
 
-    private fun loadMorePage(page: MorePage) {
-        currentTopLevel = TopLevelTab.MORE
-        syncBottomNavigation(TopLevelTab.MORE)
-        binding.webView.loadUrl(withAppMarker(page.url))
-    }
-
     private fun syncBottomNavigation(tab: TopLevelTab) {
-        val menuId = when (tab) {
-            TopLevelTab.RACES -> R.id.menu_races
-            TopLevelTab.HISTORY -> R.id.menu_history
-            TopLevelTab.REPORTS -> R.id.menu_reports
-            TopLevelTab.MORE -> R.id.menu_more
-        }
+        val menuId =
+            when (tab) {
+                TopLevelTab.RACES -> R.id.menu_races
+                TopLevelTab.HISTORY -> R.id.menu_history
+                TopLevelTab.REPORTS -> R.id.menu_reports
+            }
         suppressBottomNavEvents = true
         binding.bottomNav.selectedItemId = menuId
         suppressBottomNavEvents = false
@@ -283,11 +423,16 @@ class MainActivity : AppCompatActivity() {
         val uri = url?.let(Uri::parse) ?: return
         val topLevel = inferTopLevel(uri)
         currentTopLevel = topLevel
-        if (topLevel == TopLevelTab.MORE) {
-            currentMorePage = inferMorePage(uri) ?: currentMorePage
-        }
         syncBottomNavigation(topLevel)
-        binding.toolbarTitle.text = resolveTitle(uri)
+        val overrideTitle =
+            if (pendingOverrideUrl == url) {
+                pendingOverrideTitle
+            } else {
+                pendingOverrideUrl = null
+                pendingOverrideTitle = null
+                null
+            }
+        binding.toolbarTitle.text = overrideTitle ?: resolveTitle(uri)
         binding.toolbarSubtitle.text = resolveSubtitle(topLevel)
     }
 
@@ -296,20 +441,7 @@ class MainActivity : AppCompatActivity() {
         return when {
             path == "/keiba/history" -> TopLevelTab.HISTORY
             path.startsWith("/keiba/reports") -> TopLevelTab.REPORTS
-            path == "/keiba/privacy" || path == "/keiba/terms" || path == "/keiba/disclaimer" || path == "/keiba/contact" ->
-                TopLevelTab.MORE
-
             else -> TopLevelTab.RACES
-        }
-    }
-
-    private fun inferMorePage(uri: Uri): MorePage? {
-        return when (uri.path.orEmpty().trimEnd('/')) {
-            "/keiba/privacy" -> MorePage.PRIVACY
-            "/keiba/terms" -> MorePage.TERMS
-            "/keiba/disclaimer" -> MorePage.DISCLAIMER
-            "/keiba/contact" -> MorePage.CONTACT
-            else -> null
         }
     }
 
@@ -321,10 +453,6 @@ class MainActivity : AppCompatActivity() {
             path == "/keiba/history" -> getString(R.string.title_history)
             path == "/keiba/reports" -> getString(R.string.title_reports)
             path.startsWith("/keiba/reports/") -> getString(R.string.title_report_detail)
-            path == "/keiba/privacy" -> getString(R.string.more_privacy)
-            path == "/keiba/terms" -> getString(R.string.more_terms)
-            path == "/keiba/disclaimer" -> getString(R.string.more_disclaimer)
-            path == "/keiba/contact" -> getString(R.string.more_contact)
             else -> getString(R.string.app_name)
         }
     }
@@ -334,7 +462,6 @@ class MainActivity : AppCompatActivity() {
             TopLevelTab.RACES -> getString(R.string.subtitle_races)
             TopLevelTab.HISTORY -> getString(R.string.subtitle_history)
             TopLevelTab.REPORTS -> getString(R.string.subtitle_reports)
-            TopLevelTab.MORE -> getString(R.string.subtitle_more)
         }
     }
 
@@ -359,9 +486,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openExternal(uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-        }
+        val intent =
+            Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
         try {
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
@@ -374,24 +502,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun withAppMarker(url: String): String {
-        val uri = Uri.parse(url)
-        if (uri.getQueryParameter("app") == "1") {
-            return url
-        }
-        return uri.buildUpon().appendQueryParameter("app", "1").build().toString()
+        return AppWeb.withAppMarker(url)
     }
 
     private enum class TopLevelTab {
         RACES,
         HISTORY,
         REPORTS,
-        MORE,
     }
 
-    private enum class MorePage(val labelRes: Int, val url: String) {
-        PRIVACY(R.string.more_privacy, "${BuildConfig.BASE_WEB_URL}/privacy"),
-        TERMS(R.string.more_terms, "${BuildConfig.BASE_WEB_URL}/terms"),
-        DISCLAIMER(R.string.more_disclaimer, "${BuildConfig.BASE_WEB_URL}/disclaimer"),
-        CONTACT(R.string.more_contact, "${BuildConfig.BASE_WEB_URL}/contact"),
+    private companion object {
+        const val STATE_LAUNCH_OVERLAY_DISMISSED = "state_launch_overlay_dismissed"
+        const val LAUNCH_RELOAD_DELAY_MS = 10_000L
     }
 }

@@ -1,19 +1,20 @@
 # Android App Shell
 
-这个目录是当前项目的 Android 原生壳工程预览版，定位是：
+This directory contains the preview version of the native Android shell for the current project.
 
-- 原生 `Kotlin` 壳子
-- `WebView` 承载公开页面
-- 底部导航直达 `レース / 履歴分析 / 私の日報 / その他`
+- Native `Kotlin` shell
+- Public pages rendered inside `WebView`
+- Bottom navigation for `レース / 履歴分析 / 日報 / その他`
+- `その他` uses a native screen for entry points and shows a `Native Advanced` ad at the bottom
 
-## 当前入口
+## Current Entry Points
 
 - `レース`: `/keiba`
 - `履歴分析`: `/keiba/history`
-- `私の日報`: `/keiba/reports`
+- `日報`: `/keiba/reports`
 - `その他`: `プライバシーポリシー / 利用規約 / 免責事項 / お問い合わせ`
 
-## 目录
+## Directory Layout
 
 ```text
 android/
@@ -23,35 +24,75 @@ android/
       res/
 ```
 
-## 打开方式
+## Open the Project
 
-1. 用 Android Studio 打开 `D:\keiba\new\android`
-2. 等待 Gradle Sync
-3. 运行 `app`
+1. Open `D:\keiba\new\android` in Android Studio
+2. Wait for Gradle sync to finish
+3. Run the `app` module
 
-## Debug 本地检查
+## Local Debug Workflow
 
-如果你想在本地检查 Web 改动：
+If you want to verify local Web changes from the Android app:
 
-1. 在仓库根目录启动本地服务：
+1. Start the local server from the repository root:
    `python pipeline/web_server.py`
-2. 在 Android Studio 运行 `debug` 版本
-3. `debug` 默认连接：
-   `http://127.0.0.1:8000/kei`
+2. Run the `debug` build in Android Studio
+3. The `debug` build connects to:
+   `http://10.0.2.2:8000/keiba`
 
-说明：
+Notes:
 
-- `127.0.0.1` 是 Android 模拟器访问宿主机 localhost 的固定地址
-- `release` 版本仍然连接线上：
+- `10.0.2.2` is the fixed host alias used by the Android Emulator to access the host machine's localhost
+- The `release` build still points to:
   `https://www.ikaimo-ai.com/keiba`
+- The bottom banner ad uses the configured AdMob banner unit
 
-## 可选覆盖
+## Optional Overrides
 
-如果你不是用模拟器，想让 `debug` 改连别的地址，可以加一个 Gradle 属性：
+If you are not using the Android Emulator and want `debug` to connect to a different URL, add this Gradle property:
 
-`KEIBA_DEBUG_BASE_WEB_URL=http://你的地址:8000/keiba`
+`KEIBA_DEBUG_BASE_WEB_URL=http://your-host:8000/keiba`
 
-这个属性可以放在：
+You can place it in:
 
-- `C:\Users\你的用户名\.gradle\gradle.properties`
-- 或者项目里的 `android\gradle.properties`
+- `C:\Users\<your-user>\.gradle\gradle.properties`
+- or `android\gradle.properties`
+
+The repository does not include `google-services.json`.
+Add your own local files here before building Firebase-enabled variants:
+
+- `android/app/google-services.json`
+- `android/app/src/debug/google-services.json`
+
+To override the AdMob app ID:
+
+- `KEIBA_ADMOB_APP_ID=your_admob_app_id`
+
+To override the banner ad unit:
+
+- `KEIBA_BANNER_AD_UNIT_ID=your_banner_id`
+
+To override the native ad unit shown on the `その他` screen:
+
+- `KEIBA_NATIVE_MORE_AD_UNIT_ID=your_native_id`
+
+## FCM
+
+The Android shell already includes the client-side FCM integration:
+
+- `FirebaseMessagingService` for receiving messages
+- Notification permission request on first launch for Android 13+
+- Automatic notification channel creation
+- Notification tap routing to a target page
+
+It is recommended to send a `data` payload with these fields:
+
+- `title`: notification title
+- `body`: notification body
+- `destination`: top-level destination, one of `races / history / reports / more`
+- `url`: relative in-app path or full URL, for example `/keiba/reports/foo` or `https://...`
+
+Priority:
+
+- If both `url` and `destination` are present, `url` takes priority
+- `app=1` is appended automatically for routed Web pages

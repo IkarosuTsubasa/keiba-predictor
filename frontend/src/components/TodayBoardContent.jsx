@@ -3,7 +3,7 @@ import EmptyRaceState from "./EmptyRaceState";
 import ModelTopFiveBoard from "./ModelTopFiveBoard";
 import RaceGrid from "./RaceGrid";
 
-export default function TodayBoardContent({ data, races }) {
+export default function TodayBoardContent({ data, races, appShell = false }) {
   const [mode, setMode] = useState("race");
 
   return (
@@ -35,7 +35,7 @@ export default function TodayBoardContent({ data, races }) {
 
       {races.length ? (
         mode === "race" ? (
-          <RaceGrid races={races} />
+          <RaceGrid races={races} appShell={appShell} />
         ) : (
           <ModelTopFiveBoard data={data} races={races} />
         )

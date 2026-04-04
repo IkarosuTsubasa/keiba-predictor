@@ -21,6 +21,33 @@
       src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2154555054261960"
       crossorigin="anonymous"
     ></script>
+    <script>
+      (function () {
+        try {
+          var params = new URLSearchParams(window.location.search || "");
+          if (params.get("app") === "1") {
+            var path = String(window.location.pathname || "").replace(/\/+$/, "") || "/";
+            var routeClass = "app-shell-boot--home";
+
+            if (path === "/keiba/history") {
+              routeClass = "app-shell-boot--history";
+            } else if (path === "/keiba/reports") {
+              routeClass = "app-shell-boot--reports";
+            } else if (/^\/keiba\/reports\/.+/.test(path)) {
+              routeClass = "app-shell-boot--report-detail";
+            } else if (/^\/keiba\/race\/.+/.test(path)) {
+              routeClass = "app-shell-boot--race-detail";
+            } else if (
+              /^\/keiba\/(about|guide|methodology|privacy|terms|disclaimer|contact)$/.test(path)
+            ) {
+              routeClass = "app-shell-boot--static";
+            }
+
+            document.documentElement.classList.add("app-shell-boot", routeClass);
+          }
+        } catch (_) {}
+      })();
+    </script>
     <style>
       .public-app-boot {
         min-height: 100vh;
@@ -170,6 +197,174 @@
         animation: public-app-boot-slide 1.4s ease-in-out infinite;
       }
 
+      .app-shell-boot .public-app-boot {
+        min-height: 100vh;
+        padding: 10px 10px 18px;
+        background:
+          radial-gradient(circle at top left, rgba(203, 167, 47, 0.08), transparent 26%),
+          linear-gradient(180deg, #f6f5f1 0%, #f1f3f6 48%, #eceff2 100%);
+      }
+
+      .app-shell-boot .public-app-boot__header,
+      .app-shell-boot .public-app-boot__nav,
+      .app-shell-boot .public-app-boot__main-card {
+        display: none;
+      }
+
+      .app-shell-boot .public-app-boot__shell {
+        width: 100%;
+        max-width: none;
+        padding: 0;
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .app-shell-boot .public-app-boot__main {
+        gap: 0;
+      }
+
+      .app-shell-boot .public-app-boot__loading {
+        padding: 20px 18px;
+        border-radius: 22px;
+      }
+
+      .public-app-boot__loading--app {
+        display: none;
+      }
+
+      .app-shell-boot .public-app-boot__loading--default {
+        display: none;
+      }
+
+      .app-shell-boot.app-shell-boot--home .public-app-boot__loading--home,
+      .app-shell-boot.app-shell-boot--history .public-app-boot__loading--history,
+      .app-shell-boot.app-shell-boot--reports .public-app-boot__loading--reports,
+      .app-shell-boot.app-shell-boot--report-detail .public-app-boot__loading--report-detail,
+      .app-shell-boot.app-shell-boot--race-detail .public-app-boot__loading--race-detail,
+      .app-shell-boot.app-shell-boot--static .public-app-boot__loading--static {
+        display: grid;
+      }
+
+      .app-shell-boot .public-app-boot__loading p {
+        font-size: 13px;
+      }
+
+      .public-app-boot__skeleton-title,
+      .public-app-boot__skeleton-line,
+      .public-app-boot__skeleton-pill,
+      .public-app-boot__skeleton-card,
+      .public-app-boot__skeleton-chip {
+        position: relative;
+        overflow: hidden;
+        background: rgba(25, 35, 76, 0.08);
+      }
+
+      .public-app-boot__skeleton-title::after,
+      .public-app-boot__skeleton-line::after,
+      .public-app-boot__skeleton-pill::after,
+      .public-app-boot__skeleton-card::after,
+      .public-app-boot__skeleton-chip::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+        animation: public-app-boot-shimmer 1.3s ease-in-out infinite;
+      }
+
+      .public-app-boot__skeleton-title {
+        height: 22px;
+        width: 48%;
+        border-radius: 10px;
+      }
+
+      .public-app-boot__skeleton-line {
+        height: 12px;
+        border-radius: 999px;
+      }
+
+      .public-app-boot__skeleton-line--short {
+        width: 54%;
+      }
+
+      .public-app-boot__skeleton-line--mid {
+        width: 72%;
+      }
+
+      .public-app-boot__skeleton-pill-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: nowrap;
+      }
+
+      .public-app-boot__skeleton-pill {
+        height: 38px;
+        border-radius: 999px;
+        flex: 1 1 0;
+      }
+
+      .public-app-boot__skeleton-pill--wide {
+        flex: 1.6 1 0;
+      }
+
+      .public-app-boot__skeleton-chip-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: nowrap;
+      }
+
+      .public-app-boot__skeleton-chip {
+        height: 34px;
+        border-radius: 12px;
+        flex: 1 1 0;
+      }
+
+      .public-app-boot__skeleton-card-list,
+      .public-app-boot__skeleton-section {
+        display: grid;
+        gap: 12px;
+      }
+
+      .public-app-boot__skeleton-card {
+        min-height: 118px;
+        border-radius: 20px;
+      }
+
+      .public-app-boot__skeleton-card--hero {
+        min-height: 148px;
+      }
+
+      .public-app-boot__skeleton-card--compact {
+        min-height: 88px;
+      }
+
+      .public-app-boot__skeleton-metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .public-app-boot__skeleton-metrics .public-app-boot__skeleton-card {
+        min-height: 86px;
+      }
+
+      .public-app-boot__skeleton-stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .public-app-boot__loading--history,
+      .public-app-boot__loading--reports,
+      .public-app-boot__loading--report-detail,
+      .public-app-boot__loading--race-detail,
+      .public-app-boot__loading--static {
+        gap: 14px;
+      }
+
+      @keyframes public-app-boot-shimmer {
+        100% { transform: translateX(100%); }
+      }
+
       @keyframes public-app-boot-slide {
         0% { background-position: 100% 0; }
         100% { background-position: -100% 0; }
@@ -208,7 +403,7 @@
         }
       }
     </style>
-    <script type="module" crossorigin src="/keiba/assets/index-H-1V9JuE.js"></script>
+    <script type="module" crossorigin src="/keiba/assets/index-BUP_bZdF.js"></script>
     <link rel="stylesheet" crossorigin href="/keiba/assets/index-Cz8b8MB3.css">
   </head>
   <body>
@@ -240,11 +435,105 @@
           </aside>
           <div class="public-app-boot__main">
             <!-- PUBLIC_HOME_INTRO_SLOT -->
-            <section class="public-app-boot__loading" aria-live="polite">
+            <section class="public-app-boot__loading public-app-boot__loading--default" aria-live="polite">
               <span class="public-app-boot__loading-label">読み込み中</span>
               <strong>公開レースを読み込んでいます</strong>
               <p>ヘッダーとナビゲーションを先に表示しながら、公開データを読み込みます。</p>
               <div class="public-app-boot__loading-bar" aria-hidden="true"></div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--home" aria-live="polite">
+              <span class="public-app-boot__loading-label">レース一覧</span>
+              <div class="public-app-boot__skeleton-pill-row" aria-hidden="true">
+                <div class="public-app-boot__skeleton-pill public-app-boot__skeleton-pill--wide"></div>
+                <div class="public-app-boot__skeleton-pill"></div>
+                <div class="public-app-boot__skeleton-pill"></div>
+              </div>
+              <div class="public-app-boot__skeleton-card-list" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+              </div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--history" aria-live="polite">
+              <span class="public-app-boot__loading-label">履歴分析</span>
+              <div class="public-app-boot__skeleton-stack" aria-hidden="true">
+                <div class="public-app-boot__skeleton-title"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--mid"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--short"></div>
+              </div>
+              <div class="public-app-boot__skeleton-chip-row" aria-hidden="true">
+                <div class="public-app-boot__skeleton-chip"></div>
+                <div class="public-app-boot__skeleton-chip"></div>
+              </div>
+              <div class="public-app-boot__skeleton-pill-row" aria-hidden="true">
+                <div class="public-app-boot__skeleton-pill"></div>
+                <div class="public-app-boot__skeleton-pill"></div>
+                <div class="public-app-boot__skeleton-pill"></div>
+              </div>
+              <div class="public-app-boot__skeleton-metrics" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--compact"></div>
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--compact"></div>
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--compact"></div>
+              </div>
+              <div class="public-app-boot__skeleton-section" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+              </div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--reports" aria-live="polite">
+              <span class="public-app-boot__loading-label">私の日報</span>
+              <div class="public-app-boot__skeleton-stack" aria-hidden="true">
+                <div class="public-app-boot__skeleton-title"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--mid"></div>
+              </div>
+              <div class="public-app-boot__skeleton-section" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+              </div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--report-detail" aria-live="polite">
+              <span class="public-app-boot__loading-label">日報詳細</span>
+              <div class="public-app-boot__skeleton-stack" aria-hidden="true">
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--short"></div>
+                <div class="public-app-boot__skeleton-title"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--mid"></div>
+              </div>
+              <div class="public-app-boot__skeleton-section" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+              </div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--race-detail" aria-live="polite">
+              <span class="public-app-boot__loading-label">レース詳細</span>
+              <div class="public-app-boot__skeleton-stack" aria-hidden="true">
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--short"></div>
+                <div class="public-app-boot__skeleton-title"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--mid"></div>
+              </div>
+              <div class="public-app-boot__skeleton-section" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+              </div>
+            </section>
+
+            <section class="public-app-boot__loading public-app-boot__loading--app public-app-boot__loading--static" aria-live="polite">
+              <span class="public-app-boot__loading-label">ページを読み込み中</span>
+              <div class="public-app-boot__skeleton-stack" aria-hidden="true">
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--short"></div>
+                <div class="public-app-boot__skeleton-title"></div>
+                <div class="public-app-boot__skeleton-line public-app-boot__skeleton-line--mid"></div>
+              </div>
+              <div class="public-app-boot__skeleton-section" aria-hidden="true">
+                <div class="public-app-boot__skeleton-card public-app-boot__skeleton-card--hero"></div>
+                <div class="public-app-boot__skeleton-card"></div>
+              </div>
             </section>
           </div>
         </div>

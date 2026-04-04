@@ -48,7 +48,7 @@ function filterRacesByTab(races, tab) {
   return races || [];
 }
 
-export default function RaceGrid({ races }) {
+export default function RaceGrid({ races, appShell = false }) {
   const [tab, setTab] = useState("all");
   const [viewportPhase, setViewportPhase] = useState("idle");
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 });
@@ -173,34 +173,36 @@ export default function RaceGrid({ races }) {
 
   return (
     <div className="race-grid-section">
-      <div className="race-grid-tabs" ref={tabsRef}>
-        <span
-          className="race-grid-tabs__indicator"
-          aria-hidden="true"
-          style={{
-            width: `${indicator.width}px`,
-            transform: `translateX(${indicator.left}px)`,
-            opacity: indicator.opacity,
-          }}
-        />
-        {tabs.map((item) => (
-          <button
-            key={item.key}
-            ref={(node) => {
-              if (node) {
-                buttonRefs.current.set(item.key, node);
-              } else {
-                buttonRefs.current.delete(item.key);
-              }
+      {!appShell ? (
+        <div className="race-grid-tabs" ref={tabsRef}>
+          <span
+            className="race-grid-tabs__indicator"
+            aria-hidden="true"
+            style={{
+              width: `${indicator.width}px`,
+              transform: `translateX(${indicator.left}px)`,
+              opacity: indicator.opacity,
             }}
-            type="button"
-            className={tab === item.key ? "is-active" : ""}
-            onClick={() => changeTab(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+          />
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              ref={(node) => {
+                if (node) {
+                  buttonRefs.current.set(item.key, node);
+                } else {
+                  buttonRefs.current.delete(item.key);
+                }
+              }}
+              type="button"
+              className={tab === item.key ? "is-active" : ""}
+              onClick={() => changeTab(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className={`race-grid__viewport race-grid__viewport--${viewportPhase}`}>
         <div className="race-grid">
