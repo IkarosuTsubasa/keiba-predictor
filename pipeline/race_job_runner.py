@@ -226,7 +226,7 @@ def _mark_ntfy_notify_failed(row, now_text, run_id, error_text):
 
 
 def _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id):
-    from ntfy_notifier import publish_ntfy_share_notification
+    from ntfy_notifier import publish_share_notifications
 
     job = get_job(base_path, job_id) or {}
     if str(job.get("ntfy_notify_status", "") or "").strip().lower() == "notified":
@@ -234,7 +234,7 @@ def _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id):
             _log_runner_event("ntfy_notify_skipped", job_id=job_id, run_id=run_id, reason="already_notified")
             return None
     try:
-        result = publish_ntfy_share_notification(scope_key, run_id)
+        result = publish_share_notifications(scope_key, run_id)
     except Exception as exc:
         error_text = str(exc or "").strip()
         update_job(

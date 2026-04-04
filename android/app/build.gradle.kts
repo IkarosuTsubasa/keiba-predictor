@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,23 +7,68 @@ plugins {
     id("com.google.firebase.crashlytics")
 }
 
+val localProperties =
+    Properties().apply {
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.inputStream().use(::load)
+        }
+    }
+
+fun localProperty(name: String): String? =
+    localProperties.getProperty(name)?.trim()?.ifBlank { null }
+
 val releaseBaseWebUrl = "https://www.ikaimo-ai.com/keiba"
+val googleTestAdmobAppId = "ca-app-pub-3940256099942544~3347511713"
+val googleTestBannerAdUnitId = "ca-app-pub-3940256099942544/9214589741"
+val googleTestNativeAdUnitId = "ca-app-pub-3940256099942544/2247696110"
 val admobAppId =
     providers.gradleProperty("KEIBA_ADMOB_APP_ID")
-        .orElse("ca-app-pub-3940256099942544~3347511713")
+        .orElse(localProperty("KEIBA_ADMOB_APP_ID") ?: googleTestAdmobAppId)
         .get()
 val debugBaseWebUrl =
     providers.gradleProperty("KEIBA_DEBUG_BASE_WEB_URL")
-        .orElse("http://10.0.2.2:8000/keiba")
+        .orElse(localProperty("KEIBA_DEBUG_BASE_WEB_URL") ?: "http://10.0.2.2:8000/keiba")
         .get()
 val bannerAdUnitId =
     providers.gradleProperty("KEIBA_BANNER_AD_UNIT_ID")
-        .orElse("ca-app-pub-3940256099942544/9214589741")
+        .orElse(localProperty("KEIBA_BANNER_AD_UNIT_ID") ?: googleTestBannerAdUnitId)
         .get()
 val nativeMoreAdUnitId =
     providers.gradleProperty("KEIBA_NATIVE_MORE_AD_UNIT_ID")
-        .orElse("ca-app-pub-3940256099942544/2247696110")
+        .orElse(localProperty("KEIBA_NATIVE_MORE_AD_UNIT_ID") ?: googleTestNativeAdUnitId)
         .get()
+val fcmTopic =
+    providers.gradleProperty("KEIBA_FCM_TOPIC")
+        .orElse(localProperty("KEIBA_FCM_TOPIC") ?: "keiba-public-updates")
+        .get()
+
+val validateReleaseAdmobConfig =
+    tasks.register("validateReleaseAdmobConfig") {
+        group = "verification"
+        description = "Fails the release build if AdMob is still using missing or test IDs."
+        doLast {
+            val problems = mutableListOf<String>()
+            if (admobAppId.isBlank() || admobAppId == googleTestAdmobAppId) {
+                problems += "KEIBA_ADMOB_APP_ID must be set to your production AdMob app ID for release builds."
+            }
+            if (bannerAdUnitId.isBlank() || bannerAdUnitId == googleTestBannerAdUnitId) {
+                problems += "KEIBA_BANNER_AD_UNIT_ID must be set to your production banner ad unit ID for release builds."
+            }
+            if (nativeMoreAdUnitId.isBlank() || nativeMoreAdUnitId == googleTestNativeAdUnitId) {
+                problems += "KEIBA_NATIVE_MORE_AD_UNIT_ID must be set to your production native ad unit ID for release builds."
+            }
+            if (problems.isNotEmpty()) {
+                throw GradleException(problems.joinToString(separator = "\n"))
+            }
+        }
+    }
+
+tasks.configureEach {
+    if (name.contains("Release", ignoreCase = true) && name != validateReleaseAdmobConfig.name) {
+        dependsOn(validateReleaseAdmobConfig)
+    }
+}
 
 android {
     namespace = "com.ikaimo.keiba.app"
@@ -32,12 +79,13 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BASE_WEB_URL", "\"$releaseBaseWebUrl\"")
         buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
         buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
+        buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
         buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -50,6 +98,7 @@ android {
             buildConfigField("String", "BASE_WEB_URL", "\"$debugBaseWebUrl\"")
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
+            buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "true")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
@@ -59,6 +108,7 @@ android {
             buildConfigField("String", "BASE_WEB_URL", "\"$releaseBaseWebUrl\"")
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
+            buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
             manifestPlaceholders["usesCleartextTraffic"] = "false"
             proguardFiles(

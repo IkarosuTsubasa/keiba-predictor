@@ -64,6 +64,9 @@ Add your own local files here before building Firebase-enabled variants:
 - `android/app/google-services.json`
 - `android/app/src/debug/google-services.json`
 
+Local machine-only values can be placed either in Gradle properties or in `android/local.properties`.
+Project-level `android/local.properties` is already ignored by Git.
+
 To override the AdMob app ID:
 
 - `KEIBA_ADMOB_APP_ID=your_admob_app_id`
@@ -75,6 +78,12 @@ To override the banner ad unit:
 To override the native ad unit shown on the `その他` screen:
 
 - `KEIBA_NATIVE_MORE_AD_UNIT_ID=your_native_id`
+
+Release builds fail on purpose if these AdMob values are missing or still set to Google's test IDs.
+
+To override the FCM topic used by the Android client:
+
+- `KEIBA_FCM_TOPIC=your_topic_name`
 
 ## FCM
 

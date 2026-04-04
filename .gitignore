@@ -12,6 +12,7 @@ frontend/node_modules/
 android/.gradle/
 android/.idea/
 android/local.properties
+android/app/release/
 android/**/build/
 android/**/*.iml
 android/app/google-services.json

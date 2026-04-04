@@ -43,7 +43,7 @@ class KeibaFirebaseMessagingService : FirebaseMessagingService() {
 
         val notification =
             NotificationCompat.Builder(this, NotificationChannels.GENERAL_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                .setSmallIcon(R.drawable.ic_stat_name)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))

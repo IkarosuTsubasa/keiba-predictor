@@ -9,6 +9,11 @@ class KeibaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         NotificationChannels.ensureCreated(this)
+        FirebaseMessaging.getInstance().subscribeToTopic(BuildConfig.FCM_TOPIC).addOnCompleteListener { task ->
+            if (BuildConfig.DEBUG && !task.isSuccessful) {
+                Log.w(TAG, "FCM topic subscribe failed", task.exception)
+            }
+        }
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
                 if (BuildConfig.DEBUG) {
