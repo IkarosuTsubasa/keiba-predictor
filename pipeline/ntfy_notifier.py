@@ -56,6 +56,19 @@ def _fcm_credentials_path():
     return str(path)
 
 
+def _fcm_credentials_info():
+    raw = str(os.environ.get("PIPELINE_FCM_SERVICE_ACCOUNT_JSON", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("PIPELINE_FCM_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("PIPELINE_FCM_SERVICE_ACCOUNT_JSON must decode to a JSON object")
+    return payload
+
+
 def _public_site_url():
     value = str(os.environ.get("PIPELINE_PUBLIC_SITE_URL", "https://www.ikaimo-ai.com") or "").strip()
     return (value or "https://www.ikaimo-ai.com").rstrip("/")
@@ -125,6 +138,11 @@ def _get_firebase_app():
         return _FCM_APP
     except ValueError:
         pass
+
+    credentials_info = _fcm_credentials_info()
+    if credentials_info:
+        _FCM_APP = firebase_admin.initialize_app(credentials.Certificate(credentials_info))
+        return _FCM_APP
 
     credentials_path = _fcm_credentials_path()
     if credentials_path:
