@@ -136,6 +136,17 @@ python pipeline/web_server.py
 - Requires `fastapi` and `uvicorn`
 - Runs on `http://127.0.0.1:8000`
 
+## Android Shell Preview
+- Android preview project lives in `android/`
+- Current approach is a native `Kotlin` shell with a `WebView`
+- First-pass tabs:
+  - `レース`
+  - `履歴分析`
+  - `私の日報`
+  - `その他`
+- Default web target is `https://www.ikaimo-ai.com/keiba`
+- See `android/README.md` for details
+
 ## Data and Outputs
 - Root outputs (latest run): `predictions.csv`, `odds.csv`, `fuku_odds.csv`, `wide_odds.csv`, `quinella_odds.csv`, `trio_odds.csv`
 - Per-scope logs: `pipeline/data/<scope>/runs.csv`, `results.csv`, `predictor_results.csv`, and optimizer logs

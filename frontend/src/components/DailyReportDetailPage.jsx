@@ -187,7 +187,20 @@ async function parseJsonSafely(response) {
   }
 }
 
-export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba" }) {
+function withAppShellFlag(href, enabled = false) {
+  const value = String(href || "").trim();
+  if (!enabled || !value) return value;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "https://www.ikaimo-ai.com";
+    const url = new URL(value, base);
+    url.searchParams.set("app", "1");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value.includes("?") ? `${value}&app=1` : `${value}?app=1`;
+  }
+}
+
+export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba", appShell = false }) {
   const [state, setState] = useState({
     loading: true,
     errorTitle: "",
@@ -329,7 +342,7 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
       <div className="daily-report-detail-hero">
         <div className="daily-report-detail-hero__copy">
           <div className="daily-report-detail-hero__actions">
-            <a className="race-detail-back-link" href={`${appBasePath}/reports`}>
+            <a className="race-detail-back-link" href={withAppShellFlag(`${appBasePath}/reports`, appShell)}>
               日報一覧へ戻る
             </a>
             <button

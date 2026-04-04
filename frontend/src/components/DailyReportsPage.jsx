@@ -16,8 +16,21 @@ function ErrorState({ title = "", details = [] }) {
   );
 }
 
-function ReportCard({ item, featured = false }) {
-  const href = String(item?.public_url || "").trim() || "/keiba/reports";
+function withAppShellFlag(href, enabled = false) {
+  const value = String(href || "").trim();
+  if (!enabled || !value) return value;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "https://www.ikaimo-ai.com";
+    const url = new URL(value, base);
+    url.searchParams.set("app", "1");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value.includes("?") ? `${value}&app=1` : `${value}?app=1`;
+  }
+}
+
+function ReportCard({ item, featured = false, appShell = false }) {
+  const href = withAppShellFlag(String(item?.public_url || "").trim() || "/keiba/reports", appShell);
   const className = `daily-report-card${featured ? " daily-report-card--featured" : ""}`;
   return (
     <article className={className}>
@@ -42,7 +55,7 @@ async function parseJsonSafely(response) {
   }
 }
 
-export default function DailyReportsPage({ appBasePath = "/keiba" }) {
+export default function DailyReportsPage({ appBasePath = "/keiba", appShell = false }) {
   const [state, setState] = useState({
     loading: true,
     errorTitle: "",
@@ -131,7 +144,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
               <h2>Latest Entry</h2>
             </div>
           </div>
-          <ReportCard item={latest} featured />
+          <ReportCard item={latest} featured appShell={appShell} />
         </section>
       ) : null}
 
@@ -146,7 +159,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba" }) {
           {items.length ? (
             <div className="daily-report-grid">
               {items.map((item) => (
-                <ReportCard key={item.slug || item.created_at} item={item} />
+                <ReportCard key={item.slug || item.created_at} item={item} appShell={appShell} />
               ))}
             </div>
           ) : (

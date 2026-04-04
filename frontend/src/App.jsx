@@ -6,6 +6,7 @@ import BeginnerGuideSection from "./components/BeginnerGuideSection";
 import DailyReportDetailPage from "./components/DailyReportDetailPage";
 import DailyReportsPage from "./components/DailyReportsPage";
 import FeaturedContentSection from "./components/FeaturedContentSection";
+import FilterBar from "./components/FilterBar";
 import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
@@ -39,8 +40,22 @@ function extractSelectedDate(search) {
   }
 }
 
+function isAppShellSearch(search) {
+  try {
+    return new URLSearchParams(String(search || "")).get("app") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function navigateWithSearch(nextSearch) {
-  const url = nextSearch ? `${APP_BASE_PATH}?${nextSearch}` : APP_BASE_PATH;
+  const current = new URLSearchParams(window.location.search.replace(/^\?/, ""));
+  const next = new URLSearchParams(String(nextSearch || "").replace(/^\?/, ""));
+  if (current.get("app") === "1") {
+    next.set("app", "1");
+  }
+  const query = next.toString();
+  const url = query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
   window.history.pushState({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
@@ -159,7 +174,19 @@ function ErrorState({ error, onRetry }) {
   );
 }
 
-function PublicFrame({ headerProps = {}, sideNavProps = {}, children }) {
+function PublicFrame({ headerProps = {}, sideNavProps = {}, children, appShell = false }) {
+  if (appShell) {
+    return (
+      <main className="racing-intel-page racing-intel-page--app-shell">
+        <div className="racing-intel-page__shell racing-intel-page__shell--app-shell">
+          <div className="racing-intel-page__main racing-intel-page__main--app-shell">
+            {children}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="racing-intel-page">
       <AppHeader {...headerProps} />
@@ -221,6 +248,7 @@ export default function App() {
   const isRaceDetail = Boolean(raceDetailId);
   const staticPage = PUBLIC_PAGE_CONTENT[normalizedPath] || null;
   const selectedDate = extractSelectedDate(search);
+  const isAppShell = isAppShellSearch(search);
   const isDateFocusedHome = normalizedPath === APP_BASE_PATH && Boolean(selectedDate);
   useEffect(() => {
     if (isAdminWorkspace) {
@@ -259,7 +287,7 @@ export default function App() {
     trackPageView(pagePath, document.title);
   }, [isAdminConsole, isAdminWorkspace, normalizedPath, search]);
 
-  const shouldLoadPublicHeaderData = !isAdminConsole && !isAdminWorkspace;
+  const shouldLoadPublicHeaderData = !isAdminConsole && !isAdminWorkspace && !isAppShell;
   const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
   const { loading, error, data } = useBoardData(
     search,
@@ -304,6 +332,7 @@ export default function App() {
   if (staticPage) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{ pathname: normalizedPath, mode: "static" }}
       >
@@ -317,6 +346,7 @@ export default function App() {
   if (isReportsPage) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
@@ -324,7 +354,7 @@ export default function App() {
         }}
       >
         <div className="public-content-stack">
-          <DailyReportsPage appBasePath={APP_BASE_PATH} />
+          <DailyReportsPage appBasePath={APP_BASE_PATH} appShell={isAppShell} />
         </div>
       </PublicFrame>
     );
@@ -333,6 +363,7 @@ export default function App() {
   if (isReportDetail) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
@@ -340,7 +371,7 @@ export default function App() {
         }}
       >
         <div className="public-content-stack">
-          <DailyReportDetailPage slug={reportSlug} appBasePath={APP_BASE_PATH} />
+          <DailyReportDetailPage slug={reportSlug} appBasePath={APP_BASE_PATH} appShell={isAppShell} />
         </div>
       </PublicFrame>
     );
@@ -349,6 +380,7 @@ export default function App() {
   if (loading) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           ...basePublicSideNavProps,
@@ -363,6 +395,7 @@ export default function App() {
   if (error || !data) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           ...basePublicSideNavProps,
@@ -380,6 +413,7 @@ export default function App() {
   if (isHistoryPage) {
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
@@ -391,6 +425,11 @@ export default function App() {
         }}
       >
         <div className="public-content-stack">
+          {isAppShell ? (
+            <section className="app-shell-filter-strip">
+              <FilterBar data={data} search={search} onApply={navigateWithSearch} />
+            </section>
+          ) : null}
           <HistoryPage data={data} />
         </div>
       </PublicFrame>
@@ -401,6 +440,7 @@ export default function App() {
     if (!selectedRace) {
       return (
         <PublicFrame
+          appShell={isAppShell}
           headerProps={publicHeaderProps}
           sideNavProps={{
             pathname: normalizedPath,
@@ -433,6 +473,7 @@ export default function App() {
 
     return (
       <PublicFrame
+        appShell={isAppShell}
         headerProps={publicHeaderProps}
         sideNavProps={{
           pathname: normalizedPath,
@@ -457,6 +498,7 @@ export default function App() {
 
   return (
     <PublicFrame
+      appShell={isAppShell}
       headerProps={publicHeaderProps}
       sideNavProps={{
         pathname: normalizedPath,
@@ -467,8 +509,15 @@ export default function App() {
         showTargetFilter: true,
       }}
     >
-      <div className="public-content-stack public-content-stack--home">
-        {!isDateFocusedHome ? (
+      <div
+        className={[
+          "public-content-stack",
+          isAppShell ? "public-content-stack--app-shell" : "public-content-stack--home",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {!isAppShell && !isDateFocusedHome ? (
           <>
             <HomeHeroSection data={data} search={search} />
             <FeaturedContentSection data={data} />
@@ -476,41 +525,57 @@ export default function App() {
           </>
         ) : null}
 
-        <section className="today-races-section" id="home-race-board">
-          <PageSectionHeader
-            kicker="公開レース"
-            title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
-            subtitle="比較用の導読を確認したあとに、各レースの印、買い目、結果、回収率をレース単位とモデル単位の両方から見比べられます。"
-            actions={
-              data?.daily_report?.public_url
-                ? [
-                    {
-                      href: data.daily_report.public_url,
-                      label: "日報を見る",
-                    },
-                  ]
-                : []
-            }
-            meta={[
-              {
-                key: "target-date",
-                label: "対象日",
-                value: data?.target_date_label || "-",
-              },
-              {
-                key: "race-count",
-                label: "公開数",
-                value: `${races.length}レース`,
-              },
-            ]}
-          />
+        <section
+          className={[
+            "today-races-section",
+            isAppShell ? "today-races-section--app-shell" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          id="home-race-board"
+        >
+          {isAppShell ? (
+            <div className="app-shell-filter-strip">
+              <FilterBar data={data} search={search} onApply={navigateWithSearch} />
+            </div>
+          ) : (
+            <>
+              <PageSectionHeader
+                kicker="公開レース"
+                title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
+                subtitle="比較用の導読を確認したあとに、各レースの印、買い目、結果、回収率をレース単位とモデル単位の両方から見比べられます。"
+                actions={
+                  data?.daily_report?.public_url
+                    ? [
+                        {
+                          href: data.daily_report.public_url,
+                          label: "日報を見る",
+                        },
+                      ]
+                    : []
+                }
+                meta={[
+                  {
+                    key: "target-date",
+                    label: "対象日",
+                    value: data?.target_date_label || "-",
+                  },
+                  {
+                    key: "race-count",
+                    label: "公開数",
+                    value: `${races.length}レース`,
+                  },
+                ]}
+              />
 
-          {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
+              {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
+            </>
+          )}
           <TodayBoardContent data={data} races={races} />
         </section>
 
-        <SecondaryStatsPanel data={data} />
-        {!isDateFocusedHome ? <BeginnerGuideSection /> : null}
+        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
+        {!isAppShell && !isDateFocusedHome ? <BeginnerGuideSection /> : null}
       </div>
     </PublicFrame>
   );

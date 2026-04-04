@@ -9,3 +9,7 @@ tmp_*.html
 _debug_*.html
 tmp_*.log
 frontend/node_modules/
+android/.gradle/
+android/local.properties
+android/**/build/
+android/**/*.iml
