@@ -83,12 +83,28 @@ def _env_truthy(name: str, default: bool = False) -> bool:
 
 
 ENABLE_MARKET_OVERLAY = _env_truthy("PREDICTOR_ENABLE_MARKET_OVERLAY", True)
+USE_MARKET_FEATURES = _env_truthy("PREDICTOR_USE_MARKET_FEATURES", False)
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     d.columns = [re.sub(r"\s+", "", str(c or "")).strip() for c in d.columns]
     return d
+
+
+def neutral_market_feat() -> Dict[str, float]:
+    return {
+        "odds_win": 0.0,
+        "implied_prob_win": 0.0,
+        "implied_prob_place": 0.0,
+        "wide_network_strength": 0.0,
+        "quinella_network_strength": 0.0,
+        "market_centrality": 0.0,
+        "exacta_network_strength": 0.0,
+        "exacta_network_strength_norm": 0.0,
+        "trio_network_strength": 0.0,
+        "trio_network_strength_norm": 0.0,
+    }
 
 
 
@@ -394,21 +410,16 @@ class FeatureEngineV6(FeatureEngine):
 
     @staticmethod
     def _make_target_row_market_feat(target_row: pd.Series) -> Dict[str, float]:
+        if not USE_MARKET_FEATURES:
+            return neutral_market_feat()
         odds_val = float(target_row.get("Odds", 0) or 0)
         if not np.isfinite(odds_val):
             odds_val = 0.0
-        return {
-            "odds_win": odds_val,
-            "implied_prob_win": 1.0 / odds_val if odds_val > 0 else 0.0,
-            "implied_prob_place": min(0.8, (1.0 / odds_val) * 1.6) if odds_val > 0 else 0.0,
-            "wide_network_strength": 0.0,
-            "quinella_network_strength": 0.0,
-            "market_centrality": 0.0,
-            "exacta_network_strength": 0.0,
-            "exacta_network_strength_norm": 0.0,
-            "trio_network_strength": 0.0,
-            "trio_network_strength_norm": 0.0,
-        }
+        feat = neutral_market_feat()
+        feat["odds_win"] = odds_val
+        feat["implied_prob_win"] = 1.0 / odds_val if odds_val > 0 else 0.0
+        feat["implied_prob_place"] = min(0.8, (1.0 / odds_val) * 1.6) if odds_val > 0 else 0.0
+        return feat
 
     def create_training_features(self, history_df: pd.DataFrame) -> pd.DataFrame:
         print("[INFO] Building training features (v6 chronological per-horse expansion)...")
@@ -450,7 +461,7 @@ class FeatureEngineV6(FeatureEngine):
                 field_size = int(float(target_row.get("FieldSize", 0) or 0))
                 draw_val = int(float(target_row.get("Draw", 0) or 0))
                 wt_carried = float(target_row.get("WeightCarried", 0.0) or 0.0)
-                popularity = int(float(target_row.get("Popularity", 0) or 0))
+                popularity = int(float(target_row.get("Popularity", 0) or 0)) if USE_MARKET_FEATURES else 0
                 sex = str(target_row.get("Sex", "") or "")
                 age = float(target_row.get("Age", 3.0) or 3.0)
 
@@ -528,11 +539,15 @@ class FeatureEngineV6(FeatureEngine):
             for x in d.get("HorseName", pd.Series(dtype=str)).dropna().unique().tolist()
             if str(x).strip()
         ]
-        odds_names = [
-            str(k).strip()
-            for k in getattr(odds_engine, "_features", {}).keys()
-            if str(k).strip()
-        ]
+        odds_names = (
+            [
+                str(k).strip()
+                for k in getattr(odds_engine, "_features", {}).keys()
+                if str(k).strip()
+            ]
+            if USE_MARKET_FEATURES
+            else []
+        )
 
         current_mask = pd.Series(False, index=d.index)
         if not d.empty:
@@ -558,9 +573,9 @@ class FeatureEngineV6(FeatureEngine):
         elif odds_names:
             target_horses = odds_names
             if shutuba_names and not shared_names:
-                print(
-                    "[WARN] shutuba.csv and odds files appear to describe different races. "
-                    "Using odds.csv horse list for inference."
+                raise RuntimeError(
+                    "shutuba.csv and odds files appear to describe different races. "
+                    "Refusing to infer with mismatched horse lists."
                 )
         else:
             target_horses = shutuba_names
@@ -568,13 +583,18 @@ class FeatureEngineV6(FeatureEngine):
         if not target_horses:
             return pd.DataFrame()
 
-        odds_list: List[Tuple[str, float]] = []
-        for horse_name in target_horses:
-            of = odds_engine.get_features(horse_name)
-            odds_val = float(of.get("odds_win", 9999.0) or 9999.0)
-            odds_list.append((horse_name, odds_val))
-        odds_list.sort(key=lambda x: x[1])
-        odds_ranking = {name: rank for rank, (name, _) in enumerate(odds_list, 1)}
+        odds_ranking: Dict[str, int] = {}
+        if USE_MARKET_FEATURES:
+            odds_list: List[Tuple[str, float]] = []
+            for horse_name in target_horses:
+                of = odds_engine.get_features(horse_name)
+                odds_raw = pd.to_numeric(pd.Series([of.get("odds_win", np.nan)]), errors="coerce").iloc[0]
+                odds_val = float(odds_raw) if pd.notna(odds_raw) else np.nan
+                odds_list.append((horse_name, odds_val))
+            valid_market_count = sum(1 for _, odds_val in odds_list if np.isfinite(odds_val) and odds_val > 0)
+            if valid_market_count > 0:
+                odds_list.sort(key=lambda x: x[1] if np.isfinite(x[1]) and x[1] > 0 else 9999.0)
+                odds_ranking = {name: rank for rank, (name, _) in enumerate(odds_list, 1)}
         field_size = len(target_horses)
 
         rows_out: List[Dict[str, Any]] = []
@@ -591,6 +611,7 @@ class FeatureEngineV6(FeatureEngine):
             sex = ""
             age = 3.0
             display_name = horse_name
+            horse_no_val = 0
 
             if current_row is not None:
                 display_name = str(current_row.get("HorseName", horse_name) or horse_name).strip()
@@ -601,6 +622,7 @@ class FeatureEngineV6(FeatureEngine):
                 sex = str(current_row.get("Sex", "") or "")
                 age_val = current_row.get("Age", 3.0)
                 age = float(age_val) if pd.notna(age_val) else 3.0
+                horse_no_val = int(float(current_row.get("horse_no", current_row.get("馬番", 0)) or 0))
             else:
                 if not g.empty and "JockeyId_current" in g.columns:
                     cur_vals = g["JockeyId_current"].dropna().astype(str)
@@ -616,9 +638,10 @@ class FeatureEngineV6(FeatureEngine):
                     sex = str(latest.get("Sex", "") or "")
                     age_val = latest.get("Age", 3.0)
                     age = float(age_val) if pd.notna(age_val) else 3.0
+                    horse_no_val = int(float(latest.get("horse_no", latest.get("馬番", 0)) or 0))
 
-            odds_feat = odds_engine.get_features(display_name or horse_name)
-            popularity = int(odds_ranking.get(horse_name, odds_ranking.get(display_name, max(field_size // 2, 1))))
+            odds_feat = odds_engine.get_features(display_name or horse_name) if USE_MARKET_FEATURES else neutral_market_feat()
+            popularity = int(odds_ranking.get(horse_name, odds_ranking.get(display_name, 0)))
 
             feat = self.compute_horse_features(
                 history=hist if not hist.empty else pd.DataFrame(),
@@ -638,7 +661,7 @@ class FeatureEngineV6(FeatureEngine):
                 popularity=popularity,
             )
             feat["HorseName"] = display_name or horse_name
-            feat["horse_no"] = int(float(odds_feat.get("horse_no", 0) or 0))
+            feat["horse_no"] = horse_no_val if horse_no_val > 0 else int(float(odds_feat.get("horse_no", 0) or 0))
             feat["Odds"] = float(odds_feat.get("odds_win", 0.0) or 0.0)
             feat["race_id"] = "current"
             rows_out.append(feat)
@@ -662,9 +685,14 @@ class PredictorV6:
         self.meta_win_model: Optional[LogisticRegression] = None
         self.top3_calibrator = PlattCalibrator()
         self.win_calibrator = PlattCalibrator()
-        self.top3_blend_weights: Dict[str, float] = {"market": 0.40, "skill": 0.45, "ranker": 0.15}
-        self.win_blend_weights: Dict[str, float] = {"market": 0.45, "skill": 0.40, "ranker": 0.15}
+        if USE_MARKET_FEATURES:
+            self.top3_blend_weights: Dict[str, float] = {"market": 0.40, "skill": 0.45, "ranker": 0.15}
+            self.win_blend_weights: Dict[str, float] = {"market": 0.45, "skill": 0.40, "ranker": 0.15}
+        else:
+            self.top3_blend_weights = {"market": 0.00, "skill": 0.80, "ranker": 0.20}
+            self.win_blend_weights = {"market": 0.00, "skill": 0.75, "ranker": 0.25}
         self.rank_weights: Dict[str, float] = {"top3": 0.50, "win": 0.25, "rank": 0.25}
+        self.overlay_enabled_: bool = bool(ENABLE_MARKET_OVERLAY and USE_MARKET_FEATURES)
         self.training_report_: Dict[str, float] = {}
 
     # ----- model builders -----
@@ -857,8 +885,94 @@ class PredictorV6:
             return fallback
         return model.predict_proba(X_meta)[:, 1]
 
+    def _blend_meta_fallback(self, meta_df: pd.DataFrame, mode: str) -> np.ndarray:
+        if mode == "win":
+            weights = self.win_blend_weights
+            market_col = "market_win"
+            skill_col = "skill_win"
+        else:
+            weights = self.top3_blend_weights
+            market_col = "market_top3"
+            skill_col = "skill_top3"
+        return np.clip(
+            weights["market"] * meta_df[market_col].to_numpy(dtype=float)
+            + weights["skill"] * meta_df[skill_col].to_numpy(dtype=float)
+            + weights["ranker"] * meta_df["ranker_norm"].to_numpy(dtype=float),
+            PROB_EPS,
+            1.0 - PROB_EPS,
+        )
+
+    def _fit_meta_stack(
+        self,
+        df: pd.DataFrame,
+        meta_df: pd.DataFrame,
+        labels: np.ndarray,
+        mode: str,
+    ) -> Tuple[Optional[LogisticRegression], PlattCalibrator, np.ndarray, np.ndarray]:
+        fallback = self._blend_meta_fallback(meta_df, mode)
+        strict_meta_oof = np.full(len(df), np.nan, dtype=float)
+        strict_true_oof = np.full(len(df), np.nan, dtype=float)
+        inner_cv = TimeSeriesCV(n_splits=4, min_train_frac=0.55)
+        inner_folds = inner_cv.split(df)
+
+        for tr_idx, te_idx in inner_folds:
+            X_tr = meta_df.iloc[tr_idx][META_FEATURES].fillna(0).to_numpy(dtype=float)
+            X_te = meta_df.iloc[te_idx][META_FEATURES].fillna(0).to_numpy(dtype=float)
+            y_tr = labels[tr_idx]
+
+            if len(np.unique(y_tr)) >= 2 and len(y_tr) >= 30:
+                fold_model = LogisticRegression(C=1.0, max_iter=3000, solver="lbfgs")
+                fold_model.fit(X_tr, y_tr)
+                meta_tr = fold_model.predict_proba(X_tr)[:, 1]
+                meta_te = fold_model.predict_proba(X_te)[:, 1]
+            else:
+                meta_tr = fallback[tr_idx]
+                meta_te = fallback[te_idx]
+
+            fold_calibrator = PlattCalibrator()
+            fold_calibrator.fit(meta_tr, y_tr)
+            strict_meta_oof[te_idx] = meta_te
+            strict_true_oof[te_idx] = fold_calibrator.transform(meta_te)
+
+        missing_mask = ~np.isfinite(strict_meta_oof)
+        if np.any(missing_mask):
+            strict_meta_oof[missing_mask] = fallback[missing_mask]
+            strict_true_oof[missing_mask] = fallback[missing_mask]
+
+        X_all = meta_df[META_FEATURES].fillna(0).to_numpy(dtype=float)
+        if len(np.unique(labels)) >= 2 and len(labels) >= 30:
+            final_model = LogisticRegression(C=1.0, max_iter=3000, solver="lbfgs")
+            final_model.fit(X_all, labels)
+        else:
+            final_model = None
+
+        final_calibrator = PlattCalibrator()
+        valid_mask = np.isfinite(strict_meta_oof) & np.isfinite(labels)
+        final_calibrator.fit(strict_meta_oof[valid_mask], labels[valid_mask])
+        return final_model, final_calibrator, strict_meta_oof, strict_true_oof
+
+    @staticmethod
+    def _overlay_specs() -> List[Tuple[str, float]]:
+        return [
+            ("market_centrality", 0.32),
+            ("wide_network_strength", 0.18),
+            ("quinella_network_strength", 0.14),
+            ("exacta_network_strength_norm", 0.12),
+            ("trio_network_strength_norm", 0.12),
+        ]
+
+    def _has_overlay_signal(self, df: pd.DataFrame) -> bool:
+        for col, _ in self._overlay_specs():
+            if col not in df.columns:
+                continue
+            arr = pd.to_numeric(df[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            if len(arr) > 0 and np.nanmax(np.abs(arr)) > 1e-12:
+                return True
+        return False
+
     def _tune_rank_weights(
         self,
+        df: pd.DataFrame,
         race_ids: Sequence[Any],
         y_top3: Sequence[int],
         y_win: Sequence[int],
@@ -880,7 +994,8 @@ class PredictorV6:
                 if w_rank < 0.10 or w_rank > 0.40:
                     continue
                 score = w_top3 * top3_component + w_win * win_component + w_rank * rank_component
-                metrics = evaluate_rank_metrics(race_ids, y_top3, y_win, rank_label, score, top3_prob=top3_true)
+                score_eval, overlay_strength = self._apply_market_overlay(df, score, groups)
+                metrics = evaluate_rank_metrics(race_ids, y_top3, y_win, rank_label, score_eval, top3_prob=top3_true)
                 objective = (
                     0.45 * metrics["hit3_slot"]
                     + 0.25 * metrics["hit1"]
@@ -897,6 +1012,7 @@ class PredictorV6:
                         "hit3_slot": float(metrics["hit3_slot"]),
                         "ndcg3": float(metrics["ndcg3"]),
                         "ece": float(ece),
+                        "overlay_strength": float(overlay_strength),
                     }
         return best
 
@@ -927,17 +1043,10 @@ class PredictorV6:
         union = set.union(*rankings)
         return len(inter) / max(len(union), 1)
 
-    @staticmethod
-    def _apply_market_overlay(df: pd.DataFrame, base_score: np.ndarray, race_ids: Sequence[Any]) -> Tuple[np.ndarray, float]:
-        if not ENABLE_MARKET_OVERLAY:
+    def _apply_market_overlay(self, df: pd.DataFrame, base_score: np.ndarray, race_ids: Sequence[Any]) -> Tuple[np.ndarray, float]:
+        if not self.overlay_enabled_:
             return np.asarray(base_score, dtype=float), 0.0
-        specs = [
-            ("market_centrality", 0.32),
-            ("wide_network_strength", 0.18),
-            ("quinella_network_strength", 0.14),
-            ("exacta_network_strength_norm", 0.12),
-            ("trio_network_strength_norm", 0.12),
-        ]
+        specs = self._overlay_specs()
         overlay = np.zeros(len(df), dtype=float)
         active_weight = 0.0
         for col, w in specs:
@@ -961,12 +1070,12 @@ class PredictorV6:
             if col not in d.columns:
                 d[col] = 0.0
         d = d.sort_values(["Date", "race_id", "HorseName"]).reset_index(drop=True)
+        self.overlay_enabled_ = bool(ENABLE_MARKET_OVERLAY and USE_MARKET_FEATURES) and self._has_overlay_signal(d)
 
         y_top3 = pd.to_numeric(d["y_top3"], errors="coerce").fillna(0).astype(int).to_numpy()
         y_win = pd.to_numeric(d["y_win"], errors="coerce").fillna(0).astype(int).to_numpy()
         race_ids = d["race_id"].astype(str).to_numpy()
 
-        X_market = d[MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
         X_skill = d[SKILL_FEATURES].fillna(0).to_numpy(dtype=float)
 
         cv = TimeSeriesCV(n_splits=5, min_train_frac=0.45)
@@ -981,13 +1090,18 @@ class PredictorV6:
         for fold_idx, (tr_idx, te_idx) in enumerate(folds, 1):
             df_tr = d.iloc[tr_idx].copy()
             df_te = d.iloc[te_idx].copy()
-            X_market_tr, X_market_te = X_market[tr_idx], X_market[te_idx]
             X_skill_tr, X_skill_te = X_skill[tr_idx], X_skill[te_idx]
 
-            m_top3_model, m_top3_prior = self._safe_fit_logistic(X_market_tr, y_top3[tr_idx])
-            m_win_model, m_win_prior = self._safe_fit_logistic(X_market_tr, y_win[tr_idx])
-            oof_market_top3[te_idx] = self._predict_logistic(m_top3_model, m_top3_prior, X_market_te)
-            oof_market_win[te_idx] = self._predict_logistic(m_win_model, m_win_prior, X_market_te)
+            if USE_MARKET_FEATURES:
+                X_market_tr = d.iloc[tr_idx][MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
+                X_market_te = d.iloc[te_idx][MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
+                m_top3_model, m_top3_prior = self._safe_fit_logistic(X_market_tr, y_top3[tr_idx])
+                m_win_model, m_win_prior = self._safe_fit_logistic(X_market_tr, y_win[tr_idx])
+                oof_market_top3[te_idx] = self._predict_logistic(m_top3_model, m_top3_prior, X_market_te)
+                oof_market_win[te_idx] = self._predict_logistic(m_win_model, m_win_prior, X_market_te)
+            else:
+                oof_market_top3[te_idx] = 0.0
+                oof_market_win[te_idx] = 0.0
 
             s_top3_models, s_top3_prior = self._fit_lgb_ensemble(
                 [self._build_skill_top3_a, self._build_skill_top3_b], X_skill_tr, y_top3[tr_idx]
@@ -1055,49 +1169,26 @@ class PredictorV6:
             oof_skill_win[valid_mask],
             oof_ranker[valid_mask],
         )
-        X_meta_valid = meta_valid[META_FEATURES].fillna(0).to_numpy(dtype=float)
         y_top3_valid = y_top3[valid_mask]
         y_win_valid = y_win[valid_mask]
         race_valid = d_valid["race_id"].astype(str).to_numpy()
         rank_valid = d_valid["rank_label"].to_numpy(dtype=float)
 
-        # Meta top3
-        top3_fallback = np.clip(
-            self.top3_blend_weights["market"] * meta_valid["market_top3"].to_numpy(dtype=float)
-            + self.top3_blend_weights["skill"] * meta_valid["skill_top3"].to_numpy(dtype=float)
-            + self.top3_blend_weights["ranker"] * meta_valid["ranker_norm"].to_numpy(dtype=float),
-            PROB_EPS,
-            1.0 - PROB_EPS,
+        self.meta_top3_model, self.top3_calibrator, oof_top3_meta, oof_top3_true = self._fit_meta_stack(
+            d_valid,
+            meta_valid,
+            y_top3_valid,
+            mode="top3",
         )
-        if len(np.unique(y_top3_valid)) >= 2 and len(y_top3_valid) >= 30:
-            self.meta_top3_model = LogisticRegression(C=1.0, max_iter=3000, solver="lbfgs")
-            self.meta_top3_model.fit(X_meta_valid, y_top3_valid)
-            oof_top3_meta = self.meta_top3_model.predict_proba(X_meta_valid)[:, 1]
-        else:
-            self.meta_top3_model = None
-            oof_top3_meta = top3_fallback
-        self.top3_calibrator.fit(oof_top3_meta, y_top3_valid)
-        oof_top3_true = self.top3_calibrator.transform(oof_top3_meta)
-
-        # Meta win
-        win_fallback = np.clip(
-            self.win_blend_weights["market"] * meta_valid["market_win"].to_numpy(dtype=float)
-            + self.win_blend_weights["skill"] * meta_valid["skill_win"].to_numpy(dtype=float)
-            + self.win_blend_weights["ranker"] * meta_valid["ranker_norm"].to_numpy(dtype=float),
-            PROB_EPS,
-            1.0 - PROB_EPS,
+        self.meta_win_model, self.win_calibrator, oof_win_meta, oof_win_true = self._fit_meta_stack(
+            d_valid,
+            meta_valid,
+            y_win_valid,
+            mode="win",
         )
-        if len(np.unique(y_win_valid)) >= 2 and len(y_win_valid) >= 30:
-            self.meta_win_model = LogisticRegression(C=1.0, max_iter=3000, solver="lbfgs")
-            self.meta_win_model.fit(X_meta_valid, y_win_valid)
-            oof_win_meta = self.meta_win_model.predict_proba(X_meta_valid)[:, 1]
-        else:
-            self.meta_win_model = None
-            oof_win_meta = win_fallback
-        self.win_calibrator.fit(oof_win_meta, y_win_valid)
-        oof_win_true = self.win_calibrator.transform(oof_win_meta)
 
         self.rank_weights = self._tune_rank_weights(
+            d_valid,
             race_valid,
             y_top3_valid,
             y_win_valid,
@@ -1116,6 +1207,7 @@ class PredictorV6:
             + self.rank_weights["win"] * win_component
             + self.rank_weights["rank"] * rank_component
         )
+        final_oof_score, oof_overlay_strength = self._apply_market_overlay(d_valid, final_oof_score, race_valid)
         oof_metrics = evaluate_rank_metrics(
             race_valid,
             y_top3_valid,
@@ -1127,8 +1219,13 @@ class PredictorV6:
 
         # Refit full models
         print("[INFO] Refitting full models...")
-        self.market_top3_model, self.market_top3_prior_ = self._safe_fit_logistic(X_market, y_top3)
-        self.market_win_model, self.market_win_prior_ = self._safe_fit_logistic(X_market, y_win)
+        if USE_MARKET_FEATURES:
+            X_market = d[MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
+            self.market_top3_model, self.market_top3_prior_ = self._safe_fit_logistic(X_market, y_top3)
+            self.market_win_model, self.market_win_prior_ = self._safe_fit_logistic(X_market, y_win)
+        else:
+            self.market_top3_model, self.market_top3_prior_ = None, 0.0
+            self.market_win_model, self.market_win_prior_ = None, 0.0
         self.skill_top3_models, self.skill_top3_prior_ = self._fit_lgb_ensemble(
             [self._build_skill_top3_a, self._build_skill_top3_b], X_skill, y_top3
         )
@@ -1146,6 +1243,8 @@ class PredictorV6:
             "blend_top3": float(self.rank_weights["top3"]),
             "blend_win": float(self.rank_weights["win"]),
             "blend_rank": float(self.rank_weights["rank"]),
+            "overlay_enabled": float(1 if self.overlay_enabled_ else 0),
+            "overlay_strength": float(oof_overlay_strength),
             "oof_top3_prob_mean": float(np.mean(oof_top3_true)),
             "oof_win_prob_mean": float(np.mean(oof_win_true)),
         }
@@ -1178,11 +1277,15 @@ class PredictorV6:
             d["race_id"] = "current"
         race_ids = d["race_id"].astype(str).to_numpy()
 
-        X_market = d[MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
         X_skill = d[SKILL_FEATURES].fillna(0).to_numpy(dtype=float)
 
-        market_top3 = self._predict_logistic(self.market_top3_model, getattr(self, "market_top3_prior_", 0.0), X_market)
-        market_win = self._predict_logistic(self.market_win_model, getattr(self, "market_win_prior_", 0.0), X_market)
+        if USE_MARKET_FEATURES:
+            X_market = d[MARKET_FEATURES].fillna(0).to_numpy(dtype=float)
+            market_top3 = self._predict_logistic(self.market_top3_model, getattr(self, "market_top3_prior_", 0.0), X_market)
+            market_win = self._predict_logistic(self.market_win_model, getattr(self, "market_win_prior_", 0.0), X_market)
+        else:
+            market_top3 = np.zeros(len(d), dtype=float)
+            market_win = np.zeros(len(d), dtype=float)
         skill_top3 = self._predict_lgb_ensemble(self.skill_top3_models, getattr(self, "skill_top3_prior_", 0.0), X_skill)
         skill_win = self._predict_lgb_ensemble(self.skill_win_models, getattr(self, "skill_win_prior_", 0.0), X_skill)
         ranker_norm = self._predict_ranker(self.ranker, d, RANK_FEATURES)
@@ -1268,7 +1371,7 @@ class PredictorV6:
         results["consistency_score"] = results["stability_score"]
         results["risk_score"] = 1.0 - results["confidence_score"]
         results["score_is_probability"] = 0
-        results["model_mode"] = "v6_market_skill_rank"
+        results["model_mode"] = "v6_skill_rank_no_odds" if not USE_MARKET_FEATURES else "v6_market_skill_rank"
         results["horse_key"] = results.apply(
             lambda r: str(int(r["horse_no"])) if pd.notna(r.get("horse_no")) and float(r.get("horse_no", 0) or 0) > 0 else str(r.get("HorseName", "")),
             axis=1,
