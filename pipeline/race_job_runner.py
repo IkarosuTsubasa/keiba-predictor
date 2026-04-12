@@ -787,6 +787,7 @@ def _run_policy_engine_subprocess(base_path, scope_key, run_id, engine, policy_m
 def _build_run_row(job, run_id, snapshot_paths):
     race_id = str(job.get("race_id", "") or "").strip()
     scope_key = str(job.get("scope_key", "") or "").strip()
+    race_name = str(job.get("race_name", "") or "").strip()
     race_url = _race_url(scope_key, race_id)
     return {
         "run_id": run_id,
@@ -794,7 +795,8 @@ def _build_run_row(job, run_id, snapshot_paths):
         "race_url": race_url,
         "race_id": race_id,
         "history_url": "",
-        "trigger_race": "",
+        "trigger_race": race_name,
+        "race_name": race_name,
         "scope": scope_key,
         "location": str(job.get("location", "") or "").strip(),
         "race_date": str(job.get("race_date", "") or "").strip(),

@@ -207,7 +207,7 @@ def _select_share_candidate(scope_key, run_id):
     venue = "".join(location.split())
     if venue and not venue.endswith("競馬"):
         venue = f"{venue}競馬"
-    race_name = str(run_row.get("race_name", "") or run_row.get("trigger_race", "") or "").strip()
+    race_name = _resolve_notification_race_name(scope_key, resolved_run_id, run_row)
     if race_name and race_name in f"{venue} {race_no}".strip():
         race_name = ""
     header_body = " ".join(part for part in (venue, race_no, race_name) if str(part or "").strip())
@@ -246,7 +246,7 @@ def _prediction_complete_text(run_row, run_id):
     venue = "".join(location.split())
     if venue and not venue.endswith("競馬"):
         venue = f"{venue}競馬"
-    race_name = str(row.get("race_name", "") or row.get("trigger_race", "") or "").strip()
+    race_name = _resolve_notification_race_name("", run_id, row)
     core = " ".join(part for part in (venue, race_no, race_name) if str(part or "").strip())
     if core:
         return f"#{core} の予測が完了しました"
@@ -254,12 +254,45 @@ def _prediction_complete_text(run_row, run_id):
     return f"#{resolved_run_id} の予測が完了しました"
 
 
+def _resolve_notification_race_name(scope_key, run_id, run_row):
+    row = dict(run_row or {})
+    race_name = str(row.get("race_name", "") or row.get("trigger_race", "") or "").strip()
+    if race_name:
+        return race_name
+    try:
+        import web_app  # local import to avoid circular imports
+
+        load_jobs = getattr(web_app, "load_race_jobs", None)
+        base_dir = getattr(web_app, "BASE_DIR", None)
+        normalize_scope_key = getattr(web_app, "normalize_scope_key", None)
+        if not callable(load_jobs) or base_dir is None:
+            return ""
+        scope_norm = (
+            normalize_scope_key(scope_key) if callable(normalize_scope_key) else str(scope_key or "").strip()
+        )
+        for job in reversed(list(load_jobs(base_dir) or [])):
+            job_run_id = str((job or {}).get("current_run_id", "") or "").strip()
+            if job_run_id != str(run_id or "").strip():
+                continue
+            job_scope = (
+                normalize_scope_key((job or {}).get("scope_key", ""))
+                if callable(normalize_scope_key)
+                else str((job or {}).get("scope_key", "") or "").strip()
+            )
+            if scope_norm and job_scope and job_scope != scope_norm:
+                continue
+            return str((job or {}).get("race_name", "") or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
 def build_ntfy_share_notification(scope_key, run_id):
     candidate = _select_share_candidate(scope_key, run_id)
     run_row = dict(candidate.get("run_row", {}) or {})
     race_id = str(run_row.get("race_id", "") or "").strip()
     location = str(run_row.get("location", "") or "").strip()
-    race_name = str(run_row.get("race_name", "") or run_row.get("trigger_race", "") or "").strip()
+    race_name = _resolve_notification_race_name(scope_key, run_id, run_row)
     title_parts = [part for part in (location, race_id, race_name) if part]
     title = " ".join(title_parts) if title_parts else f"预测完成 {run_id}"
     share_text = str(candidate.get("share_text", "") or "").strip()
