@@ -19,6 +19,7 @@ from site_copy import load_site_copy
 
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_FRONTEND_DIST_DIR = BASE_DIR / "public_frontend_dist"
+PUBLIC_APP_ADS_TXT_FILE = BASE_DIR / "app-ads.txt"
 
 PUBLIC_BASE_PATH = "/keiba"
 CONSOLE_BASE_PATH = f"{PUBLIC_BASE_PATH}/console"
@@ -27,6 +28,7 @@ PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
 PUBLIC_APPLE_TOUCH_ICON_PATH = f"{PUBLIC_BASE_PATH}/apple-touch-icon.png"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
+PUBLIC_APP_ADS_TXT_PATH = "/app-ads.txt"
 PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
 PUBLIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
@@ -1020,6 +1022,13 @@ def build_public_index_response(path="", home_intro_payload=None):
 
 
 def register_public_static_routes(app: FastAPI) -> None:
+    @app.get(PUBLIC_APP_ADS_TXT_PATH)
+    @app.get(f"{PUBLIC_BASE_PATH}/app-ads.txt")
+    def public_app_ads_txt():
+        if not PUBLIC_APP_ADS_TXT_FILE.exists():
+            raise HTTPException(status_code=404, detail="app-ads.txt not found")
+        return FileResponse(PUBLIC_APP_ADS_TXT_FILE, media_type="text/plain; charset=utf-8")
+
     @app.get(PUBLIC_ADS_TXT_PATH)
     @app.get(f"{PUBLIC_BASE_PATH}/ads.txt")
     def public_ads_txt():
