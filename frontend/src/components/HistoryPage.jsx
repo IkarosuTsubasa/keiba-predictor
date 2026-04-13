@@ -1,4 +1,5 @@
 ﻿import React, { useMemo, useState } from "react";
+import EzoicAdSlot from "./EzoicAdSlot";
 
 const PREDICTOR_LABELS = {
   top1: "本命1着率",
@@ -362,7 +363,7 @@ function PredictorDesk({ items }) {
   );
 }
 
-export default function HistoryPage({ data }) {
+export default function HistoryPage({ data, appShell = false }) {
   const [groupKey, setGroupKey] = useState("llm");
   const [periodKey, setPeriodKey] = useState("days_30");
 
@@ -472,11 +473,23 @@ export default function HistoryPage({ data }) {
       {groupKey === "llm" ? (
         <>
           <LlmRankingPanel items={rankedLlmCards} />
+          {!appShell ? (
+            <EzoicAdSlot
+              slot="historyBetweenPanels"
+              wrapperClassName="ezoic-ad-slot--content"
+            />
+          ) : null}
           <HistoryArchivePanel items={llmTrend} />
         </>
       ) : (
         <>
           <PredictorHighlightStrip leaders={predictorLeaders} />
+          {!appShell ? (
+            <EzoicAdSlot
+              slot="historyBetweenPanels"
+              wrapperClassName="ezoic-ad-slot--content"
+            />
+          ) : null}
           <PredictorDesk items={predictorCards} />
         </>
       )}

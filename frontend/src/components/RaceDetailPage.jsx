@@ -1,6 +1,7 @@
 ﻿import React, { useMemo } from "react";
 import AutoFitLine from "./AutoFitLine";
 import BetPreviewList from "./BetPreviewList";
+import EzoicAdSlot from "./EzoicAdSlot";
 import ModelMetaBadge from "./ModelMetaBadge";
 import RaceDetailAffiliateCard from "./RaceDetailAffiliateCard";
 import {
@@ -199,7 +200,7 @@ function ModelDetailCard({ card, highlightRoi = false }) {
   );
 }
 
-export default function RaceDetailPage({ race, search = "" }) {
+export default function RaceDetailPage({ race, search = "", appShell = false }) {
   const cards = Array.isArray(race?.cards) ? race.cards.filter(Boolean) : [];
   const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
     ? race.predictor_compare_cards.filter(Boolean)
@@ -330,6 +331,12 @@ export default function RaceDetailPage({ race, search = "" }) {
             )}
           </section>
 
+          {!appShell ? (
+            <EzoicAdSlot
+              slot="raceDetailSidebar"
+              wrapperClassName="ezoic-ad-slot--sidebar"
+            />
+          ) : null}
           <RaceDetailAffiliateCard />
         </div>
       </div>

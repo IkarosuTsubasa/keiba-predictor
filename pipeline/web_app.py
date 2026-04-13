@@ -160,6 +160,7 @@ from web_report.helpers import (
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
+EZOIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 DEFAULT_RUN_LIMIT = 200
@@ -3196,7 +3197,7 @@ def public_static_pages(request: Request):
 
 @app.get("/ads.txt")
 def ads_txt():
-    return FileResponse(ADS_TXT_PATH, media_type="text/plain; charset=utf-8")
+    return RedirectResponse(url=EZOIC_ADS_TXT_REDIRECT_URL, status_code=301)
 
 
 @app.get("/robots.txt")

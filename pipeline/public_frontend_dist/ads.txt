@@ -1,1 +1,2 @@
-google.com, pub-2154555054261960, DIRECT, f08c47fec0942fa0
+# ads.txt will be managed by the active ad platform.
+# Add the current production entries here after the final publisher details are confirmed.

@@ -1,4 +1,5 @@
 import React, { Fragment, useEffect, useMemo, useState } from "react";
+import EzoicAdSlot from "./EzoicAdSlot";
 
 function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
@@ -384,6 +385,12 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
           </section>
         ) : null}
 
+        {!appShell ? (
+          <EzoicAdSlot
+            slot="reportDetailBody"
+            wrapperClassName="ezoic-ad-slot--content"
+          />
+        ) : null}
         <MarkdownArticle markdown={markdown} />
 
         {item?.mode === "fallback" ? (

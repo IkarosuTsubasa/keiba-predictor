@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import EzoicAdSlot from "./EzoicAdSlot";
 
 function EmptyState({ children }) {
   return <p className="daily-report-empty-note">{children}</p>;
@@ -149,23 +150,31 @@ export default function DailyReportsPage({ appBasePath = "/keiba", appShell = fa
       ) : null}
 
       {!state.loading && !state.errorTitle ? (
-        <section className="daily-report-panel">
-          <div className="daily-report-panel__head">
-            <div>
-              <span className="daily-report-panel__eyebrow">アーカイブ</span>
-              <h2>Saved Reports</h2>
+        <>
+          {!appShell ? (
+            <EzoicAdSlot
+              slot="reportsBetweenPanels"
+              wrapperClassName="ezoic-ad-slot--content"
+            />
+          ) : null}
+          <section className="daily-report-panel">
+            <div className="daily-report-panel__head">
+              <div>
+                <span className="daily-report-panel__eyebrow">アーカイブ</span>
+                <h2>Saved Reports</h2>
+              </div>
             </div>
-          </div>
-          {items.length ? (
-            <div className="daily-report-grid">
-              {items.map((item) => (
-                <ReportCard key={item.slug || item.created_at} item={item} appShell={appShell} />
-              ))}
-            </div>
-          ) : (
-            <EmptyState>保存済みの日報はまだありません。</EmptyState>
-          )}
-        </section>
+            {items.length ? (
+              <div className="daily-report-grid">
+                {items.map((item) => (
+                  <ReportCard key={item.slug || item.created_at} item={item} appShell={appShell} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState>保存済みの日報はまだありません。</EmptyState>
+            )}
+          </section>
+        </>
       ) : null}
     </section>
   );

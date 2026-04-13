@@ -18,6 +18,18 @@
   --radius-md: 14px;
 }
 
+.ezoic-ad-slot {
+  width: 100%;
+}
+
+.ezoic-ad-slot--content {
+  margin: 20px 0 8px;
+}
+
+.ezoic-ad-slot--sidebar {
+  margin: 4px 0;
+}
+
 * {
   box-sizing: border-box;
 }

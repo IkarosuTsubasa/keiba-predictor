@@ -11,6 +11,7 @@ import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
 import MethodSummarySection from "./components/MethodSummarySection";
+import EzoicAdSlot from "./components/EzoicAdSlot";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicSideNav from "./components/PublicSideNav";
 import PublicStaticPage from "./components/PublicStaticPage";
@@ -430,7 +431,7 @@ export default function App() {
               <FilterBar data={data} search={search} onApply={navigateWithSearch} />
             </section>
           ) : null}
-          <HistoryPage data={data} />
+          <HistoryPage data={data} appShell={isAppShell} />
         </div>
       </PublicFrame>
     );
@@ -490,7 +491,7 @@ export default function App() {
         }}
       >
         <div className="public-content-stack">
-          <RaceDetailPage race={selectedRace} search={search} />
+          <RaceDetailPage race={selectedRace} search={search} appShell={isAppShell} />
         </div>
       </PublicFrame>
     );
@@ -523,6 +524,12 @@ export default function App() {
             <FeaturedContentSection data={data} />
             <MethodSummarySection />
           </>
+        ) : null}
+        {!isAppShell ? (
+          <EzoicAdSlot
+            slot="homeBeforeBoard"
+            wrapperClassName="ezoic-ad-slot--content"
+          />
         ) : null}
 
         <section
@@ -574,6 +581,12 @@ export default function App() {
           <TodayBoardContent data={data} races={races} appShell={isAppShell} />
         </section>
 
+        {!isAppShell ? (
+          <EzoicAdSlot
+            slot="homeAfterBoard"
+            wrapperClassName="ezoic-ad-slot--content"
+          />
+        ) : null}
         {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
         {!isAppShell && !isDateFocusedHome ? <BeginnerGuideSection /> : null}
       </div>

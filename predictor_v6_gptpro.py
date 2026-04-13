@@ -640,7 +640,8 @@ class FeatureEngineV6(FeatureEngine):
                     age = float(age_val) if pd.notna(age_val) else 3.0
                     horse_no_val = int(float(latest.get("horse_no", latest.get("馬番", 0)) or 0))
 
-            odds_feat = odds_engine.get_features(display_name or horse_name) if USE_MARKET_FEATURES else neutral_market_feat()
+            entry_ref_feat = odds_engine.get_features(display_name or horse_name)
+            odds_feat = entry_ref_feat if USE_MARKET_FEATURES else neutral_market_feat()
             popularity = int(odds_ranking.get(horse_name, odds_ranking.get(display_name, 0)))
 
             feat = self.compute_horse_features(
@@ -661,8 +662,11 @@ class FeatureEngineV6(FeatureEngine):
                 popularity=popularity,
             )
             feat["HorseName"] = display_name or horse_name
-            feat["horse_no"] = horse_no_val if horse_no_val > 0 else int(float(odds_feat.get("horse_no", 0) or 0))
-            feat["Odds"] = float(odds_feat.get("odds_win", 0.0) or 0.0)
+            odds_horse_no = int(float(entry_ref_feat.get("horse_no", 0) or 0))
+            # Prefer the current race horse number from odds/current entry.
+            # Historical rows may carry stale horse_no values from prior races.
+            feat["horse_no"] = odds_horse_no if odds_horse_no > 0 else horse_no_val
+            feat["Odds"] = float(entry_ref_feat.get("odds_win", 0.0) or 0.0)
             feat["race_id"] = "current"
             rows_out.append(feat)
 

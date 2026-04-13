@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from public_share_copy import (
@@ -29,6 +29,7 @@ PUBLIC_APPLE_TOUCH_ICON_PATH = f"{PUBLIC_BASE_PATH}/apple-touch-icon.png"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
 PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
+PUBLIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
 PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
 PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
 SITE_COPY = load_site_copy()
@@ -1022,10 +1023,7 @@ def register_public_static_routes(app: FastAPI) -> None:
     @app.get(PUBLIC_ADS_TXT_PATH)
     @app.get(f"{PUBLIC_BASE_PATH}/ads.txt")
     def public_ads_txt():
-        ads_path = PUBLIC_FRONTEND_DIST_DIR / "ads.txt"
-        if ads_path.exists():
-            return FileResponse(ads_path, media_type="text/plain; charset=utf-8")
-        raise HTTPException(status_code=404, detail="ads.txt not found")
+        return RedirectResponse(url=PUBLIC_ADS_TXT_REDIRECT_URL, status_code=301)
 
     @app.get(f"{PUBLIC_BASE_PATH}/affiliate/{{asset_path:path}}")
     @app.get("/affiliate/{asset_path:path}")
