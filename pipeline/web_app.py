@@ -17,6 +17,7 @@ import base64
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -165,6 +166,8 @@ ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 DEFAULT_RUN_LIMIT = 200
 MAX_RUN_LIMIT = 500
+MOBILE_APP_CLIENT_NAME = "android"
+MOBILE_APP_TOKEN_ENV_KEYS = ("PIPELINE_MOBILE_APP_TOKEN", "MOBILE_APP_TOKEN")
 app = FastAPI()
 load_local_env(BASE_DIR, override=False)
 mount_public_assets(app)
@@ -2053,6 +2056,122 @@ def build_public_board_payload(date_text="", scope_key=""):
     return payload
 
 
+def _mobile_app_token_expected():
+    for key in MOBILE_APP_TOKEN_ENV_KEYS:
+        value = str(os.environ.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _verify_mobile_app_request(request: Request):
+    expected = _mobile_app_token_expected()
+    if not expected:
+        raise HTTPException(status_code=503, detail="mobile api token not configured")
+    supplied = str(request.headers.get("X-App-Token", "") or "").strip()
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="app token invalid")
+    client = str(request.headers.get("X-App-Client", "") or "").strip().lower()
+    if client != MOBILE_APP_CLIENT_NAME:
+        raise HTTPException(status_code=403, detail="app client invalid")
+
+
+def _mobile_api_headers():
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
+
+def _mobile_scheduled_off_time_label(value):
+    text = str(value or "").strip()
+    match = re.search(r"T?(\d{2}):(\d{2})", text)
+    if match:
+        return f"{match.group(1)}:{match.group(2)}"
+    return text
+
+
+def _mobile_race_result_payload(row):
+    result = dict((row or {}).get("actual_result", {}) or {})
+    top3 = []
+    for item in list(result.get("top3", []) or [])[:3]:
+        horse_no = str((item or {}).get("horse_no", "") or "").strip()
+        horse_name = str((item or {}).get("horse_name", "") or "").strip()
+        if not horse_no and not horse_name:
+            continue
+        top3.append(
+            {
+                "rank": int((item or {}).get("rank", len(top3) + 1) or (len(top3) + 1)),
+                "horse_no": horse_no,
+                "horse_name": horse_name,
+            }
+        )
+    return {
+        "is_settled": bool(top3) or bool(result.get("is_settled")),
+        "top3": top3,
+    }
+
+
+def _mobile_llm_card_payload(card):
+    row = dict(card or {})
+    return {
+        "engine": str(row.get("engine", "") or "").strip(),
+        "label": str(row.get("label", "") or row.get("engine", "") or "").strip() or "-",
+        "decision_text": str(row.get("decision_text", "") or "").strip(),
+        "marks_text": str(row.get("marks_text", "") or "").strip(),
+        "bet_summary": str(row.get("ticket_plan_text", "") or "").strip(),
+        "result_text": str(row.get("result_triplet_text", "") or "").strip(),
+        "roi_text": str(row.get("roi_text", "") or "").strip() or "-",
+        "hit": int(row.get("hit_count", 0) or 0) > 0,
+        "status_label": str(row.get("status_label", "") or "").strip(),
+        "status_tone": str(row.get("status_tone", "") or "").strip(),
+    }
+
+
+def _mobile_race_list_item(row):
+    item = dict(row or {})
+    result = _mobile_race_result_payload(item)
+    status = str(item.get("display_variant", "") or "").strip() or ("settled" if result.get("is_settled") else "open")
+    status_label = str(((item.get("display_status") or {}).get("label", "")) or "").strip()
+    race_title = str(item.get("race_title", "") or "").strip()
+    race_id = str(item.get("race_id", "") or "").strip()
+    match = re.search(r"(\d+R)", race_title)
+    if match:
+        race_id = match.group(1)
+    return {
+        "run_id": str(item.get("run_id", "") or "").strip(),
+        "race_id": race_id or race_title,
+        "race_title": race_title,
+        "race_name": str(item.get("race_name", "") or "").strip(),
+        "location": str(item.get("location", "") or "").strip(),
+        "scheduled_off_time": _mobile_scheduled_off_time_label(item.get("scheduled_off_time")),
+        "status": status,
+        "status_label": status_label or ("結果確定" if result.get("is_settled") else "確定待ち"),
+        "result": result,
+        "llm_cards": [_mobile_llm_card_payload(card) for card in list(item.get("cards", []) or [])],
+        "detail_path": f"{PUBLIC_BASE_PATH}/race/{quote(str(item.get('run_id', '') or '').strip(), safe='')}",
+    }
+
+
+def _mobile_races_payload(payload):
+    board = dict(payload or {})
+    items = [_mobile_race_list_item(row) for row in list(board.get("races", []) or [])]
+    return {
+        "ok": True,
+        "data": {
+            "target_date": str(board.get("target_date", "") or "").strip(),
+            "target_date_label": str(board.get("target_date_label", "") or "").strip(),
+            "totals": {
+                "race_count": len(items),
+                "settled_count": sum(1 for item in items if bool(((item.get("result") or {}).get("is_settled")))),
+                "placeholder_race_count": int(board.get("placeholder_race_count", 0) or 0),
+            },
+            "items": items,
+        },
+    }
+
+
 _DAILY_SUMMARY_BET_TYPE_LABELS = {
     "win": "単勝",
     "place": "複勝",
@@ -3255,11 +3374,17 @@ def sitemap_xml():
 def public_board_api(date: str = "", scope_key: str = ""):
     return JSONResponse(
         build_public_board_payload(date_text=date, scope_key=scope_key),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
+        headers=_mobile_api_headers(),
+    )
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/mobile/v1/races")
+@app.get("/api/mobile/v1/races")
+def mobile_races_api(request: Request, date: str = "", scope_key: str = ""):
+    _verify_mobile_app_request(request)
+    return JSONResponse(
+        _mobile_races_payload(build_public_board_payload(date_text=date, scope_key=scope_key)),
+        headers=_mobile_api_headers(),
     )
 
 
@@ -3269,11 +3394,7 @@ def public_reports_api(limit: int = 60):
         {
             "items": [_daily_report_compact_record(item) for item in _load_daily_report_records(limit=limit)],
         },
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
+        headers=_mobile_api_headers(),
     )
 
 
@@ -3284,11 +3405,7 @@ def public_report_detail_api(report_slug: str):
         return JSONResponse({"ok": False, "error": "report not found"}, status_code=404)
     return JSONResponse(
         {"ok": True, "item": record},
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
+        headers=_mobile_api_headers(),
     )
 
 

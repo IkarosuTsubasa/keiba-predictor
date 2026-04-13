@@ -42,6 +42,10 @@ val fcmTopic =
     providers.gradleProperty("KEIBA_FCM_TOPIC")
         .orElse(localProperty("KEIBA_FCM_TOPIC") ?: "keiba-public-updates")
         .get()
+val mobileApiToken =
+    providers.gradleProperty("KEIBA_MOBILE_API_TOKEN")
+        .orElse(localProperty("KEIBA_MOBILE_API_TOKEN") ?: "")
+        .get()
 
 val validateReleaseAdmobConfig =
     tasks.register("validateReleaseAdmobConfig") {
@@ -86,6 +90,7 @@ android {
         buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
         buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
         buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+        buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
         buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -99,6 +104,7 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+            buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "true")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
@@ -109,6 +115,7 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+            buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
             manifestPlaceholders["usesCleartextTraffic"] = "false"
             proguardFiles(

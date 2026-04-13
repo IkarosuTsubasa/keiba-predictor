@@ -72,6 +72,33 @@ def public_ticket_plan_text(ticket_rows):
     return "\n".join(lines)
 
 
+def _public_actual_top3(actual_names, actual_horse_nos):
+    items = []
+    names = list(actual_names or [])
+    horse_nos = list(actual_horse_nos or [])
+    for index in range(min(3, max(len(names), len(horse_nos)))):
+        horse_name = safe_text(names[index] if index < len(names) else "")
+        horse_no = safe_text(horse_nos[index] if index < len(horse_nos) else "")
+        if not horse_name and not horse_no:
+            continue
+        items.append(
+            {
+                "rank": index + 1,
+                "horse_no": horse_no,
+                "horse_name": horse_name,
+            }
+        )
+    return items
+
+
+def _public_race_id_text(run_row):
+    title = format_race_label(run_row)
+    match = re.search(r"(\d+R)", title)
+    if match:
+        return match.group(1)
+    return race_no_text((run_row or {}).get("race_id")) or safe_text((run_row or {}).get("race_id"))
+
+
 def _share_hashtag_race_label(run_row):
     venue = safe_text((run_row or {}).get("location")) or safe_text((run_row or {}).get("trigger_race"))
     race_no = race_no_text((run_row or {}).get("race_id")) or ""
@@ -359,6 +386,7 @@ def build_public_board_payload(
         actual_names = list(actual_snapshot.get("actual_names", []) or [])
         actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
         actual_text = public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
+        actual_top3 = _public_actual_top3(actual_names, actual_horse_nos)
 
         cards = []
         for engine in LLM_BATTLE_ORDER:
@@ -434,10 +462,15 @@ def build_public_board_payload(
             {
                 "scope_key": report_scope_key,
                 "scope_label": public_scope_label_ja(report_scope_key),
+                "race_id": _public_race_id_text(run_row),
                 "race_title": format_race_label(run_row),
                 "race_name": safe_text(job_meta.get("race_name")) or safe_text(run_row.get("trigger_race")),
                 "date_label": public_date_label(safe_text(run_row.get("race_date")) or target_date, parse_run_date=parse_run_date),
                 "actual_text": actual_text,
+                "actual_result": {
+                    "is_settled": bool(actual_top3),
+                    "top3": actual_top3,
+                },
                 "location": safe_text(job_meta.get("location")) or safe_text(run_row.get("location")),
                 "scheduled_off_time": safe_text(job_meta.get("scheduled_off_time")),
                 "distance_label": format_distance_label(job_meta.get("target_distance")),
