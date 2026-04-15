@@ -17,6 +17,7 @@ STATUS_FLOW = (
     "waiting_v5",
     "queued_policy",
     "processing_policy",
+    "preview_ready",
     "ready",
     "queued_settle",
     "settling",
@@ -25,6 +26,15 @@ STATUS_FLOW = (
 )
 JOB_STEP_NAMES = ("odds", "predictor", "policy", "settlement")
 JOB_STEP_STATE_FLOW = ("idle", "queued", "running", "succeeded", "failed")
+RUN_KIND_FINAL = "final_prediction"
+RUN_KIND_MORNING = "morning_preview"
+
+
+def normalize_run_kind(value):
+    text = str(value or "").strip().lower()
+    if text in {"morning_preview", "morning", "preview"}:
+        return RUN_KIND_MORNING
+    return RUN_KIND_FINAL
 
 
 def _job_step_field(step_name, suffix):
@@ -33,6 +43,7 @@ def _job_step_field(step_name, suffix):
 
 def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
+    row["run_kind"] = normalize_run_kind(row.get("run_kind", ""))
     row.setdefault("race_name", "")
     row.setdefault("race_number", "")
     row.setdefault("meta_source_url", "")
@@ -170,6 +181,7 @@ def hydrate_job_step_states(job):
 def derive_job_display_state(job):
     row = hydrate_job_step_states(job)
     legacy_status = str(row.get("status", "") or "").strip().lower()
+    run_kind = normalize_run_kind(row.get("run_kind", ""))
     if legacy_status == "waiting_v5":
         return {"code": "waiting_v5", "label": "等待远程预测", "tone": "active"}
     if legacy_status == "queued_policy":
@@ -200,6 +212,10 @@ def derive_job_display_state(job):
         return {"code": "odds_running", "label": "赔率处理中", "tone": "active"}
     if row.get("policy_status") == "succeeded":
         return {"code": "ready", "label": "处理完成", "tone": "good"}
+    if legacy_status == "preview_ready" or (
+        run_kind == RUN_KIND_MORNING and row.get("predictor_status") == "succeeded"
+    ):
+        return {"code": "preview_ready", "label": "朝版予測完成", "tone": "good"}
     if row.get("predictor_status") == "succeeded":
         return {"code": "predictor_ready", "label": "预测已生成", "tone": "good"}
     if legacy_status == "waiting_input_info":
@@ -371,6 +387,7 @@ def create_job(
     target_distance="",
     target_track_condition="",
     lead_minutes=30,
+    run_kind="",
     notes="",
     artifacts=None,
 ):
@@ -395,6 +412,7 @@ def create_job(
         "target_distance": str(target_distance or "").strip(),
         "target_track_condition": str(target_track_condition or "").strip(),
         "lead_minutes": lead,
+        "run_kind": normalize_run_kind(run_kind),
         "status": "uploaded",
         "notes": str(notes or "").strip(),
         "artifacts": [dict(item) for item in list(artifacts or []) if isinstance(item, dict)],
@@ -633,6 +651,8 @@ def delete_job(base_dir, job_id):
 __all__ = [
     "STATUS_FLOW",
     "JOB_STEP_NAMES",
+    "RUN_KIND_FINAL",
+    "RUN_KIND_MORNING",
     "apply_job_action",
     "compute_initial_status",
     "create_job",
@@ -642,6 +662,7 @@ __all__ = [
     "hydrate_job_step_states",
     "initialize_job_step_fields",
     "load_jobs",
+    "normalize_run_kind",
     "save_artifact",
     "scan_due_jobs",
     "scan_due_diagnostics",

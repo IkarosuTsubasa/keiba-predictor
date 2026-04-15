@@ -11,6 +11,7 @@ import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
 import MethodSummarySection from "./components/MethodSummarySection";
+import MorningPreviewSection from "./components/MorningPreviewSection";
 import EzoicAdSlot from "./components/EzoicAdSlot";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicSideNav from "./components/PublicSideNav";
@@ -28,9 +29,101 @@ const APP_BASE_PATH = "/keiba";
 const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
+const { useMemo } = React;
 
 function buildQuery(search) {
   return search ? `?${search}` : "";
+}
+
+function buildMorningBadges(item, baseRace) {
+  const baseBadges = Array.isArray(baseRace?.display_header?.badges)
+    ? baseRace.display_header.badges.filter(Boolean)
+    : [];
+  if (baseBadges.length) {
+    return baseBadges;
+  }
+  return [
+    String(item?.scheduled_off_time || "").match(/(\d{2}:\d{2})/)?.[1] || "",
+    item?.distance_label || "",
+    item?.track_condition || "",
+  ].filter(Boolean);
+}
+
+function buildMorningPreviewRace(item, baseRace = null) {
+  const title =
+    String(baseRace?.display_header?.title || "").trim() ||
+    String(item?.race_title || "").trim() ||
+    "-";
+  const subtitle =
+    String(baseRace?.display_header?.subtitle || "").trim() ||
+    String(item?.race_name || "").trim();
+  return {
+    ...(baseRace || {}),
+    ...item,
+    run_id: item?.run_id || baseRace?.run_id || "",
+    race_id: item?.race_id || baseRace?.race_id || "",
+    location: item?.location || baseRace?.location || "",
+    scheduled_off_time: item?.scheduled_off_time || baseRace?.scheduled_off_time || "",
+    display_order: Number.isFinite(Number(baseRace?.display_order))
+      ? Number(baseRace.display_order)
+      : Number.MAX_SAFE_INTEGER,
+    display_variant: "morning_preview",
+    display_status: {
+      label: "朝版速報",
+      tone: "open",
+    },
+    display_header: {
+      title,
+      subtitle,
+      detail_title: subtitle ? `${title} ${subtitle}`.trim() : title,
+      badges: buildMorningBadges(item, baseRace),
+    },
+    display_body: {
+      kind: "morning_preview",
+      result_text: item?.summary_text || "朝版速報を表示中",
+    },
+    cards: [],
+  };
+}
+
+function mergeMorningPreviewRaces(races, preview) {
+  const baseRaces = Array.isArray(races) ? races : [];
+  const morningRaces = Array.isArray(preview?.races) ? preview.races : [];
+  if (!preview?.available || !morningRaces.length) {
+    return baseRaces;
+  }
+
+  const morningByRaceId = new Map();
+  for (const item of morningRaces) {
+    const key = String(item?.race_id || "").trim();
+    if (key) {
+      morningByRaceId.set(key, item);
+    }
+  }
+
+  const seen = new Set();
+  const merged = baseRaces.map((race) => {
+    const raceId = String(race?.race_id || "").trim();
+    const morning = morningByRaceId.get(raceId);
+    if (!morning) {
+      return race;
+    }
+    seen.add(raceId);
+    if (String(race?.display_variant || "").trim() === "placeholder") {
+      return buildMorningPreviewRace(morning, race);
+    }
+    return race;
+  });
+
+  for (const item of morningRaces) {
+    const raceId = String(item?.race_id || "").trim();
+    if (raceId && seen.has(raceId)) {
+      continue;
+    }
+    merged.push(buildMorningPreviewRace(item));
+  }
+
+  return merged;
 }
 
 function extractSelectedDate(search) {
@@ -311,8 +404,12 @@ export default function App() {
     }),
   };
   const races = data?.races || [];
+  const boardRaces = useMemo(
+    () => mergeMorningPreviewRaces(races, data?.morning_preview),
+    [data?.morning_preview, races],
+  );
   const selectedRace = isRaceDetail
-    ? races.find((race) => matchRaceIdentifier(race, raceDetailId))
+    ? boardRaces.find((race) => matchRaceIdentifier(race, raceDetailId))
     : null;
 
   useEffect(() => {
@@ -520,9 +617,7 @@ export default function App() {
       >
         {!isAppShell && !isDateFocusedHome ? (
           <>
-            <HomeHeroSection data={data} search={search} />
-            <FeaturedContentSection data={data} />
-            <MethodSummarySection />
+            <MorningPreviewSection data={data} search={search} />
           </>
         ) : null}
         {!isAppShell ? (
@@ -531,6 +626,7 @@ export default function App() {
             wrapperClassName="ezoic-ad-slot--content"
           />
         ) : null}
+        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
 
         <section
           className={[
@@ -550,7 +646,7 @@ export default function App() {
               <PageSectionHeader
                 kicker="公開レース"
                 title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
-                subtitle="比較用の導読を確認したあとに、各レースの印、買い目、結果、回収率をレース単位とモデル単位の両方から見比べられます。"
+                subtitle="比較用の導読を確認したあとに、各レースの印、上位候補、結果、定量モデルごとの判断差をレース単位とモデル単位の両方から見比べられます。"
                 actions={
                   data?.daily_report?.public_url
                     ? [
@@ -570,7 +666,7 @@ export default function App() {
                   {
                     key: "race-count",
                     label: "公開数",
-                    value: `${races.length}レース`,
+                    value: `${boardRaces.length}レース`,
                   },
                 ]}
               />
@@ -578,7 +674,7 @@ export default function App() {
               {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
             </>
           )}
-          <TodayBoardContent data={data} races={races} appShell={isAppShell} />
+          <TodayBoardContent data={data} races={boardRaces} appShell={isAppShell} />
         </section>
 
         {!isAppShell ? (
@@ -587,7 +683,9 @@ export default function App() {
             wrapperClassName="ezoic-ad-slot--content"
           />
         ) : null}
-        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
+        {!isAppShell && !isDateFocusedHome ? <HomeHeroSection data={data} search={search} /> : null}
+        {!isAppShell && !isDateFocusedHome ? <MethodSummarySection /> : null}
+        {!isAppShell && !isDateFocusedHome ? <FeaturedContentSection data={data} /> : null}
         {!isAppShell && !isDateFocusedHome ? <BeginnerGuideSection /> : null}
       </div>
     </PublicFrame>

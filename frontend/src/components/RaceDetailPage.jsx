@@ -1,8 +1,6 @@
-﻿import React, { useMemo } from "react";
+import React, { useMemo } from "react";
 import AutoFitLine from "./AutoFitLine";
-import BetPreviewList from "./BetPreviewList";
 import EzoicAdSlot from "./EzoicAdSlot";
-import ModelMetaBadge from "./ModelMetaBadge";
 import RaceDetailAffiliateCard from "./RaceDetailAffiliateCard";
 import {
   APP_BASE_PATH,
@@ -14,61 +12,89 @@ import {
 } from "../lib/publicRace";
 
 const MAIN_MARK = MARK_ORDER[0];
+const MARK_WEIGHT = { "◎": 5, "○": 4, "▲": 3, "△": 2, "☆": 1 };
 
 function buildBackHref(search) {
   const query = String(search || "").replace(/^\?/, "");
   return query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
 }
 
-function parsePlanCount(text) {
-  const lines = String(text || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!lines.length) return 0;
-  if (lines.length === 1 && /買い目なし/.test(lines[0])) {
-    return 0;
-  }
-  return lines.filter((line) => !/買い目なし/.test(line)).length;
-}
-
-function buildConsensusRows(cards, predictorCards = []) {
+function buildHorseSignalRows(predictorCards = []) {
   const tally = new Map();
 
-  for (const card of [...(cards || []), ...(predictorCards || [])]) {
+  for (const card of predictorCards || []) {
     const marks = parseMarks(card?.marks_text);
-    const mainHorse = pickHorse(marks, MAIN_MARK);
-    if (!mainHorse) continue;
-    tally.set(mainHorse, (tally.get(mainHorse) || 0) + 1);
+    if (!marks.length) continue;
+    const seen = new Set();
+
+    for (const mark of marks) {
+      const horseNo = String(mark?.horseNo || "").trim();
+      if (!horseNo) continue;
+      const entry = tally.get(horseNo) || {
+        horseNo,
+        score: 0,
+        supportCount: 0,
+        mainCount: 0,
+      };
+      entry.score += MARK_WEIGHT[mark.symbol] || 0;
+      if (mark.symbol === MAIN_MARK) {
+        entry.mainCount += 1;
+      }
+      if (!seen.has(horseNo)) {
+        entry.supportCount += 1;
+        seen.add(horseNo);
+      }
+      tally.set(horseNo, entry);
+    }
   }
 
-  return [...tally.entries()]
-    .map(([horseNo, count]) => ({ horseNo, count }))
-    .sort(
-      (left, right) =>
-        right.count - left.count || Number(left.horseNo) - Number(right.horseNo),
-    );
+  const rows = [...tally.values()].sort(
+    (left, right) =>
+      right.score - left.score ||
+      right.mainCount - left.mainCount ||
+      right.supportCount - left.supportCount ||
+      Number(left.horseNo) - Number(right.horseNo),
+  );
+  const topScore = Number(rows[0]?.score || 0);
+
+  return rows.map((row) => ({
+    ...row,
+    aiIndex: topScore > 0 ? Math.max(1, Math.round((row.score / topScore) * 100)) : 0,
+  }));
 }
 
-function resolveLead(variant, race) {
+function buildConfidenceMeta(signalRows, totalSources) {
+  const top = signalRows[0] || null;
+  const next = signalRows[1] || null;
+  if (!top || totalSources <= 0) {
+    return { stars: "☆☆☆☆☆", supportText: "-", modelCountText: "0モデル" };
+  }
+
+  const supportRatio = top.mainCount / totalSources;
+  const marginRatio = top.score > 0
+    ? Math.max(0, (top.score - Number(next?.score || 0)) / top.score)
+    : 0;
+  const score = Math.max(0, Math.min(1, 0.55 * supportRatio + 0.45 * marginRatio));
+  const filledStars = Math.max(1, Math.min(5, Math.round(score * 4) + 1));
+  return {
+    stars: `${"★".repeat(filledStars)}${"☆".repeat(5 - filledStars)}`,
+    supportText: `${top.mainCount}/${totalSources}モデル支持`,
+    modelCountText: `${totalSources}モデル`,
+  };
+}
+
+function resolveLead(variant, race, signalRows, totalSources) {
   if (variant === "placeholder") {
     return String(
       race?.display_body?.message ||
         "公開データの準備中です。更新後にこのレースの詳細が表示されます。",
     );
   }
-  if (variant === "settled") {
-    return "AIモデルの買い目と定量モデルの本命比較を、確定結果とあわせて確認できます。";
+  const top = signalRows[0] || null;
+  if (!top) {
+    return "このレースの定量モデル比較データを上から順に確認できます。";
   }
-  return "AIモデルの買い目と定量モデルの本命比較を、同じ画面でまとめて確認できます。";
-}
-
-function resolveResultTone(text) {
-  const source = String(text || "");
-  if (!source || /未|なし/.test(source)) {
-    return "neutral";
-  }
-  return "positive";
+  return `6つの定量モデルを束ねた AI本命は ◎${top.horseNo} です。上位候補と各モデルの印をそのまま見比べられます。`;
 }
 
 function DetailSummary({ label, value, accent = false }) {
@@ -105,27 +131,51 @@ function MarkGrid({ marks, itemKey }) {
   );
 }
 
-function ConsensusPanel({ consensusRows }) {
+function SpotlightCard({ eyebrow, title, value, meta = [], accent = false }) {
   return (
-    <section className="race-detail-panel race-detail-panel--consensus">
+    <article className={`race-detail-spotlight-card${accent ? " race-detail-spotlight-card--accent" : ""}`}>
+      <div className="race-detail-spotlight-card__head">
+        <span>{eyebrow}</span>
+      </div>
+      <div className="race-detail-spotlight-card__main">
+        <span>{title}</span>
+        <strong>{value || "-"}</strong>
+      </div>
+      {meta.length ? (
+        <div className="race-detail-spotlight-card__stats">
+          {meta.map((item) => (
+            <div key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value || "-"}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function AiIndexPanel({ signalRows }) {
+  return (
+    <section className="race-detail-panel" id="race-detail-index">
       <div className="race-detail-panel__head">
         <div>
-          <span className="race-detail-panel__eyebrow">総合評価</span>
-          <h2>AI・定量モデル総合本命</h2>
+          <span className="race-detail-panel__eyebrow">AI指数</span>
+          <h2>上位候補ランキング</h2>
         </div>
       </div>
-      {consensusRows.length ? (
-        <div className="race-detail-consensus-list">
-          {consensusRows.slice(0, 3).map((item, index) => (
-            <article key={item.horseNo} className="race-detail-consensus-item">
+      {signalRows.length ? (
+        <div className="race-detail-index-list">
+          {signalRows.slice(0, 5).map((item, index) => (
+            <article key={item.horseNo} className="race-detail-index-item">
               <span>{`0${index + 1}`.slice(-2)}</span>
-              <strong>{`${MAIN_MARK}${item.horseNo}`}</strong>
-              <em>{`${item.count}モデル支持`}</em>
+              <strong>{item.horseNo}</strong>
+              <em>{item.aiIndex}</em>
             </article>
           ))}
         </div>
       ) : (
-        <PanelEmpty>総合本命を集計できるデータがまだありません。</PanelEmpty>
+        <PanelEmpty>AI指数を計算できるデータがまだありません。</PanelEmpty>
       )}
     </section>
   );
@@ -133,11 +183,13 @@ function ConsensusPanel({ consensusRows }) {
 
 function PredictorCompareRow({ card }) {
   const marks = parseMarks(card?.marks_text);
+  const mainHorse = pickHorse(marks, MAIN_MARK) || "-";
 
   return (
     <article className="race-detail-compare-row">
       <div className="race-detail-compare-row__top">
         <strong>{card?.label || "-"}</strong>
+        <em>{`${MAIN_MARK}${mainHorse}`}</em>
       </div>
       <MarkGrid
         marks={marks}
@@ -147,61 +199,7 @@ function PredictorCompareRow({ card }) {
   );
 }
 
-function ModelDetailCard({ card, highlightRoi = false }) {
-  const marks = parseMarks(card?.marks_text);
-  const resultText = String(card?.result_triplet_text || "結果未確定");
-  const planCount = parsePlanCount(card?.ticket_plan_text);
-  const commentText = String(card?.comment || "").trim();
-
-  return (
-    <article className="race-detail-model-card">
-      <div className="race-detail-model-card__head">
-        <div>
-          <span className="race-detail-model-card__eyebrow">AIモデル</span>
-          <h3>{card?.label || "-"}</h3>
-        </div>
-        <div className="race-detail-model-card__badges">
-          <ModelMetaBadge
-            label="ROI"
-            value={card?.roi_text || "-"}
-            tone="subtle"
-            dynamicRoi={highlightRoi}
-          />
-        </div>
-      </div>
-
-      <MarkGrid marks={marks} itemKey={card?.engine || card?.label || "model"} />
-
-      <div className="race-detail-model-card__stats">
-        <DetailSummary label="買い目数" value={`${planCount || 0}件`} />
-      </div>
-
-      <div className="race-detail-model-card__section">
-        <div className="race-detail-model-card__section-head">
-          <span>買い目</span>
-        </div>
-        <BetPreviewList text={card?.ticket_plan_text || ""} />
-      </div>
-
-      <div className="race-detail-model-card__section">
-        <div className="race-detail-model-card__section-head">
-          <span>コメント</span>
-        </div>
-        <p className="race-detail-model-card__comment">{commentText || "-"}</p>
-      </div>
-
-      <div
-        className={`race-detail-model-card__result race-detail-model-card__result--${resolveResultTone(resultText)}`}
-      >
-        <span>結果</span>
-        <strong>{resultText}</strong>
-      </div>
-    </article>
-  );
-}
-
 export default function RaceDetailPage({ race, search = "", appShell = false }) {
-  const cards = Array.isArray(race?.cards) ? race.cards.filter(Boolean) : [];
   const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
     ? race.predictor_compare_cards.filter(Boolean)
     : [];
@@ -209,21 +207,22 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
   const status = race?.display_status || {};
   const resultText = String(race?.display_body?.result_text || "結果はまだありません");
   const resultEntries = parseResultEntries(resultText);
-  const consensusRows = useMemo(
-    () => buildConsensusRows(cards, predictorCompareCards),
-    [cards, predictorCompareCards],
+  const signalRows = useMemo(
+    () => buildHorseSignalRows(predictorCompareCards),
+    [predictorCompareCards],
+  );
+  const confidenceMeta = useMemo(
+    () => buildConfidenceMeta(signalRows, predictorCompareCards.length),
+    [predictorCompareCards.length, signalRows],
   );
   const badges = formatRaceBadges(race).filter(
     (item) => !["良", "稍重", "重", "不良"].includes(String(item || "").trim()),
   );
   const backHref = buildBackHref(search);
-  const totalPlanCount = cards.reduce(
-    (sum, card) => sum + parsePlanCount(card?.ticket_plan_text),
-    0,
-  );
   const detailTitle = String(
     race?.display_header?.detail_title || race?.display_header?.title || "-",
   ).trim() || "-";
+  const topHorse = signalRows[0] || null;
 
   return (
     <section className="race-detail-page">
@@ -248,99 +247,117 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
               ))}
             </div>
           ) : null}
-          <p>{resolveLead(variant, race)}</p>
+          <p>{resolveLead(variant, race, signalRows, predictorCompareCards.length)}</p>
         </div>
 
         <div className="race-detail-hero__meta">
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
-          <DetailSummary label="買い目総数" value={`${totalPlanCount}件`} />
+          <DetailSummary label="掲載モデル" value={confidenceMeta.modelCountText} />
+          <DetailSummary label="本命支持" value={confidenceMeta.supportText} />
+          <DetailSummary label="AI信頼度" value={confidenceMeta.stars} />
         </div>
       </div>
 
+      <section className="race-detail-panel" id="race-detail-conclusion">
+        <div className="race-detail-panel__head">
+          <div>
+            <span className="race-detail-panel__eyebrow">結論</span>
+            <h2>AI本命</h2>
+          </div>
+        </div>
+        <div className="race-detail-spotlight-grid">
+          <SpotlightCard
+            eyebrow="AI本命"
+            title="本命馬"
+            value={topHorse ? `◎${topHorse.horseNo}` : "-"}
+            meta={[
+              { label: "本命票", value: `${topHorse?.mainCount || 0}/${predictorCompareCards.length || 0}` },
+              { label: "AI指数", value: `${topHorse?.aiIndex || 0}` },
+            ]}
+            accent
+          />
+          <SpotlightCard
+            eyebrow="AI信頼度"
+            title="信頼度"
+            value={confidenceMeta.stars}
+            meta={[
+              { label: "支持状況", value: confidenceMeta.supportText },
+            ]}
+          />
+          <SpotlightCard
+            eyebrow="モデル数"
+            title="定量モデル"
+            value={confidenceMeta.modelCountText}
+            meta={[
+              { label: "比較対象", value: "main / v2 / v3 / v4 / v5 / v6" },
+            ]}
+          />
+          <SpotlightCard
+            eyebrow="結果"
+            title="レース結果"
+            value={resultEntries[0] ? resultEntries[0].body : "未確定"}
+            meta={resultEntries.slice(1, 3).map((entry) => ({
+              label: `${entry.rank}着`,
+              value: entry.body,
+            }))}
+          />
+        </div>
+      </section>
+
+      <AiIndexPanel signalRows={signalRows} />
+
       <section
-        className="race-detail-panel race-detail-panel--models"
-        id="race-detail-models"
+        className="race-detail-panel race-detail-panel--compare"
+        id="race-detail-compare"
       >
         <div className="race-detail-panel__head">
           <div>
-            <span className="race-detail-panel__eyebrow">買い目一覧</span>
-            <h2>AIモデル別の買い目</h2>
+            <span className="race-detail-panel__eyebrow">定量モデル予想</span>
+            <h2>6モデルの本命比較</h2>
           </div>
         </div>
-        <div className="race-detail-model-grid">
-          {cards.length ? (
-            cards.map((card) => (
-              <ModelDetailCard
-                key={card?.engine || card?.label}
+        <div className="race-detail-compare-list">
+          {predictorCompareCards.length ? (
+            predictorCompareCards.map((card) => (
+              <PredictorCompareRow
+                key={card?.predictor_id || card?.label}
                 card={card}
-                highlightRoi={variant === "settled"}
               />
             ))
           ) : (
-            <PanelEmpty>買い目データはまだ公開されていません。</PanelEmpty>
+            <PanelEmpty>定量モデルの比較データはまだありません。</PanelEmpty>
           )}
         </div>
       </section>
 
-      <div className="race-detail-layout">
-        <section
-          className="race-detail-panel race-detail-panel--compare"
-          id="race-detail-compare"
-        >
-          <div className="race-detail-panel__head">
-            <div>
-              <span className="race-detail-panel__eyebrow">定量モデル</span>
-              <h2>定量モデルの本命比較</h2>
-            </div>
+      <section className="race-detail-panel race-detail-panel--result" id="race-detail-result">
+        <div className="race-detail-panel__head">
+          <div>
+            <span className="race-detail-panel__eyebrow">レース結果</span>
+            <h2>確定着順</h2>
           </div>
-          <div className="race-detail-compare-list">
-            {predictorCompareCards.length ? (
-              predictorCompareCards.map((card) => (
-                <PredictorCompareRow
-                  key={card?.predictor_id || card?.label}
-                  card={card}
-                />
-              ))
-            ) : (
-              <PanelEmpty>定量モデルの比較データはまだありません。</PanelEmpty>
-            )}
-          </div>
-        </section>
-
-        <div className="race-detail-side-stack">
-          <ConsensusPanel consensusRows={consensusRows} />
-
-          <section className="race-detail-panel race-detail-panel--result">
-            <div className="race-detail-panel__head">
-              <div>
-                <span className="race-detail-panel__eyebrow">確定結果</span>
-                <h2>レース結果</h2>
-              </div>
-            </div>
-            {resultEntries.length ? (
-              <ol className="race-detail-result-list">
-                {resultEntries.map((entry) => (
-                  <li key={entry.key}>
-                    <span>{entry.rank}着</span>
-                    <strong>{entry.body}</strong>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="race-detail-result-placeholder">{resultText}</p>
-            )}
-          </section>
-
-          {!appShell ? (
-            <EzoicAdSlot
-              slot="raceDetailSidebar"
-              wrapperClassName="ezoic-ad-slot--sidebar"
-            />
-          ) : null}
-          <RaceDetailAffiliateCard />
         </div>
-      </div>
+        {resultEntries.length ? (
+          <ol className="race-detail-result-list">
+            {resultEntries.map((entry) => (
+              <li key={entry.key}>
+                <span>{entry.rank}着</span>
+                <strong>{entry.body}</strong>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="race-detail-result-placeholder">{resultText}</p>
+        )}
+      </section>
+
+      {!appShell ? (
+        <EzoicAdSlot
+          slot="raceDetailSidebar"
+          wrapperClassName="ezoic-ad-slot--content"
+        />
+      ) : null}
+      <RaceDetailAffiliateCard />
     </section>
   );
 }
-

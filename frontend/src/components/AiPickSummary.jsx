@@ -1,5 +1,4 @@
 import React from "react";
-import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 import { MARK_ORDER, parseMarks, pickHorse } from "../lib/publicRace";
 
@@ -12,6 +11,8 @@ export default function AiPickSummary({ card, highlightRoi = false }) {
       horseNo: pickHorse(marks, symbol),
     }))
     .filter((item) => item.horseNo);
+  const badgeLabel = String(card?.metaLabel || "").trim() || "指標";
+  const badgeValue = String(card?.metaValue || card?.roi_text || "").trim() || "-";
 
   return (
     <article
@@ -21,8 +22,8 @@ export default function AiPickSummary({ card, highlightRoi = false }) {
       <div className="ai-pick-summary__head">
         <strong className="ai-pick-summary__model">{card?.label || "-"}</strong>
         <ModelMetaBadge
-          label="ROI"
-          value={card?.roi_text || "-"}
+          label={badgeLabel}
+          value={badgeValue}
           tone="subtle"
           dynamicRoi={highlightRoi}
         />
@@ -48,8 +49,6 @@ export default function AiPickSummary({ card, highlightRoi = false }) {
           </div>
         ) : null}
       </div>
-
-      <BetPreviewList text={card?.ticket_plan_text || ""} maxItems={3} compact />
     </article>
   );
 }

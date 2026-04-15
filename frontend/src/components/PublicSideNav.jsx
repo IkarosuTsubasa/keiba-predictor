@@ -71,16 +71,16 @@ export default function PublicSideNav({
             active: !activeHash || activeHash === "#race-detail-summary",
           },
           {
-            href: `${normalizedDetailHref}#race-detail-models`,
-            label: "買い目比較",
-            note: "AIモデル別の買い目",
-            active: activeHash === "#race-detail-models",
-          },
-          {
             href: `${normalizedDetailHref}#race-detail-compare`,
             label: "定量比較",
             note: "定量モデルの本命比較",
-            active: activeHash === "#race-detail-compare",
+            active: activeHash === "#race-detail-compare" || activeHash === "#race-detail-models",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-index`,
+            label: "AI指数",
+            note: "上位候補ランキング",
+            active: activeHash === "#race-detail-index",
           },
         ]
       : [];
@@ -98,7 +98,7 @@ export default function PublicSideNav({
 
   const focusText =
     mode === "detail"
-      ? "このレースの買い目、定量比較、結果を一つの流れで確認できます。"
+      ? "このレースのAI本命、AI指数、定量比較、結果を一つの流れで確認できます。"
       : mode === "history"
         ? "期間ごとの成績比較と定量モデルの傾向をまとめて確認できます。"
         : mode === "reports"

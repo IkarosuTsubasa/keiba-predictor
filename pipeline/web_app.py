@@ -70,6 +70,7 @@ from race_job_store import (
     hydrate_job_step_states as hydrate_race_job_step_states,
     initialize_job_step_fields as initialize_race_job_step_fields,
     load_jobs as load_race_jobs,
+    normalize_run_kind,
     save_artifact as save_race_job_artifact,
     scan_due_diagnostics as scan_due_race_job_diagnostics,
     scan_due_jobs as scan_due_race_jobs,
@@ -143,6 +144,7 @@ from web_report.helpers import (
     format_yen_text as report_format_yen_text,
     has_llm_policy_assets as report_has_llm_policy_assets,
     jst_today_text as report_jst_today_text,
+    public_scope_label_ja,
     llm_today_scope_keys as report_llm_today_scope_keys,
     normalize_report_date_text as report_normalize_report_date_text,
     parse_run_date as report_parse_run_date,
@@ -1899,6 +1901,14 @@ def _public_display_race_name(row):
     return race_name
 
 
+def _public_race_id_text(run_row):
+    title = _format_race_label(run_row)
+    match = re.search(r"(\d+R)", title)
+    if match:
+        return match.group(1)
+    return _race_no_text((run_row or {}).get("race_id")) or _safe_text((run_row or {}).get("race_id"))
+
+
 def _public_display_header(row, variant):
     badges = []
     scheduled_off_time = str((row or {}).get("scheduled_off_time", "") or "").strip()
@@ -1938,6 +1948,7 @@ def _public_display_body(row, variant):
 
 
 _PUBLIC_COMPARE_MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+_MORNING_TOP5_POSITION_WEIGHTS = (1.0, 0.82, 0.67, 0.54, 0.43)
 
 
 def _public_predictor_compare_cards(row):
@@ -1986,6 +1997,317 @@ def _public_predictor_compare_cards(row):
             }
         )
     return cards
+
+
+def _morning_run_priority(row):
+    run_kind = str((row or {}).get("run_kind", "") or "").strip().lower()
+    return (
+        1 if run_kind == "morning_preview" else 0,
+        str((row or {}).get("timestamp", "") or "").strip(),
+        str((row or {}).get("run_id", "") or "").strip(),
+    )
+
+
+def _load_combined_morning_preview_runs(scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    rows = []
+    for report_scope_key in scope_keys:
+        for row in load_runs(report_scope_key):
+            item = dict(row or {})
+            item["_report_scope_key"] = report_scope_key
+            if normalize_run_kind(item.get("run_kind", "")) != "morning_preview":
+                continue
+            if str(item.get("predictions_path", "") or "").strip() and str(item.get("predictions_v6_kiwami_path", "") or "").strip():
+                rows.append(item)
+    return rows
+
+
+def _morning_weighted_support_map(ranking):
+    top5 = [dict(item or {}) for item in list(ranking or [])[:5] if isinstance(item, dict)]
+    if not top5:
+        return {}
+    raw_scores = []
+    for item in top5:
+        raw_scores.append(
+            max(
+                0.0,
+                0.55 * float(item.get("top3_prob_model", 0.0) or 0.0)
+                + 0.30 * float(item.get("rank_score_norm", 0.0) or 0.0)
+                + 0.15 * float(item.get("confidence_score", 0.0) or 0.0),
+            )
+        )
+    score_cap = max(raw_scores) if raw_scores else 0.0
+    support_map = {}
+    for idx, item in enumerate(top5):
+        horse_no = normalize_horse_no_text(item.get("horse_no", ""))
+        if not horse_no:
+            continue
+        position_weight = _MORNING_TOP5_POSITION_WEIGHTS[min(idx, len(_MORNING_TOP5_POSITION_WEIGHTS) - 1)]
+        score_norm = (raw_scores[idx] / score_cap) if score_cap > 0 else 0.0
+        support_map[horse_no] = {
+            "horse_no": horse_no,
+            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "support": round(position_weight * (0.6 + 0.4 * score_norm), 6),
+            "pred_rank": int(item.get("pred_rank", 0) or 0),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+            "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+        }
+    return support_map
+
+
+def _morning_weighted_jaccard(left_map, right_map):
+    keys = sorted(set(dict(left_map or {}).keys()) | set(dict(right_map or {}).keys()))
+    if not keys:
+        return 0.0
+    numerator = 0.0
+    denominator = 0.0
+    for key in keys:
+        left_value = float(((left_map or {}).get(key) or {}).get("support", 0.0) or 0.0)
+        right_value = float(((right_map or {}).get(key) or {}).get("support", 0.0) or 0.0)
+        numerator += min(left_value, right_value)
+        denominator += max(left_value, right_value)
+    if denominator <= 0:
+        return 0.0
+    return max(0.0, min(1.0, numerator / denominator))
+
+
+def _morning_predictor_stability(support_map):
+    rows = sorted(
+        [dict(item or {}) for item in dict(support_map or {}).values()],
+        key=lambda item: (
+            int(item.get("pred_rank", 0) or 0) if int(item.get("pred_rank", 0) or 0) > 0 else 999,
+            -float(item.get("support", 0.0) or 0.0),
+            str(item.get("horse_no", "") or ""),
+        ),
+    )
+    values = [float(item.get("support", 0.0) or 0.0) for item in rows[:5]]
+    while len(values) < 5:
+        values.append(0.0)
+    gap13 = max(0.0, values[0] - values[2])
+    gap35 = max(0.0, values[2] - values[4])
+    return max(0.0, min(1.0, 0.58 * min(1.0, gap13 / 0.35) + 0.42 * min(1.0, gap35 / 0.18)))
+
+
+def _morning_concentration_score(aggregate_rows):
+    values = [float((item or {}).get("support", 0.0) or 0.0) for item in list(aggregate_rows or [])[:5]]
+    total = sum(values)
+    if total <= 0:
+        return 0.0
+    top3_ratio = sum(values[:3]) / total
+    return max(0.0, min(1.0, (top3_ratio - 0.6) / 0.4))
+
+
+def _morning_confidence_label(score):
+    value = float(score or 0.0)
+    if value >= 0.8:
+        return "かなり高い"
+    if value >= 0.65:
+        return "高い"
+    if value >= 0.45:
+        return "中"
+    if value >= 0.25:
+        return "やや低い"
+    return "低い"
+
+
+def _morning_summary_text(agreement_score, concentration_score, stability_score):
+    parts = []
+    if agreement_score >= 0.72:
+        parts.append("2モデルの上位候補が近い")
+    elif agreement_score <= 0.32:
+        parts.append("2モデルの見立てが割れ気味")
+    if concentration_score >= 0.68:
+        parts.append("上位3頭に評価が集中")
+    if stability_score >= 0.62:
+        parts.append("順位の傾きが明確")
+    return " / ".join(parts) if parts else "上位候補を比較中"
+
+
+def _build_morning_preview_race_item(row):
+    run_row = dict(row or {})
+    scope_key = str(run_row.get("_report_scope_key", "") or run_row.get("scope", "") or "").strip()
+    run_id = str(run_row.get("run_id", "") or "").strip()
+    if not scope_key or not run_id:
+        return {}
+
+    shutuba_path = resolve_run_asset_path(scope_key, run_id, run_row, "shutuba_path", "shutuba")
+    odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "odds_path", "odds")
+    fuku_odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
+    if odds_path and Path(odds_path).exists():
+        name_to_no_map = load_name_to_no(odds_path)
+    elif shutuba_path and Path(shutuba_path).exists():
+        name_to_no_map = load_name_to_no(shutuba_path)
+    else:
+        name_to_no_map = {}
+    win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
+    place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
+
+    ranking_by_predictor = {}
+    for predictor_id in ("main", "v6_kiwami"):
+        pred_path = resolve_run_prediction_path(
+            run_row,
+            get_data_dir(BASE_DIR, scope_key),
+            BASE_DIR,
+            run_id=run_id,
+            race_id=run_row.get("race_id", ""),
+            predictor_id=predictor_id,
+        )
+        if not pred_path or not Path(pred_path).exists():
+            continue
+        pred_rows = load_csv_rows_flexible(pred_path)
+        ranking = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
+        if ranking:
+            ranking_by_predictor[predictor_id] = ranking[:5]
+
+    if set(ranking_by_predictor.keys()) != {"main", "v6_kiwami"}:
+        return {}
+
+    support_by_predictor = {
+        predictor_id: _morning_weighted_support_map(ranking)
+        for predictor_id, ranking in ranking_by_predictor.items()
+    }
+    aggregate = {}
+    for predictor_id, support_map in support_by_predictor.items():
+        for horse_no, item in support_map.items():
+            entry = aggregate.setdefault(
+                horse_no,
+                {
+                    "horse_no": horse_no,
+                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "support": 0.0,
+                    "sources": [],
+                    "top3_prob_model": 0.0,
+                },
+            )
+            entry["support"] += float(item.get("support", 0.0) or 0.0)
+            entry["top3_prob_model"] += float(item.get("top3_prob_model", 0.0) or 0.0)
+            entry["sources"].append(predictor_id)
+            if not entry["horse_name"]:
+                entry["horse_name"] = str(item.get("horse_name", "") or "").strip()
+    aggregate_rows = sorted(
+        [
+            {
+                "horse_no": horse_no,
+                "horse_name": str(item.get("horse_name", "") or "").strip(),
+                "support": round(float(item.get("support", 0.0) or 0.0), 6),
+                "support_score": int(round(float(item.get("support", 0.0) or 0.0) * 100)),
+                "sources": list(item.get("sources", []) or []),
+                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0) / max(1, len(item.get("sources", []) or [])), 6),
+            }
+            for horse_no, item in aggregate.items()
+        ],
+        key=lambda item: (-float(item.get("support", 0.0) or 0.0), str(item.get("horse_no", "") or "")),
+    )[:5]
+    if not aggregate_rows:
+        return {}
+
+    agreement_score = _morning_weighted_jaccard(
+        support_by_predictor.get("main", {}),
+        support_by_predictor.get("v6_kiwami", {}),
+    )
+    concentration_score = _morning_concentration_score(aggregate_rows)
+    stability_score = (
+        _morning_predictor_stability(support_by_predictor.get("main", {}))
+        + _morning_predictor_stability(support_by_predictor.get("v6_kiwami", {}))
+    ) / 2.0
+    confidence_score = max(
+        0.0,
+        min(
+            1.0,
+            0.40 * agreement_score + 0.35 * concentration_score + 0.25 * stability_score,
+        ),
+    )
+    job_meta = _find_job_meta_for_run(scope_key, run_id, run_row) or {}
+    race_title = _format_race_label(run_row)
+    return {
+        "scope_key": scope_key,
+        "scope_label": public_scope_label_ja(scope_key),
+        "run_id": run_id,
+        "race_id": _public_race_id_text(run_row),
+        "race_title": race_title,
+        "race_name": _safe_text(job_meta.get("race_name")) or _safe_text(run_row.get("race_name")) or _safe_text(run_row.get("trigger_race")),
+        "location": _safe_text(job_meta.get("location")) or _safe_text(run_row.get("location")),
+        "scheduled_off_time": _safe_text(job_meta.get("scheduled_off_time")) or _safe_text(run_row.get("scheduled_off_time")),
+        "distance_label": _format_distance_label(_safe_text(job_meta.get("target_distance")) or _safe_text(run_row.get("distance"))),
+        "track_condition": _safe_text(job_meta.get("target_track_condition")) or _safe_text(run_row.get("track_condition")) or "良",
+        "run_kind": str(run_row.get("run_kind", "") or "").strip() or "final_prediction",
+        "main_horse_no": str((aggregate_rows[0] or {}).get("horse_no", "") or "").strip(),
+        "main_horse_name": str((aggregate_rows[0] or {}).get("horse_name", "") or "").strip(),
+        "confidence_score": round(confidence_score, 6),
+        "confidence_label": _morning_confidence_label(confidence_score),
+        "agreement_score": round(agreement_score, 6),
+        "concentration_score": round(concentration_score, 6),
+        "stability_score": round(stability_score, 6),
+        "summary_text": _morning_summary_text(agreement_score, concentration_score, stability_score),
+        "top5": aggregate_rows,
+        "predictor_top5": {
+            predictor_id: [
+                {
+                    "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
+                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "pred_rank": int(item.get("pred_rank", 0) or 0),
+                    "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                    "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+                }
+                for item in list(ranking_by_predictor.get(predictor_id, []) or [])[:5]
+            ]
+            for predictor_id in ("main", "v6_kiwami")
+        },
+    }
+
+
+def _build_public_morning_preview_payload(target_date="", scope_key=""):
+    target_date = str(target_date or "").strip()
+    if not target_date:
+        return {"available": False, "races": [], "confidence_ranking": [], "featured_race": {}}
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    selected_rows = {}
+    for row in _load_combined_morning_preview_runs(scope_norm):
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        race_id = normalize_race_id((row or {}).get("race_id", ""))
+        if not race_id:
+            continue
+        dedupe_key = (report_scope_key, race_id)
+        current = selected_rows.get(dedupe_key)
+        if current is None or _morning_run_priority(row) > _morning_run_priority(current):
+            selected_rows[dedupe_key] = dict(row or {})
+
+    races = []
+    for row in selected_rows.values():
+        item = _build_morning_preview_race_item(row)
+        if item:
+            races.append(item)
+    confidence_ranking = sorted(
+        list(races),
+        key=lambda item: (
+            -float(item.get("confidence_score", 0.0) or 0.0),
+            -float(item.get("agreement_score", 0.0) or 0.0),
+            str(item.get("scheduled_off_time", "") or ""),
+            str(item.get("race_title", "") or ""),
+        ),
+    )
+    featured_race = dict(confidence_ranking[0]) if confidence_ranking else {}
+    races = sorted(
+        list(races),
+        key=lambda item: (
+            str(item.get("scheduled_off_time", "") or ""),
+            str(item.get("race_title", "") or ""),
+        ),
+    )
+    return {
+        "available": bool(races),
+        "target_date": target_date,
+        "race_count": len(races),
+        "featured_race": featured_race,
+        "confidence_ranking": confidence_ranking[:5],
+        "races": races,
+    }
 
 
 def _with_public_display_sort_fields(items):
@@ -2053,6 +2375,7 @@ def build_public_board_payload(date_text="", scope_key=""):
     payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     payload["daily_report"] = _find_daily_report_for_date(target_date)
+    payload["morning_preview"] = _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
     return payload
 
 
@@ -2853,7 +3176,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             summary["scheduled"] += 1
         elif status in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
             summary["processing"] += 1
-        elif status == "ready":
+        elif status in ("ready", "preview_ready"):
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
@@ -3901,6 +4224,7 @@ async def admin_jobs_create_api(
     request: Request,
     scope_key: str = Form(""),
     race_id: str = Form(""),
+    run_kind: str = Form(""),
     race_name: str = Form(""),
     location: str = Form(""),
     race_date: str = Form(""),
@@ -4004,6 +4328,7 @@ async def admin_jobs_create_api(
         BASE_DIR,
         race_id=race_id,
         scope_key=scope_norm,
+        run_kind=run_kind,
         race_name=race_name,
         location=location,
         race_date=race_date,

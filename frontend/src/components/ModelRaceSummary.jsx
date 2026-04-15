@@ -1,5 +1,4 @@
 import React from "react";
-import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 
 const MARK_ORDER = ["◎", "○", "▲", "△", "☆"];
@@ -49,16 +48,12 @@ export default function ModelRaceSummary({ card, highlightRoi = false }) {
         </div>
         <div className="model-race-summary__meta">
           <ModelMetaBadge
-            label="ROI"
-            value={card?.roi_text || "-"}
+            label="指標"
+            value={card?.metricText || "-"}
             tone="subtle"
             dynamicRoi={highlightRoi}
           />
         </div>
-      </div>
-
-      <div className="model-race-summary__tickets">
-        <BetPreviewList text={card?.ticket_plan_text || ""} />
       </div>
     </div>
   );

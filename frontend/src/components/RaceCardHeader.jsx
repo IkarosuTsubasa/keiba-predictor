@@ -44,6 +44,7 @@ export default function RaceCardHeader({ race, actions = null }) {
     : [];
   const variant = String(race?.display_variant || "").trim();
   const isPlaceholder = variant === "placeholder";
+  const isMorningPreview = variant === "morning_preview";
   const resultText = String(
     race?.display_body?.result_text || "結果は確定後に表示されます",
   );
@@ -79,7 +80,7 @@ export default function RaceCardHeader({ race, actions = null }) {
         </span>
       </div>
 
-      {!isPlaceholder ? (
+      {!isPlaceholder && !isMorningPreview ? (
         <div className="race-card-header__result-row">
           <div className="race-card-header__result">
             <span className="race-card-header__result-label">結果</span>

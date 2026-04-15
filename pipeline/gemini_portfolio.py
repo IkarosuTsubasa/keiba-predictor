@@ -279,7 +279,7 @@ def load_name_to_no(path):
     out = {}
     for row in rows:
         name = row.get("name") or row.get("HorseName") or row.get("horse_name")
-        horse_no = parse_horse_no(row.get("horse_no"))
+        horse_no = parse_horse_no(row.get("horse_no") or row.get("HorseNo") or row.get("馬番"))
         if not name or horse_no is None:
             continue
         out[normalize_name(name)] = horse_no

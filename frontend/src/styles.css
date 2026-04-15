@@ -1502,6 +1502,10 @@ select {
   gap: 12px;
 }
 
+.race-card__summary-grid--single {
+  grid-template-columns: 1fr;
+}
+
 .race-card--placeholder .race-card__summary-grid {
   grid-template-columns: 1fr;
 }
@@ -1609,6 +1613,22 @@ select {
   font-size: 18px;
   line-height: 1;
   color: #eef4ff;
+}
+
+.ai-pick-summary__meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #b9c7da;
+  font-size: 13px;
+}
+
+.ai-pick-summary__note {
+  margin: 0;
+  color: #dbe5f4;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .bet-preview-list {
@@ -3166,6 +3186,21 @@ body {
   overflow: visible;
 }
 
+.secondary-stats-panel__intro {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.secondary-stats-panel__intro h2,
+.secondary-stats-panel__intro p {
+  margin: 0;
+}
+
+.secondary-stats-panel__intro p {
+  color: var(--muted);
+}
+
 .secondary-stats-panel__row {
   min-width: 0;
   padding: 14px 16px;
@@ -3813,6 +3848,15 @@ body {
   gap: 14px;
 }
 
+.race-card--linkable {
+  cursor: pointer;
+}
+
+.race-card--linkable:focus-visible {
+  outline: 3px solid rgba(26, 35, 126, 0.22);
+  outline-offset: 3px;
+}
+
 .race-card::before {
   content: "";
   position: absolute;
@@ -4400,6 +4444,12 @@ body {
   box-shadow: inset 0 0 0 1px rgba(198, 197, 212, 0.14);
 }
 
+.race-detail-spotlight-card--accent {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(203, 167, 47, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(255, 248, 221, 0.96), rgba(255, 255, 255, 0.98));
+}
+
 .race-detail-spotlight-card__head,
 .race-detail-spotlight-card__stats,
 .race-detail-consensus-item {
@@ -4469,6 +4519,108 @@ body {
 
 .race-detail-panel--consensus {
   align-content: start;
+}
+
+.race-detail-recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.race-detail-recommend-card,
+.race-detail-index-item {
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--surface-low);
+}
+
+.race-detail-recommend-card {
+  display: grid;
+  gap: 12px;
+}
+
+.race-detail-recommend-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.race-detail-recommend-card__head strong,
+.race-detail-index-item strong {
+  color: var(--primary);
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+}
+
+.race-detail-recommend-card__head strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.race-detail-recommend-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.race-detail-recommend-line {
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(198, 197, 212, 0.14);
+}
+
+.race-detail-recommend-line span,
+.race-detail-recommend-line em,
+.race-detail-index-item span {
+  font-style: normal;
+  color: var(--muted);
+  font-family: "Work Sans", "Noto Sans JP", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.race-detail-recommend-line span {
+  color: var(--primary);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.race-detail-index-list {
+  display: grid;
+  gap: 10px;
+}
+
+.race-detail-index-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.race-detail-index-item strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.race-detail-index-item em {
+  min-width: 64px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(224, 224, 255, 0.78);
+  color: var(--primary);
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
 }
 
 .race-detail-consensus-list {
@@ -4809,6 +4961,7 @@ body {
     padding: 18px;
   }
 
+  .race-detail-recommend-grid,
   .race-detail-hero__meta,
   .race-detail-model-grid,
   .race-detail-model-card__stats {
@@ -4832,6 +4985,7 @@ body {
     padding: 16px;
   }
 
+  .race-detail-recommend-grid,
   .race-detail-hero__meta,
   .race-detail-model-grid,
   .race-detail-model-card__stats {
@@ -4847,6 +5001,15 @@ body {
   .race-detail-model-card__head,
   .race-detail-compare-row__top {
     display: grid;
+  }
+
+  .race-detail-index-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .race-detail-index-item em {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .race-detail-result-list strong {
@@ -6619,4 +6782,195 @@ body {
   display: block;
   overflow: hidden;
   white-space: nowrap;
+}
+.morning-preview {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(202, 152, 60, 0.2), transparent 28%),
+    linear-gradient(135deg, #fff8ed 0%, #fffdf8 55%, #f5eee0 100%);
+  border: 1px solid rgba(143, 98, 20, 0.14);
+  box-shadow: 0 16px 44px rgba(46, 33, 18, 0.08);
+}
+
+.morning-preview__head h2,
+.morning-preview__subhead h3,
+.morning-preview__featured p,
+.morning-preview__ranking {
+  margin: 0;
+}
+
+.morning-preview__head p {
+  margin: 8px 0 0;
+  color: #5f5649;
+}
+
+.morning-preview__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
+  gap: 18px;
+}
+
+.morning-preview__featured,
+.morning-preview__ranking-card,
+.morning-preview__app-card {
+  padding: 20px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(143, 98, 20, 0.12);
+}
+
+.morning-preview__side {
+  display: grid;
+  gap: 18px;
+}
+
+.morning-preview__featured-top,
+.morning-preview__race-top,
+.morning-preview__subhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.morning-preview__featured-top strong,
+.morning-preview__race-top em,
+.morning-preview__ranking li em {
+  color: #8a4b00;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.morning-preview__featured-main {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 14px;
+}
+
+.morning-preview__featured-main div {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #fff7ea;
+}
+
+.morning-preview__featured-main small {
+  display: block;
+  margin-bottom: 6px;
+  color: #7a6f60;
+}
+
+.morning-preview__featured-main strong {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.morning-preview__top5 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.morning-preview__top5 span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f1eadf;
+}
+
+.morning-preview__top5 em {
+  color: #7a6f60;
+  font-style: normal;
+  font-size: 0.82rem;
+}
+
+.morning-preview__top5-empty {
+  margin-top: 14px;
+  color: #7a6f60;
+}
+
+.morning-preview__link {
+  display: inline-flex;
+  margin-top: 16px;
+  color: #7a2d00;
+  font-weight: 700;
+}
+
+.morning-preview__app-points {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #5f5649;
+}
+
+.morning-preview__app-points li {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff7ea;
+}
+
+.morning-preview__app-link {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 18px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  background: #7a2d00;
+  color: #fff8ed;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.morning-preview__ranking {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin-top: 16px;
+}
+
+.morning-preview__ranking li a {
+  display: grid;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.morning-preview__ranking li {
+  border-radius: 16px;
+  background: #fff7ea;
+}
+
+.morning-preview__ranking li a {
+  grid-template-columns: minmax(0, 1fr) 44px 64px;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.morning-preview__footnote {
+  color: #7a6f60;
+  font-size: 13px;
+}
+
+.morning-preview__footnote p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .morning-preview__hero {
+    grid-template-columns: 1fr;
+  }
+
+  .morning-preview__featured-main {
+    grid-template-columns: 1fr;
+  }
 }
