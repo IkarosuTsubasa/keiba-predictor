@@ -11,17 +11,23 @@ function formatScore(value) {
   return `${Math.round(number * 100)}%`;
 }
 
-function TopFiveLine({ items = [] }) {
+function TopFiveIndexList({ items = [] }) {
   if (!items.length) {
-    return <p className="morning-preview__top5-empty">上位候補を準備中です。</p>;
+    return <p className="morning-preview__top5-empty">AI予測指数を準備中です。</p>;
   }
   return (
-    <div className="morning-preview__top5">
+    <div className="morning-preview__index-list">
+      <div className="morning-preview__index-head">
+        <span>馬番</span>
+        <span>馬名</span>
+        <span>AI指数</span>
+      </div>
       {items.slice(0, 5).map((item, index) => (
-        <span key={`${item.horse_no}-${index}`}>
-          <strong>{item.horse_no || "-"}</strong>
+        <article key={`${item.horse_no}-${index}`} className="morning-preview__index-item">
+          <span>{item.horse_no || "-"}</span>
+          <strong>{item.horse_name || "-"}</strong>
           <em>{item.support_score || 0}</em>
-        </span>
+        </article>
       ))}
     </div>
   );
@@ -32,7 +38,9 @@ const APP_DOWNLOAD_HREF = "https://x.gd/BDVgd";
 export default function MorningPreviewSection({ data, search = "" }) {
   const preview = data?.morning_preview || {};
   const featuredRace = preview?.featured_race || null;
-  const ranking = Array.isArray(preview?.confidence_ranking) ? preview.confidence_ranking : [];
+  const ranking = Array.isArray(preview?.confidence_ranking)
+    ? preview.confidence_ranking.slice(0, 6)
+    : [];
 
   if (!preview?.available || !featuredRace || !ranking.length) {
     return null;
@@ -42,9 +50,9 @@ export default function MorningPreviewSection({ data, search = "" }) {
     <section className="morning-preview" id="home-morning-preview">
       <div className="morning-preview__head">
         <div>
-          <span className="home-section-eyebrow">朝版速報</span>
+          <span className="home-section-eyebrow">AI注目</span>
           <h2>今日のAI注目レース</h2>
-          <p>v1 と 極 KIWAMI の前5候補を束ねて、朝時点の注目度と自信度を先出しします。</p>
+          <p>本命、自信度、上位5頭、AI予測指数をまとめて確認できます。</p>
         </div>
       </div>
 
@@ -52,7 +60,6 @@ export default function MorningPreviewSection({ data, search = "" }) {
         <article className="morning-preview__featured">
           <div className="morning-preview__featured-top">
             <span>{featuredRace.race_title || "-"}</span>
-            <strong>{featuredRace.confidence_label || "-"}</strong>
           </div>
           <div className="morning-preview__featured-main">
             <div>
@@ -63,52 +70,54 @@ export default function MorningPreviewSection({ data, search = "" }) {
               <small>自信度</small>
               <strong>{formatScore(featuredRace.confidence_score)}</strong>
             </div>
-            <div>
-              <small>一致度</small>
-              <strong>{formatScore(featuredRace.agreement_score)}</strong>
-            </div>
           </div>
-          <p>{featuredRace.summary_text || "上位候補を比較中"}</p>
-          <TopFiveLine items={featuredRace.top5} />
+          <div className="morning-preview__featured-block">
+            <div className="morning-preview__featured-labels">
+              <span>上位5頭</span>
+            </div>
+            <TopFiveIndexList items={featuredRace.top5} />
+          </div>
           <a className="morning-preview__link" href={buildRaceHref(featuredRace, search)}>
             詳細を見る
           </a>
         </article>
 
         <div className="morning-preview__side">
-          <article className="morning-preview__app-card">
+          <article className="morning-preview__ranking-card">
             <div className="morning-preview__subhead">
-              <span>アプリ</span>
-              <h3>レース直前のAI最終予想</h3>
+              <span>ランキング</span>
+              <h3>AI自信度ランキング</h3>
             </div>
-            <ul className="morning-preview__app-points">
-              <li>6つの定量モデルを確認</li>
-              <li>レース直前の最終印を比較</li>
-              <li>すべて無料でチェック</li>
-            </ul>
-            <a className="morning-preview__app-link" href={APP_DOWNLOAD_HREF}>
-              Androidアプリをダウンロード
-            </a>
+            <ol className="morning-preview__ranking">
+              {ranking.map((item) => (
+                <li key={item.run_id}>
+                  <a href={buildRaceHref(item, search)}>
+                    <span>{item.race_title || "-"}</span>
+                    <strong>{item.main_horse_no || "-"}</strong>
+                    <em>{formatScore(item.confidence_score)}</em>
+                  </a>
+                </li>
+              ))}
+            </ol>
           </article>
         </div>
       </div>
 
-      <article className="morning-preview__ranking-card">
-        <div className="morning-preview__subhead">
-          <span>ランキング</span>
-          <h3>AI自信度ランキング</h3>
+      <article className="morning-preview__app-card morning-preview__app-card--wide">
+        <div className="morning-preview__app-row">
+          <div className="morning-preview__subhead">
+            <span>アプリ</span>
+            <h3>レース直前のAI最終予想</h3>
+          </div>
+          <ul className="morning-preview__app-points morning-preview__app-points--inline">
+            <li>6つの定量モデルを確認</li>
+            <li>レース直前の最終印を比較</li>
+            <li>すべて無料でチェック</li>
+          </ul>
+          <a className="morning-preview__app-link" href={APP_DOWNLOAD_HREF}>
+            Androidアプリをダウンロード
+          </a>
         </div>
-        <ol className="morning-preview__ranking">
-          {ranking.map((item) => (
-            <li key={item.run_id}>
-              <a href={buildRaceHref(item, search)}>
-                <span>{item.race_title || "-"}</span>
-                <strong>{item.main_horse_no || "-"}</strong>
-                <em>{formatScore(item.confidence_score)}</em>
-              </a>
-            </li>
-          ))}
-        </ol>
       </article>
       
       <div className="morning-preview__footnote">

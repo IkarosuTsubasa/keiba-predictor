@@ -1684,6 +1684,126 @@ def _public_predictor_history_cards(scope_key="", days=None, target_date=""):
     return cards
 
 
+def _condition_distance_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"(\d{3,4})", text)
+    return match.group(1) if match else ""
+
+
+def _public_condition_predictor_ranking(location="", target_distance="", track_condition="", scope_key=""):
+    location_text = str(location or "").strip()
+    distance_text = _condition_distance_value(target_distance)
+    track_text = str(track_condition or "").strip() or "良"
+    if not location_text or not distance_text or not track_text:
+        return {
+            "available": False,
+            "condition_text": "",
+            "metric_label": "予測上位3頭馬券内率",
+            "sample_count": 0,
+            "cards": [],
+        }
+
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = [scope_norm] if scope_norm else ["central_turf", "central_dirt", "local"]
+    aggregates = {
+        spec["id"]: {
+            "predictor_id": spec["id"],
+            "label": predictor_label(spec["id"]),
+            "samples": 0,
+            "top3_hit_count": 0,
+            "top5_hit_count": 0,
+            "top1_hit": 0,
+        }
+        for spec in list_predictors()
+    }
+
+    for scope_item in scope_keys:
+        run_meta_map = {}
+        for run_row in load_runs(scope_item):
+            run_id = str(run_row.get("run_id", "") or "").strip()
+            if not run_id:
+                continue
+            run_meta_map[run_id] = {
+                "location": str(run_row.get("location", "") or "").strip(),
+                "distance": _condition_distance_value(
+                    run_row.get("target_distance", "") or run_row.get("distance", "")
+                ),
+                "track_condition": str(
+                    run_row.get("target_track_condition", "") or run_row.get("track_condition", "")
+                ).strip()
+                or "良",
+            }
+
+        path = get_data_dir(BASE_DIR, scope_item) / "predictor_results.csv"
+        for row in load_csv_rows(path):
+            predictor_id = canonical_predictor_id(row.get("predictor_id"))
+            if not predictor_id:
+                continue
+            run_id = str(row.get("run_id", "") or "").strip()
+            meta = dict(run_meta_map.get(run_id) or {})
+            if not meta:
+                continue
+            if meta.get("location") != location_text:
+                continue
+            if meta.get("distance") != distance_text:
+                continue
+            if meta.get("track_condition") != track_text:
+                continue
+
+            aggregate = aggregates[predictor_id]
+            aggregate["samples"] += 1
+            aggregate["top1_hit"] += int(float(row.get("top1_hit", 0) or 0))
+            aggregate["top3_hit_count"] += int(float(row.get("top3_hit_count", 0) or 0))
+            aggregate["top5_hit_count"] += int(float(row.get("top5_hit_count", 0) or 0))
+
+    cards = []
+    for spec in list_predictors():
+        aggregate = aggregates[spec["id"]]
+        samples = int(aggregate["samples"] or 0)
+        top3_hit_rate = (
+            round(float(aggregate["top3_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        top5_to_top3_hit_rate = (
+            round(float(aggregate["top5_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        top1_hit_rate = round(float(aggregate["top1_hit"]) / float(samples), 4) if samples > 0 else ""
+        cards.append(
+            {
+                "predictor_id": spec["id"],
+                "label": aggregate["label"],
+                "samples": samples,
+                "top1_hit_rate": top1_hit_rate,
+                "top1_hit_rate_text": _format_public_rate_text(top1_hit_rate),
+                "top3_hit_rate": top3_hit_rate,
+                "top3_hit_rate_text": _format_public_rate_text(top3_hit_rate),
+                "top5_to_top3_hit_rate": top5_to_top3_hit_rate,
+                "top5_to_top3_hit_rate_text": _format_public_rate_text(top5_to_top3_hit_rate),
+            }
+        )
+
+    ranked_cards = sorted(
+        [dict(item or {}) for item in cards if int((item or {}).get("samples", 0) or 0) > 0],
+        key=lambda item: (
+            -(float(item.get("top3_hit_rate", 0) or 0.0)),
+            -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
+            -int(item.get("samples", 0) or 0),
+            str(item.get("predictor_id", "") or ""),
+        ),
+    )
+    for index, item in enumerate(ranked_cards, start=1):
+        item["rank"] = index
+
+    return {
+        "available": bool(ranked_cards),
+        "condition_text": f"{location_text} / {distance_text}m / {track_text}",
+        "metric_label": "予測上位3頭馬券内率",
+        "sample_count": max((int(item.get("samples", 0) or 0) for item in ranked_cards), default=0),
+        "cards": ranked_cards,
+    }
+
+
 def _public_daily_predictor_summary(target_date="", scope_key=""):
     cards = _public_predictor_history_cards(scope_key=scope_key, target_date=target_date)
     ranked_cards = sorted(
@@ -2027,31 +2147,39 @@ def _morning_weighted_support_map(ranking):
     top5 = [dict(item or {}) for item in list(ranking or [])[:5] if isinstance(item, dict)]
     if not top5:
         return {}
-    raw_scores = []
-    for item in top5:
-        raw_scores.append(
-            max(
-                0.0,
-                0.55 * float(item.get("top3_prob_model", 0.0) or 0.0)
-                + 0.30 * float(item.get("rank_score_norm", 0.0) or 0.0)
-                + 0.15 * float(item.get("confidence_score", 0.0) or 0.0),
-            )
-        )
-    score_cap = max(raw_scores) if raw_scores else 0.0
+    prob_values = [max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0)) for item in top5]
+    prob_min = min(prob_values) if prob_values else 0.0
+    prob_max = max(prob_values) if prob_values else 0.0
+    prob_span = max(1e-9, prob_max - prob_min)
     support_map = {}
     for idx, item in enumerate(top5):
         horse_no = normalize_horse_no_text(item.get("horse_no", ""))
         if not horse_no:
             continue
         position_weight = _MORNING_TOP5_POSITION_WEIGHTS[min(idx, len(_MORNING_TOP5_POSITION_WEIGHTS) - 1)]
-        score_norm = (raw_scores[idx] / score_cap) if score_cap > 0 else 0.0
+        prob_value = max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0))
+        prob_norm = ((prob_value - prob_min) / prob_span) if prob_max > prob_min else 1.0
+        rank_norm = max(0.0, min(1.0, float(item.get("rank_score_norm", 0.0) or 0.0)))
+        confidence_norm = max(0.0, min(1.0, float(item.get("confidence_score", 0.0) or 0.0)))
+        blended_strength = max(
+            0.0,
+            min(
+                1.0,
+                0.55 * position_weight
+                + 0.30 * prob_norm
+                + 0.10 * rank_norm
+                + 0.05 * confidence_norm,
+            ),
+        )
         support_map[horse_no] = {
             "horse_no": horse_no,
             "horse_name": str(item.get("horse_name", "") or "").strip(),
-            "support": round(position_weight * (0.6 + 0.4 * score_norm), 6),
+            "support": round(blended_strength, 6),
             "pred_rank": int(item.get("pred_rank", 0) or 0),
             "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+            "top3_prob_model_norm": round(prob_norm, 6),
             "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+            "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
         }
     return support_map
 
@@ -2124,6 +2252,16 @@ def _morning_summary_text(agreement_score, concentration_score, stability_score)
     return " / ".join(parts) if parts else "上位候補を比較中"
 
 
+def _morning_absolute_support_score(item):
+    row = dict(item or {})
+    source_count = max(1, len(list(row.get("sources", []) or [])))
+    avg_support = max(0.0, min(1.0, float(row.get("support", 0.0) or 0.0) / float(source_count)))
+    avg_prob = max(0.0, min(1.0, float(row.get("top3_prob_model", 0.0) or 0.0)))
+    multi_source_bonus = 1.0 if source_count >= 2 else 0.0
+    value = 42.0 + 26.0 * avg_support + 16.0 * avg_prob + 8.0 * multi_source_bonus
+    return max(1, min(99, int(round(value))))
+
+
 def _build_morning_preview_race_item(row):
     run_row = dict(row or {})
     scope_key = str(run_row.get("_report_scope_key", "") or run_row.get("scope", "") or "").strip()
@@ -2185,19 +2323,25 @@ def _build_morning_preview_race_item(row):
             entry["sources"].append(predictor_id)
             if not entry["horse_name"]:
                 entry["horse_name"] = str(item.get("horse_name", "") or "").strip()
+    aggregate_rows = [
+        {
+            "horse_no": horse_no,
+            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "support": round(float(item.get("support", 0.0) or 0.0), 6),
+            "sources": list(item.get("sources", []) or []),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0) / max(1, len(item.get("sources", []) or [])), 6),
+        }
+        for horse_no, item in aggregate.items()
+    ]
+    for item in aggregate_rows:
+        item["support_score"] = _morning_absolute_support_score(item)
     aggregate_rows = sorted(
-        [
-            {
-                "horse_no": horse_no,
-                "horse_name": str(item.get("horse_name", "") or "").strip(),
-                "support": round(float(item.get("support", 0.0) or 0.0), 6),
-                "support_score": int(round(float(item.get("support", 0.0) or 0.0) * 100)),
-                "sources": list(item.get("sources", []) or []),
-                "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0) / max(1, len(item.get("sources", []) or [])), 6),
-            }
-            for horse_no, item in aggregate.items()
-        ],
-        key=lambda item: (-float(item.get("support", 0.0) or 0.0), str(item.get("horse_no", "") or "")),
+        aggregate_rows,
+        key=lambda item: (
+            -int(item.get("support_score", 0) or 0),
+            -float(item.get("support", 0.0) or 0.0),
+            str(item.get("horse_no", "") or ""),
+        ),
     )[:5]
     if not aggregate_rows:
         return {}
@@ -2366,9 +2510,24 @@ def build_public_board_payload(date_text="", scope_key=""):
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
     sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
     enriched_races = []
+    condition_cache = {}
     for item in sorted_races:
         row = dict(item or {})
         row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
+        condition_key = (
+            str(row.get("scope_key", "") or scope_key or "").strip(),
+            str(row.get("location", "") or "").strip(),
+            _condition_distance_value(row.get("target_distance", "") or row.get("distance", "") or row.get("distance_label", "")),
+            str(row.get("target_track_condition", "") or row.get("track_condition", "") or "").strip() or "良",
+        )
+        if condition_key not in condition_cache:
+            condition_cache[condition_key] = _public_condition_predictor_ranking(
+                location=condition_key[1],
+                target_distance=condition_key[2],
+                track_condition=condition_key[3],
+                scope_key=condition_key[0],
+            )
+        row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
         enriched_races.append(row)
     payload["races"] = _with_public_display_sort_fields(enriched_races)
     payload["placeholder_race_count"] = len(placeholder_races)
@@ -3801,11 +3960,19 @@ async def admin_reset_llm_state_api(request: Request):
     return JSONResponse({"ok": True, "output_text": "LLM state reset completed."})
 
 
+def _llm_buy_disabled_response():
+    return JSONResponse(
+        {"ok": False, "error": "LLM buy backend is disabled."},
+        status_code=410,
+    )
+
+
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_llm_buy")
 async def admin_workspace_run_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -3871,6 +4038,7 @@ async def admin_workspace_run_all_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -3924,6 +4092,7 @@ async def admin_workspace_topup_all_llm_budget_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -4473,6 +4642,7 @@ async def admin_jobs_topup_today_all_llm_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     ledger_date = datetime.now().strftime("%Y%m%d")
     amount_yen = resolve_daily_bankroll_yen(ledger_date)
     summaries = []

@@ -8,34 +8,20 @@ function toPercent(value) {
 }
 
 function buildSpotlightItems(data) {
-  const cards = Array.isArray(data?.daily_predictor?.cards) ? data.daily_predictor.cards : [];
   const leader = data?.daily_predictor?.top5to3_leader || null;
-  if (!cards.length) {
+  if (!leader) {
     return [];
   }
-
-  const top1Leader = [...cards].sort(
-    (left, right) => Number(right?.top1_hit_rate || 0) - Number(left?.top1_hit_rate || 0),
-  )[0] || null;
 
   return [
     {
       key: "coverage",
-      eyebrow: "対象日リーダー",
+      eyebrow: "対象日予測カバレッジ",
       badge: "TOP5",
       title: String(leader?.label || "-"),
       metric: toPercent(leader?.top5_to_top3_hit_rate),
       detail: `対象 ${leader?.samples || 0}レース`,
       caption: String(leader?.top5_to_top3_hit_rate_text || "-"),
-    },
-    {
-      key: "top1",
-      eyebrow: "本命精度",
-      badge: "TOP1",
-      title: String(top1Leader?.label || "-"),
-      metric: toPercent(top1Leader?.top1_hit_rate),
-      detail: `掲載 ${cards.length}モデル`,
-      caption: String(top1Leader?.top1_hit_rate_text || "-"),
     },
   ];
 }

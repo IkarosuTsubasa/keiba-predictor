@@ -188,6 +188,8 @@ def derive_job_display_state(job):
         return {"code": "queued_policy", "label": "等待 LLM", "tone": "active"}
     if legacy_status == "processing_policy":
         return {"code": "processing_policy", "label": "LLM 处理中", "tone": "active"}
+    if legacy_status == "ready":
+        return {"code": "ready", "label": "处理完成", "tone": "good"}
     if row.get("settlement_status") == "succeeded":
         return {"code": "settled", "label": "已结算", "tone": "good"}
     if row.get("settlement_status") == "running":
@@ -215,7 +217,7 @@ def derive_job_display_state(job):
     if legacy_status == "preview_ready" or (
         run_kind == RUN_KIND_MORNING and row.get("predictor_status") == "succeeded"
     ):
-        return {"code": "preview_ready", "label": "朝版予測完成", "tone": "good"}
+        return {"code": "preview_ready", "label": "速報完成", "tone": "good"}
     if row.get("predictor_status") == "succeeded":
         return {"code": "predictor_ready", "label": "预测已生成", "tone": "good"}
     if legacy_status == "waiting_input_info":

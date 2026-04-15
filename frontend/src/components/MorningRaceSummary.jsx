@@ -1,4 +1,5 @@
 import ModelMetaBadge from "./ModelMetaBadge";
+import { buildPredictorConsensusSummary } from "../lib/publicRace";
 
 const MARKS = ["◎", "○", "▲", "△", "☆"];
 
@@ -9,7 +10,15 @@ function formatConfidence(value) {
 }
 
 export default function MorningRaceSummary({ race }) {
-  const top5 = Array.isArray(race?.top5) ? race.top5.slice(0, 5) : [];
+  const derivedSummary =
+    !Array.isArray(race?.top5) || !race.top5.length
+      ? buildPredictorConsensusSummary(race?.predictor_compare_cards)
+      : null;
+  const top5 = Array.isArray(race?.top5) && race.top5.length
+    ? race.top5.slice(0, 5)
+    : Array.isArray(derivedSummary?.top5)
+      ? derivedSummary.top5
+      : [];
   const main = top5[0] || null;
   const supportMarks = top5
     .slice(1)
@@ -22,10 +31,9 @@ export default function MorningRaceSummary({ race }) {
   return (
     <article className="ai-pick-summary ai-pick-summary--morning">
       <div className="ai-pick-summary__head">
-        <strong className="ai-pick-summary__model">AI朝版</strong>
         <ModelMetaBadge
           label="自信度"
-          value={formatConfidence(race?.confidence_score)}
+          value={formatConfidence(race?.confidence_score ?? derivedSummary?.confidence_score)}
           tone="subtle"
         />
       </div>
@@ -52,8 +60,7 @@ export default function MorningRaceSummary({ race }) {
       </div>
 
       <div className="ai-pick-summary__meta-row">
-        <span>{race?.confidence_label || "朝版速報"}</span>
-        <span>{`一致度 ${formatConfidence(race?.agreement_score)}`}</span>
+        <span>{`一致度 ${formatConfidence(race?.agreement_score ?? derivedSummary?.agreement_score)}`}</span>
       </div>
     </article>
   );

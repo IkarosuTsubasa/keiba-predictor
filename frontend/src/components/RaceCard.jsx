@@ -12,6 +12,7 @@ export default function RaceCard({ race, style = undefined }) {
   const isPlaceholder = variant === "placeholder";
   const isSettled = variant === "settled";
   const isMorningPreview = variant === "morning_preview";
+  const isOpenSummary = !isPlaceholder && !isSettled;
   const hasCards = cards.length > 0;
   const hasDetail = Boolean(String(race?.run_id || race?.race_id || "").trim());
   const placeholderTitle = String(race?.display_body?.title || "公開準備中");
@@ -41,7 +42,7 @@ export default function RaceCard({ race, style = undefined }) {
     event.preventDefault();
     handleNavigate();
   };
-  const isLinkable = !isPlaceholder && hasDetail && (isMorningPreview || hasCards);
+  const isLinkable = !isPlaceholder && hasDetail && (isOpenSummary || hasCards);
 
   return (
     <article
@@ -72,7 +73,7 @@ export default function RaceCard({ race, style = undefined }) {
             <p className="race-card__placeholder-time">{placeholderMessage}</p>
           </article>
         </div>
-      ) : isMorningPreview ? (
+      ) : isOpenSummary ? (
         <div className="race-card__summary-grid race-card__summary-grid--single">
           <MorningRaceSummary race={race} />
         </div>

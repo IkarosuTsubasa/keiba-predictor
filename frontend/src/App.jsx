@@ -7,7 +7,6 @@ import DailyReportDetailPage from "./components/DailyReportDetailPage";
 import DailyReportsPage from "./components/DailyReportsPage";
 import FeaturedContentSection from "./components/FeaturedContentSection";
 import FilterBar from "./components/FilterBar";
-import HeroSpotlightStrip from "./components/HeroSpotlightStrip";
 import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
 import MethodSummarySection from "./components/MethodSummarySection";
@@ -69,7 +68,7 @@ function buildMorningPreviewRace(item, baseRace = null) {
       : Number.MAX_SAFE_INTEGER,
     display_variant: "morning_preview",
     display_status: {
-      label: "朝版速報",
+      label: "速報",
       tone: "open",
     },
     display_header: {
@@ -80,7 +79,7 @@ function buildMorningPreviewRace(item, baseRace = null) {
     },
     display_body: {
       kind: "morning_preview",
-      result_text: item?.summary_text || "朝版速報を表示中",
+      result_text: item?.summary_text || "速報を表示中",
     },
     cards: [],
   };
@@ -626,7 +625,6 @@ export default function App() {
             wrapperClassName="ezoic-ad-slot--content"
           />
         ) : null}
-        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
 
         <section
           className={[
@@ -670,12 +668,11 @@ export default function App() {
                   },
                 ]}
               />
-
-              {!isDateFocusedHome ? <HeroSpotlightStrip data={data} /> : null}
             </>
           )}
           <TodayBoardContent data={data} races={boardRaces} appShell={isAppShell} />
         </section>
+        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
 
         {!isAppShell ? (
           <EzoicAdSlot

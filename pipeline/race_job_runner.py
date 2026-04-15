@@ -140,6 +140,11 @@ def remote_predictor_batch_enabled():
     return remote_v5_enabled()
 
 
+def llm_buy_enabled():
+    raw = os.environ.get("PIPELINE_ENABLE_LLM_BUY", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -214,6 +219,18 @@ def _mark_policy_succeeded_and_ready(row, now_text, run_id, summary, refreshed_j
     row["queued_process_at"] = str((refreshed_job or {}).get("queued_process_at", "") or "")
     set_job_step_state(row, "predictor", "succeeded", now_text)
     set_job_step_state(row, "policy", "succeeded", now_text)
+
+
+def _mark_predictor_succeeded_and_ready(row, now_text, run_id, summary):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "ready"
+    row["ready_at"] = now_text
+    row["current_run_id"] = run_id
+    row["current_v5_task_id"] = ""
+    row["error_message"] = ""
+    row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
+    set_job_step_state(row, "predictor", "succeeded", now_text)
+    set_job_step_state(row, "policy", "idle")
 
 
 def _mark_predictor_succeeded_and_preview_ready(row, now_text, run_id, summary):
@@ -937,6 +954,35 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         run_id = str(job.get("current_run_id", "") or "").strip()
         if not run_id:
             raise ValueError("race job has no current_run_id for queued_policy")
+        if not llm_buy_enabled():
+            summary = {
+                "job_id": job_id,
+                "race_id": race_id,
+                "scope_key": scope_key,
+                "process_log": [
+                    {
+                        "step": "policy_stage",
+                        "code": 0,
+                        "output": "skipped because llm_buy is disabled",
+                    }
+                ],
+                "run_id": run_id,
+                "policy_engines": [],
+            }
+            update_job(
+                base_path,
+                job_id,
+                lambda row, now_text: _mark_predictor_succeeded_and_ready(
+                    row, now_text, run_id, summary
+                ),
+            )
+            _log_runner_event(
+                "policy_stage_skipped",
+                job_id=job_id,
+                run_id=run_id,
+                reason="llm_buy_disabled",
+            )
+            return summary
         _log_runner_event(
             "process_job_start",
             job_id=job_id,
@@ -985,7 +1031,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         scope_key=scope_key,
         run_kind=run_kind,
         predictor_ids=sorted(predictor_ids),
-        policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")),
+        policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")) if llm_buy_enabled() else [],
     )
     _log_memory_checkpoint("process_job_start", job_id=job_id, race_id=race_id, scope_key=scope_key)
 
@@ -1259,7 +1305,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 _log_memory_checkpoint("predictor_stage_done", job_id=job_id, predictor_id=spec["id"])
             _log_memory_checkpoint("predictor_batch_done", job_id=job_id)
 
-        if not use_remote_predictors and run_kind != RUN_KIND_MORNING:
+        if not use_remote_predictors and run_kind != RUN_KIND_MORNING and llm_buy_enabled():
             update_job(
                 base_path,
                 job_id,
@@ -1284,6 +1330,29 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 ),
             )
             _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, run_kind=run_kind)
+            return summary
+
+        if not llm_buy_enabled() and not use_remote_predictors:
+            summary["process_log"].append(
+                {
+                    "step": "policy_stage",
+                    "code": 0,
+                    "output": "skipped because llm_buy is disabled",
+                }
+            )
+            update_job(
+                base_path,
+                job_id,
+                lambda row, now_text: _mark_predictor_succeeded_and_ready(
+                    row, now_text, run_id, summary
+                ),
+            )
+            _log_runner_event(
+                "policy_stage_skipped",
+                job_id=job_id,
+                run_id=run_id,
+                reason="llm_buy_disabled",
+            )
             return summary
 
         if use_remote_predictors:
