@@ -220,12 +220,17 @@ def _select_share_candidate(scope_key, run_id):
             "",
             marks_text,
             "",
-            "予想を最速で受け取る（Androidアプリ）",
+            "このレースの",
+            "AI最終評価・期待値・買い目は👇",
+            "",
+            "📱AI予想はアプリで最速公開",
+            "今すぐダウンロード👇",
             "https://x.gd/BDVgd",
             "",
-            "全モデル・全買い目はこちら（無料公開中）",
+            "🌐 全モデル予想はこちら",
             public_url,
-            "#いかいもAI競馬 #競馬",
+            "",
+            "#いかいもAI競馬 #競馬予想",
         ]
     ).strip()
     return {

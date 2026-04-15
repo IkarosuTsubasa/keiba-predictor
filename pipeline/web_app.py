@@ -2139,6 +2139,9 @@ def _mobile_race_list_item(row):
     match = re.search(r"(\d+R)", race_title)
     if match:
         race_id = match.group(1)
+    detail_path = ""
+    if status != "placeholder":
+        detail_path = f"{PUBLIC_BASE_PATH}/race/{quote(str(item.get('run_id', '') or '').strip(), safe='')}"
     return {
         "run_id": str(item.get("run_id", "") or "").strip(),
         "race_id": race_id or race_title,
@@ -2150,7 +2153,7 @@ def _mobile_race_list_item(row):
         "status_label": status_label or ("結果確定" if result.get("is_settled") else "確定待ち"),
         "result": result,
         "llm_cards": [_mobile_llm_card_payload(card) for card in list(item.get("cards", []) or [])],
-        "detail_path": f"{PUBLIC_BASE_PATH}/race/{quote(str(item.get('run_id', '') or '').strip(), safe='')}",
+        "detail_path": detail_path,
     }
 
 
@@ -2162,6 +2165,7 @@ def _mobile_races_payload(payload):
         "data": {
             "target_date": str(board.get("target_date", "") or "").strip(),
             "target_date_label": str(board.get("target_date_label", "") or "").strip(),
+            "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
             "totals": {
                 "race_count": len(items),
                 "settled_count": sum(1 for item in items if bool(((item.get("result") or {}).get("is_settled")))),

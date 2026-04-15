@@ -38,4 +38,9 @@
     <string name="external_open_error">%1$s を開けませんでした。</string>
     <string name="launch_eyebrow">Loading</string>
     <string name="launch_message">公開ページを読み込んでいます</string>
+    <string name="races_empty">公開中のレースが見つかりませんでした。</string>
+    <string name="races_result_pending">結果はまだ確定していません。</string>
+    <string name="races_llm_summary_empty">公開中の予測データを準備中です。</string>
+    <string name="races_load_failed">レース一覧の取得に失敗しました。</string>
+    <string name="races_load_failed_debug">%1$s\n%2$s</string>
 </resources>
