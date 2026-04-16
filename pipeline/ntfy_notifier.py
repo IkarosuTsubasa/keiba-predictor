@@ -159,6 +159,22 @@ def _get_firebase_app():
 def _select_share_candidate(scope_key, run_id):
     import web_app  # local import to avoid circular imports
 
+    def _confidence_rank_text(value):
+        score = float(value or 0.0)
+        if score >= 0.60:
+            return "SSS"
+        if score >= 0.50:
+            return "SS"
+        if score >= 0.40:
+            return "S"
+        if score >= 0.32:
+            return "A"
+        if score >= 0.24:
+            return "B"
+        if score >= 0.15:
+            return "C"
+        return "D"
+
     def _normalize_horse_no_text(value):
         text = str(value or "").strip()
         if not text:
@@ -168,7 +184,15 @@ def _select_share_candidate(scope_key, run_id):
         except (TypeError, ValueError):
             return text
 
-    def _build_v6_marks_text(resolved_scope_key, resolved_run_id, row):
+    def _horse_sort_key(value):
+        try:
+            return int(float(str(value or "").strip()))
+        except (TypeError, ValueError):
+            return 999
+
+    def _build_consensus_marks_text(resolved_scope_key, resolved_run_id, row):
+        mark_weight = {"◎": 5, "○": 4, "▲": 3, "△": 2, "☆": 1}
+        mark_order = ("◎", "○", "▲", "△", "☆")
         odds_path = web_app.resolve_run_asset_path(resolved_scope_key, resolved_run_id, row, "odds_path", "odds")
         fuku_odds_path = web_app.resolve_run_asset_path(resolved_scope_key, resolved_run_id, row, "fuku_odds_path", "fuku_odds")
         name_to_no_map = web_app.load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
@@ -182,19 +206,123 @@ def _select_share_candidate(scope_key, run_id):
             win_odds_map,
             place_odds_map,
         )
-        for item in list((predictor_context or {}).get("predictor_rankings", []) or []):
-            predictor_id = str(item.get("predictor_id", "") or "").strip()
-            if predictor_id != "v6_kiwami":
-                continue
-            marks_map = {}
-            ranking = list(item.get("ranking", []) or [])
-            for symbol, rank_item in zip(("◎", "○", "▲", "△", "☆"), ranking[:5]):
+        predictor_rankings = [
+            item for item in list((predictor_context or {}).get("predictor_rankings", []) or [])
+            if list((item or {}).get("ranking", []) or [])
+        ]
+        model_count = len(predictor_rankings)
+        if model_count <= 0:
+            return {
+                "marks_text": "印なし",
+                "confidence_text": "",
+            }
+
+        tally = {}
+        for predictor_item in predictor_rankings:
+            ranking = list((predictor_item or {}).get("ranking", []) or [])[:5]
+            seen = set()
+            marks_by_horse = {}
+            for symbol, rank_item in zip(mark_order, ranking):
                 horse_no = _normalize_horse_no_text((rank_item or {}).get("horse_no", ""))
                 if horse_no:
-                    marks_map[horse_no] = symbol
-            if marks_map:
-                return web_app.report_format_marks_text(marks_map)
-        return "印なし"
+                    marks_by_horse[horse_no] = symbol
+            for rank_item in ranking:
+                horse_no = _normalize_horse_no_text((rank_item or {}).get("horse_no", ""))
+                if not horse_no:
+                    continue
+                symbol = str(marks_by_horse.get(horse_no, "") or "").strip()
+                entry = tally.setdefault(
+                    horse_no,
+                    {
+                        "horse_no": horse_no,
+                        "score": 0.0,
+                        "support_count": 0,
+                        "main_count": 0,
+                        "top3_prob_total": 0.0,
+                        "rank_score_total": 0.0,
+                        "entry_count": 0,
+                    },
+                )
+                entry["score"] += float(mark_weight.get(symbol, 0) or 0)
+                entry["top3_prob_total"] += max(0.0, float((rank_item or {}).get("top3_prob_model", 0.0) or 0.0))
+                entry["rank_score_total"] += max(0.0, float((rank_item or {}).get("rank_score_norm", 0.0) or 0.0))
+                entry["entry_count"] += 1
+                if symbol == "◎":
+                    entry["main_count"] += 1
+                if horse_no not in seen:
+                    entry["support_count"] += 1
+                    seen.add(horse_no)
+
+        rows = []
+        for horse_no, item in tally.items():
+            support_count = int(item.get("support_count", 0) or 0)
+            entry_count = int(item.get("entry_count", 0) or 0)
+            score = float(item.get("score", 0.0) or 0.0)
+            avg_mark_strength = score / float(support_count * 5) if support_count > 0 else 0.0
+            avg_top3_prob = float(item.get("top3_prob_total", 0.0) or 0.0) / float(entry_count) if entry_count > 0 else 0.0
+            avg_rank_score = float(item.get("rank_score_total", 0.0) or 0.0) / float(entry_count) if entry_count > 0 else 0.0
+            ai_index = max(
+                1,
+                min(
+                    99,
+                    int(
+                        round(
+                            42
+                            + 20 * max(0.0, min(1.0, avg_mark_strength))
+                            + 16 * max(0.0, min(1.0, avg_top3_prob))
+                            + 12 * max(0.0, min(1.0, avg_rank_score))
+                            + 10 * (float(support_count) / float(model_count)),
+                        )
+                    ),
+                ),
+            )
+            rows.append(
+                {
+                    "horse_no": horse_no,
+                    "score": score,
+                    "main_count": int(item.get("main_count", 0) or 0),
+                    "support_count": support_count,
+                    "ai_index": ai_index,
+                }
+            )
+
+        rows.sort(
+            key=lambda item: (
+                -int(item.get("ai_index", 0) or 0),
+                -float(item.get("score", 0.0) or 0.0),
+                -int(item.get("main_count", 0) or 0),
+                _horse_sort_key(item.get("horse_no", "")),
+            )
+        )
+        top5 = rows[:5]
+        marks_map = {}
+        for symbol, item in zip(mark_order, top5):
+            horse_no = _normalize_horse_no_text(item.get("horse_no", ""))
+            if horse_no:
+                marks_map[horse_no] = symbol
+        if marks_map:
+            marks_text = web_app.report_format_marks_text(marks_map)
+            top = top5[0] if top5 else {}
+            second = top5[1] if len(top5) > 1 else {}
+            support_ratio = (
+                float(top.get("main_count", 0) or 0) / float(model_count)
+                if model_count > 0 else 0.0
+            )
+            top_index = float(top.get("ai_index", 0) or 0.0)
+            second_index = float(second.get("ai_index", 0) or 0.0)
+            margin_ratio = (
+                max(0.0, (top_index - second_index) / top_index)
+                if top_index > 0 else 0.0
+            )
+            confidence_score = max(0.0, min(1.0, 0.55 * support_ratio + 0.45 * margin_ratio))
+            return {
+                "marks_text": marks_text,
+                "confidence_text": _confidence_rank_text(confidence_score),
+            }
+        return {
+            "marks_text": "印なし",
+            "confidence_text": "",
+        }
 
     run_row = web_app.resolve_run(run_id, scope_key)
     if run_row is None:
@@ -212,16 +340,19 @@ def _select_share_candidate(scope_key, run_id):
         race_name = ""
     header_body = " ".join(part for part in (venue, race_no, race_name) if str(part or "").strip())
     header = f"#{header_body}" if header_body else ""
-    marks_text = _build_v6_marks_text(resolved_scope_key, resolved_run_id, run_row)
+    marks_meta = _build_consensus_marks_text(resolved_scope_key, resolved_run_id, run_row)
+    marks_text = str(marks_meta.get("marks_text", "") or "").strip() or "印なし"
+    confidence_text = str(marks_meta.get("confidence_text", "") or "").strip()
+    marks_line = f"{marks_text} ｜自信度 {confidence_text}" if confidence_text else marks_text
     public_url = _build_public_race_url(run_row)
     share_text = "\n".join(
         [
             header,
             "",
-            marks_text,
+            marks_line,
             "",
             "このレースの",
-            "AI最終評価・期待値・買い目は👇",
+            "AI最終評価・期待値はこちら👇",
             "",
             "📱AI予想はアプリで最速公開",
             "今すぐダウンロード👇",
@@ -234,7 +365,7 @@ def _select_share_candidate(scope_key, run_id):
         ]
     ).strip()
     return {
-        "engine": "v6_kiwami",
+        "engine": "predictor_consensus",
         "run_row": dict(run_row or {}),
         "share_text": share_text,
         "public_url": public_url,
