@@ -50,23 +50,47 @@ function buildFullReleaseText(scheduledOffTime) {
 
 function buildHorseSignalRows(predictorCards = []) {
   const tally = new Map();
+  const modelCount = Array.isArray(predictorCards) ? predictorCards.filter(Boolean).length : 0;
 
   for (const card of predictorCards || []) {
     const marks = parseMarks(card?.marks_text);
-    if (!marks.length) continue;
+    const topHorses = Array.isArray(card?.top_horses) && card.top_horses.length
+      ? card.top_horses.filter(Boolean).slice(0, 5)
+      : marks.map((item, index) => ({
+        horse_no: String(item?.horseNo || "").trim(),
+        horse_name: "",
+        top3_prob_model: 0,
+        rank_score_norm: Math.max(0, 1 - index * 0.18),
+      }));
+    const markMap = new Map(
+      marks
+        .filter(Boolean)
+        .map((item) => [String(item?.horseNo || "").trim(), item?.symbol])
+        .filter(([horseNo, symbol]) => horseNo && symbol),
+    );
+    if (!marks.length && !topHorses.length) continue;
     const seen = new Set();
 
-    for (const mark of marks) {
-      const horseNo = String(mark?.horseNo || "").trim();
+    for (const item of topHorses) {
+      const horseNo = String(item?.horse_no || item?.horseNo || "").trim();
       if (!horseNo) continue;
+      const symbol = markMap.get(horseNo) || "";
       const entry = tally.get(horseNo) || {
         horseNo,
+        horseName: "",
         score: 0,
         supportCount: 0,
         mainCount: 0,
+        top3ProbTotal: 0,
+        rankScoreTotal: 0,
+        entryCount: 0,
       };
-      entry.score += MARK_WEIGHT[mark.symbol] || 0;
-      if (mark.symbol === MAIN_MARK) {
+      entry.horseName = entry.horseName || String(item?.horse_name || item?.horseName || "").trim();
+      entry.score += MARK_WEIGHT[symbol] || 0;
+      entry.top3ProbTotal += Math.max(0, Number(item?.top3_prob_model || 0) || 0);
+      entry.rankScoreTotal += Math.max(0, Number(item?.rank_score_norm || 0) || 0);
+      entry.entryCount += 1;
+      if (symbol === MAIN_MARK) {
         entry.mainCount += 1;
       }
       if (!seen.has(horseNo)) {
@@ -84,12 +108,36 @@ function buildHorseSignalRows(predictorCards = []) {
       right.supportCount - left.supportCount ||
       Number(left.horseNo) - Number(right.horseNo),
   );
-  const topScore = Number(rows[0]?.score || 0);
 
   return rows.map((row) => ({
     ...row,
-    aiIndex: topScore > 0 ? Math.max(1, Math.round((row.score / topScore) * 100)) : 0,
-  }));
+    horseName: row.horseName || "-",
+    avgMarkStrength:
+      row.supportCount > 0 ? Math.max(0, Math.min(1, row.score / (row.supportCount * 5))) : 0,
+    avgTop3Prob:
+      row.entryCount > 0 ? Math.max(0, Math.min(1, row.top3ProbTotal / row.entryCount)) : 0,
+    avgRankScore:
+      row.entryCount > 0 ? Math.max(0, Math.min(1, row.rankScoreTotal / row.entryCount)) : 0,
+    aiIndex: Math.max(
+      1,
+      Math.min(
+        99,
+        Math.round(
+          42 +
+            20 * (row.supportCount > 0 ? Math.max(0, Math.min(1, row.score / (row.supportCount * 5))) : 0) +
+            16 * (row.entryCount > 0 ? Math.max(0, Math.min(1, row.top3ProbTotal / row.entryCount)) : 0) +
+            12 * (row.entryCount > 0 ? Math.max(0, Math.min(1, row.rankScoreTotal / row.entryCount)) : 0) +
+            10 * (modelCount > 0 ? row.supportCount / modelCount : 0),
+        ),
+      ),
+    ),
+  })).sort(
+    (left, right) =>
+      right.aiIndex - left.aiIndex ||
+      right.score - left.score ||
+      right.mainCount - left.mainCount ||
+      Number(left.horseNo) - Number(right.horseNo),
+  );
 }
 
 function buildMorningIndexRows(top5 = []) {

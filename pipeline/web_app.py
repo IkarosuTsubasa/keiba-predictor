@@ -2113,6 +2113,7 @@ def _public_predictor_compare_cards(row):
                 "predictor_id": predictor_id,
                 "label": str(item.get("predictor_label", "") or predictor_label(predictor_id) or predictor_id).strip() or "-",
                 "marks_text": report_format_marks_text(marks_map),
+                "top_horses": [_serialize_ranking_item(rank_item) for rank_item in ranking[: len(_PUBLIC_COMPARE_MARK_ORDER)]],
             }
         )
     return cards
