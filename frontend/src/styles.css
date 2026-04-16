@@ -1608,8 +1608,9 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #b9c7da;
+  color: #eef4ff;
   font-size: 13px;
+  font-weight: 700;
 }
 
 .ai-pick-summary__note {

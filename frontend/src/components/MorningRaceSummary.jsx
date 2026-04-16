@@ -60,7 +60,7 @@ export default function MorningRaceSummary({ race }) {
       </div>
 
       <div className="ai-pick-summary__meta-row">
-        <span>{`一致度 ${formatConfidence(race?.agreement_score ?? derivedSummary?.agreement_score)}`}</span>
+        <span>{`本命一致度 ${formatConfidence(race?.agreement_score ?? derivedSummary?.agreement_score)}`}</span>
       </div>
     </article>
   );
