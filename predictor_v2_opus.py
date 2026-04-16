@@ -1147,23 +1147,41 @@ if len(rank_vals) and np.isfinite(rank_max - rank_min) and (rank_max - rank_min)
 else:
     pred_profiles["rank_score_norm"] = np.full(len(pred_profiles), 0.5 if len(pred_profiles) else np.nan)
 
-# Confidence score
-scores = pred_profiles["rank_score"].values
-if len(scores) >= 3:
-    gap = float(scores[0]) - float(scores[2])
-    n_runners = max(len(scores), 1)
-    expected_gap = 3.0 / n_runners
-    confidence = min(gap / expected_gap, 1.0) if expected_gap > 0 else 0.0
+top_slice = pred_profiles.head(min(5, len(pred_profiles))).copy()
+score_vals = top_slice["rank_score_norm"].to_numpy(dtype=float) if "rank_score_norm" in top_slice.columns else np.array([], dtype=float)
+prob_vals = (
+    np.clip(top_slice["Top3Prob_model"].to_numpy(dtype=float), 0.0, 1.0)
+    if "Top3Prob_model" in top_slice.columns
+    else np.zeros(len(top_slice), dtype=float)
+)
+if len(score_vals):
+    top1 = float(score_vals[0])
+    top3 = float(score_vals[min(2, len(score_vals) - 1)])
+    top5 = float(score_vals[min(4, len(score_vals) - 1)])
+    gap13 = max(0.0, top1 - top3)
+    gap35 = max(0.0, top3 - top5)
+    consistency = max(0.0, min(1.0, 0.7 * (gap13 / 0.22) + 0.3 * (gap35 / 0.12)))
+    drops = [max(0.0, float(score_vals[i]) - float(score_vals[i + 1])) for i in range(len(score_vals) - 1)]
+    positive_drop_ratio = sum(1 for item in drops if item > 1e-6) / max(len(drops), 1) if drops else 0.0
+    avg_drop = float(np.mean(drops)) if drops else 0.0
+    stability = max(0.0, min(1.0, 0.55 * positive_drop_ratio + 0.45 * min(avg_drop / 0.16, 1.0)))
+    prob_top = float(prob_vals[0]) if len(prob_vals) else 0.0
+    prob_mean = float(np.mean(prob_vals[: min(3, len(prob_vals))])) if len(prob_vals) else 0.0
+    validity = max(0.0, min(1.0, 0.65 * prob_top + 0.35 * prob_mean))
+    confidence = max(0.0, min(1.0, math.sqrt(max(stability * validity, 0.0)) * consistency))
 else:
     confidence = 0.0
+    stability = 0.0
+    validity = 0.0
+    consistency = 0.0
 
 pred_profiles["confidence_score"] = round(confidence, 4)
-pred_profiles["stability_score"] = round(confidence, 4)
-pred_profiles["validity_score"] = round(confidence, 4)
-pred_profiles["consistency_score"] = round(confidence, 4)
+pred_profiles["stability_score"] = round(stability, 4)
+pred_profiles["validity_score"] = round(validity, 4)
+pred_profiles["consistency_score"] = round(consistency, 4)
 pred_profiles["rank_ema"] = 0.5
 pred_profiles["ev_ema"] = 0.5
-pred_profiles["risk_score"] = round(confidence, 4)
+pred_profiles["risk_score"] = round(max(0.0, 1.0 - confidence), 4)
 
 # Compatibility columns
 if "horse_no" not in pred_profiles.columns:

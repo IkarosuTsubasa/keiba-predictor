@@ -1605,13 +1605,21 @@ class StackingEnsemble:
         results = results.sort_values("rank_score", ascending=False).reset_index(drop=True)
 
         # Confidence / stability / validity / consistency
-        scores = results["rank_score"].values
-        if len(scores) >= 3:
-            gap = float(scores[0]) - float(scores[2])
-            confidence = min(gap / 0.18, 1.0)
-            confidence = max(0.0, confidence)
+        score_head = results["rank_score_norm"].to_numpy(dtype=float)[:5]
+        prob_head = np.clip(results["Top3Prob_model"].to_numpy(dtype=float)[:5], 0.0, 1.0)
+        if len(score_head):
+            top1 = float(score_head[0])
+            top3 = float(score_head[min(2, len(score_head) - 1)])
+            top5 = float(score_head[min(4, len(score_head) - 1)])
+            gap13 = max(0.0, top1 - top3)
+            gap35 = max(0.0, top3 - top5)
+            consistency = max(0.0, min(1.0, 0.7 * (gap13 / 0.22) + 0.3 * (gap35 / 0.12)))
+            prob_top = float(prob_head[0]) if len(prob_head) else 0.0
+            prob_mean = float(np.mean(prob_head[: min(3, len(prob_head))])) if len(prob_head) else 0.0
+            validity = max(0.0, min(1.0, 0.65 * prob_top + 0.35 * prob_mean))
         else:
-            confidence = 0.0
+            consistency = 0.0
+            validity = 0.0
 
         # Stability: based on agreement among base models on top-3 picks
         # Each model's top-3 by its own ranking, then measure overlap
@@ -1622,12 +1630,16 @@ class StackingEnsemble:
                 top3_sets.append(set(model_ranking[:3].tolist()))
             intersection = set.intersection(*top3_sets) if top3_sets else set()
             union = set.union(*top3_sets) if top3_sets else {0, 1, 2}
-            stability = len(intersection) / max(len(union), 1)
+            base_stability = len(intersection) / max(len(union), 1)
         else:
-            stability = 0.5
+            base_stability = 0.5
 
-        validity = min(1.0, confidence * 0.7 + stability * 0.3)
-        consistency = stability
+        drops = [max(0.0, float(score_head[i]) - float(score_head[i + 1])) for i in range(len(score_head) - 1)]
+        positive_drop_ratio = sum(1 for item in drops if item > 1e-6) / max(len(drops), 1) if drops else 0.0
+        avg_drop = float(np.mean(drops)) if drops else 0.0
+        shape_stability = max(0.0, min(1.0, 0.55 * positive_drop_ratio + 0.45 * min(avg_drop / 0.16, 1.0)))
+        stability = max(0.0, min(1.0, 0.6 * base_stability + 0.4 * shape_stability))
+        confidence = max(0.0, min(1.0, math.sqrt(max(stability * validity, 0.0)) * consistency))
 
         results["model_mode"] = "v5_stacking"
         # Top3Prob_model is race-level normalized (sums to ~3, not 1).

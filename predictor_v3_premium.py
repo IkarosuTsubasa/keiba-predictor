@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import numpy as np
 import os
 import random
 import re
@@ -891,14 +892,32 @@ def run(args: argparse.Namespace) -> None:
     for i, r in enumerate(runners, start=1):
         r["rank"] = float(i)
 
-    # Race-level confidence
-    conf = 0.0
-    if len(runners) >= 3:
-        conf = clamp((runners[0]["score"] - runners[2]["score"]) / 1.8, 0.0, 1.0)
     score_vals = [float(r["score"]) for r in runners]
     score_min = min(score_vals) if score_vals else 0.0
     score_max = max(score_vals) if score_vals else 0.0
     score_denom = (score_max - score_min) if (score_max - score_min) > 1e-12 else 1.0
+    top_scores = [max(0.0, min(1.0, (float(r["score"]) - score_min) / score_denom)) for r in runners[:5]]
+    top_probs = [max(0.0, min(1.0, float(r.get("top3_prob", 0.0) or 0.0))) for r in runners[:5]]
+    if top_scores:
+        top1 = float(top_scores[0])
+        top3 = float(top_scores[min(2, len(top_scores) - 1)])
+        top5 = float(top_scores[min(4, len(top_scores) - 1)])
+        gap13 = max(0.0, top1 - top3)
+        gap35 = max(0.0, top3 - top5)
+        consistency = clamp(0.7 * (gap13 / 0.22) + 0.3 * (gap35 / 0.12), 0.0, 1.0)
+        drops = [max(0.0, float(top_scores[i]) - float(top_scores[i + 1])) for i in range(len(top_scores) - 1)]
+        positive_drop_ratio = sum(1 for item in drops if item > 1e-6) / max(len(drops), 1) if drops else 0.0
+        avg_drop = float(np.mean(drops)) if drops else 0.0
+        stability = clamp(0.55 * positive_drop_ratio + 0.45 * min(avg_drop / 0.16, 1.0), 0.0, 1.0)
+        prob_top = float(top_probs[0]) if top_probs else 0.0
+        prob_mean = float(np.mean(top_probs[: min(3, len(top_probs))])) if top_probs else 0.0
+        validity = clamp(0.65 * prob_top + 0.35 * prob_mean, 0.0, 1.0)
+        confidence = clamp(math.sqrt(max(stability * validity, 0.0)) * consistency, 0.0, 1.0)
+    else:
+        confidence = 0.0
+        stability = 0.0
+        validity = 0.0
+        consistency = 0.0
 
     for r in runners:
         r["Top3Prob_model"] = float(r["top3_prob"])
@@ -914,13 +933,13 @@ def run(args: argparse.Namespace) -> None:
         r["model_mode"] = "v3_ultimate_hybrid"
         r["score_is_probability"] = 0
         r["race_id"] = "current"
-        r["confidence_score"] = round(conf, 4)
-        r["stability_score"] = round(conf, 4)
-        r["validity_score"] = round(conf, 4)
-        r["consistency_score"] = round(conf, 4)
+        r["confidence_score"] = round(confidence, 4)
+        r["stability_score"] = round(stability, 4)
+        r["validity_score"] = round(validity, 4)
+        r["consistency_score"] = round(consistency, 4)
         r["rank_ema"] = 0.5
         r["ev_ema"] = 0.5
-        r["risk_score"] = round(1.0 - conf, 4)
+        r["risk_score"] = round(1.0 - confidence, 4)
         hno = int(r["horse_no"]) if float(r["horse_no"]) > 0 else 0
         r["horse_key"] = str(hno) if hno > 0 else str(r.get("HorseName", "")).strip()
 
@@ -991,7 +1010,7 @@ def run(args: argparse.Namespace) -> None:
         )
 
     print("-" * 68)
-    print(f"[INFO] confidence: {conf:.3f}")
+    print(f"[INFO] confidence: {confidence:.3f}")
     print(f"Saved: {out_path.name}")
     if not args.no_wait:
         try:

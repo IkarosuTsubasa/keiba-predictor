@@ -23,6 +23,7 @@ Usage:
 
 import pandas as pd
 import numpy as np
+import math
 import lightgbm as lgb
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import roc_auc_score, ndcg_score
@@ -556,24 +557,41 @@ class SupremePredictor:
         results['Top3Prob_model'] = prob_score
         results['Top3Prob'] = prob_score
         results['rank_score'] = final_score
+        results['rank_score_norm'] = norm(final_score)
         
         results = results.sort_values('rank_score', ascending=False)
         
         # Pipeline compatibility columns
-        scores = results['rank_score'].values
-        if len(scores) >= 3:
-            gap = float(scores[0]) - float(scores[2])
-            confidence = min(gap * 10, 1.0)
+        scores = results['rank_score_norm'].to_numpy(dtype=float)
+        probs = np.clip(results['Top3Prob_model'].to_numpy(dtype=float), 0.0, 1.0)
+        if len(scores):
+            top1 = float(scores[0])
+            top3 = float(scores[min(2, len(scores) - 1)])
+            top5 = float(scores[min(4, len(scores) - 1)])
+            gap13 = max(0.0, top1 - top3)
+            gap35 = max(0.0, top3 - top5)
+            consistency = max(0.0, min(1.0, 0.7 * (gap13 / 0.22) + 0.3 * (gap35 / 0.12)))
+            drops = [max(0.0, float(scores[i]) - float(scores[i + 1])) for i in range(len(scores[:5]) - 1)]
+            positive_drop_ratio = sum(1 for item in drops if item > 1e-6) / max(len(drops), 1) if drops else 0.0
+            avg_drop = float(np.mean(drops)) if drops else 0.0
+            stability = max(0.0, min(1.0, 0.55 * positive_drop_ratio + 0.45 * min(avg_drop / 0.16, 1.0)))
+            prob_top = float(probs[0]) if len(probs) else 0.0
+            prob_mean = float(np.mean(probs[: min(3, len(probs))])) if len(probs) else 0.0
+            validity = max(0.0, min(1.0, 0.65 * prob_top + 0.35 * prob_mean))
+            confidence = max(0.0, min(1.0, math.sqrt(max(stability * validity, 0.0)) * consistency))
         else:
             confidence = 0.0
+            stability = 0.0
+            validity = 0.0
+            consistency = 0.0
             
-        results['confidence_score'] = confidence 
-        results['stability_score'] = 0.5
-        results['validity_score'] = 0.5
-        results['consistency_score'] = 0.5
+        results['confidence_score'] = round(confidence, 4)
+        results['stability_score'] = round(stability, 4)
+        results['validity_score'] = round(validity, 4)
+        results['consistency_score'] = round(consistency, 4)
         results['rank_ema'] = 0.5
         results['ev_ema'] = 0.5
-        results['risk_score'] = 0.5
+        results['risk_score'] = round(max(0.0, 1.0 - confidence), 4)
         
         return results
 

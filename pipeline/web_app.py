@@ -1694,8 +1694,7 @@ def _condition_distance_value(value):
 def _public_condition_predictor_ranking(location="", target_distance="", track_condition="", scope_key=""):
     location_text = str(location or "").strip()
     distance_text = _condition_distance_value(target_distance)
-    track_text = str(track_condition or "").strip() or "良"
-    if not location_text or not distance_text or not track_text:
+    if not location_text or not distance_text:
         return {
             "available": False,
             "condition_text": "",
@@ -1729,10 +1728,6 @@ def _public_condition_predictor_ranking(location="", target_distance="", track_c
                 "distance": _condition_distance_value(
                     run_row.get("target_distance", "") or run_row.get("distance", "")
                 ),
-                "track_condition": str(
-                    run_row.get("target_track_condition", "") or run_row.get("track_condition", "")
-                ).strip()
-                or "良",
             }
 
         path = get_data_dir(BASE_DIR, scope_item) / "predictor_results.csv"
@@ -1747,8 +1742,6 @@ def _public_condition_predictor_ranking(location="", target_distance="", track_c
             if meta.get("location") != location_text:
                 continue
             if meta.get("distance") != distance_text:
-                continue
-            if meta.get("track_condition") != track_text:
                 continue
 
             aggregate = aggregates[predictor_id]
@@ -1796,7 +1789,7 @@ def _public_condition_predictor_ranking(location="", target_distance="", track_c
 
     return {
         "available": bool(ranked_cards),
-        "condition_text": f"{location_text} / {distance_text}m / {track_text}",
+        "condition_text": f"{location_text} / {distance_text}m",
         "metric_label": "上位5頭カバー率",
         "sample_count": max((int(item.get("samples", 0) or 0) for item in ranked_cards), default=0),
         "cards": ranked_cards,
