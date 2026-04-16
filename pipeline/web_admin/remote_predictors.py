@@ -19,6 +19,11 @@ def remote_predictor_auto_continue_enabled():
     return raw not in ("0", "false", "no", "off")
 
 
+def llm_buy_enabled():
+    raw = os.environ.get("PIPELINE_ENABLE_LLM_BUY", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def append_job_process_log_entry(row, step, code, output):
     payload = {}
     raw = str((row or {}).get("last_process_output", "") or "").strip()
@@ -75,7 +80,7 @@ def promote_job_after_remote_v5(
             return
         if current_task_id and current_task_id != str(task_id or "").strip():
             return
-        row["status"] = "queued_policy"
+        row["status"] = "queued_policy" if llm_buy_enabled() else "ready"
         row["current_run_id"] = str(run_id or "").strip()
         row["current_v5_task_id"] = str(task_id or "").strip()
         row["error_message"] = ""
@@ -86,14 +91,16 @@ def promote_job_after_remote_v5(
             log_output,
         )
         set_race_job_step_state(row, "predictor", "succeeded", now_text)
-        set_race_job_step_state(row, "policy", "queued")
+        set_race_job_step_state(row, "policy", "queued" if llm_buy_enabled() else "idle")
+        if not llm_buy_enabled():
+            row["ready_at"] = now_text
 
     return update_race_job(base_dir, job_id, mutate)
 
 
 def auto_continue_remote_policy(*, base_dir, job_id):
     target_job_id = str(job_id or "").strip()
-    if not target_job_id:
+    if not target_job_id or not llm_buy_enabled():
         return
 
     def _runner():

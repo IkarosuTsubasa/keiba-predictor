@@ -10,9 +10,9 @@ function raceCardKey(race, engine) {
 function buildSummaryMap(summaryCards) {
   const map = new Map();
   for (const item of summaryCards || []) {
-    const engine = String(item?.engine || "").trim();
-    if (!engine) continue;
-    map.set(engine, item);
+    const predictorId = String(item?.predictor_id || "").trim();
+    if (!predictorId) continue;
+    map.set(predictorId, item);
   }
   return map;
 }
@@ -22,71 +22,70 @@ function buildModelRows(races, summaryCards) {
   const order = [];
   const rows = new Map();
 
-  const ensureRow = (engine, label = "") => {
-    if (!engine) return null;
-    if (!rows.has(engine)) {
-      order.push(engine);
-      rows.set(engine, {
-        engine,
-        label: label || summaryMap.get(engine)?.label || engine,
-        summary: summaryMap.get(engine) || null,
+  const ensureRow = (predictorId, label = "") => {
+    if (!predictorId) return null;
+    if (!rows.has(predictorId)) {
+      order.push(predictorId);
+      rows.set(predictorId, {
+        predictorId,
+        label: label || summaryMap.get(predictorId)?.label || predictorId,
+        summary: summaryMap.get(predictorId) || null,
         items: [],
       });
     }
-    const current = rows.get(engine);
+    const current = rows.get(predictorId);
     if (!current.label) {
-      current.label = label || summaryMap.get(engine)?.label || engine;
+      current.label = label || summaryMap.get(predictorId)?.label || predictorId;
     }
     return current;
   };
 
   for (const item of summaryCards || []) {
-    ensureRow(String(item?.engine || "").trim(), String(item?.label || "").trim());
+    ensureRow(String(item?.predictor_id || "").trim(), String(item?.label || "").trim());
   }
 
   for (const race of sortRacesForDisplay(races || [])) {
-    for (const card of race?.cards || []) {
-      const engine = String(card?.engine || "").trim();
-      const row = ensureRow(engine, String(card?.label || "").trim());
+    for (const card of race?.predictor_compare_cards || []) {
+      const predictorId = String(card?.predictor_id || "").trim();
+      const row = ensureRow(predictorId, String(card?.label || "").trim());
       if (!row) continue;
       row.items.push({
-        key: raceCardKey(race, engine),
+        key: raceCardKey(race, predictorId),
         race,
-        card,
+        card: {
+          ...card,
+          metricText:
+            summaryMap.get(predictorId)?.top5_to_top3_hit_rate_text ||
+            summaryMap.get(predictorId)?.top3_hit_rate_text ||
+            "-",
+        },
       });
     }
   }
 
   return order
-    .map((engine) => rows.get(engine))
+    .map((predictorId) => rows.get(predictorId))
     .filter((item) => item && item.items.length > 0);
-}
-
-function formatHitText(summary) {
-  const raceCount = Number(summary?.settled_races || summary?.races || 0);
-  const hitRaces = Number(summary?.hit_races || 0);
-  if (!raceCount) return "-";
-  return `${hitRaces} / ${raceCount}`;
 }
 
 export default function ModelTopFiveBoard({ data, races }) {
   const modelRows = useMemo(
-    () => buildModelRows(races, data?.summary_cards || []),
+    () => buildModelRows(races, data?.daily_predictor?.cards || []),
     [data, races],
   );
-  const [engine, setEngine] = useState("");
+  const [predictorId, setPredictorId] = useState("");
 
   useEffect(() => {
     if (!modelRows.length) {
-      setEngine("");
+      setPredictorId("");
       return;
     }
-    if (!modelRows.some((item) => item.engine === engine)) {
-      setEngine(modelRows[0].engine);
+    if (!modelRows.some((item) => item.predictorId === predictorId)) {
+      setPredictorId(modelRows[0].predictorId);
     }
-  }, [engine, modelRows]);
+  }, [modelRows, predictorId]);
 
-  const active = modelRows.find((item) => item.engine === engine) || modelRows[0];
+  const active = modelRows.find((item) => item.predictorId === predictorId) || modelRows[0];
 
   if (!active) {
     return null;
@@ -97,12 +96,12 @@ export default function ModelTopFiveBoard({ data, races }) {
       <div className="model-top-five-board__tabs" role="tablist" aria-label="モデル切替">
         {modelRows.map((item) => (
           <button
-            key={item.engine}
+            key={item.predictorId}
             type="button"
             role="tab"
-            aria-selected={active.engine === item.engine}
-            className={active.engine === item.engine ? "is-active" : ""}
-            onClick={() => setEngine(item.engine)}
+            aria-selected={active.predictorId === item.predictorId}
+            className={active.predictorId === item.predictorId ? "is-active" : ""}
+            onClick={() => setPredictorId(item.predictorId)}
           >
             {item.label}
           </button>
@@ -112,12 +111,12 @@ export default function ModelTopFiveBoard({ data, races }) {
       <div className="model-top-five-board__header">
         <div className="model-top-five-board__stats">
           <div className="model-top-five-board__stat">
-            <span>ROI</span>
-            <strong>{active.summary?.roi_text || "-"}</strong>
+            <span>TOP5内カバー</span>
+            <strong>{active.summary?.top5_to_top3_hit_rate_text || "-"}</strong>
           </div>
           <div className="model-top-five-board__stat">
-            <span>的中</span>
-            <strong>{formatHitText(active.summary)}</strong>
+            <span>本命1着率</span>
+            <strong>{active.summary?.top1_hit_rate_text || "-"}</strong>
           </div>
           <div className="model-top-five-board__stat">
             <span>掲載</span>
@@ -132,9 +131,7 @@ export default function ModelTopFiveBoard({ data, races }) {
             <RaceCardHeader race={item.race} />
             <ModelRaceSummary
               card={item.card}
-              highlightRoi={
-                String(item.race?.display_variant || "").trim() === "settled"
-              }
+              highlightRoi={false}
             />
           </article>
         ))}

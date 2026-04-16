@@ -70,6 +70,7 @@ from race_job_store import (
     hydrate_job_step_states as hydrate_race_job_step_states,
     initialize_job_step_fields as initialize_race_job_step_fields,
     load_jobs as load_race_jobs,
+    normalize_run_kind,
     save_artifact as save_race_job_artifact,
     scan_due_diagnostics as scan_due_race_job_diagnostics,
     scan_due_jobs as scan_due_race_jobs,
@@ -143,6 +144,7 @@ from web_report.helpers import (
     format_yen_text as report_format_yen_text,
     has_llm_policy_assets as report_has_llm_policy_assets,
     jst_today_text as report_jst_today_text,
+    public_scope_label_ja,
     llm_today_scope_keys as report_llm_today_scope_keys,
     normalize_report_date_text as report_normalize_report_date_text,
     parse_run_date as report_parse_run_date,
@@ -161,7 +163,6 @@ from web_report.helpers import (
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
-EZOIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 DEFAULT_RUN_LIMIT = 200
@@ -1682,6 +1683,126 @@ def _public_predictor_history_cards(scope_key="", days=None, target_date=""):
     return cards
 
 
+def _condition_distance_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"(\d{3,4})", text)
+    return match.group(1) if match else ""
+
+
+def _public_condition_predictor_ranking(location="", target_distance="", track_condition="", scope_key=""):
+    location_text = str(location or "").strip()
+    distance_text = _condition_distance_value(target_distance)
+    track_text = str(track_condition or "").strip() or "良"
+    if not location_text or not distance_text or not track_text:
+        return {
+            "available": False,
+            "condition_text": "",
+            "metric_label": "予測上位3頭馬券内率",
+            "sample_count": 0,
+            "cards": [],
+        }
+
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = [scope_norm] if scope_norm else ["central_turf", "central_dirt", "local"]
+    aggregates = {
+        spec["id"]: {
+            "predictor_id": spec["id"],
+            "label": predictor_label(spec["id"]),
+            "samples": 0,
+            "top3_hit_count": 0,
+            "top5_hit_count": 0,
+            "top1_hit": 0,
+        }
+        for spec in list_predictors()
+    }
+
+    for scope_item in scope_keys:
+        run_meta_map = {}
+        for run_row in load_runs(scope_item):
+            run_id = str(run_row.get("run_id", "") or "").strip()
+            if not run_id:
+                continue
+            run_meta_map[run_id] = {
+                "location": str(run_row.get("location", "") or "").strip(),
+                "distance": _condition_distance_value(
+                    run_row.get("target_distance", "") or run_row.get("distance", "")
+                ),
+                "track_condition": str(
+                    run_row.get("target_track_condition", "") or run_row.get("track_condition", "")
+                ).strip()
+                or "良",
+            }
+
+        path = get_data_dir(BASE_DIR, scope_item) / "predictor_results.csv"
+        for row in load_csv_rows(path):
+            predictor_id = canonical_predictor_id(row.get("predictor_id"))
+            if not predictor_id:
+                continue
+            run_id = str(row.get("run_id", "") or "").strip()
+            meta = dict(run_meta_map.get(run_id) or {})
+            if not meta:
+                continue
+            if meta.get("location") != location_text:
+                continue
+            if meta.get("distance") != distance_text:
+                continue
+            if meta.get("track_condition") != track_text:
+                continue
+
+            aggregate = aggregates[predictor_id]
+            aggregate["samples"] += 1
+            aggregate["top1_hit"] += int(float(row.get("top1_hit", 0) or 0))
+            aggregate["top3_hit_count"] += int(float(row.get("top3_hit_count", 0) or 0))
+            aggregate["top5_hit_count"] += int(float(row.get("top5_hit_count", 0) or 0))
+
+    cards = []
+    for spec in list_predictors():
+        aggregate = aggregates[spec["id"]]
+        samples = int(aggregate["samples"] or 0)
+        top3_hit_rate = (
+            round(float(aggregate["top3_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        top5_to_top3_hit_rate = (
+            round(float(aggregate["top5_hit_count"]) / float(3 * samples), 4) if samples > 0 else ""
+        )
+        top1_hit_rate = round(float(aggregate["top1_hit"]) / float(samples), 4) if samples > 0 else ""
+        cards.append(
+            {
+                "predictor_id": spec["id"],
+                "label": aggregate["label"],
+                "samples": samples,
+                "top1_hit_rate": top1_hit_rate,
+                "top1_hit_rate_text": _format_public_rate_text(top1_hit_rate),
+                "top3_hit_rate": top3_hit_rate,
+                "top3_hit_rate_text": _format_public_rate_text(top3_hit_rate),
+                "top5_to_top3_hit_rate": top5_to_top3_hit_rate,
+                "top5_to_top3_hit_rate_text": _format_public_rate_text(top5_to_top3_hit_rate),
+            }
+        )
+
+    ranked_cards = sorted(
+        [dict(item or {}) for item in cards if int((item or {}).get("samples", 0) or 0) > 0],
+        key=lambda item: (
+            -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
+            -(float(item.get("top3_hit_rate", 0) or 0.0)),
+            -int(item.get("samples", 0) or 0),
+            str(item.get("predictor_id", "") or ""),
+        ),
+    )
+    for index, item in enumerate(ranked_cards, start=1):
+        item["rank"] = index
+
+    return {
+        "available": bool(ranked_cards),
+        "condition_text": f"{location_text} / {distance_text}m / {track_text}",
+        "metric_label": "上位5頭カバー率",
+        "sample_count": max((int(item.get("samples", 0) or 0) for item in ranked_cards), default=0),
+        "cards": ranked_cards,
+    }
+
+
 def _public_daily_predictor_summary(target_date="", scope_key=""):
     cards = _public_predictor_history_cards(scope_key=scope_key, target_date=target_date)
     ranked_cards = sorted(
@@ -1899,6 +2020,14 @@ def _public_display_race_name(row):
     return race_name
 
 
+def _public_race_id_text(run_row):
+    title = _format_race_label(run_row)
+    match = re.search(r"(\d+R)", title)
+    if match:
+        return match.group(1)
+    return _race_no_text((run_row or {}).get("race_id")) or _safe_text((run_row or {}).get("race_id"))
+
+
 def _public_display_header(row, variant):
     badges = []
     scheduled_off_time = str((row or {}).get("scheduled_off_time", "") or "").strip()
@@ -1938,6 +2067,7 @@ def _public_display_body(row, variant):
 
 
 _PUBLIC_COMPARE_MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+_MORNING_TOP5_POSITION_WEIGHTS = (1.0, 0.82, 0.67, 0.54, 0.43)
 
 
 def _public_predictor_compare_cards(row):
@@ -1986,6 +2116,341 @@ def _public_predictor_compare_cards(row):
             }
         )
     return cards
+
+
+def _morning_run_priority(row):
+    run_kind = str((row or {}).get("run_kind", "") or "").strip().lower()
+    return (
+        1 if run_kind == "morning_preview" else 0,
+        str((row or {}).get("timestamp", "") or "").strip(),
+        str((row or {}).get("run_id", "") or "").strip(),
+    )
+
+
+def _load_combined_morning_preview_runs(scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    rows = []
+    for report_scope_key in scope_keys:
+        for row in load_runs(report_scope_key):
+            item = dict(row or {})
+            item["_report_scope_key"] = report_scope_key
+            if normalize_run_kind(item.get("run_kind", "")) != "morning_preview":
+                continue
+            if str(item.get("predictions_path", "") or "").strip() and str(item.get("predictions_v6_kiwami_path", "") or "").strip():
+                rows.append(item)
+    return rows
+
+
+def _morning_weighted_support_map(ranking):
+    top5 = [dict(item or {}) for item in list(ranking or [])[:5] if isinstance(item, dict)]
+    if not top5:
+        return {}
+    prob_values = [max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0)) for item in top5]
+    prob_min = min(prob_values) if prob_values else 0.0
+    prob_max = max(prob_values) if prob_values else 0.0
+    prob_span = max(1e-9, prob_max - prob_min)
+    support_map = {}
+    for idx, item in enumerate(top5):
+        horse_no = normalize_horse_no_text(item.get("horse_no", ""))
+        if not horse_no:
+            continue
+        position_weight = _MORNING_TOP5_POSITION_WEIGHTS[min(idx, len(_MORNING_TOP5_POSITION_WEIGHTS) - 1)]
+        prob_value = max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0))
+        prob_norm = ((prob_value - prob_min) / prob_span) if prob_max > prob_min else 1.0
+        rank_norm = max(0.0, min(1.0, float(item.get("rank_score_norm", 0.0) or 0.0)))
+        confidence_norm = max(0.0, min(1.0, float(item.get("confidence_score", 0.0) or 0.0)))
+        blended_strength = max(
+            0.0,
+            min(
+                1.0,
+                0.55 * position_weight
+                + 0.30 * prob_norm
+                + 0.10 * rank_norm
+                + 0.05 * confidence_norm,
+            ),
+        )
+        support_map[horse_no] = {
+            "horse_no": horse_no,
+            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "support": round(blended_strength, 6),
+            "pred_rank": int(item.get("pred_rank", 0) or 0),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+            "top3_prob_model_norm": round(prob_norm, 6),
+            "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+            "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
+        }
+    return support_map
+
+
+def _morning_weighted_jaccard(left_map, right_map):
+    keys = sorted(set(dict(left_map or {}).keys()) | set(dict(right_map or {}).keys()))
+    if not keys:
+        return 0.0
+    numerator = 0.0
+    denominator = 0.0
+    for key in keys:
+        left_value = float(((left_map or {}).get(key) or {}).get("support", 0.0) or 0.0)
+        right_value = float(((right_map or {}).get(key) or {}).get("support", 0.0) or 0.0)
+        numerator += min(left_value, right_value)
+        denominator += max(left_value, right_value)
+    if denominator <= 0:
+        return 0.0
+    return max(0.0, min(1.0, numerator / denominator))
+
+
+def _morning_predictor_stability(support_map):
+    rows = sorted(
+        [dict(item or {}) for item in dict(support_map or {}).values()],
+        key=lambda item: (
+            int(item.get("pred_rank", 0) or 0) if int(item.get("pred_rank", 0) or 0) > 0 else 999,
+            -float(item.get("support", 0.0) or 0.0),
+            str(item.get("horse_no", "") or ""),
+        ),
+    )
+    values = [float(item.get("support", 0.0) or 0.0) for item in rows[:5]]
+    while len(values) < 5:
+        values.append(0.0)
+    gap13 = max(0.0, values[0] - values[2])
+    gap35 = max(0.0, values[2] - values[4])
+    return max(0.0, min(1.0, 0.58 * min(1.0, gap13 / 0.35) + 0.42 * min(1.0, gap35 / 0.18)))
+
+
+def _morning_concentration_score(aggregate_rows):
+    values = [float((item or {}).get("support", 0.0) or 0.0) for item in list(aggregate_rows or [])[:5]]
+    total = sum(values)
+    if total <= 0:
+        return 0.0
+    top3_ratio = sum(values[:3]) / total
+    return max(0.0, min(1.0, (top3_ratio - 0.6) / 0.4))
+
+
+def _morning_confidence_label(score):
+    value = float(score or 0.0)
+    if value >= 0.8:
+        return "かなり高い"
+    if value >= 0.65:
+        return "高い"
+    if value >= 0.45:
+        return "中"
+    if value >= 0.25:
+        return "やや低い"
+    return "低い"
+
+
+def _morning_summary_text(agreement_score, concentration_score, stability_score):
+    parts = []
+    if agreement_score >= 0.72:
+        parts.append("2モデルの上位候補が近い")
+    elif agreement_score <= 0.32:
+        parts.append("2モデルの見立てが割れ気味")
+    if concentration_score >= 0.68:
+        parts.append("上位3頭に評価が集中")
+    if stability_score >= 0.62:
+        parts.append("順位の傾きが明確")
+    return " / ".join(parts) if parts else "上位候補を比較中"
+
+
+def _morning_absolute_support_score(item):
+    row = dict(item or {})
+    source_count = max(1, len(list(row.get("sources", []) or [])))
+    avg_support = max(0.0, min(1.0, float(row.get("support", 0.0) or 0.0) / float(source_count)))
+    avg_prob = max(0.0, min(1.0, float(row.get("top3_prob_model", 0.0) or 0.0)))
+    multi_source_bonus = 1.0 if source_count >= 2 else 0.0
+    value = 42.0 + 26.0 * avg_support + 16.0 * avg_prob + 8.0 * multi_source_bonus
+    return max(1, min(99, int(round(value))))
+
+
+def _build_morning_preview_race_item(row):
+    run_row = dict(row or {})
+    scope_key = str(run_row.get("_report_scope_key", "") or run_row.get("scope", "") or "").strip()
+    run_id = str(run_row.get("run_id", "") or "").strip()
+    if not scope_key or not run_id:
+        return {}
+
+    shutuba_path = resolve_run_asset_path(scope_key, run_id, run_row, "shutuba_path", "shutuba")
+    odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "odds_path", "odds")
+    fuku_odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
+    if odds_path and Path(odds_path).exists():
+        name_to_no_map = load_name_to_no(odds_path)
+    elif shutuba_path and Path(shutuba_path).exists():
+        name_to_no_map = load_name_to_no(shutuba_path)
+    else:
+        name_to_no_map = {}
+    win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
+    place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
+
+    ranking_by_predictor = {}
+    for predictor_id in ("main", "v6_kiwami"):
+        pred_path = resolve_run_prediction_path(
+            run_row,
+            get_data_dir(BASE_DIR, scope_key),
+            BASE_DIR,
+            run_id=run_id,
+            race_id=run_row.get("race_id", ""),
+            predictor_id=predictor_id,
+        )
+        if not pred_path or not Path(pred_path).exists():
+            continue
+        pred_rows = load_csv_rows_flexible(pred_path)
+        ranking = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
+        if ranking:
+            ranking_by_predictor[predictor_id] = ranking[:5]
+
+    if set(ranking_by_predictor.keys()) != {"main", "v6_kiwami"}:
+        return {}
+
+    support_by_predictor = {
+        predictor_id: _morning_weighted_support_map(ranking)
+        for predictor_id, ranking in ranking_by_predictor.items()
+    }
+    aggregate = {}
+    for predictor_id, support_map in support_by_predictor.items():
+        for horse_no, item in support_map.items():
+            entry = aggregate.setdefault(
+                horse_no,
+                {
+                    "horse_no": horse_no,
+                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "support": 0.0,
+                    "sources": [],
+                    "top3_prob_model": 0.0,
+                },
+            )
+            entry["support"] += float(item.get("support", 0.0) or 0.0)
+            entry["top3_prob_model"] += float(item.get("top3_prob_model", 0.0) or 0.0)
+            entry["sources"].append(predictor_id)
+            if not entry["horse_name"]:
+                entry["horse_name"] = str(item.get("horse_name", "") or "").strip()
+    aggregate_rows = [
+        {
+            "horse_no": horse_no,
+            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "support": round(float(item.get("support", 0.0) or 0.0), 6),
+            "sources": list(item.get("sources", []) or []),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0) / max(1, len(item.get("sources", []) or [])), 6),
+        }
+        for horse_no, item in aggregate.items()
+    ]
+    for item in aggregate_rows:
+        item["support_score"] = _morning_absolute_support_score(item)
+    aggregate_rows = sorted(
+        aggregate_rows,
+        key=lambda item: (
+            -int(item.get("support_score", 0) or 0),
+            -float(item.get("support", 0.0) or 0.0),
+            str(item.get("horse_no", "") or ""),
+        ),
+    )[:5]
+    if not aggregate_rows:
+        return {}
+
+    agreement_score = _morning_weighted_jaccard(
+        support_by_predictor.get("main", {}),
+        support_by_predictor.get("v6_kiwami", {}),
+    )
+    concentration_score = _morning_concentration_score(aggregate_rows)
+    stability_score = (
+        _morning_predictor_stability(support_by_predictor.get("main", {}))
+        + _morning_predictor_stability(support_by_predictor.get("v6_kiwami", {}))
+    ) / 2.0
+    confidence_score = max(
+        0.0,
+        min(
+            1.0,
+            0.40 * agreement_score + 0.35 * concentration_score + 0.25 * stability_score,
+        ),
+    )
+    job_meta = _find_job_meta_for_run(scope_key, run_id, run_row) or {}
+    race_title = _format_race_label(run_row)
+    return {
+        "scope_key": scope_key,
+        "scope_label": public_scope_label_ja(scope_key),
+        "run_id": run_id,
+        "race_id": _public_race_id_text(run_row),
+        "race_title": race_title,
+        "race_name": _safe_text(job_meta.get("race_name")) or _safe_text(run_row.get("race_name")) or _safe_text(run_row.get("trigger_race")),
+        "location": _safe_text(job_meta.get("location")) or _safe_text(run_row.get("location")),
+        "scheduled_off_time": _safe_text(job_meta.get("scheduled_off_time")) or _safe_text(run_row.get("scheduled_off_time")),
+        "distance_label": _format_distance_label(_safe_text(job_meta.get("target_distance")) or _safe_text(run_row.get("distance"))),
+        "track_condition": _safe_text(job_meta.get("target_track_condition")) or _safe_text(run_row.get("track_condition")) or "良",
+        "run_kind": str(run_row.get("run_kind", "") or "").strip() or "final_prediction",
+        "main_horse_no": str((aggregate_rows[0] or {}).get("horse_no", "") or "").strip(),
+        "main_horse_name": str((aggregate_rows[0] or {}).get("horse_name", "") or "").strip(),
+        "confidence_score": round(confidence_score, 6),
+        "confidence_label": _morning_confidence_label(confidence_score),
+        "agreement_score": round(agreement_score, 6),
+        "concentration_score": round(concentration_score, 6),
+        "stability_score": round(stability_score, 6),
+        "summary_text": _morning_summary_text(agreement_score, concentration_score, stability_score),
+        "top5": aggregate_rows,
+        "predictor_top5": {
+            predictor_id: [
+                {
+                    "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
+                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "pred_rank": int(item.get("pred_rank", 0) or 0),
+                    "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                    "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+                }
+                for item in list(ranking_by_predictor.get(predictor_id, []) or [])[:5]
+            ]
+            for predictor_id in ("main", "v6_kiwami")
+        },
+    }
+
+
+def _build_public_morning_preview_payload(target_date="", scope_key=""):
+    target_date = str(target_date or "").strip()
+    if not target_date:
+        return {"available": False, "races": [], "confidence_ranking": [], "featured_race": {}}
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    selected_rows = {}
+    for row in _load_combined_morning_preview_runs(scope_norm):
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        race_id = normalize_race_id((row or {}).get("race_id", ""))
+        if not race_id:
+            continue
+        dedupe_key = (report_scope_key, race_id)
+        current = selected_rows.get(dedupe_key)
+        if current is None or _morning_run_priority(row) > _morning_run_priority(current):
+            selected_rows[dedupe_key] = dict(row or {})
+
+    races = []
+    for row in selected_rows.values():
+        item = _build_morning_preview_race_item(row)
+        if item:
+            races.append(item)
+    confidence_ranking = sorted(
+        list(races),
+        key=lambda item: (
+            -float(item.get("confidence_score", 0.0) or 0.0),
+            -float(item.get("agreement_score", 0.0) or 0.0),
+            str(item.get("scheduled_off_time", "") or ""),
+            str(item.get("race_title", "") or ""),
+        ),
+    )
+    featured_race = dict(confidence_ranking[0]) if confidence_ranking else {}
+    races = sorted(
+        list(races),
+        key=lambda item: (
+            str(item.get("scheduled_off_time", "") or ""),
+            str(item.get("race_title", "") or ""),
+        ),
+    )
+    return {
+        "available": bool(races),
+        "target_date": target_date,
+        "race_count": len(races),
+        "featured_race": featured_race,
+        "confidence_ranking": confidence_ranking[:5],
+        "races": races,
+    }
 
 
 def _with_public_display_sort_fields(items):
@@ -2044,15 +2509,31 @@ def build_public_board_payload(date_text="", scope_key=""):
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
     sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
     enriched_races = []
+    condition_cache = {}
     for item in sorted_races:
         row = dict(item or {})
         row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
+        condition_key = (
+            str(row.get("scope_key", "") or scope_key or "").strip(),
+            str(row.get("location", "") or "").strip(),
+            _condition_distance_value(row.get("target_distance", "") or row.get("distance", "") or row.get("distance_label", "")),
+            str(row.get("target_track_condition", "") or row.get("track_condition", "") or "").strip() or "良",
+        )
+        if condition_key not in condition_cache:
+            condition_cache[condition_key] = _public_condition_predictor_ranking(
+                location=condition_key[1],
+                target_distance=condition_key[2],
+                track_condition=condition_key[3],
+                scope_key=condition_key[0],
+            )
+        row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
         enriched_races.append(row)
     payload["races"] = _with_public_display_sort_fields(enriched_races)
     payload["placeholder_race_count"] = len(placeholder_races)
     payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     payload["daily_report"] = _find_daily_report_for_date(target_date)
+    payload["morning_preview"] = _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
     return payload
 
 
@@ -2139,6 +2620,9 @@ def _mobile_race_list_item(row):
     match = re.search(r"(\d+R)", race_title)
     if match:
         race_id = match.group(1)
+    detail_path = ""
+    if status != "placeholder":
+        detail_path = f"{PUBLIC_BASE_PATH}/race/{quote(str(item.get('run_id', '') or '').strip(), safe='')}"
     return {
         "run_id": str(item.get("run_id", "") or "").strip(),
         "race_id": race_id or race_title,
@@ -2150,7 +2634,7 @@ def _mobile_race_list_item(row):
         "status_label": status_label or ("結果確定" if result.get("is_settled") else "確定待ち"),
         "result": result,
         "llm_cards": [_mobile_llm_card_payload(card) for card in list(item.get("cards", []) or [])],
-        "detail_path": f"{PUBLIC_BASE_PATH}/race/{quote(str(item.get('run_id', '') or '').strip(), safe='')}",
+        "detail_path": detail_path,
     }
 
 
@@ -2162,6 +2646,7 @@ def _mobile_races_payload(payload):
         "data": {
             "target_date": str(board.get("target_date", "") or "").strip(),
             "target_date_label": str(board.get("target_date_label", "") or "").strip(),
+            "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
             "totals": {
                 "race_count": len(items),
                 "settled_count": sum(1 for item in items if bool(((item.get("result") or {}).get("is_settled")))),
@@ -2849,7 +3334,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             summary["scheduled"] += 1
         elif status in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
             summary["processing"] += 1
-        elif status == "ready":
+        elif status in ("ready", "preview_ready"):
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
@@ -3316,7 +3801,7 @@ def public_static_pages(request: Request):
 
 @app.get("/ads.txt")
 def ads_txt():
-    return RedirectResponse(url=EZOIC_ADS_TXT_REDIRECT_URL, status_code=301)
+    return FileResponse(ADS_TXT_PATH, media_type="text/plain; charset=utf-8")
 
 
 @app.get("/robots.txt")
@@ -3474,11 +3959,19 @@ async def admin_reset_llm_state_api(request: Request):
     return JSONResponse({"ok": True, "output_text": "LLM state reset completed."})
 
 
+def _llm_buy_disabled_response():
+    return JSONResponse(
+        {"ok": False, "error": "LLM buy backend is disabled."},
+        status_code=410,
+    )
+
+
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_llm_buy")
 async def admin_workspace_run_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -3544,6 +4037,7 @@ async def admin_workspace_run_all_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -3597,6 +4091,7 @@ async def admin_workspace_topup_all_llm_budget_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -3897,6 +4392,7 @@ async def admin_jobs_create_api(
     request: Request,
     scope_key: str = Form(""),
     race_id: str = Form(""),
+    run_kind: str = Form(""),
     race_name: str = Form(""),
     location: str = Form(""),
     race_date: str = Form(""),
@@ -4000,6 +4496,7 @@ async def admin_jobs_create_api(
         BASE_DIR,
         race_id=race_id,
         scope_key=scope_norm,
+        run_kind=run_kind,
         race_name=race_name,
         location=location,
         race_date=race_date,
@@ -4144,6 +4641,7 @@ async def admin_jobs_topup_today_all_llm_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    return _llm_buy_disabled_response()
     ledger_date = datetime.now().strftime("%Y%m%d")
     amount_yen = resolve_daily_bankroll_yen(ledger_date)
     summaries = []
