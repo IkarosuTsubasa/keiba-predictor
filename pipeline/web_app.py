@@ -2070,6 +2070,21 @@ _PUBLIC_COMPARE_MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 _MORNING_TOP5_POSITION_WEIGHTS = (1.0, 0.82, 0.67, 0.54, 0.43)
 
 
+def _serialize_public_ranking_item(item):
+    return {
+        "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
+        "horse_name": str(item.get("horse_name", "") or ""),
+        "pred_rank": int(item.get("pred_rank", 0) or 0),
+        "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+        "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
+        "win_odds": round(float(item.get("win_odds", 0.0) or 0.0), 6),
+        "place_odds": round(float(item.get("place_odds", 0.0) or 0.0), 6),
+        "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
+        "stability_score": round(float(item.get("stability_score", 0.0) or 0.0), 6),
+        "risk_score": round(float(item.get("risk_score", 0.0) or 0.0), 6),
+    }
+
+
 def _public_predictor_compare_cards(row):
     scope_norm = normalize_scope_key(str((row or {}).get("scope_key", "") or "").strip())
     run_id = str((row or {}).get("run_id", "") or "").strip()
@@ -2113,7 +2128,10 @@ def _public_predictor_compare_cards(row):
                 "predictor_id": predictor_id,
                 "label": str(item.get("predictor_label", "") or predictor_label(predictor_id) or predictor_id).strip() or "-",
                 "marks_text": report_format_marks_text(marks_map),
-                "top_horses": [_serialize_ranking_item(rank_item) for rank_item in ranking[: len(_PUBLIC_COMPARE_MARK_ORDER)]],
+                "top_horses": [
+                    _serialize_public_ranking_item(rank_item)
+                    for rank_item in ranking[: len(_PUBLIC_COMPARE_MARK_ORDER)]
+                ],
             }
         )
     return cards
