@@ -34,6 +34,7 @@ function TopFiveIndexList({ items = [] }) {
 }
 
 const APP_DOWNLOAD_HREF = "https://x.gd/BDVgd";
+const APP_BADGE_SRC = "/keiba/GetItOnGooglePlay_Badge_Web_color_Japanese.png";
 
 export default function MorningPreviewSection({ data, search = "" }) {
   const preview = data?.morning_preview || {};
@@ -105,23 +106,23 @@ export default function MorningPreviewSection({ data, search = "" }) {
 
       <article className="morning-preview__app-card morning-preview__app-card--wide">
         <div className="morning-preview__app-row">
-          <div className="morning-preview__subhead">
-            <span>アプリ</span>
-            <h3>レース直前のAI最終予想</h3>
+          <div className="morning-preview__app-copy">
+            <span className="morning-preview__app-eyebrow">アプリ</span>
+            <h3>レース直前の最終印を最速でチェック</h3>
+            <p>注目レース情報から直前の最終更新まで、完全無料でまとめて確認できます。</p>
           </div>
-          <ul className="morning-preview__app-points morning-preview__app-points--inline">
-            <li>6つの定量モデルを確認</li>
-            <li>レース直前の最終印を比較</li>
-            <li>すべて無料でチェック</li>
-          </ul>
           <a className="morning-preview__app-link" href={APP_DOWNLOAD_HREF}>
-            Androidアプリをダウンロード
+            <img
+              className="morning-preview__app-badge"
+              src={APP_BADGE_SRC}
+              alt="Google Play で手に入れよう"
+            />
           </a>
         </div>
       </article>
       
       <div className="morning-preview__footnote">
-        <p>朝は注目度を確認して、レース直前の最終判断はアプリで追う流れがおすすめです。</p>
+        <p>注目レースの確認からレース直前の最終チェックまで、アプリですぐ追えます。</p>
       </div>
     </section>
   );

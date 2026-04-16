@@ -11,7 +11,6 @@ import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
 import MethodSummarySection from "./components/MethodSummarySection";
 import MorningPreviewSection from "./components/MorningPreviewSection";
-import EzoicAdSlot from "./components/EzoicAdSlot";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicSideNav from "./components/PublicSideNav";
 import PublicStaticPage from "./components/PublicStaticPage";
@@ -619,12 +618,6 @@ export default function App() {
             <MorningPreviewSection data={data} search={search} />
           </>
         ) : null}
-        {!isAppShell ? (
-          <EzoicAdSlot
-            slot="homeBeforeBoard"
-            wrapperClassName="ezoic-ad-slot--content"
-          />
-        ) : null}
 
         <section
           className={[
@@ -673,13 +666,6 @@ export default function App() {
           <TodayBoardContent data={data} races={boardRaces} appShell={isAppShell} />
         </section>
         {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
-
-        {!isAppShell ? (
-          <EzoicAdSlot
-            slot="homeAfterBoard"
-            wrapperClassName="ezoic-ad-slot--content"
-          />
-        ) : null}
         {!isAppShell && !isDateFocusedHome ? <HomeHeroSection data={data} search={search} /> : null}
         {!isAppShell && !isDateFocusedHome ? <MethodSummarySection /> : null}
         {!isAppShell && !isDateFocusedHome ? <FeaturedContentSection data={data} /> : null}

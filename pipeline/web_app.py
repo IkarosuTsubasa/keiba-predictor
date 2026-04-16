@@ -163,7 +163,6 @@ from web_report.helpers import (
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ADS_TXT_PATH = BASE_DIR / "ads.txt"
-EZOIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
 ODDS_EXTRACT = ROOT_DIR / "odds_extract.py"
 RECORD_PREDICTOR = BASE_DIR / "record_predictor_result.py"
 DEFAULT_RUN_LIMIT = 200
@@ -1786,8 +1785,8 @@ def _public_condition_predictor_ranking(location="", target_distance="", track_c
     ranked_cards = sorted(
         [dict(item or {}) for item in cards if int((item or {}).get("samples", 0) or 0) > 0],
         key=lambda item: (
-            -(float(item.get("top3_hit_rate", 0) or 0.0)),
             -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
+            -(float(item.get("top3_hit_rate", 0) or 0.0)),
             -int(item.get("samples", 0) or 0),
             str(item.get("predictor_id", "") or ""),
         ),
@@ -1798,7 +1797,7 @@ def _public_condition_predictor_ranking(location="", target_distance="", track_c
     return {
         "available": bool(ranked_cards),
         "condition_text": f"{location_text} / {distance_text}m / {track_text}",
-        "metric_label": "予測上位3頭馬券内率",
+        "metric_label": "上位5頭カバー率",
         "sample_count": max((int(item.get("samples", 0) or 0) for item in ranked_cards), default=0),
         "cards": ranked_cards,
     }
@@ -3802,7 +3801,7 @@ def public_static_pages(request: Request):
 
 @app.get("/ads.txt")
 def ads_txt():
-    return RedirectResponse(url=EZOIC_ADS_TXT_REDIRECT_URL, status_code=301)
+    return FileResponse(ADS_TXT_PATH, media_type="text/plain; charset=utf-8")
 
 
 @app.get("/robots.txt")

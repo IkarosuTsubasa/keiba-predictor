@@ -1,6 +1,4 @@
 import React, { useMemo, useState } from "react";
-import EzoicAdSlot from "./EzoicAdSlot";
-
 const PREDICTOR_LABELS = {
   top1: "本命1着率",
   top1InTop3: "本命複勝圏率",
@@ -283,12 +281,6 @@ export default function HistoryPage({ data, appShell = false }) {
       </div>
 
       <PredictorHighlightStrip leaders={predictorLeaders} />
-      {!appShell ? (
-        <EzoicAdSlot
-          slot="historyBetweenPanels"
-          wrapperClassName="ezoic-ad-slot--content"
-        />
-      ) : null}
       <PredictorDesk items={predictorCards} />
     </section>
   );

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from public_share_copy import (
@@ -28,10 +28,10 @@ PUBLIC_SITE_ICON_PATH = f"{PUBLIC_BASE_PATH}/site-icon.png"
 PUBLIC_FAVICON_PATH = f"{PUBLIC_BASE_PATH}/favicon.ico"
 PUBLIC_APPLE_TOUCH_ICON_PATH = f"{PUBLIC_BASE_PATH}/apple-touch-icon.png"
 PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
+PUBLIC_GOOGLE_PLAY_BADGE_PATH = f"{PUBLIC_BASE_PATH}/GetItOnGooglePlay_Badge_Web_color_Japanese.png"
 PUBLIC_APP_ADS_TXT_PATH = "/app-ads.txt"
 PUBLIC_ADS_TXT_PATH = "/ads.txt"
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
-PUBLIC_ADS_TXT_REDIRECT_URL = "https://srv.adstxtmanager.com/19390/www.ikaimo-ai.com"
 PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
 PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
 SITE_COPY = load_site_copy()
@@ -1032,7 +1032,10 @@ def register_public_static_routes(app: FastAPI) -> None:
     @app.get(PUBLIC_ADS_TXT_PATH)
     @app.get(f"{PUBLIC_BASE_PATH}/ads.txt")
     def public_ads_txt():
-        return RedirectResponse(url=PUBLIC_ADS_TXT_REDIRECT_URL, status_code=301)
+        ads_path = PUBLIC_FRONTEND_DIST_DIR / "ads.txt"
+        if ads_path.exists():
+            return FileResponse(ads_path, media_type="text/plain; charset=utf-8")
+        raise HTTPException(status_code=404, detail="ads.txt not found")
 
     @app.get(f"{PUBLIC_BASE_PATH}/affiliate/{{asset_path:path}}")
     @app.get("/affiliate/{asset_path:path}")
@@ -1079,6 +1082,14 @@ def register_public_static_routes(app: FastAPI) -> None:
         if fallback_path.exists():
             return FileResponse(fallback_path, media_type="image/png")
         raise HTTPException(status_code=404, detail="og image not found")
+
+    @app.get(PUBLIC_GOOGLE_PLAY_BADGE_PATH)
+    @app.get("/GetItOnGooglePlay_Badge_Web_color_Japanese.png")
+    def public_google_play_badge():
+        badge_path = PUBLIC_FRONTEND_DIST_DIR / "GetItOnGooglePlay_Badge_Web_color_Japanese.png"
+        if badge_path.exists():
+            return FileResponse(badge_path, media_type="image/png")
+        raise HTTPException(status_code=404, detail="google play badge not found")
 
 
 

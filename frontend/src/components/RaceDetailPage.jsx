@@ -1,6 +1,5 @@
 import React, { useMemo } from "react";
 import AutoFitLine from "./AutoFitLine";
-import EzoicAdSlot from "./EzoicAdSlot";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
@@ -12,6 +11,8 @@ import {
 
 const MAIN_MARK = MARK_ORDER[0];
 const MARK_WEIGHT = { "◎": 5, "○": 4, "▲": 3, "△": 2, "☆": 1 };
+const APP_DOWNLOAD_HREF = "https://x.gd/BDVgd";
+const APP_BADGE_SRC = "/keiba/GetItOnGooglePlay_Badge_Web_color_Japanese.png";
 const PREDICTOR_LABELS = {
   main: "ゲート",
   v2_opus: "ストライド",
@@ -173,6 +174,25 @@ function DetailSummary({ label, value, accent = false }) {
   );
 }
 
+function DetailAppSummary() {
+  return (
+    <article className="race-detail-summary-card race-detail-summary-card--app">
+      <span>アプリ</span>
+      <a
+        className="race-detail-summary-card__app-link"
+        href={APP_DOWNLOAD_HREF}
+        aria-label="Androidアプリをダウンロード"
+      >
+        <img
+          className="race-detail-summary-card__app-badge"
+          src={APP_BADGE_SRC}
+          alt="Google Play で手に入れよう"
+        />
+      </a>
+    </article>
+  );
+}
+
 function PanelEmpty({ children }) {
   return <p className="race-detail-empty-note">{children}</p>;
 }
@@ -229,8 +249,7 @@ function ConditionPredictorRankingPanel({ ranking }) {
     <section className="race-detail-panel race-detail-panel--condition-ranking" id="race-detail-condition-ranking">
       <div className="race-detail-panel__head">
         <div>
-          <span className="race-detail-panel__eyebrow">この条件</span>
-          <h2>定量モデル順位</h2>
+          <h2>この条件の定量モデル順位</h2>
         </div>
       </div>
       {ranking?.condition_text ? (
@@ -245,7 +264,7 @@ function ConditionPredictorRankingPanel({ ranking }) {
             <li key={item.predictor_id} className="race-detail-condition-ranking__item">
               <span>{`${item.rank || "-"}`}</span>
               <strong>{item.label || "-"}</strong>
-              <em>{item.top3_hit_rate_text || "-"}</em>
+              <em>{item.top5_to_top3_hit_rate_text || "-"}</em>
             </li>
           ))}
         </ol>
@@ -361,8 +380,8 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
 
         <div className="race-detail-hero__meta">
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
-          <DetailSummary label="掲載モデル" value={confidenceMeta.modelCountText} />
-          <DetailSummary label="AI信頼度" value={detailConfidenceText} />
+          <DetailSummary label="自信度" value={detailConfidenceText} />
+          <DetailAppSummary />
         </div>
       </div>
 
@@ -400,9 +419,6 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
         >
           <div className="race-detail-panel__head">
             <div>
-              <span className="race-detail-panel__eyebrow">
-                {isMorningPreview && !predictorCompareCards.length ? "速報比較" : "定量モデル予想"}
-              </span>
               <h2>
                 {isMorningPreview && !predictorCompareCards.length
                   ? "定量モデル比較"
@@ -428,13 +444,6 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
           <ConditionPredictorRankingPanel ranking={conditionRanking} />
         </div>
       </div>
-
-      {!appShell ? (
-        <EzoicAdSlot
-          slot="raceDetailSidebar"
-          wrapperClassName="ezoic-ad-slot--content"
-        />
-      ) : null}
     </section>
   );
 }
