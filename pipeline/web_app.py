@@ -2354,6 +2354,15 @@ def _build_public_predictor_only_races(target_date="", scope_key=""):
                 "distance_label": _format_distance_label(_safe_text(job_meta.get("target_distance")) or _safe_text(row.get("distance"))),
                 "track_condition": _safe_text(job_meta.get("target_track_condition")) or _safe_text(row.get("track_condition")) or "良",
                 "run_id": run_id,
+                "alias_ids": [
+                    value
+                    for value in [
+                        str(run_id or "").strip(),
+                        str(job_meta.get("current_run_id", "") or "").strip(),
+                        str(job_meta.get("morning_run_id", "") or "").strip(),
+                    ]
+                    if value
+                ],
                 "cards": [],
             }
         )

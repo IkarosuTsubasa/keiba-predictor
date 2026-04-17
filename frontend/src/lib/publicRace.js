@@ -120,7 +120,7 @@ export function matchRaceIdentifier(race, targetId) {
   const normalizedTarget = String(targetId || "").trim();
   if (!normalizedTarget) return false;
 
-  return [race?.run_id, race?.card_id, race?.race_id]
+  return [race?.run_id, race?.card_id, race?.race_id, ...(Array.isArray(race?.alias_ids) ? race.alias_ids : [])]
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .includes(normalizedTarget);

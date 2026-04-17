@@ -107,6 +107,8 @@ def find_job_meta_for_run(base_dir, scope_key, run_id, run_row=None, *, load_rac
         if not best or updated_at >= best_time:
             best = {
                 "job_id": safe_text(job.get("job_id")),
+                "current_run_id": safe_text(job.get("current_run_id")),
+                "morning_run_id": safe_text(job.get("morning_run_id")),
                 "race_name": safe_text(job.get("race_name")),
                 "location": safe_text(job.get("location")),
                 "scheduled_off_time": safe_text(job.get("scheduled_off_time")),
