@@ -5167,6 +5167,7 @@ async def internal_v5_task_callback(task_id: str, request: Request):
         summary_payload = {}
     job_id = str((task or {}).get("job_id", "") or "").strip()
     run_id = str((task or {}).get("run_id", "") or "").strip()
+    scope_key = str((task or {}).get("scope_key", "") or "").strip()
     task_type = str((task or {}).get("task_type", "") or "").strip().lower()
 
     if status == "succeeded":
