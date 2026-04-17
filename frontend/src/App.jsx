@@ -91,9 +91,25 @@ function mergeMorningPreviewRaces(races, preview) {
     return baseRaces;
   }
 
+  const previewMatchKey = (race) => {
+    const raceTitle = String(race?.race_title || "").trim();
+    if (raceTitle) {
+      return `title:${raceTitle}`;
+    }
+    const location = String(race?.location || "").trim();
+    const raceId = String(race?.race_id || "").trim();
+    if (location && raceId) {
+      return `loc:${location}:${raceId}`;
+    }
+    if (raceId) {
+      return `id:${raceId}`;
+    }
+    return "";
+  };
+
   const morningByRaceId = new Map();
   for (const item of morningRaces) {
-    const key = String(item?.race_id || "").trim();
+    const key = previewMatchKey(item);
     if (key) {
       morningByRaceId.set(key, item);
     }
@@ -101,12 +117,12 @@ function mergeMorningPreviewRaces(races, preview) {
 
   const seen = new Set();
   const merged = baseRaces.map((race) => {
-    const raceId = String(race?.race_id || "").trim();
-    const morning = morningByRaceId.get(raceId);
+    const raceKey = previewMatchKey(race);
+    const morning = morningByRaceId.get(raceKey);
     if (!morning) {
       return race;
     }
-    seen.add(raceId);
+    seen.add(raceKey);
     if (String(race?.display_variant || "").trim() === "placeholder") {
       return buildMorningPreviewRace(morning, race);
     }
@@ -114,8 +130,8 @@ function mergeMorningPreviewRaces(races, preview) {
   });
 
   for (const item of morningRaces) {
-    const raceId = String(item?.race_id || "").trim();
-    if (raceId && seen.has(raceId)) {
+    const raceKey = previewMatchKey(item);
+    if (raceKey && seen.has(raceKey)) {
       continue;
     }
     merged.push(buildMorningPreviewRace(item));
