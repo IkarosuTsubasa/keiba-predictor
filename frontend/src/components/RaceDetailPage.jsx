@@ -140,20 +140,40 @@ function buildHorseSignalRows(predictorCards = []) {
   );
 }
 
-function buildMorningIndexRows(top5 = []) {
-  return (Array.isArray(top5) ? top5 : [])
-    .filter(Boolean)
-    .map((item) => {
-      const sourceCount = Array.isArray(item?.sources) ? item.sources.length : 0;
-      return {
-        horseNo: String(item?.horse_no || "").trim() || "-",
-        horseName: String(item?.horse_name || "").trim() || "-",
-        aiIndex: Number(item?.support_score || 0) || 0,
-        score: Number(item?.support || 0) || 0,
-        supportCount: sourceCount,
-        mainCount: sourceCount,
-      };
-    })
+function buildMorningIndexRows(top5 = [], predictorTop5 = {}) {
+  const rows = [];
+  const seen = new Set();
+
+  const pushRow = (item, fallbackScore = 0) => {
+    const horseNo = String(item?.horse_no || "").trim();
+    const horseName = String(item?.horse_name || "").trim();
+    const dedupeKey = horseNo || horseName;
+    if (!dedupeKey || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    const sourceCount = Array.isArray(item?.sources) ? item.sources.length : 0;
+    rows.push({
+      horseNo: horseNo || "-",
+      horseName: horseName || "-",
+      aiIndex: Number(item?.support_score || fallbackScore || 0) || 0,
+      score: Number(item?.support || 0) || 0,
+      supportCount: sourceCount,
+      mainCount: sourceCount,
+    });
+  };
+
+  (Array.isArray(top5) ? top5 : []).filter(Boolean).forEach((item) => pushRow(item));
+
+  if (rows.length < 5 && predictorTop5 && typeof predictorTop5 === "object") {
+    for (const predictorId of ["main", "v6_kiwami"]) {
+      for (const item of Array.isArray(predictorTop5?.[predictorId]) ? predictorTop5[predictorId] : []) {
+        pushRow(item, 40);
+        if (rows.length >= 5) break;
+      }
+      if (rows.length >= 5) break;
+    }
+  }
+
+  return rows
     .sort((left, right) => right.aiIndex - left.aiIndex || right.score - left.score)
     .slice(0, 5);
 }
@@ -181,7 +201,14 @@ function buildMorningCompareCards(predictorTop5, scheduledOffTime = "") {
         })
         .filter(Boolean)
         .join(" ");
-      if (!marksText) return null;
+      if (!marksText) {
+        return {
+          predictor_id: predictorId,
+          label: PREDICTOR_LABELS[predictorId] || predictorId,
+          is_placeholder: true,
+          placeholder_text: "速報生成済み・馬番整備中",
+        };
+      }
       return {
         predictor_id: predictorId,
         label: PREDICTOR_LABELS[predictorId] || predictorId,
@@ -381,8 +408,8 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
     () =>
       predictorCompareCards.length
         ? buildHorseSignalRows(predictorCompareCards)
-        : buildMorningIndexRows(race?.top5),
-    [predictorCompareCards, race?.top5],
+        : buildMorningIndexRows(race?.top5, race?.predictor_top5),
+    [predictorCompareCards, race?.predictor_top5, race?.top5],
   );
   const confidenceMeta = useMemo(
     () => buildConfidenceMeta(signalRows, activeCompareCount),

@@ -22,7 +22,7 @@ function TopFiveIndexList({ items = [] }) {
         <span>馬名</span>
         <span>AI指数</span>
       </div>
-      {items.slice(0, 5).map((item, index) => (
+      {items.slice(0, 6).map((item, index) => (
         <article key={`${item.horse_no}-${index}`} className="morning-preview__index-item">
           <span>{item.horse_no || "-"}</span>
           <strong>{item.horse_name || "-"}</strong>

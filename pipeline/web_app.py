@@ -2416,6 +2416,74 @@ def _morning_absolute_support_score(item):
     return max(1, min(99, int(round(value))))
 
 
+def _morning_prepare_ranking_rows(ranking, name_to_no_map):
+    prepared = []
+    seen_horse_nos = set()
+    lookup = dict(name_to_no_map or {})
+    compact_lookup = {
+        re.sub(r"\s+", "", str(key or "").strip()): str(value or "").strip()
+        for key, value in lookup.items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    for item in list(ranking or []):
+        row = dict(item or {})
+        horse_no = normalize_horse_no_text(row.get("horse_no", ""))
+        horse_name = str(row.get("horse_name", "") or "").strip()
+        if not horse_no and horse_name:
+            horse_no = normalize_horse_no_text(lookup.get(horse_name, ""))
+        if not horse_no and horse_name:
+            horse_no = normalize_horse_no_text(compact_lookup.get(re.sub(r"\s+", "", horse_name), ""))
+        if not horse_no or horse_no in seen_horse_nos:
+            continue
+        row["horse_no"] = horse_no
+        row["horse_name"] = horse_name
+        prepared.append(row)
+        seen_horse_nos.add(horse_no)
+        if len(prepared) >= 5:
+            break
+    return prepared
+
+
+def _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor):
+    rows = [dict(item or {}) for item in list(aggregate_rows or []) if isinstance(item, dict)]
+    seen_horse_nos = {
+        str((item or {}).get("horse_no", "") or "").strip()
+        for item in rows
+        if str((item or {}).get("horse_no", "") or "").strip()
+    }
+    if len(rows) >= 5:
+        return rows[:5]
+    candidates = []
+    for predictor_id in ("main", "v6_kiwami"):
+        for item in list((ranking_by_predictor or {}).get(predictor_id, []) or []):
+            horse_no = normalize_horse_no_text(item.get("horse_no", ""))
+            if not horse_no or horse_no in seen_horse_nos:
+                continue
+            candidates.append(
+                {
+                    "horse_no": horse_no,
+                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "support": 0.0,
+                    "sources": [predictor_id],
+                    "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+                    "support_score": _morning_absolute_support_score(
+                        {
+                            "support": 0.36,
+                            "sources": [predictor_id],
+                            "top3_prob_model": float(item.get("top3_prob_model", 0.0) or 0.0),
+                        }
+                    ),
+                }
+            )
+            seen_horse_nos.add(horse_no)
+            if len(rows) + len(candidates) >= 5:
+                break
+        if len(rows) + len(candidates) >= 5:
+            break
+    rows.extend(candidates)
+    return rows[:5]
+
+
 def _build_morning_preview_race_item(row):
     run_row = dict(row or {})
     scope_key = str(run_row.get("_report_scope_key", "") or run_row.get("scope", "") or "").strip()
@@ -2450,7 +2518,7 @@ def _build_morning_preview_race_item(row):
         pred_rows = load_csv_rows_flexible(pred_path)
         ranking = build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_odds_map)
         if ranking:
-            ranking_by_predictor[predictor_id] = ranking[:5]
+            ranking_by_predictor[predictor_id] = _morning_prepare_ranking_rows(ranking, name_to_no_map)
 
     if set(ranking_by_predictor.keys()) != {"main", "v6_kiwami"}:
         return {}
@@ -2497,6 +2565,7 @@ def _build_morning_preview_race_item(row):
             str(item.get("horse_no", "") or ""),
         ),
     )[:5]
+    aggregate_rows = _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor)
     if not aggregate_rows:
         return {}
 
@@ -2603,7 +2672,7 @@ def _build_public_morning_preview_payload(target_date="", scope_key=""):
         "target_date": target_date,
         "race_count": len(races),
         "featured_race": featured_race,
-        "confidence_ranking": confidence_ranking[:5],
+        "confidence_ranking": confidence_ranking[:6],
         "races": races,
     }
 

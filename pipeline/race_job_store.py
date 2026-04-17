@@ -661,7 +661,6 @@ def apply_job_action(base_dir, job_id, action):
                 job["settled_at"] = now_text
                 set_job_step_state(job, "settlement", "succeeded", now_text)
         elif action_key in ("reset_schedule", "force_reset"):
-            job["status"] = compute_initial_status(job)
             job["morning_queued_at"] = ""
             job["morning_started_at"] = ""
             job["morning_ready_at"] = ""
@@ -684,6 +683,7 @@ def apply_job_action(base_dir, job_id, action):
             job["error_message"] = ""
             for step_name in JOB_STEP_NAMES:
                 set_job_step_state(job, step_name, "idle")
+            job["status"] = compute_initial_status(job)
         elif action_key == "mark_failed":
             job["status"] = "failed"
             job["error_message"] = "manually marked as failed"
