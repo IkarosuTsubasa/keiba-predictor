@@ -2301,11 +2301,23 @@ def _build_public_predictor_only_races(target_date="", scope_key=""):
             continue
         if _run_date_key(row) != target_date:
             continue
+        if normalize_run_kind((row or {}).get("run_kind", "")) != "final_prediction":
+            continue
         run_id = str((row or {}).get("run_id", "") or "").strip()
         if not run_id:
             continue
-        predictor_cards = _public_predictor_compare_cards(row)
-        if not predictor_cards:
+        has_predictor_outputs = any(
+            str((row or {}).get(field, "") or "").strip()
+            for field in (
+                "predictions_path",
+                "predictions_v2_opus_path",
+                "predictions_v3_premium_path",
+                "predictions_v4_gemini_path",
+                "predictions_v5_stacking_path",
+                "predictions_v6_kiwami_path",
+            )
+        )
+        if not has_predictor_outputs:
             continue
         race_id = normalize_race_id((row or {}).get("race_id", ""))
         if not race_id:
