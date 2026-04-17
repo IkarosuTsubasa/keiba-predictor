@@ -84,62 +84,6 @@ function buildMorningPreviewRace(item, baseRace = null) {
   };
 }
 
-function mergeMorningPreviewRaces(races, preview) {
-  const baseRaces = Array.isArray(races) ? races : [];
-  const morningRaces = Array.isArray(preview?.races) ? preview.races : [];
-  if (!preview?.available || !morningRaces.length) {
-    return baseRaces;
-  }
-
-  const previewMatchKey = (race) => {
-    const raceTitle = String(race?.race_title || "").trim();
-    if (raceTitle) {
-      return `title:${raceTitle}`;
-    }
-    const location = String(race?.location || "").trim();
-    const raceId = String(race?.race_id || "").trim();
-    if (location && raceId) {
-      return `loc:${location}:${raceId}`;
-    }
-    if (raceId) {
-      return `id:${raceId}`;
-    }
-    return "";
-  };
-
-  const morningByRaceId = new Map();
-  for (const item of morningRaces) {
-    const key = previewMatchKey(item);
-    if (key) {
-      morningByRaceId.set(key, item);
-    }
-  }
-
-  const seen = new Set();
-  const merged = baseRaces.map((race) => {
-    const raceKey = previewMatchKey(race);
-    const morning = morningByRaceId.get(raceKey);
-    if (!morning) {
-      return race;
-    }
-    seen.add(raceKey);
-    if (String(race?.display_variant || "").trim() === "placeholder") {
-      return buildMorningPreviewRace(morning, race);
-    }
-    return race;
-  });
-
-  for (const item of morningRaces) {
-    const raceKey = previewMatchKey(item);
-    if (raceKey && seen.has(raceKey)) {
-      continue;
-    }
-    merged.push(buildMorningPreviewRace(item));
-  }
-
-  return merged;
-}
-
 function raceDisplayMatchKey(race) {
   const raceTitle = String(race?.race_title || "").trim();
   if (raceTitle) {
@@ -154,6 +98,84 @@ function raceDisplayMatchKey(race) {
     return `id:${raceId}`;
   }
   return "";
+}
+
+function raceDisplayPriority(race) {
+  const variant = String(race?.display_variant || "").trim();
+  const hasCompareCards = Array.isArray(race?.predictor_compare_cards) && race.predictor_compare_cards.length > 0;
+  const isSettled = Boolean(race?.actual_result?.is_settled);
+  if (variant && variant !== "placeholder" && variant !== "morning_preview") {
+    return isSettled ? 4 : 3;
+  }
+  if (hasCompareCards) {
+    return isSettled ? 4 : 3;
+  }
+  if (variant === "morning_preview") {
+    return 2;
+  }
+  if (variant === "placeholder") {
+    return 0;
+  }
+  return 1;
+}
+
+function shouldReplaceRaceDisplay(currentRace, nextRace) {
+  if (!currentRace) {
+    return true;
+  }
+  const currentPriority = raceDisplayPriority(currentRace);
+  const nextPriority = raceDisplayPriority(nextRace);
+  if (nextPriority !== currentPriority) {
+    return nextPriority > currentPriority;
+  }
+  const currentSettled = Boolean(currentRace?.actual_result?.is_settled);
+  const nextSettled = Boolean(nextRace?.actual_result?.is_settled);
+  if (nextSettled !== currentSettled) {
+    return nextSettled;
+  }
+  const currentRunId = String(currentRace?.run_id || "").trim();
+  const nextRunId = String(nextRace?.run_id || "").trim();
+  if (currentRunId !== nextRunId) {
+    return nextRunId > currentRunId;
+  }
+  return false;
+}
+
+function consolidateBoardRaces(races, preview) {
+  const baseRaces = Array.isArray(races) ? races : [];
+  const morningRaces = Array.isArray(preview?.races) ? preview.races : [];
+  const mergedMap = new Map();
+  const orderedKeys = [];
+
+  const upsertRace = (race) => {
+    const key = raceDisplayMatchKey(race);
+    if (!key) {
+      return;
+    }
+    if (!mergedMap.has(key)) {
+      orderedKeys.push(key);
+      mergedMap.set(key, race);
+      return;
+    }
+    const currentRace = mergedMap.get(key);
+    if (shouldReplaceRaceDisplay(currentRace, race)) {
+      mergedMap.set(key, race);
+    }
+  };
+
+  for (const race of baseRaces) {
+    upsertRace(race);
+  }
+
+  if (preview?.available) {
+    for (const item of morningRaces) {
+      const key = raceDisplayMatchKey(item);
+      const baseRace = key ? mergedMap.get(key) : null;
+      upsertRace(buildMorningPreviewRace(item, baseRace));
+    }
+  }
+
+  return orderedKeys.map((key) => mergedMap.get(key)).filter(Boolean);
 }
 
 function resolveSelectedRace(boardRaces, raceDetailId) {
@@ -457,7 +479,7 @@ export default function App() {
   };
   const races = data?.races || [];
   const boardRaces = useMemo(
-    () => mergeMorningPreviewRaces(races, data?.morning_preview),
+    () => consolidateBoardRaces(races, data?.morning_preview),
     [data?.morning_preview, races],
   );
   const selectedRace = isRaceDetail
