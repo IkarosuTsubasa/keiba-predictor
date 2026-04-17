@@ -114,7 +114,6 @@ object MobileRacesApi {
                     statusLabel = row.optString("status_label").trim(),
                     result = parseResult(row.optJSONObject("result")),
                     summary = parseSummary(row.optJSONObject("summary")),
-                    llmCards = parseLlmCards(row.optJSONArray("llm_cards")),
                     detailPath = row.optString("detail_path").trim(),
                 )
         }
@@ -166,24 +165,4 @@ object MobileRacesApi {
         return items
     }
 
-    private fun parseLlmCards(array: JSONArray?): List<MobileLlmCard> {
-        if (array == null) return emptyList()
-        val items = mutableListOf<MobileLlmCard>()
-        for (index in 0 until array.length()) {
-            val row = array.optJSONObject(index) ?: continue
-            items +=
-                MobileLlmCard(
-                    engine = row.optString("engine").trim(),
-                    label = row.optString("label").trim(),
-                    decisionText = row.optString("decision_text").trim(),
-                    marksText = row.optString("marks_text").trim(),
-                    betSummary = row.optString("bet_summary").trim(),
-                    resultText = row.optString("result_text").trim(),
-                    roiText = row.optString("roi_text").trim(),
-                    hit = row.optBoolean("hit"),
-                    statusLabel = row.optString("status_label").trim(),
-                )
-        }
-        return items
-    }
 }

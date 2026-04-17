@@ -41,7 +41,6 @@ data class MobileRaceItem(
     val statusLabel: String,
     val result: MobileRaceResult,
     val summary: MobileRaceSummary,
-    val llmCards: List<MobileLlmCard>,
     val detailPath: String,
 )
 
@@ -68,16 +67,4 @@ data class MobileRaceFinish(
     val rank: Int,
     val horseNo: String,
     val horseName: String,
-)
-
-data class MobileLlmCard(
-    val engine: String,
-    val label: String,
-    val decisionText: String,
-    val marksText: String,
-    val betSummary: String,
-    val resultText: String,
-    val roiText: String,
-    val hit: Boolean,
-    val statusLabel: String,
 )

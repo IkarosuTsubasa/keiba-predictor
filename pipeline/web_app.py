@@ -1229,6 +1229,18 @@ def _load_combined_llm_report_runs():
     return report_data.load_combined_llm_report_runs(load_runs, LLM_REPORT_SCOPE_KEYS)
 
 
+def _load_combined_scope_runs(scope_key=""):
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    runs = []
+    for report_scope_key in list(scope_keys or []):
+        for row in load_runs(report_scope_key):
+            item = dict(row or {})
+            item["_report_scope_key"] = report_scope_key
+            runs.append(item)
+    return runs
+
+
 def _load_actual_result_map(scope_key):
     return report_data.load_actual_result_map(
         BASE_DIR,
@@ -1850,7 +1862,7 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
     scope_keys = _llm_today_scope_keys(scope_norm)
     scoped_rows = []
     available_dates = set()
-    for row in _load_combined_llm_report_runs():
+    for row in _load_combined_scope_runs(scope_norm):
         report_scope_key = _report_scope_key_for_row(row, scope_norm)
         if report_scope_key not in scope_keys:
             continue
@@ -1886,7 +1898,7 @@ def _published_public_race_keys(target_date="", scope_key=""):
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = _llm_today_scope_keys(scope_norm)
     out = set()
-    for row in _load_combined_llm_report_runs():
+    for row in _load_combined_scope_runs(scope_norm):
         report_scope_key = _report_scope_key_for_row(row, scope_norm)
         if report_scope_key not in scope_keys:
             continue
@@ -2924,22 +2936,6 @@ def _mobile_race_result_payload(row):
     }
 
 
-def _mobile_llm_card_payload(card):
-    row = dict(card or {})
-    return {
-        "engine": str(row.get("engine", "") or "").strip(),
-        "label": str(row.get("label", "") or row.get("engine", "") or "").strip() or "-",
-        "decision_text": str(row.get("decision_text", "") or "").strip(),
-        "marks_text": str(row.get("marks_text", "") or "").strip(),
-        "bet_summary": str(row.get("ticket_plan_text", "") or "").strip(),
-        "result_text": str(row.get("result_triplet_text", "") or "").strip(),
-        "roi_text": str(row.get("roi_text", "") or "").strip() or "-",
-        "hit": int(row.get("hit_count", 0) or 0) > 0,
-        "status_label": str(row.get("status_label", "") or "").strip(),
-        "status_tone": str(row.get("status_tone", "") or "").strip(),
-    }
-
-
 def _mobile_race_summary_payload(row):
     summary = dict(((row or {}).get("consensus_summary") or {}) or {})
     if not summary:
@@ -3072,7 +3068,6 @@ def _mobile_race_list_item(row):
         "status_label": status_label or ("結果確定" if result.get("is_settled") else "確定待ち"),
         "result": result,
         "summary": _mobile_race_summary_payload(item),
-        "llm_cards": [_mobile_llm_card_payload(card) for card in list(item.get("cards", []) or [])],
         "detail_path": detail_path,
     }
 
