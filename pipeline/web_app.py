@@ -1895,7 +1895,10 @@ def _published_public_race_keys(target_date="", scope_key=""):
         run_id = str((row or {}).get("run_id", "") or "").strip()
         if not run_id:
             continue
-        if not list(load_policy_payloads(report_scope_key, run_id, row) or []):
+        has_public_output = bool(list(load_policy_payloads(report_scope_key, run_id, row) or []))
+        if not has_public_output:
+            has_public_output = bool(_public_predictor_compare_cards(row))
+        if not has_public_output:
             continue
         race_id = normalize_race_id((row or {}).get("race_id", ""))
         if not race_id:
@@ -5223,6 +5226,10 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                 initialize_race_job_step_fields=initialize_race_job_step_fields,
                 set_race_job_step_state=set_race_job_step_state,
             )
+            if job_id and not web_remote_predictors.llm_buy_enabled():
+                from race_job_runner import _maybe_send_ntfy_share_notification
+
+                _maybe_send_ntfy_share_notification(BASE_DIR, job_id, scope_key, run_id)
         if task_type != "morning_preview" and web_remote_predictors.remote_predictor_auto_continue_enabled() and job_id:
             web_remote_predictors.auto_continue_remote_policy(base_dir=BASE_DIR, job_id=job_id)
         return JSONResponse({"ok": True, "status": "succeeded", **saved})

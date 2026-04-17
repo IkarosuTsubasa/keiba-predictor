@@ -1482,6 +1482,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 run_id=run_id,
                 reason="llm_buy_disabled",
             )
+            _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id)
             return summary
 
         if use_remote_predictors:
