@@ -20,8 +20,9 @@ def remote_predictor_auto_continue_enabled():
 
 
 def llm_buy_enabled():
-    raw = os.environ.get("PIPELINE_ENABLE_LLM_BUY", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    # LLM buy flow is retired. Remote predictor callbacks should always
+    # promote jobs directly to ready/scheduled paths without policy wait.
+    return False
 
 
 def append_job_process_log_entry(row, step, code, output):

@@ -141,8 +141,9 @@ def remote_predictor_batch_enabled():
 
 
 def llm_buy_enabled():
-    raw = os.environ.get("PIPELINE_ENABLE_LLM_BUY", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    # LLM buy flow is retired. Keep the helper for compatibility, but
+    # always short-circuit the task pipeline to predictor-only readiness.
+    return False
 
 
 def remote_morning_enabled():
