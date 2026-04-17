@@ -2276,6 +2276,78 @@ def _public_predictor_compare_cards(row):
     return cards
 
 
+def _build_public_predictor_only_races(target_date="", scope_key=""):
+    target_date = str(target_date or "").strip()
+    if not target_date:
+        return []
+    scope_norm = normalize_scope_key(scope_key)
+    scope_keys = _llm_today_scope_keys(scope_norm)
+    selected_rows = {}
+    for row in _load_combined_llm_report_runs():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        if report_scope_key not in scope_keys:
+            continue
+        if _run_date_key(row) != target_date:
+            continue
+        run_id = str((row or {}).get("run_id", "") or "").strip()
+        if not run_id:
+            continue
+        predictor_cards = _public_predictor_compare_cards(row)
+        if not predictor_cards:
+            continue
+        race_id = normalize_race_id((row or {}).get("race_id", ""))
+        if not race_id:
+            continue
+        dedupe_key = (report_scope_key, race_id)
+        current = selected_rows.get(dedupe_key)
+        row_key = (
+            str((row or {}).get("timestamp", "") or ""),
+            str((row or {}).get("run_id", "") or ""),
+        )
+        current_key = (
+            str((current or {}).get("timestamp", "") or ""),
+            str((current or {}).get("run_id", "") or ""),
+        )
+        if current is None or row_key >= current_key:
+            selected_rows[dedupe_key] = dict(row or {})
+
+    items = []
+    actual_result_maps = {report_scope_key: _load_actual_result_map(report_scope_key) for report_scope_key in scope_keys}
+    for row in selected_rows.values():
+        report_scope_key = _report_scope_key_for_row(row, scope_norm)
+        run_id = str((row or {}).get("run_id", "") or "").strip()
+        if not run_id:
+            continue
+        job_meta = _find_job_meta_for_run(report_scope_key, run_id, row) or {}
+        actual_snapshot = _actual_result_snapshot(report_scope_key, run_id, row, actual_result_maps.get(report_scope_key, {}))
+        actual_names = list(actual_snapshot.get("actual_names", []) or [])
+        actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
+        actual_text = public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
+        actual_top3 = _public_actual_top3(actual_names, actual_horse_nos)
+        items.append(
+            {
+                "scope_key": report_scope_key,
+                "scope_label": public_scope_label_ja(report_scope_key),
+                "race_id": _public_race_id_text(row),
+                "race_title": _format_race_label(row),
+                "race_name": _safe_text(job_meta.get("race_name")) or _safe_text(row.get("trigger_race")),
+                "date_label": _public_date_label(_safe_text(row.get("race_date")) or target_date),
+                "actual_text": actual_text,
+                "actual_result": {
+                    "is_settled": bool(actual_top3),
+                    "top3": actual_top3,
+                },
+                "location": _safe_text(job_meta.get("location")) or _safe_text(row.get("location")),
+                "scheduled_off_time": _safe_text(job_meta.get("scheduled_off_time")) or _safe_text(row.get("scheduled_off_time")),
+                "distance_label": _format_distance_label(_safe_text(job_meta.get("target_distance")) or _safe_text(row.get("distance"))),
+                "track_condition": _safe_text(job_meta.get("target_track_condition")) or _safe_text(row.get("track_condition")) or "良",
+                "run_id": run_id,
+                "cards": [],
+            }
+        )
+    return items
+
+
 def _morning_run_priority(row):
     run_kind = str((row or {}).get("run_kind", "") or "").strip().lower()
     return (
@@ -2733,6 +2805,8 @@ def build_public_board_payload(date_text="", scope_key=""):
     )
     payload = dict(payload or {})
     target_date = str(payload.get("target_date", "") or "").strip()
+    predictor_only_races = _build_public_predictor_only_races(target_date=target_date, scope_key=scope_key)
+    payload["races"] = list(predictor_only_races)
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
     sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
     enriched_races = []
@@ -2756,9 +2830,38 @@ def build_public_board_payload(date_text="", scope_key=""):
         row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
         enriched_races.append(row)
     payload["races"] = _with_public_display_sort_fields(enriched_races)
+    predictor_public_races = [
+        dict(item or {})
+        for item in list(payload["races"] or [])
+        if str((item or {}).get("display_variant", "") or "").strip() != "placeholder"
+    ]
+    settled_count = sum(
+        1
+        for item in predictor_public_races
+        if bool((((item or {}).get("actual_result", {}) or {}).get("is_settled")))
+    )
     payload["placeholder_race_count"] = len(placeholder_races)
+    payload["summary_cards"] = []
+    payload["all_time_roi"] = {}
+    payload["trend"] = []
+    payload["totals"] = {
+        "race_count": len(predictor_public_races),
+        "engine_count": 0,
+        "stake_yen": 0,
+        "payout_yen": 0,
+        "profit_yen": 0,
+        "settled_count": settled_count,
+        "pending_count": max(0, len(predictor_public_races) - settled_count),
+        "roi_text": "-",
+    }
     payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
+    payload["hero"] = {
+        "lead_race": predictor_public_races[0] if predictor_public_races else {},
+        "leader": dict((payload.get("daily_predictor", {}) or {}).get("top5to3_leader", {}) or {}),
+    }
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
+    if isinstance(payload.get("history"), dict):
+        payload["history"]["llm"] = {"periods": {}}
     payload["daily_report"] = _find_daily_report_for_date(target_date)
     payload["morning_preview"] = _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
     return payload
