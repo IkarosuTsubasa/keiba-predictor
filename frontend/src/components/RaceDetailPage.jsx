@@ -218,6 +218,27 @@ function buildMorningCompareCards(predictorTop5, scheduledOffTime = "") {
     .filter(Boolean);
 }
 
+function mergeCompareCards(primaryCards = [], fallbackCards = []) {
+  const fallbackMap = new Map(
+    (Array.isArray(fallbackCards) ? fallbackCards : [])
+      .filter(Boolean)
+      .map((card) => [String(card?.predictor_id || "").trim(), card]),
+  );
+  const primaryMap = new Map(
+    (Array.isArray(primaryCards) ? primaryCards : [])
+      .filter(Boolean)
+      .map((card) => [String(card?.predictor_id || "").trim(), card]),
+  );
+
+  return PREDICTOR_ORDER.map((predictorId) => {
+    const primary = primaryMap.get(predictorId);
+    if (primary) return primary;
+    const fallback = fallbackMap.get(predictorId);
+    if (fallback) return fallback;
+    return null;
+  }).filter(Boolean);
+}
+
 function buildConfidenceMeta(signalRows, totalSources) {
   const top = signalRows[0] || null;
   const next = signalRows[1] || null;
@@ -394,7 +415,10 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
     () => buildMorningCompareCards(race?.predictor_top5, race?.scheduled_off_time),
     [race?.predictor_top5, race?.scheduled_off_time],
   );
-  const compareCards = predictorCompareCards.length ? predictorCompareCards : morningCompareCards;
+  const compareCards = useMemo(
+    () => mergeCompareCards(predictorCompareCards, morningCompareCards),
+    [morningCompareCards, predictorCompareCards],
+  );
   const activeCompareCount = predictorCompareCards.length
     ? predictorCompareCards.length
     : morningCompareCards.filter((item) => !item?.is_placeholder).length;
