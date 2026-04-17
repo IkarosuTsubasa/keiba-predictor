@@ -1176,6 +1176,25 @@ def _public_result_triplet_text(actual_names):
 def _public_result_triplet_text_with_nos(actual_names, actual_horse_nos):
     return web_public_llm.public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
 
+
+def _public_actual_top3(actual_names, actual_horse_nos):
+    names = list(actual_names or [])[:3]
+    horse_nos = list(actual_horse_nos or [])[:3]
+    items = []
+    for index in range(3):
+        horse_no = str(horse_nos[index] if index < len(horse_nos) else "" or "").strip()
+        horse_name = str(names[index] if index < len(names) else "" or "").strip()
+        if not horse_no and not horse_name:
+            continue
+        items.append(
+            {
+                "rank": index + 1,
+                "horse_no": horse_no,
+                "horse_name": horse_name,
+            }
+        )
+    return items
+
 def _public_date_label(date_text):
     return web_public_llm.public_date_label(date_text, parse_run_date=_parse_run_date)
 
