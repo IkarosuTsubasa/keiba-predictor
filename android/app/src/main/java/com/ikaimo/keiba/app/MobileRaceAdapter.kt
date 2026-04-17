@@ -45,7 +45,7 @@ class MobileRaceAdapter(
                     .joinToString("  ")
             binding.raceStatus.text = item.statusLabel
             binding.raceResult.text = buildResultText(item.result)
-            binding.raceLlmSummary.text = buildLlmSummary(item.llmCards)
+            binding.raceLlmSummary.text = buildSummaryText(item.summary)
             binding.root.isEnabled = detailAvailable
             binding.root.isClickable = detailAvailable
             binding.root.alpha = if (detailAvailable) 1f else 0.72f
@@ -61,18 +61,42 @@ class MobileRaceAdapter(
             }
         }
 
-        private fun buildLlmSummary(cards: List<MobileLlmCard>): String {
-            if (cards.isEmpty()) {
-                return binding.root.context.getString(R.string.races_llm_summary_empty)
+        private fun buildSummaryText(summary: MobileRaceSummary): String {
+            if (summary.top5.isEmpty()) {
+                return binding.root.context.getString(R.string.races_summary_empty)
             }
-            return cards.joinToString("\n\n") { card ->
-                listOf(
-                    card.label,
-                    card.marksText.takeIf { it.isNotBlank() }?.let { "印 $it" },
-                    card.betSummary.takeIf { it.isNotBlank() }?.let { "買い目 $it" },
-                    card.roiText.takeIf { it.isNotBlank() }?.let { "回収率 $it" },
-                ).filterNotNull().joinToString("\n")
-            }
+            val context = binding.root.context
+            val mainHorseNo =
+                summary.mainHorseNo.ifBlank {
+                    summary.top5.firstOrNull()?.horseNo.orEmpty()
+                }
+            val marksLine =
+                summary.top5.take(5).mapIndexedNotNull { index, horse ->
+                    val symbol = when (index) {
+                        0 -> "◎"
+                        1 -> "○"
+                        2 -> "▲"
+                        3 -> "△"
+                        4 -> "☆"
+                        else -> null
+                    } ?: return@mapIndexedNotNull null
+                    val horseNo = horse.horseNo.ifBlank { return@mapIndexedNotNull null }
+                    "$symbol$horseNo"
+                }.joinToString(" ")
+
+            return listOf(
+                context.getString(R.string.races_summary_main_pick, mainHorseNo),
+                context.getString(
+                    R.string.races_summary_meta,
+                    formatPercent(summary.confidenceScore),
+                    formatPercent(summary.agreementScore),
+                ),
+                marksLine.takeIf { it.isNotBlank() },
+            ).filterNotNull().joinToString("\n")
+        }
+
+        private fun formatPercent(value: Double): Int {
+            return (value.coerceIn(0.0, 1.0) * 100.0).toInt()
         }
     }
 }

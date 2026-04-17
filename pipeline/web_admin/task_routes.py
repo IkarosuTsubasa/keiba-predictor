@@ -21,6 +21,8 @@ AUTO_SETTLE_DELAY_MINUTES = 20
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
 ACTIVE_RUN_DUE_JOB_STATUSES = {
+    "queued_morning",
+    "processing_morning",
     "queued_process",
     "processing",
     "waiting_v5",
@@ -164,7 +166,7 @@ def pick_next_process_job_id(*, load_race_jobs):
     jobs = load_race_jobs()
     for job in jobs:
         status = str(job.get("status", "") or "").strip().lower()
-        if status in ("queued_process", "queued_policy"):
+        if status in ("queued_morning", "queued_process", "queued_policy"):
             return str(job.get("job_id", "") or "").strip()
     return ""
 

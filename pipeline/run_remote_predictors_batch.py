@@ -241,8 +241,14 @@ def run_batch(workspace_dir: str):
     surface_token = surface_cli_token(surface)
     target_location = _safe_text(meta.get("location"))
     race_date = _safe_text(meta.get("race_date"))
+    requested_predictor_ids = {
+        str(item or "").strip()
+        for item in list(meta.get("predictor_ids") or [])
+        if str(item or "").strip()
+    }
+    require_odds = bool(meta.get("require_odds", True))
     odds_src = workspace / "odds.csv"
-    if not odds_src.exists():
+    if require_odds and not odds_src.exists():
         raise FileNotFoundError(f"odds.csv not found: {odds_src}")
 
     _emit_batch_log(
@@ -254,6 +260,8 @@ def run_batch(workspace_dir: str):
         track_condition=track_cond_label,
         location=target_location,
         race_date=race_date,
+        predictor_ids=sorted(requested_predictor_ids) if requested_predictor_ids else [spec["id"] for spec in list_predictors()],
+        require_odds=require_odds,
     )
 
     process_log = []
@@ -294,6 +302,8 @@ def run_batch(workspace_dir: str):
         raise RuntimeError(failure_message)
 
     for spec in list_predictors():
+        if requested_predictor_ids and spec["id"] not in requested_predictor_ids:
+            continue
         script_name = _safe_text(spec.get("script_name"))
         latest_name = _safe_text(spec.get("latest_filename"))
         if not script_name or not latest_name:
@@ -466,7 +476,11 @@ def run_batch(workspace_dir: str):
             output_name=latest_name,
             output_path=str(pred_latest_path),
         )
-        ok, msg = validate_prediction_output(predictor_start, pred_latest_path, odds_src)
+        ok, msg = validate_prediction_output(
+            predictor_start,
+            pred_latest_path,
+            odds_src if require_odds and odds_src.exists() else None,
+        )
         tolerated, tolerated_missing = _should_tolerate_validation_mismatch(msg, reconcile_result, workspace)
         if not ok and tolerated:
             process_log.append(
@@ -533,6 +547,7 @@ def run_batch(workspace_dir: str):
         "track_condition": track_cond_label,
         "completed_predictors": list(completed_predictors),
         "output_paths": output_paths,
+        "generated_files": sorted([Path(path).name for path in output_paths.values() if str(path or "").strip()]),
         "process_log": process_log,
     }
     _write_batch_summary(workspace, summary)

@@ -11,6 +11,9 @@ REQUIRED_ARTIFACT_TYPES = ("kachiuma", "shutuba")
 STATUS_FLOW = (
     "uploaded",
     "waiting_input_info",
+    "waiting_morning",
+    "queued_morning",
+    "processing_morning",
     "scheduled",
     "queued_process",
     "processing",
@@ -24,7 +27,7 @@ STATUS_FLOW = (
     "settled",
     "failed",
 )
-JOB_STEP_NAMES = ("odds", "predictor", "policy", "settlement")
+JOB_STEP_NAMES = ("morning", "odds", "predictor", "policy", "settlement")
 JOB_STEP_STATE_FLOW = ("idle", "queued", "running", "succeeded", "failed")
 RUN_KIND_FINAL = "final_prediction"
 RUN_KIND_MORNING = "morning_preview"
@@ -55,6 +58,11 @@ def initialize_job_step_fields(job):
     row.setdefault("ntfy_notify_engine", "")
     row.setdefault("ntfy_notified_at", "")
     row.setdefault("ntfy_notify_error", "")
+    row.setdefault("morning_queued_at", "")
+    row.setdefault("morning_started_at", "")
+    row.setdefault("morning_ready_at", "")
+    row.setdefault("morning_run_id", "")
+    row.setdefault("current_morning_task_id", "")
     for step_name in JOB_STEP_NAMES:
         row.setdefault(_job_step_field(step_name, "status"), "idle")
         row.setdefault(_job_step_field(step_name, "started_at"), "")
@@ -112,11 +120,28 @@ def hydrate_job_step_states(job):
     current_run_id = str(row.get("current_run_id", "") or "").strip()
     actual_names_ready = all(str(row.get(name, "") or "").strip() for name in ("actual_top1", "actual_top2", "actual_top3"))
     if not explicit:
-        if legacy_status == "queued_process":
+        if legacy_status == "queued_morning":
+            row = set_job_step_state(row, "morning", "queued")
+        elif legacy_status == "processing_morning":
+            row = set_job_step_state(
+                row,
+                "morning",
+                "running",
+                row.get("morning_started_at", "") or row.get("updated_at", ""),
+            )
+        elif legacy_status == "queued_process":
             row = set_job_step_state(row, "odds", "queued")
         elif legacy_status == "processing":
             row = set_job_step_state(row, "odds", "running", row.get("processing_started_at", ""))
-        elif legacy_status in ("ready", "queued_settle", "settling", "settled"):
+        elif legacy_status in ("scheduled", "ready", "queued_settle", "settling", "settled"):
+            if str(row.get("morning_ready_at", "") or "").strip() or str(row.get("morning_run_id", "") or "").strip():
+                row = set_job_step_state(
+                    row,
+                    "morning",
+                    "succeeded",
+                    row.get("morning_ready_at", "") or row.get("updated_at", ""),
+                )
+        if legacy_status in ("ready", "queued_settle", "settling", "settled"):
             for step_name in ("odds", "predictor", "policy"):
                 row = set_job_step_state(row, step_name, "succeeded", row.get("ready_at", ""))
         elif legacy_status == "waiting_v5":
@@ -182,6 +207,12 @@ def derive_job_display_state(job):
     row = hydrate_job_step_states(job)
     legacy_status = str(row.get("status", "") or "").strip().lower()
     run_kind = normalize_run_kind(row.get("run_kind", ""))
+    if legacy_status == "waiting_morning":
+        return {"code": "waiting_morning", "label": "速報待機中", "tone": "muted"}
+    if legacy_status == "queued_morning":
+        return {"code": "queued_morning", "label": "速報キュー", "tone": "active"}
+    if legacy_status == "processing_morning":
+        return {"code": "processing_morning", "label": "速報生成中", "tone": "active"}
     if legacy_status == "waiting_v5":
         return {"code": "waiting_v5", "label": "等待远程预测", "tone": "active"}
     if legacy_status == "queued_policy":
@@ -223,7 +254,7 @@ def derive_job_display_state(job):
     if legacy_status == "waiting_input_info":
         return {"code": "waiting_input_info", "label": "情報補完待ち", "tone": "muted"}
     if legacy_status == "scheduled":
-        return {"code": "scheduled", "label": "已排程", "tone": "muted"}
+        return {"code": "scheduled", "label": "最終予想待ち", "tone": "muted"}
     if legacy_status == "uploaded":
         return {"code": "uploaded", "label": "已上传", "tone": "muted"}
     return {"code": legacy_status or "unknown", "label": legacy_status or "-", "tone": "muted"}
@@ -323,12 +354,17 @@ def compute_initial_status(job):
     row = dict(job or {})
     artifact_map = _artifact_index(row.get("artifacts", []))
     has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
+    run_kind = normalize_run_kind(row.get("run_kind", ""))
     scope_key = str(row.get("scope_key", "") or "").strip()
     off_dt = _parse_dt(row.get("scheduled_off_time", ""))
     target_distance = parse_int_text(row.get("target_distance", ""))
     track_condition = str(row.get("target_track_condition", "") or "").strip()
     if has_required and scope_key and off_dt and target_distance and track_condition:
-        return "scheduled"
+        if run_kind == RUN_KIND_MORNING:
+            return "scheduled"
+        if str(row.get("morning_ready_at", "") or "").strip() or str(row.get("morning_run_id", "") or "").strip():
+            return "scheduled"
+        return "waiting_morning"
     if has_required:
         return "waiting_input_info"
     return "uploaded"
@@ -421,6 +457,9 @@ def create_job(
         "created_at": _dt_text(created_at),
         "updated_at": _dt_text(created_at),
         "queued_process_at": "",
+        "morning_queued_at": "",
+        "morning_started_at": "",
+        "morning_ready_at": "",
         "processing_started_at": "",
         "ready_at": "",
         "queued_settle_at": "",
@@ -428,6 +467,8 @@ def create_job(
         "settled_at": "",
         "current_run_id": "",
         "current_v5_task_id": "",
+        "morning_run_id": "",
+        "current_morning_task_id": "",
         "actual_top1": "",
         "actual_top2": "",
         "actual_top3": "",
@@ -487,10 +528,19 @@ def scan_due_jobs(base_dir, now_text=""):
         job = initialize_job_step_fields(job)
         status = str(job.get("status", "")).strip().lower()
         expected_status = compute_initial_status(job)
-        if status == "uploaded" and expected_status in ("waiting_input_info", "scheduled"):
+        if status == "uploaded" and expected_status in ("waiting_input_info", "waiting_morning", "scheduled"):
             job["status"] = expected_status
             status = expected_status
             dirty = True
+        if status == "waiting_morning":
+            job["status"] = "queued_morning"
+            job["morning_queued_at"] = _dt_text(now_dt)
+            job = set_job_step_state(job, "morning", "queued")
+            job["updated_at"] = _dt_text(now_dt)
+            jobs[idx] = job
+            dirty = True
+            changed.append(dict(job))
+            continue
         process_dt = _parse_dt(job.get("process_after_time", ""))
         if process_dt is None:
             derived_process_dt = _derive_process_after_dt(job)
@@ -525,15 +575,19 @@ def scan_due_diagnostics(base_dir, now_text=""):
         artifact_map = _artifact_index(row.get("artifacts", []))
         has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
         expected_status = compute_initial_status(row)
-        effective_status = expected_status if status == "uploaded" and expected_status in ("waiting_input_info", "scheduled") else status
+        effective_status = expected_status if status == "uploaded" and expected_status in ("waiting_input_info", "waiting_morning", "scheduled") else status
         process_dt = _parse_dt(row.get("process_after_time", ""))
         derived_process_dt = _derive_process_after_dt(row) if process_dt is None else process_dt
         reason = "eligible"
-        if effective_status != "scheduled":
+        if effective_status == "waiting_morning":
+            reason = "eligible_morning"
+        elif effective_status != "scheduled":
             if not has_required:
                 reason = "missing_artifacts"
             elif effective_status == "waiting_input_info":
                 reason = "wait_input_info"
+            elif effective_status == "waiting_morning":
+                reason = "wait_morning"
             elif not _parse_dt(row.get("scheduled_off_time", "")):
                 reason = "missing_off_time"
             else:
@@ -564,7 +618,12 @@ def apply_job_action(base_dir, job_id, action):
         job.update(initialize_job_step_fields(job))
         current = str(job.get("status", "")).strip().lower()
         if action_key == "start_processing":
-            if current in ("queued_process", "scheduled"):
+            if current in ("queued_morning", "waiting_morning"):
+                job["status"] = "processing_morning"
+                job["morning_started_at"] = now_text
+                job["error_message"] = ""
+                set_job_step_state(job, "morning", "running", now_text)
+            elif current in ("queued_process", "scheduled"):
                 job["status"] = "processing"
                 job["processing_started_at"] = now_text
                 job["error_message"] = ""
@@ -603,6 +662,11 @@ def apply_job_action(base_dir, job_id, action):
                 set_job_step_state(job, "settlement", "succeeded", now_text)
         elif action_key in ("reset_schedule", "force_reset"):
             job["status"] = compute_initial_status(job)
+            job["morning_queued_at"] = ""
+            job["morning_started_at"] = ""
+            job["morning_ready_at"] = ""
+            job["morning_run_id"] = ""
+            job["current_morning_task_id"] = ""
             job["queued_process_at"] = ""
             job["processing_started_at"] = ""
             job["ready_at"] = ""

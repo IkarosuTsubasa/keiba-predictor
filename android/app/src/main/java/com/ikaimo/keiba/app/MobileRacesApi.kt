@@ -54,8 +54,47 @@ object MobileRacesApi {
             targetDate = data.optString("target_date").trim(),
             targetDateLabel = data.optString("target_date_label").trim(),
             fallbackNotice = data.optString("fallback_notice").trim(),
+            featuredRace = parseFeaturedRace(data.optJSONObject("featured_race")),
+            confidenceRanking = parseConfidenceRanking(data.optJSONArray("confidence_ranking")),
             items = parseRaceItems(data.optJSONArray("items")),
         )
+    }
+
+    private fun parseFeaturedRace(json: JSONObject?): MobileFeaturedRace? {
+        if (json == null) return null
+        val runId = json.optString("run_id").trim()
+        val detailPath = json.optString("detail_path").trim()
+        val summary = parseSummary(json.optJSONObject("summary"))
+        if (runId.isBlank() && detailPath.isBlank() && summary.top5.isEmpty()) return null
+        return MobileFeaturedRace(
+            runId = runId,
+            raceId = json.optString("race_id").trim(),
+            raceTitle = json.optString("race_title").trim(),
+            raceName = json.optString("race_name").trim(),
+            scheduledOffTime = json.optString("scheduled_off_time").trim(),
+            statusLabel = json.optString("status_label").trim(),
+            detailPath = detailPath,
+            summary = summary,
+        )
+    }
+
+    private fun parseConfidenceRanking(array: JSONArray?): List<MobileConfidenceRankingItem> {
+        if (array == null) return emptyList()
+        val items = mutableListOf<MobileConfidenceRankingItem>()
+        for (index in 0 until array.length()) {
+            val row = array.optJSONObject(index) ?: continue
+            items +=
+                MobileConfidenceRankingItem(
+                    runId = row.optString("run_id").trim(),
+                    raceId = row.optString("race_id").trim(),
+                    raceTitle = row.optString("race_title").trim(),
+                    statusLabel = row.optString("status_label").trim(),
+                    detailPath = row.optString("detail_path").trim(),
+                    mainHorseNo = row.optString("main_horse_no").trim(),
+                    confidenceScore = row.optDouble("confidence_score", 0.0),
+                )
+        }
+        return items
     }
 
     private fun parseRaceItems(array: JSONArray?): List<MobileRaceItem> {
@@ -74,6 +113,7 @@ object MobileRacesApi {
                     status = row.optString("status").trim(),
                     statusLabel = row.optString("status_label").trim(),
                     result = parseResult(row.optJSONObject("result")),
+                    summary = parseSummary(row.optJSONObject("summary")),
                     llmCards = parseLlmCards(row.optJSONArray("llm_cards")),
                     detailPath = row.optString("detail_path").trim(),
                 )
@@ -99,6 +139,31 @@ object MobileRacesApi {
             isSettled = json?.optBoolean("is_settled") == true,
             top3 = top3,
         )
+    }
+
+    private fun parseSummary(json: JSONObject?): MobileRaceSummary {
+        return MobileRaceSummary(
+            mainHorseNo = json?.optString("main_horse_no").orEmpty().trim(),
+            confidenceScore = json?.optDouble("confidence_score", 0.0) ?: 0.0,
+            agreementScore = json?.optDouble("agreement_score", 0.0) ?: 0.0,
+            modelCount = json?.optInt("model_count", 0) ?: 0,
+            top5 = parseSummaryTop5(json?.optJSONArray("top5")),
+        )
+    }
+
+    private fun parseSummaryTop5(array: JSONArray?): List<MobileSummaryHorse> {
+        if (array == null) return emptyList()
+        val items = mutableListOf<MobileSummaryHorse>()
+        for (index in 0 until array.length()) {
+            val row = array.optJSONObject(index) ?: continue
+            items +=
+                MobileSummaryHorse(
+                    horseNo = row.optString("horse_no").trim(),
+                    horseName = row.optString("horse_name").trim(),
+                    supportScore = row.optInt("support_score", 0),
+                )
+        }
+        return items
     }
 
     private fun parseLlmCards(array: JSONArray?): List<MobileLlmCard> {

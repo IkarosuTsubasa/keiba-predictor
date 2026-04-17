@@ -98,6 +98,41 @@ def promote_job_after_remote_v5(
     return update_race_job(base_dir, job_id, mutate)
 
 
+def promote_job_after_remote_morning(
+    *,
+    base_dir,
+    job_id,
+    run_id,
+    task_id,
+    log_output,
+    update_race_job,
+    initialize_race_job_step_fields,
+    set_race_job_step_state,
+):
+    def mutate(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
+        current_status = str(row.get("status", "") or "").strip().lower()
+        current_task_id = str(row.get("current_morning_task_id", "") or "").strip()
+        if current_status not in ("queued_morning", "processing_morning"):
+            return
+        if current_task_id and current_task_id != str(task_id or "").strip():
+            return
+        row["status"] = "scheduled"
+        row["morning_ready_at"] = now_text
+        row["morning_run_id"] = str(run_id or "").strip()
+        row["current_morning_task_id"] = ""
+        row["error_message"] = ""
+        row["last_process_output"] = append_job_process_log_entry(
+            row,
+            "morning_remote_callback",
+            0,
+            log_output,
+        )
+        set_race_job_step_state(row, "morning", "succeeded", now_text)
+
+    return update_race_job(base_dir, job_id, mutate)
+
+
 def auto_continue_remote_policy(*, base_dir, job_id):
     target_job_id = str(job_id or "").strip()
     if not target_job_id or not llm_buy_enabled():

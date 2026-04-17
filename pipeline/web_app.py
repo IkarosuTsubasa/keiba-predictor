@@ -2061,6 +2061,149 @@ def _public_display_body(row, variant):
 
 _PUBLIC_COMPARE_MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 _MORNING_TOP5_POSITION_WEIGHTS = (1.0, 0.82, 0.67, 0.54, 0.43)
+_PUBLIC_SUMMARY_MARK_WEIGHTS = {"◎": 1.0, "○": 0.78, "▲": 0.62, "△": 0.48, "☆": 0.36}
+
+
+def _public_numeric_horse_no(value):
+    text = str(value or "").strip()
+    if not text:
+        return 999
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return 999
+
+
+def _public_parse_marks_text(text):
+    parts = []
+    for symbol, horse_no in re.findall(r"([◎○▲△☆])\s*([0-9]+)", str(text or "").strip()):
+        horse_no_text = normalize_horse_no_text(horse_no)
+        if not horse_no_text:
+            continue
+        parts.append({"symbol": symbol, "horse_no": horse_no_text})
+    return parts
+
+
+def _public_consensus_summary(row):
+    item = dict(row or {})
+    top5_source = [dict(entry or {}) for entry in list(item.get("top5", []) or []) if isinstance(entry, dict)]
+    if top5_source:
+        predictor_top5 = item.get("predictor_top5", {})
+        model_count = len([key for key, value in dict(predictor_top5 or {}).items() if list(value or [])])
+        return {
+            "model_count": max(1, int(model_count or 0)),
+            "main_horse_no": str((top5_source[0] or {}).get("horse_no", "") or "").strip(),
+            "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
+            "agreement_score": round(float(item.get("agreement_score", 0.0) or 0.0), 6),
+            "top5": [
+                {
+                    "horse_no": str((entry or {}).get("horse_no", "") or "").strip(),
+                    "horse_name": str((entry or {}).get("horse_name", "") or "").strip(),
+                    "support_score": int((entry or {}).get("support_score", 0) or 0),
+                }
+                for entry in top5_source[:5]
+                if str((entry or {}).get("horse_no", "") or "").strip()
+            ],
+        }
+
+    cards = [dict(card or {}) for card in list(item.get("predictor_compare_cards", []) or []) if isinstance(card, dict)]
+    if not cards:
+        return {}
+
+    horse_scores = {}
+    top_pick_counts = {}
+    horse_names = {}
+    for card in cards:
+        marks = _public_parse_marks_text(card.get("marks_text", ""))
+        if not marks:
+            continue
+        top_horses = [dict(entry or {}) for entry in list(card.get("top_horses", []) or []) if isinstance(entry, dict)]
+        for entry in top_horses:
+            horse_no = str(entry.get("horse_no", "") or "").strip()
+            horse_name = str(entry.get("horse_name", "") or "").strip()
+            if horse_no and horse_name and horse_no not in horse_names:
+                horse_names[horse_no] = horse_name
+        for mark in marks:
+            horse_no = str(mark.get("horse_no", "") or "").strip()
+            symbol = str(mark.get("symbol", "") or "").strip()
+            if not horse_no:
+                continue
+            weight = float(_PUBLIC_SUMMARY_MARK_WEIGHTS.get(symbol, 0.0) or 0.0)
+            if weight <= 0:
+                continue
+            horse_scores[horse_no] = float(horse_scores.get(horse_no, 0.0) or 0.0) + weight
+            if symbol == "◎":
+                top_pick_counts[horse_no] = int(top_pick_counts.get(horse_no, 0) or 0) + 1
+
+    ranked = [
+        {
+            "horse_no": horse_no,
+            "horse_name": str(horse_names.get(horse_no, "") or "").strip(),
+            "support": round(float(score or 0.0), 6),
+            "support_score": max(1, min(99, int(round(48.0 + float(score or 0.0) * 12.0)))),
+            "top_pick_count": int(top_pick_counts.get(horse_no, 0) or 0),
+        }
+        for horse_no, score in horse_scores.items()
+    ]
+    ranked.sort(
+        key=lambda summary_row: (
+            -float(summary_row.get("support", 0.0) or 0.0),
+            -int(summary_row.get("top_pick_count", 0) or 0),
+            _public_numeric_horse_no(summary_row.get("horse_no", "")),
+        )
+    )
+    if not ranked:
+        return {}
+
+    top5 = ranked[:5]
+    model_count = len(cards)
+    lead = dict(top5[0] or {})
+    second = dict(top5[1] or {}) if len(top5) > 1 else {}
+    total_support = sum(float(entry.get("support", 0.0) or 0.0) for entry in top5)
+    agreement_score = (
+        float(lead.get("top_pick_count", 0) or 0) / float(model_count)
+        if model_count > 0
+        else 0.0
+    )
+    concentration_score = (
+        float(lead.get("support", 0.0) or 0.0) / float(total_support)
+        if total_support > 0
+        else 0.0
+    )
+    margin_score = (
+        max(
+            0.0,
+            (float(lead.get("support", 0.0) or 0.0) - float(second.get("support", 0.0) or 0.0))
+            / float(lead.get("support", 0.0) or 1.0),
+        )
+        if float(lead.get("support", 0.0) or 0.0) > 0
+        else 0.32
+    )
+    coverage_score = min(1.0, float(model_count) / 6.0)
+    confidence_score = max(
+        0.12,
+        min(
+            0.97,
+            0.42 * agreement_score
+            + 0.28 * concentration_score
+            + 0.18 * margin_score
+            + 0.12 * coverage_score,
+        ),
+    )
+    return {
+        "model_count": int(model_count),
+        "main_horse_no": str(lead.get("horse_no", "") or "").strip(),
+        "confidence_score": round(float(confidence_score or 0.0), 6),
+        "agreement_score": round(float(agreement_score or 0.0), 6),
+        "top5": [
+            {
+                "horse_no": str(entry.get("horse_no", "") or "").strip(),
+                "horse_name": str(entry.get("horse_name", "") or "").strip(),
+                "support_score": int(entry.get("support_score", 0) or 0),
+            }
+            for entry in top5
+        ],
+    }
 
 
 def _serialize_public_ranking_item(item):
@@ -2622,6 +2765,114 @@ def _mobile_llm_card_payload(card):
     }
 
 
+def _mobile_race_summary_payload(row):
+    summary = dict(((row or {}).get("consensus_summary") or {}) or {})
+    if not summary:
+        summary = _public_consensus_summary(row)
+    if not summary:
+        direct_top5 = list((row or {}).get("top5", []) or [])
+        if direct_top5:
+            summary = {
+                "main_horse_no": str((row or {}).get("main_horse_no", "") or "").strip(),
+                "confidence_score": float((row or {}).get("confidence_score", 0.0) or 0.0),
+                "agreement_score": float((row or {}).get("agreement_score", 0.0) or 0.0),
+                "model_count": 2 if str((row or {}).get("display_variant", "") or "").strip() == "morning_preview" else 0,
+                "top5": direct_top5,
+            }
+    top5 = []
+    for item in list(summary.get("top5", []) or [])[:5]:
+        horse_no = str((item or {}).get("horse_no", "") or "").strip()
+        horse_name = str((item or {}).get("horse_name", "") or "").strip()
+        if not horse_no and not horse_name:
+            continue
+        top5.append(
+            {
+                "horse_no": horse_no,
+                "horse_name": horse_name,
+                "support_score": int((item or {}).get("support_score", 0) or 0),
+            }
+        )
+    return {
+        "main_horse_no": str(summary.get("main_horse_no", "") or "").strip(),
+        "confidence_score": round(float(summary.get("confidence_score", 0.0) or 0.0), 6),
+        "agreement_score": round(float(summary.get("agreement_score", 0.0) or 0.0), 6),
+        "model_count": int(summary.get("model_count", 0) or 0),
+        "top5": top5,
+    }
+
+
+def _mobile_build_morning_preview_row(item, base_row=None):
+    base = dict(base_row or {})
+    morning = dict(item or {})
+    row = dict(base)
+    row.update(morning)
+    row["display_variant"] = "morning_preview"
+    row["display_status"] = {"label": "速報", "tone": "open"}
+    row["display_header"] = {
+        "title": str(base.get("race_title", "") or morning.get("race_title", "") or "").strip() or "-",
+        "subtitle": str(base.get("race_name", "") or morning.get("race_name", "") or "").strip(),
+        "badges": [],
+    }
+    row["display_body"] = {
+        "kind": "morning_preview",
+        "result_text": str(morning.get("summary_text", "") or "").strip() or "速報を表示中",
+    }
+    return row
+
+
+def _mobile_preview_match_key(row):
+    item = dict(row or {})
+    race_title = str(item.get("race_title", "") or "").strip()
+    if race_title:
+        return race_title
+    race_id = str(item.get("race_id", "") or "").strip()
+    location = str(item.get("location", "") or "").strip()
+    if location and race_id:
+        return f"{location}:{race_id}"
+    return race_id
+
+
+def _mobile_merge_morning_preview_rows(rows, preview):
+    base_rows = [dict(item or {}) for item in list(rows or []) if isinstance(item, dict)]
+    morning_rows = [dict(item or {}) for item in list(((preview or {}).get("races", []) or [])) if isinstance(item, dict)]
+    if not morning_rows:
+        return base_rows
+
+    morning_by_key = {}
+    for item in morning_rows:
+        key = _mobile_preview_match_key(item)
+        if key:
+            morning_by_key[key] = item
+
+    merged = []
+    used_keys = set()
+    for row in base_rows:
+        key = _mobile_preview_match_key(row)
+        morning = morning_by_key.get(key)
+        if morning and str(row.get("display_variant", "") or "").strip() == "placeholder":
+            merged.append(_mobile_build_morning_preview_row(morning, row))
+            used_keys.add(key)
+        else:
+            merged.append(row)
+
+    for item in morning_rows:
+        key = _mobile_preview_match_key(item)
+        if key and key in used_keys:
+            continue
+        merged.append(_mobile_build_morning_preview_row(item))
+
+    deduped = []
+    seen_keys = set()
+    for row in merged:
+        key = _mobile_preview_match_key(row)
+        if key and key in seen_keys:
+            continue
+        if key:
+            seen_keys.add(key)
+        deduped.append(row)
+    return deduped
+
+
 def _mobile_race_list_item(row):
     item = dict(row or {})
     result = _mobile_race_result_payload(item)
@@ -2645,6 +2896,7 @@ def _mobile_race_list_item(row):
         "status": status,
         "status_label": status_label or ("結果確定" if result.get("is_settled") else "確定待ち"),
         "result": result,
+        "summary": _mobile_race_summary_payload(item),
         "llm_cards": [_mobile_llm_card_payload(card) for card in list(item.get("cards", []) or [])],
         "detail_path": detail_path,
     }
@@ -2652,13 +2904,54 @@ def _mobile_race_list_item(row):
 
 def _mobile_races_payload(payload):
     board = dict(payload or {})
-    items = [_mobile_race_list_item(row) for row in list(board.get("races", []) or [])]
+    merged_rows = _mobile_merge_morning_preview_rows(board.get("races", []), board.get("morning_preview"))
+    items = [_mobile_race_list_item(row) for row in merged_rows]
+    featured_race = {}
+    confidence_ranking = []
+    ranked_items = [
+        dict(item or {})
+        for item in items
+        if float((((item or {}).get("summary") or {}).get("confidence_score", 0.0) or 0.0)) > 0
+    ]
+    ranked_items.sort(
+        key=lambda item: (
+            -float((((item or {}).get("summary") or {}).get("confidence_score", 0.0) or 0.0)),
+            -float((((item or {}).get("summary") or {}).get("agreement_score", 0.0) or 0.0)),
+            str((item or {}).get("race_title", "") or "").strip(),
+        )
+    )
+    if ranked_items:
+        top_item = dict(ranked_items[0] or {})
+        featured_race = {
+            "run_id": str(top_item.get("run_id", "") or "").strip(),
+            "race_id": str(top_item.get("race_id", "") or "").strip(),
+            "race_title": str(top_item.get("race_title", "") or "").strip(),
+            "race_name": str(top_item.get("race_name", "") or "").strip(),
+            "scheduled_off_time": str(top_item.get("scheduled_off_time", "") or "").strip(),
+            "status_label": str(top_item.get("status_label", "") or "").strip(),
+            "detail_path": str(top_item.get("detail_path", "") or "").strip(),
+            "summary": dict((top_item.get("summary") or {}) or {}),
+        }
+    for item in ranked_items[:6]:
+        confidence_ranking.append(
+            {
+                "run_id": str(item.get("run_id", "") or "").strip(),
+                "race_id": str(item.get("race_id", "") or "").strip(),
+                "race_title": str(item.get("race_title", "") or "").strip(),
+                "status_label": str(item.get("status_label", "") or "").strip(),
+                "detail_path": str(item.get("detail_path", "") or "").strip(),
+                "main_horse_no": str(((item.get("summary") or {}).get("main_horse_no", "") or "")).strip(),
+                "confidence_score": round(float(((item.get("summary") or {}).get("confidence_score", 0.0) or 0.0)), 6),
+            }
+        )
     return {
         "ok": True,
         "data": {
             "target_date": str(board.get("target_date", "") or "").strip(),
             "target_date_label": str(board.get("target_date_label", "") or "").strip(),
             "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
+            "featured_race": featured_race,
+            "confidence_ranking": confidence_ranking,
             "totals": {
                 "race_count": len(items),
                 "settled_count": sum(1 for item in items if bool(((item.get("result") or {}).get("is_settled")))),
@@ -3244,6 +3537,7 @@ def generate_and_store_daily_report(date_text="", scope_key="", policy_engine=""
     return record
 
 _JOB_STEP_LABELS = {
+    "morning": "速報",
     "odds": "オッズ",
     "predictor": "予測",
     "policy": "LLM",
@@ -3327,6 +3621,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
         "total": len(jobs),
         "uploaded": 0,
         "waiting_input_info": 0,
+        "waiting_morning": 0,
         "scheduled": 0,
         "processing": 0,
         "ready": 0,
@@ -3342,9 +3637,11 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             summary["uploaded"] += 1
         elif status == "waiting_input_info":
             summary["waiting_input_info"] += 1
+        elif status == "waiting_morning":
+            summary["waiting_morning"] += 1
         elif status == "scheduled":
             summary["scheduled"] += 1
-        elif status in ("queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
+        elif status in ("queued_morning", "processing_morning", "queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
             summary["processing"] += 1
         elif status in ("ready", "preview_ready"):
             summary["ready"] += 1
@@ -3357,7 +3654,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             continue
 
         step_badges = []
-        for step_name in ("odds", "predictor", "policy", "settlement"):
+        for step_name in ("morning", "odds", "predictor", "policy", "settlement"):
             state = str(hydrated.get(f"{step_name}_status", "idle") or "idle").strip().lower() or "idle"
             step_badges.append(
                 {
@@ -4798,6 +5095,7 @@ async def internal_v5_task_callback(task_id: str, request: Request):
         summary_payload = {}
     job_id = str((task or {}).get("job_id", "") or "").strip()
     run_id = str((task or {}).get("run_id", "") or "").strip()
+    task_type = str((task or {}).get("task_type", "") or "").strip().lower()
 
     if status == "succeeded":
         try:
@@ -4834,17 +5132,29 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                 }
             ),
         )
-        web_remote_predictors.promote_job_after_remote_v5(
-            base_dir=BASE_DIR,
-            job_id=job_id,
-            run_id=run_id,
-            task_id=task_id,
-            log_output=log_excerpt,
-            update_race_job=update_race_job,
-            initialize_race_job_step_fields=initialize_race_job_step_fields,
-            set_race_job_step_state=set_race_job_step_state,
-        )
-        if web_remote_predictors.remote_predictor_auto_continue_enabled() and job_id:
+        if task_type == "morning_preview":
+            web_remote_predictors.promote_job_after_remote_morning(
+                base_dir=BASE_DIR,
+                job_id=job_id,
+                run_id=run_id,
+                task_id=task_id,
+                log_output=log_excerpt,
+                update_race_job=update_race_job,
+                initialize_race_job_step_fields=initialize_race_job_step_fields,
+                set_race_job_step_state=set_race_job_step_state,
+            )
+        else:
+            web_remote_predictors.promote_job_after_remote_v5(
+                base_dir=BASE_DIR,
+                job_id=job_id,
+                run_id=run_id,
+                task_id=task_id,
+                log_output=log_excerpt,
+                update_race_job=update_race_job,
+                initialize_race_job_step_fields=initialize_race_job_step_fields,
+                set_race_job_step_state=set_race_job_step_state,
+            )
+        if task_type != "morning_preview" and web_remote_predictors.remote_predictor_auto_continue_enabled() and job_id:
             web_remote_predictors.auto_continue_remote_policy(base_dir=BASE_DIR, job_id=job_id)
         return JSONResponse({"ok": True, "status": "succeeded", **saved})
 

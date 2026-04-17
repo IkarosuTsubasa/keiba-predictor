@@ -145,6 +145,11 @@ def llm_buy_enabled():
     return raw in ("1", "true", "yes", "on")
 
 
+def remote_morning_enabled():
+    raw = os.environ.get("PIPELINE_REMOTE_MORNING_ENABLED", "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
 def expected_odds_output_names(scope_key):
     return [
         "odds.csv",
@@ -175,6 +180,16 @@ def _mark_job_processing_started(row, now_text, skip_odds=False):
     set_job_step_state(row, "odds", "succeeded" if skip_odds else "running", now_text)
     set_job_step_state(row, "predictor", "running" if skip_odds else "idle", now_text)
     set_job_step_state(row, "policy", "idle")
+
+
+def _mark_job_morning_started(row, now_text):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "processing_morning"
+    row["morning_started_at"] = now_text
+    row["current_morning_task_id"] = ""
+    row["error_message"] = ""
+    row["last_process_output"] = ""
+    set_job_step_state(row, "morning", "running", now_text)
 
 
 def _mark_odds_succeeded_and_predictor_running(row, now_text):
@@ -245,12 +260,42 @@ def _mark_predictor_succeeded_and_preview_ready(row, now_text, run_id, summary):
     set_job_step_state(row, "policy", "idle")
 
 
+def _mark_morning_dispatched(row, now_text, run_id, task_id, summary):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "processing_morning"
+    row["morning_started_at"] = str(row.get("morning_started_at", "") or now_text)
+    row["morning_run_id"] = str(run_id or "").strip()
+    row["current_morning_task_id"] = str(task_id or "").strip()
+    row["error_message"] = ""
+    row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
+    set_job_step_state(row, "morning", "running", now_text)
+
+
+def _mark_morning_succeeded_and_scheduled(row, now_text, run_id, summary):
+    row.update(initialize_job_step_fields(row))
+    row["status"] = "scheduled"
+    row["morning_ready_at"] = now_text
+    row["morning_run_id"] = str(run_id or "").strip()
+    row["current_morning_task_id"] = ""
+    row["error_message"] = ""
+    row["last_process_output"] = json.dumps(summary, ensure_ascii=False, indent=2)
+    set_job_step_state(row, "morning", "succeeded", now_text)
+
+
 def _job_run_kind(job):
     return normalize_run_kind((job or {}).get("run_kind", ""))
 
 
+def _job_status(job):
+    return str((job or {}).get("status", "") or "").strip().lower()
+
+
+def _is_morning_stage(job):
+    return _job_run_kind(job) == RUN_KIND_MORNING or _job_status(job) in ("queued_morning", "processing_morning")
+
+
 def _job_predictor_ids(job):
-    if _job_run_kind(job) == RUN_KIND_MORNING:
+    if _is_morning_stage(job):
         return MORNING_PREVIEW_PREDICTOR_IDS
     return tuple(spec["id"] for spec in list_predictors())
 
@@ -833,13 +878,13 @@ def _run_policy_engine_subprocess(base_path, scope_key, run_id, engine, policy_m
         return result
 
 
-def _build_run_row(job, run_id, snapshot_paths):
+def _build_run_row(job, run_id, snapshot_paths, *, run_kind_override="", predictor_ids_override=None):
     race_id = str(job.get("race_id", "") or "").strip()
     scope_key = str(job.get("scope_key", "") or "").strip()
     race_name = str(job.get("race_name", "") or "").strip()
     race_url = _race_url(scope_key, race_id)
-    run_kind = _job_run_kind(job)
-    predictor_ids = ",".join(_job_predictor_ids(job))
+    run_kind = normalize_run_kind(run_kind_override) if str(run_kind_override or "").strip() else _job_run_kind(job)
+    predictor_ids = ",".join(tuple(predictor_ids_override or ()) or _job_predictor_ids(job))
     return {
         "run_id": run_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -947,7 +992,9 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     if not race_id or not scope_key:
         raise ValueError("race job missing race_id or scope_key")
     run_kind = _job_run_kind(job)
-    use_remote_predictors = remote_predictor_batch_enabled() and run_kind != RUN_KIND_MORNING
+    morning_stage = _is_morning_stage(job)
+    use_remote_predictors = remote_predictor_batch_enabled() and not morning_stage
+    use_remote_morning = remote_morning_enabled() and morning_stage
     predictor_ids = set(_job_predictor_ids(job))
     status_text = str(job.get("status", "") or "").strip().lower()
     if status_text == "queued_policy":
@@ -1029,7 +1076,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         job_id=job_id,
         race_id=race_id,
         scope_key=scope_key,
-        run_kind=run_kind,
+        run_kind="morning_preview" if morning_stage else run_kind,
         predictor_ids=sorted(predictor_ids),
         policy_engines=list(policy_engines or ("openai", "gemini", "deepseek", "grok")) if llm_buy_enabled() else [],
     )
@@ -1042,10 +1089,16 @@ def process_race_job(base_dir, job_id, policy_engines=None):
     update_job(
         base_path,
         job_id,
-        lambda row, now_text: _mark_job_processing_started(
-            row,
-            now_text,
-            skip_odds=(run_kind == RUN_KIND_MORNING),
+        (
+            (lambda row, now_text: _mark_job_morning_started(row, now_text))
+            if morning_stage
+            else (
+                lambda row, now_text: _mark_job_processing_started(
+                    row,
+                    now_text,
+                    skip_odds=False,
+                )
+            )
         ),
     )
 
@@ -1073,16 +1126,16 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         shutil.copy2(shutuba_path, workspace / "shutuba.csv")
 
         odds_src = workspace / "odds.csv"
-        if run_kind == RUN_KIND_MORNING:
+        if morning_stage:
             summary["process_log"].append(
                 {
                     "step": "odds_extract",
                     "code": 0,
-                    "output": "skipped for morning_preview",
+                    "output": "skipped for morning stage",
                 }
             )
-            _log_runner_event("odds_stage_skipped", job_id=job_id, run_kind=run_kind)
-            _log_memory_checkpoint("odds_stage_skipped", job_id=job_id, run_kind=run_kind)
+            _log_runner_event("odds_stage_skipped", job_id=job_id, run_kind="morning_preview")
+            _log_memory_checkpoint("odds_stage_skipped", job_id=job_id, run_kind="morning_preview")
         else:
             race_url = _race_url(scope_key, race_id)
             if not race_url:
@@ -1134,6 +1187,75 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         surface_token = surface_cli_token(surface)
         target_location = _job_predictor_location(job)
         race_date = _job_race_date(job)
+        if use_remote_morning:
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            summary["run_id"] = run_id
+            run_row = _build_run_row(
+                job,
+                run_id,
+                {},
+                run_kind_override=RUN_KIND_MORNING,
+                predictor_ids_override=MORNING_PREVIEW_PREDICTOR_IDS,
+            )
+            _append_csv(data_dir / "runs.csv", run_row)
+            _log_runner_event(
+                "run_row_saved",
+                job_id=job_id,
+                run_id=run_id,
+                runs_csv=str(data_dir / "runs.csv"),
+                run_kind="morning_preview",
+            )
+            task = create_v5_remote_task(
+                base_path,
+                job_id=job_id,
+                run_id=run_id,
+                race_id=race_id,
+                scope_key=scope_key,
+                task_type="morning_preview",
+                bundle_files={
+                    "kachiuma.csv": kachiuma_path,
+                    "shutuba.csv": shutuba_path,
+                },
+                bundle_meta={
+                    "race_id": race_id,
+                    "run_id": run_id,
+                    "scope_key": scope_key,
+                    "location": target_location,
+                    "race_date": race_date,
+                    "surface": surface,
+                    "distance": distance,
+                    "track_condition": track_cond_label,
+                    "predictor_ids": list(MORNING_PREVIEW_PREDICTOR_IDS),
+                    "require_odds": False,
+                },
+            )
+            dispatch_info = _dispatch_remote_v5_task(base_path, task)
+            summary["morning_remote_task_id"] = str(task.get("task_id", "") or "").strip()
+            summary["process_log"].append(
+                {
+                    "step": "morning_remote_dispatch",
+                    "code": 0,
+                    "output": json.dumps(dispatch_info, ensure_ascii=False),
+                }
+            )
+            update_job(
+                base_path,
+                job_id,
+                lambda row, now_text: _mark_morning_dispatched(
+                    row,
+                    now_text,
+                    run_id,
+                    task.get("task_id", ""),
+                    summary,
+                ),
+            )
+            _log_runner_event(
+                "morning_stage_waiting_remote_batch",
+                job_id=job_id,
+                run_id=run_id,
+                task_id=str(task.get("task_id", "") or "").strip(),
+            )
+            return summary
         if not use_remote_predictors:
             _log_memory_checkpoint("predictor_batch_start", job_id=job_id)
             for spec in list_predictors():
@@ -1305,7 +1427,7 @@ def process_race_job(base_dir, job_id, policy_engines=None):
                 _log_memory_checkpoint("predictor_stage_done", job_id=job_id, predictor_id=spec["id"])
             _log_memory_checkpoint("predictor_batch_done", job_id=job_id)
 
-        if not use_remote_predictors and run_kind != RUN_KIND_MORNING and llm_buy_enabled():
+        if not use_remote_predictors and not morning_stage and llm_buy_enabled():
             update_job(
                 base_path,
                 job_id,
@@ -1315,21 +1437,27 @@ def process_race_job(base_dir, job_id, policy_engines=None):
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         summary["run_id"] = run_id
         snapshot_paths = _snapshot_outputs(base_path, scope_key, race_id, run_id, workspace)
-        run_row = _build_run_row(job, run_id, snapshot_paths)
+        run_row = _build_run_row(
+            job,
+            run_id,
+            snapshot_paths,
+            run_kind_override=RUN_KIND_MORNING if morning_stage else "",
+            predictor_ids_override=MORNING_PREVIEW_PREDICTOR_IDS if morning_stage else None,
+        )
         _append_csv(data_dir / "runs.csv", run_row)
         _log_runner_event("run_row_saved", job_id=job_id, run_id=run_id, runs_csv=str(data_dir / "runs.csv"))
         _log_memory_checkpoint("run_row_saved", job_id=job_id, run_id=run_id)
 
-        if run_kind == RUN_KIND_MORNING:
+        if morning_stage:
             summary["preview_ready"] = True
             update_job(
                 base_path,
                 job_id,
-                lambda row, now_text: _mark_predictor_succeeded_and_preview_ready(
+                lambda row, now_text: _mark_morning_succeeded_and_scheduled(
                     row, now_text, run_id, summary
                 ),
             )
-            _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, run_kind=run_kind)
+            _log_runner_event("process_job_done", job_id=job_id, run_id=run_id, run_kind="morning_preview")
             return summary
 
         if not llm_buy_enabled() and not use_remote_predictors:

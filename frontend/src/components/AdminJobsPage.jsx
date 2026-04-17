@@ -621,6 +621,9 @@ function JobCard({ job, onAction, busyAction }) {
         <button type="button" disabled={busy} onClick={() => onAction("fetch_info", job)}>
           {busy ? "取得中..." : "情報取得"}
         </button>
+        <button type="button" disabled={busy} onClick={() => onAction("reset_schedule", job)}>
+          {busy ? "再計算中..." : "スケジュール再計算"}
+        </button>
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
           {busy ? "処理中..." : "今すぐ実行"}
         </button>
@@ -753,9 +756,14 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     setFlashMessage("");
 
     try {
-      await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
+      if (kind === "reset_schedule") {
+        await postJson("/api/admin/jobs/update", { job_id: jobId, action: "reset_schedule" });
+      } else {
+        await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
+      }
       const messages = {
         fetch_info: `タスク ${jobId} の情報を取得しました。`,
+        reset_schedule: `タスク ${jobId} のスケジュールを再計算しました。`,
         process_now: `タスク ${jobId} の処理を開始しました。`,
         delete: `タスク ${jobId} を削除しました。`,
         edit: `タスク ${jobId} を更新しました。`,

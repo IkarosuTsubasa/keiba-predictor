@@ -96,14 +96,34 @@ jobs:
               except Exception:
                   summary = {}
 
-          required_files = [
-              "predictions.csv",
-              "predictions_v2_opus.csv",
-              "predictions_v3_premium.csv",
-              "predictions_v4_gemini.csv",
-              "predictions_v5_stacking.csv",
-              "predictions_v6_kiwami.csv",
+          task_meta = {}
+          task_meta_path = work_dir / "task_meta.json"
+          if task_meta_path.exists():
+              try:
+                  task_meta = json.loads(task_meta_path.read_text(encoding="utf-8"))
+              except Exception:
+                  task_meta = {}
+
+          predictor_to_file = {
+              "main": "predictions.csv",
+              "v2_opus": "predictions_v2_opus.csv",
+              "v3_premium": "predictions_v3_premium.csv",
+              "v4_gemini": "predictions_v4_gemini.csv",
+              "v5_stacking": "predictions_v5_stacking.csv",
+              "v6_kiwami": "predictions_v6_kiwami.csv",
+          }
+          requested_predictor_ids = [
+              str(item or "").strip()
+              for item in list(task_meta.get("predictor_ids") or [])
+              if str(item or "").strip()
           ]
+          required_files = [
+              predictor_to_file[predictor_id]
+              for predictor_id in requested_predictor_ids
+              if predictor_id in predictor_to_file
+          ]
+          if not required_files:
+              required_files = list(predictor_to_file.values())
           missing_files = [name for name in required_files if not (work_dir / name).exists()]
 
           if exit_code == 0 and not missing_files:
