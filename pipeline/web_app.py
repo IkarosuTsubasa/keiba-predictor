@@ -2346,7 +2346,7 @@ def _build_public_predictor_only_races(target_date="", scope_key=""):
         actual_snapshot = _actual_result_snapshot(report_scope_key, run_id, row, actual_result_maps.get(report_scope_key, {}))
         actual_names = list(actual_snapshot.get("actual_names", []) or [])
         actual_horse_nos = list(actual_snapshot.get("actual_horse_nos", []) or [])
-        actual_text = public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
+        actual_text = _public_result_triplet_text_with_nos(actual_names, actual_horse_nos)
         actual_top3 = _public_actual_top3(actual_names, actual_horse_nos)
         items.append(
             {
