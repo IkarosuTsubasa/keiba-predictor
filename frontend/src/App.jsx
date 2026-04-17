@@ -140,6 +140,44 @@ function mergeMorningPreviewRaces(races, preview) {
   return merged;
 }
 
+function raceDisplayMatchKey(race) {
+  const raceTitle = String(race?.race_title || "").trim();
+  if (raceTitle) {
+    return `title:${raceTitle}`;
+  }
+  const location = String(race?.location || "").trim();
+  const raceId = String(race?.race_id || "").trim();
+  if (location && raceId) {
+    return `loc:${location}:${raceId}`;
+  }
+  if (raceId) {
+    return `id:${raceId}`;
+  }
+  return "";
+}
+
+function resolveSelectedRace(boardRaces, raceDetailId) {
+  const matchedRace = (Array.isArray(boardRaces) ? boardRaces : []).find((race) =>
+    matchRaceIdentifier(race, raceDetailId),
+  );
+  if (!matchedRace) {
+    return null;
+  }
+  if (String(matchedRace?.display_variant || "").trim() !== "morning_preview") {
+    return matchedRace;
+  }
+  const matchKey = raceDisplayMatchKey(matchedRace);
+  if (!matchKey) {
+    return matchedRace;
+  }
+  const preferredRace = (Array.isArray(boardRaces) ? boardRaces : []).find((race) => {
+    if (race === matchedRace) return false;
+    if (raceDisplayMatchKey(race) !== matchKey) return false;
+    return String(race?.display_variant || "").trim() !== "morning_preview";
+  });
+  return preferredRace || matchedRace;
+}
+
 function extractSelectedDate(search) {
   try {
     return new URLSearchParams(String(search || "")).get("date") || "";
@@ -423,7 +461,7 @@ export default function App() {
     [data?.morning_preview, races],
   );
   const selectedRace = isRaceDetail
-    ? boardRaces.find((race) => matchRaceIdentifier(race, raceDetailId))
+    ? resolveSelectedRace(boardRaces, raceDetailId)
     : null;
 
   useEffect(() => {

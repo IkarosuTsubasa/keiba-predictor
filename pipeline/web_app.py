@@ -2295,7 +2295,7 @@ def _build_public_predictor_only_races(target_date="", scope_key=""):
     scope_norm = normalize_scope_key(scope_key)
     scope_keys = _llm_today_scope_keys(scope_norm)
     selected_rows = {}
-    for row in _load_combined_llm_report_runs():
+    for row in _load_combined_scope_runs(scope_norm):
         report_scope_key = _report_scope_key_for_row(row, scope_norm)
         if report_scope_key not in scope_keys:
             continue
