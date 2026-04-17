@@ -3,6 +3,7 @@ import AutoFitLine from "./AutoFitLine";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
+  buildPredictorConsensusSummary,
   formatRaceBadges,
   parseMarks,
   parseResultEntries,
@@ -419,9 +420,6 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
     () => mergeCompareCards(predictorCompareCards, morningCompareCards),
     [morningCompareCards, predictorCompareCards],
   );
-  const activeCompareCount = predictorCompareCards.length
-    ? predictorCompareCards.length
-    : morningCompareCards.filter((item) => !item?.is_placeholder).length;
   const status = race?.display_status || {};
   const isSettled = variant === "settled";
   const resultText = isSettled
@@ -435,9 +433,12 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
         : buildMorningIndexRows(race?.top5, race?.predictor_top5),
     [predictorCompareCards, race?.predictor_top5, race?.top5],
   );
-  const confidenceMeta = useMemo(
-    () => buildConfidenceMeta(signalRows, activeCompareCount),
-    [activeCompareCount, signalRows],
+  const derivedSummary = useMemo(
+    () =>
+      !Array.isArray(race?.top5) || !race.top5.length
+        ? buildPredictorConsensusSummary(race?.predictor_compare_cards)
+        : null,
+    [race?.predictor_compare_cards, race?.top5],
   );
   const badges = formatRaceBadges(race).filter(
     (item) => !["良", "稍重", "重", "不良"].includes(String(item || "").trim()),
@@ -447,9 +448,9 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
     race?.display_header?.detail_title || race?.display_header?.title || "-",
   ).trim() || "-";
   const detailConfidenceText =
-    Number.isFinite(Number(race?.confidence_score))
-      ? `${Math.round(Number(race.confidence_score) * 100)}%`
-      : confidenceMeta.percentText;
+    Number.isFinite(Number(race?.confidence_score ?? derivedSummary?.confidence_score))
+      ? `${Math.round(Number(race?.confidence_score ?? derivedSummary?.confidence_score) * 100)}%`
+      : "-";
   const conditionRanking = race?.condition_predictor_ranking || {};
 
   return (
