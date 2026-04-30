@@ -2845,15 +2845,15 @@ def _public_race_match_id(row, target_id):
 
 def _public_race_display_match_key(row):
     item = dict(row or {})
-    race_title = str(item.get("race_title", "") or "").strip()
-    if race_title:
-        return f"title:{race_title}"
     location = str(item.get("location", "") or "").strip()
     race_id = str(item.get("race_id", "") or "").strip()
     if location and race_id:
         return f"loc:{location}:{race_id}"
     if race_id:
         return f"id:{race_id}"
+    race_title = str(item.get("race_title", "") or "").strip()
+    if race_title:
+        return f"title:{race_title}"
     return ""
 
 
@@ -2905,7 +2905,10 @@ def _public_build_morning_preview_display_row(item, base_row=None):
         "kind": "morning_preview",
         "result_text": str(morning.get("summary_text", "") or "").strip() or "速報を表示中",
     }
-    row["cards"] = list(row.get("cards", []) or [])
+    row["predictor_compare_cards"] = []
+    row["cards"] = []
+    row["actual_result"] = {"is_settled": False, "top3": []}
+    row["consensus_summary"] = {}
     return row
 
 

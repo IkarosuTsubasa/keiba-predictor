@@ -81,15 +81,16 @@ function buildMorningPreviewRace(item, baseRace = null) {
       kind: "morning_preview",
       result_text: item?.summary_text || "速報を表示中",
     },
+    predictor_compare_cards: [],
+    actual_result: {
+      is_settled: false,
+      top3: [],
+    },
     cards: [],
   };
 }
 
 function raceDisplayMatchKey(race) {
-  const raceTitle = String(race?.race_title || "").trim();
-  if (raceTitle) {
-    return `title:${raceTitle}`;
-  }
   const location = String(race?.location || "").trim();
   const raceId = String(race?.race_id || "").trim();
   if (location && raceId) {
@@ -97,6 +98,10 @@ function raceDisplayMatchKey(race) {
   }
   if (raceId) {
     return `id:${raceId}`;
+  }
+  const raceTitle = String(race?.race_title || "").trim();
+  if (raceTitle) {
+    return `title:${raceTitle}`;
   }
   return "";
 }
