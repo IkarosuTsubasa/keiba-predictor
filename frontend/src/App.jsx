@@ -27,6 +27,7 @@ const APP_BASE_PATH = "/keiba";
 const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
+const PUBLIC_RACE_DETAIL_API_PATH = `${APP_BASE_PATH}/api/public/races`;
 const { useMemo } = React;
 
 function buildQuery(search) {
@@ -103,7 +104,7 @@ function raceDisplayMatchKey(race) {
 function raceDisplayPriority(race) {
   const variant = String(race?.display_variant || "").trim();
   const hasCompareCards = Array.isArray(race?.predictor_compare_cards) && race.predictor_compare_cards.length > 0;
-  const isSettled = Boolean(race?.actual_result?.is_settled);
+  const isSettled = variant === "settled";
   if (variant && variant !== "placeholder" && variant !== "morning_preview") {
     return isSettled ? 4 : 3;
   }
@@ -128,8 +129,8 @@ function shouldReplaceRaceDisplay(currentRace, nextRace) {
   if (nextPriority !== currentPriority) {
     return nextPriority > currentPriority;
   }
-  const currentSettled = Boolean(currentRace?.actual_result?.is_settled);
-  const nextSettled = Boolean(nextRace?.actual_result?.is_settled);
+  const currentSettled = String(currentRace?.display_variant || "").trim() === "settled";
+  const nextSettled = String(nextRace?.display_variant || "").trim() === "settled";
   if (nextSettled !== currentSettled) {
     return nextSettled;
   }
@@ -309,6 +310,60 @@ function useBoardData(search, enabled = true) {
   return state;
 }
 
+function useRaceDetailData(raceId, search, enabled = true) {
+  const [state, setState] = useState({
+    loading: enabled,
+    error: "",
+    data: null,
+  });
+
+  useEffect(() => {
+    if (!enabled || !raceId) {
+      setState({ loading: false, error: "", data: null });
+      return;
+    }
+
+    let alive = true;
+    setState({ loading: true, error: "", data: null });
+
+    fetch(`${PUBLIC_RACE_DETAIL_API_PATH}/${encodeURIComponent(raceId)}${buildQuery(search)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (response.status === 404) {
+          return { ok: false, data: { race: null } };
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((payload) => {
+        if (!alive) return;
+        setState({
+          loading: false,
+          error: "",
+          data: payload?.data || { race: null },
+        });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setState({
+          loading: false,
+          error: error?.message || "レース詳細の読み込みに失敗しました。",
+          data: null,
+        });
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [enabled, raceId, search]);
+
+  return state;
+}
+
 function LoadingState() {
   return (
     <section className="public-screen-state">
@@ -459,10 +514,19 @@ export default function App() {
   const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
   const { loading, error, data } = useBoardData(
     search,
-    !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail,
+    !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail && !isRaceDetail,
+  );
+  const {
+    loading: detailLoading,
+    error: detailError,
+    data: detailData,
+  } = useRaceDetailData(
+    raceDetailId,
+    search,
+    !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail && isRaceDetail,
   );
   const targetDateContext = data ? buildTargetDateContext(data) : null;
-  const nextPredictionSource = headerData || data;
+  const nextPredictionSource = headerData || (!isRaceDetail ? data : null);
   const nextPrediction = nextPredictionSource
     ? buildNextPredictionSummary(nextPredictionSource)
     : null;
@@ -483,7 +547,7 @@ export default function App() {
     [data?.morning_preview, races],
   );
   const selectedRace = isRaceDetail
-    ? resolveSelectedRace(boardRaces, raceDetailId)
+    ? detailData?.race || null
     : null;
 
   useEffect(() => {
@@ -549,7 +613,7 @@ export default function App() {
     );
   }
 
-  if (loading) {
+  if (!isRaceDetail && loading) {
     return (
       <PublicFrame
         appShell={isAppShell}
@@ -564,7 +628,22 @@ export default function App() {
     );
   }
 
-  if (error || !data) {
+  if (isRaceDetail && detailLoading) {
+    return (
+      <PublicFrame
+        appShell={isAppShell}
+        headerProps={publicHeaderProps}
+        sideNavProps={{
+          ...basePublicSideNavProps,
+          detailHref: `${normalizedPath}${buildQuery(search)}`,
+        }}
+      >
+        <LoadingState />
+      </PublicFrame>
+    );
+  }
+
+  if (!isRaceDetail && (error || !data)) {
     return (
       <PublicFrame
         appShell={isAppShell}
@@ -576,6 +655,24 @@ export default function App() {
       >
         <ErrorState
           error={error}
+          onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))}
+        />
+      </PublicFrame>
+    );
+  }
+
+  if (isRaceDetail && detailError) {
+    return (
+      <PublicFrame
+        appShell={isAppShell}
+        headerProps={publicHeaderProps}
+        sideNavProps={{
+          ...basePublicSideNavProps,
+          detailHref: `${normalizedPath}${buildQuery(search)}`,
+        }}
+      >
+        <ErrorState
+          error={detailError}
           onRetry={() => setSearch(window.location.search.replace(/^\?/, ""))}
         />
       </PublicFrame>
@@ -618,7 +715,7 @@ export default function App() {
             pathname: normalizedPath,
             mode: "detail",
             detailHref: `${normalizedPath}${buildQuery(search)}`,
-            data,
+            data: detailData,
             search,
             onApplyFilters: navigateWithSearch,
             showTargetFilter: true,
@@ -655,7 +752,7 @@ export default function App() {
             selectedRace?.display_header?.detail_title ||
             selectedRace?.display_header?.title ||
             "レース詳細",
-          data,
+          data: detailData,
           search,
           onApplyFilters: navigateWithSearch,
           showTargetFilter: true,

@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingOverrideUrl: String? = null
     private var pendingOverrideTitle: String? = null
     private var racesLoaded = false
+    private var nativeRaceTargetDate: String = ""
     private val mobileRaceAdapter = MobileRaceAdapter(::openRaceDetail)
     private val launchReloadRunnable =
         Runnable {
@@ -514,6 +515,7 @@ class MainActivity : AppCompatActivity() {
                 val payload = MobileRacesApi.fetchRaceList(BuildConfig.BASE_WEB_URL, token)
                 runOnUiThread {
                     racesLoaded = true
+                    nativeRaceTargetDate = payload.targetDate
                     binding.nativeRacesProgress.visibility = View.GONE
                     binding.nativeRaceSwipeRefresh.isRefreshing = false
                     binding.nativeRaceDateLabel.text = payload.targetDateLabel.ifBlank { payload.targetDate }
@@ -559,14 +561,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openRaceDetail(item: MobileRaceItem) {
-        if (item.detailPath.isBlank()) return
-        val normalizedUrl = AppWeb.normalizeInAppUrl(item.detailPath, BuildConfig.BASE_WEB_URL) ?: return
-        currentTopLevel = TopLevelTab.RACES
-        syncBottomNavigation(TopLevelTab.RACES)
-        showWebContent()
-        pendingOverrideUrl = normalizedUrl
-        pendingOverrideTitle = item.raceTitle
-        binding.webView.loadUrl(normalizedUrl)
+        val runId = item.runId.takeIf { it.isNotBlank() } ?: return
+        startActivity(
+            RaceDetailActivity.createIntent(
+                context = this,
+                runId = runId,
+                targetDate = nativeRaceTargetDate,
+                title = item.raceTitle,
+            ),
+        )
     }
 
     private fun inferTopLevel(uri: Uri): TopLevelTab {

@@ -2827,7 +2827,349 @@ def _with_public_display_sort_fields(items):
     return out
 
 
-def build_public_board_payload(date_text="", scope_key=""):
+def _public_race_match_id(row, target_id):
+    normalized_target = str(target_id or "").strip()
+    if not normalized_target:
+        return False
+    candidates = [
+        str((row or {}).get("run_id", "") or "").strip(),
+        str((row or {}).get("card_id", "") or "").strip(),
+        str((row or {}).get("race_id", "") or "").strip(),
+    ]
+    candidates.extend(
+        str(value or "").strip()
+        for value in list((row or {}).get("alias_ids", []) or [])
+    )
+    return normalized_target in [value for value in candidates if value]
+
+
+def _public_race_display_match_key(row):
+    item = dict(row or {})
+    race_title = str(item.get("race_title", "") or "").strip()
+    if race_title:
+        return f"title:{race_title}"
+    location = str(item.get("location", "") or "").strip()
+    race_id = str(item.get("race_id", "") or "").strip()
+    if location and race_id:
+        return f"loc:{location}:{race_id}"
+    if race_id:
+        return f"id:{race_id}"
+    return ""
+
+
+def _public_race_display_priority(row):
+    variant = str((row or {}).get("display_variant", "") or "").strip()
+    has_compare_cards = bool(list((row or {}).get("predictor_compare_cards", []) or []))
+    actual_result = dict((row or {}).get("actual_result", {}) or {})
+    is_settled = bool(actual_result.get("is_settled"))
+    if variant and variant not in ("placeholder", "morning_preview"):
+        return 4 if is_settled else 3
+    if has_compare_cards:
+        return 4 if is_settled else 3
+    if variant == "morning_preview":
+        return 2
+    if variant == "placeholder":
+        return 0
+    return 1
+
+
+def _public_should_replace_race_display(current_row, next_row):
+    if not current_row:
+        return True
+    current_priority = _public_race_display_priority(current_row)
+    next_priority = _public_race_display_priority(next_row)
+    if next_priority != current_priority:
+        return next_priority > current_priority
+    current_settled = bool(dict((current_row or {}).get("actual_result", {}) or {}).get("is_settled"))
+    next_settled = bool(dict((next_row or {}).get("actual_result", {}) or {}).get("is_settled"))
+    if next_settled != current_settled:
+        return next_settled
+    current_run_id = str((current_row or {}).get("run_id", "") or "").strip()
+    next_run_id = str((next_row or {}).get("run_id", "") or "").strip()
+    if current_run_id != next_run_id:
+        return next_run_id > current_run_id
+    return False
+
+
+def _public_build_morning_preview_display_row(item, base_row=None):
+    base = dict(base_row or {})
+    morning = dict(item or {})
+    row = dict(base)
+    row.update(morning)
+    display_order = base.get("display_order")
+    row["display_order"] = int(display_order) if isinstance(display_order, int) else 900000
+    row["display_variant"] = "morning_preview"
+    row["display_status"] = {"label": "速報", "tone": "open"}
+    row["display_header"] = _public_display_header(row, "open")
+    row["display_body"] = {
+        "kind": "morning_preview",
+        "result_text": str(morning.get("summary_text", "") or "").strip() or "速報を表示中",
+    }
+    row["cards"] = list(row.get("cards", []) or [])
+    return row
+
+
+def _public_consolidate_board_races(races, preview):
+    base_rows = [dict(item or {}) for item in list(races or []) if isinstance(item, dict)]
+    morning_rows = [dict(item or {}) for item in list(((preview or {}).get("races", []) or [])) if isinstance(item, dict)]
+    if not morning_rows:
+        return base_rows
+
+    merged_map = {}
+    ordered_keys = []
+
+    def upsert_race(row):
+        key = _public_race_display_match_key(row)
+        if not key:
+            return
+        if key not in merged_map:
+            ordered_keys.append(key)
+            merged_map[key] = row
+            return
+        current_row = merged_map.get(key)
+        if _public_should_replace_race_display(current_row, row):
+            merged_map[key] = row
+
+    for row in base_rows:
+        upsert_race(row)
+
+    if bool((preview or {}).get("available")):
+        for item in morning_rows:
+            key = _public_race_display_match_key(item)
+            base_row = merged_map.get(key) if key else None
+            upsert_race(_public_build_morning_preview_display_row(item, base_row))
+
+    return [merged_map[key] for key in ordered_keys if key in merged_map]
+
+
+def _resolve_public_target_context(date_text="", scope_key=""):
+    requested_date = _normalize_report_date_text(date_text) or _daily_summary_jst_date_text()
+    scope_norm = normalize_scope_key(scope_key)
+    target_date, fallback_notice, _ = _resolve_llm_today_target_date(requested_date, scope_norm)
+    return {
+        "requested_date": requested_date,
+        "target_date": str(target_date or "").strip(),
+        "target_date_label": _public_date_label(target_date),
+        "fallback_notice": str(fallback_notice or "").strip(),
+        "scope_key": scope_norm,
+    }
+
+
+def _build_public_display_races(target_date="", scope_key="", include_detail_fields=False):
+    target_date = str(target_date or "").strip()
+    scope_norm = normalize_scope_key(scope_key)
+    predictor_only_races = _build_public_predictor_only_races(target_date=target_date, scope_key=scope_norm)
+    placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_norm)
+    sorted_races = sorted(list(predictor_only_races) + list(placeholder_races), key=_public_race_sort_key)
+    enriched_races = []
+    condition_cache = {}
+    for item in sorted_races:
+        row = dict(item or {})
+        row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
+        if include_detail_fields:
+            condition_key = (
+                str(row.get("scope_key", "") or scope_norm or "").strip(),
+                str(row.get("location", "") or "").strip(),
+                _condition_distance_value(row.get("target_distance", "") or row.get("distance", "") or row.get("distance_label", "")),
+                str(row.get("target_track_condition", "") or row.get("track_condition", "") or "").strip() or "良",
+            )
+            if condition_key not in condition_cache:
+                condition_cache[condition_key] = _public_condition_predictor_ranking(
+                    location=condition_key[1],
+                    target_distance=condition_key[2],
+                    track_condition=condition_key[3],
+                    scope_key=condition_key[0],
+                )
+            row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
+        enriched_races.append(row)
+
+    races = _with_public_display_sort_fields(enriched_races)
+    predictor_public_races = [
+        dict(item or {})
+        for item in list(races or [])
+        if str((item or {}).get("display_variant", "") or "").strip() != "placeholder"
+    ]
+    settled_count = sum(
+        1
+        for item in predictor_public_races
+        if bool((((item or {}).get("actual_result", {}) or {}).get("is_settled")))
+    )
+    return {
+        "races": races,
+        "placeholder_race_count": len(placeholder_races),
+        "predictor_public_races": predictor_public_races,
+        "settled_count": settled_count,
+    }
+
+
+def _public_race_detail_payload(race_path, date_text="", scope_key=""):
+    target_context = _resolve_public_target_context(date_text=date_text, scope_key=scope_key)
+    target_date = str(target_context.get("target_date", "") or "").strip()
+    if not target_date:
+        return {}
+    race_bundle = _build_public_display_races(
+        target_date=target_date,
+        scope_key=str(target_context.get("scope_key", "") or "").strip(),
+        include_detail_fields=True,
+    )
+    morning_preview = _build_public_morning_preview_payload(
+        target_date=target_date,
+        scope_key=str(target_context.get("scope_key", "") or "").strip(),
+    )
+    races = _public_consolidate_board_races(race_bundle.get("races", []), morning_preview)
+    target_id = str(race_path or "").strip()
+    race = next((dict(item or {}) for item in races if _public_race_match_id(item, target_id)), None)
+    if not race:
+        return {}
+    race.setdefault("condition_predictor_ranking", {})
+    race.setdefault("actual_result", {"is_settled": False, "top3": []})
+    return {
+        "ok": True,
+        "data": {
+            "target_date": target_date,
+            "target_date_label": str(target_context.get("target_date_label", "") or "").strip(),
+            "fallback_notice": str(target_context.get("fallback_notice", "") or "").strip(),
+            "race": race,
+        },
+    }
+
+
+def _public_board_api_race_item(row):
+    item = dict(row or {})
+    return {
+        "run_id": str(item.get("run_id", "") or "").strip(),
+        "race_id": str(item.get("race_id", "") or "").strip(),
+        "race_title": str(item.get("race_title", "") or "").strip(),
+        "race_name": str(item.get("race_name", "") or "").strip(),
+        "location": str(item.get("location", "") or "").strip(),
+        "scheduled_off_time": str(item.get("scheduled_off_time", "") or "").strip(),
+        "distance_label": str(item.get("distance_label", "") or "").strip(),
+        "track_condition": str(item.get("track_condition", "") or "").strip(),
+        "predictor_compare_cards": [dict(card or {}) for card in list(item.get("predictor_compare_cards", []) or []) if isinstance(card, dict)],
+        "display_order": int(item.get("display_order", 0) or 0),
+        "display_variant": str(item.get("display_variant", "") or "").strip(),
+        "display_status": dict((item.get("display_status") or {}) or {}),
+        "display_header": dict((item.get("display_header") or {}) or {}),
+        "display_body": dict((item.get("display_body") or {}) or {}),
+        "top5": [dict(entry or {}) for entry in list(item.get("top5", []) or []) if isinstance(entry, dict)],
+        "predictor_top5": dict((item.get("predictor_top5") or {}) or {}),
+        "confidence_score": float(item.get("confidence_score", 0.0) or 0.0),
+        "agreement_score": float(item.get("agreement_score", 0.0) or 0.0),
+    }
+
+
+def _public_board_api_preview_race_item(row):
+    item = dict(row or {})
+    return {
+        "run_id": str(item.get("run_id", "") or "").strip(),
+        "race_id": str(item.get("race_id", "") or "").strip(),
+        "race_title": str(item.get("race_title", "") or "").strip(),
+        "race_name": str(item.get("race_name", "") or "").strip(),
+        "location": str(item.get("location", "") or "").strip(),
+        "scheduled_off_time": str(item.get("scheduled_off_time", "") or "").strip(),
+        "distance_label": str(item.get("distance_label", "") or "").strip(),
+        "track_condition": str(item.get("track_condition", "") or "").strip(),
+        "summary_text": str(item.get("summary_text", "") or "").strip(),
+        "top5": [dict(entry or {}) for entry in list(item.get("top5", []) or []) if isinstance(entry, dict)],
+        "predictor_top5": dict((item.get("predictor_top5") or {}) or {}),
+        "confidence_score": float(item.get("confidence_score", 0.0) or 0.0),
+        "agreement_score": float(item.get("agreement_score", 0.0) or 0.0),
+    }
+
+
+def _public_board_api_morning_preview_payload(item):
+    preview = dict(item or {})
+    return {
+        "available": bool(preview.get("available")),
+        "target_date": str(preview.get("target_date", "") or "").strip(),
+        "race_count": int(preview.get("race_count", 0) or 0),
+        "featured_race": {
+            "run_id": str(((preview.get("featured_race") or {}).get("run_id", "") or "")).strip(),
+            "race_id": str(((preview.get("featured_race") or {}).get("race_id", "") or "")).strip(),
+            "race_title": str(((preview.get("featured_race") or {}).get("race_title", "") or "")).strip(),
+            "main_horse_no": str(((preview.get("featured_race") or {}).get("main_horse_no", "") or "")).strip(),
+            "confidence_score": float(((preview.get("featured_race") or {}).get("confidence_score", 0.0) or 0.0)),
+            "top5": [
+                dict(entry or {})
+                for entry in list(((preview.get("featured_race") or {}).get("top5", []) or []))
+                if isinstance(entry, dict)
+            ],
+        },
+        "confidence_ranking": [
+            {
+                "run_id": str((row.get("run_id", "") or "")).strip(),
+                "race_id": str((row.get("race_id", "") or "")).strip(),
+                "race_title": str((row.get("race_title", "") or "")).strip(),
+                "main_horse_no": str((row.get("main_horse_no", "") or "")).strip(),
+                "confidence_score": float(row.get("confidence_score", 0.0) or 0.0),
+            }
+            for row in list(preview.get("confidence_ranking", []) or [])
+            if isinstance(row, dict)
+        ],
+        "races": [
+            _public_board_api_preview_race_item(row)
+            for row in list(preview.get("races", []) or [])
+            if isinstance(row, dict)
+        ],
+    }
+
+
+def _public_board_api_predictor_summary(item):
+    summary = dict(item or {})
+    return {
+        "target_date": str(summary.get("target_date", "") or "").strip(),
+        "cards": [dict(card or {}) for card in list(summary.get("cards", []) or []) if isinstance(card, dict)],
+        "top5to3_leader": dict((summary.get("top5to3_leader") or {}) or {}),
+    }
+
+
+def _public_board_api_history_payload(item):
+    history = dict(item or {})
+    predictor = dict((history.get("predictor") or {}) or {})
+    return {
+        "predictor": {
+            "periods": dict((predictor.get("periods") or {}) or {}),
+            "scope_key": str(predictor.get("scope_key", "") or "").strip(),
+        },
+    }
+
+
+def _public_board_api_daily_report(item):
+    report = dict(item or {})
+    return {
+        "slug": str(report.get("slug", "") or "").strip(),
+        "title": str(report.get("title", "") or "").strip(),
+        "target_date": str(report.get("target_date", "") or "").strip(),
+        "target_date_label": str(report.get("target_date_label", "") or "").strip(),
+        "public_url": str(report.get("public_url", "") or "").strip(),
+    }
+
+
+def _public_board_api_payload(payload):
+    board = dict(payload or {})
+    totals = dict((board.get("totals") or {}) or {})
+    hero = dict((board.get("hero") or {}) or {})
+    return {
+        "target_date": str(board.get("target_date", "") or "").strip(),
+        "target_date_label": str(board.get("target_date_label", "") or "").strip(),
+        "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
+        "races": [_public_board_api_race_item(row) for row in list(board.get("races", []) or []) if isinstance(row, dict)],
+        "totals": {
+            "race_count": int(totals.get("race_count", 0) or 0),
+            "settled_count": int(totals.get("settled_count", 0) or 0),
+        },
+        "daily_predictor": _public_board_api_predictor_summary(board.get("daily_predictor")),
+        "hero": {
+            "lead_race": _public_board_api_race_item(hero.get("lead_race", {})),
+            "leader": dict((hero.get("leader") or {}) or {}),
+        },
+        "history": _public_board_api_history_payload(board.get("history")),
+        "daily_report": _public_board_api_daily_report(board.get("daily_report")),
+        "morning_preview": _public_board_api_morning_preview_payload(board.get("morning_preview")),
+    }
+
+
+def build_public_board_payload(date_text="", scope_key="", include_detail_fields=False):
     payload = web_public_llm.build_public_board_payload(
         date_text=date_text,
         scope_key=scope_key,
@@ -2857,42 +3199,15 @@ def build_public_board_payload(date_text="", scope_key=""):
     )
     payload = dict(payload or {})
     target_date = str(payload.get("target_date", "") or "").strip()
-    predictor_only_races = _build_public_predictor_only_races(target_date=target_date, scope_key=scope_key)
-    payload["races"] = list(predictor_only_races)
-    placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_key)
-    sorted_races = sorted(list(payload.get("races", []) or []) + placeholder_races, key=_public_race_sort_key)
-    enriched_races = []
-    condition_cache = {}
-    for item in sorted_races:
-        row = dict(item or {})
-        row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
-        condition_key = (
-            str(row.get("scope_key", "") or scope_key or "").strip(),
-            str(row.get("location", "") or "").strip(),
-            _condition_distance_value(row.get("target_distance", "") or row.get("distance", "") or row.get("distance_label", "")),
-            str(row.get("target_track_condition", "") or row.get("track_condition", "") or "").strip() or "良",
-        )
-        if condition_key not in condition_cache:
-            condition_cache[condition_key] = _public_condition_predictor_ranking(
-                location=condition_key[1],
-                target_distance=condition_key[2],
-                track_condition=condition_key[3],
-                scope_key=condition_key[0],
-            )
-        row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
-        enriched_races.append(row)
-    payload["races"] = _with_public_display_sort_fields(enriched_races)
-    predictor_public_races = [
-        dict(item or {})
-        for item in list(payload["races"] or [])
-        if str((item or {}).get("display_variant", "") or "").strip() != "placeholder"
-    ]
-    settled_count = sum(
-        1
-        for item in predictor_public_races
-        if bool((((item or {}).get("actual_result", {}) or {}).get("is_settled")))
+    race_bundle = _build_public_display_races(
+        target_date=target_date,
+        scope_key=scope_key,
+        include_detail_fields=include_detail_fields,
     )
-    payload["placeholder_race_count"] = len(placeholder_races)
+    payload["races"] = list(race_bundle.get("races", []) or [])
+    predictor_public_races = list(race_bundle.get("predictor_public_races", []) or [])
+    settled_count = int(race_bundle.get("settled_count", 0) or 0)
+    payload["placeholder_race_count"] = int(race_bundle.get("placeholder_race_count", 0) or 0)
     payload["summary_cards"] = []
     payload["all_time_roi"] = {}
     payload["trend"] = []
@@ -4376,10 +4691,20 @@ def sitemap_xml():
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
 @app.get("/api/public/board")
 def public_board_api(date: str = "", scope_key: str = ""):
+    payload = build_public_board_payload(date_text=date, scope_key=scope_key)
     return JSONResponse(
-        build_public_board_payload(date_text=date, scope_key=scope_key),
+        _public_board_api_payload(payload),
         headers=_mobile_api_headers(),
     )
+
+
+@app.get(f"{PUBLIC_API_BASE_PATH}/races/{{race_path:path}}")
+@app.get("/api/public/races/{race_path:path}")
+def public_race_detail_api(race_path: str, date: str = "", scope_key: str = ""):
+    payload = _public_race_detail_payload(race_path=race_path, date_text=date, scope_key=scope_key)
+    if not payload:
+        return JSONResponse({"ok": False, "error": "race not found"}, status_code=404, headers=_mobile_api_headers())
+    return JSONResponse(payload, headers=_mobile_api_headers())
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/api/mobile/v1/races")
@@ -4390,6 +4715,16 @@ def mobile_races_api(request: Request, date: str = "", scope_key: str = ""):
         _mobile_races_payload(build_public_board_payload(date_text=date, scope_key=scope_key)),
         headers=_mobile_api_headers(),
     )
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/mobile/v1/races/{{race_path:path}}")
+@app.get("/api/mobile/v1/races/{race_path:path}")
+def mobile_race_detail_api(request: Request, race_path: str, date: str = "", scope_key: str = ""):
+    _verify_mobile_app_request(request)
+    payload = _public_race_detail_payload(race_path=race_path, date_text=date, scope_key=scope_key)
+    if not payload:
+        return JSONResponse({"ok": False, "error": "race not found"}, status_code=404, headers=_mobile_api_headers())
+    return JSONResponse(payload, headers=_mobile_api_headers())
 
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/reports")

@@ -29,6 +29,10 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".RaceDetailActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".StaticPageActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />

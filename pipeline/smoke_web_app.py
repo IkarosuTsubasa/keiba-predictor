@@ -67,6 +67,41 @@ def main():
 
     board_payload = web_app.public_board_api()
     assert_true(getattr(board_payload, "status_code", 200) == 200, "board api should return json")
+    board_payload_body = json.loads(getattr(board_payload, "body", b"{}").decode("utf-8", errors="ignore"))
+    assert_true("summary_cards" not in board_payload_body, "board api should not expose summary_cards")
+    assert_true("all_time_roi" not in board_payload_body, "board api should not expose all_time_roi")
+    assert_true("trend" not in board_payload_body, "board api should not expose trend")
+    assert_true("llm" not in dict((board_payload_body.get("history") or {})), "board api should not expose history.llm")
+    first_board_race = next((dict(item or {}) for item in list(board_payload_body.get("races", []) or []) if isinstance(item, dict)), {})
+    if first_board_race:
+        assert_true("cards" not in first_board_race, "board api race should not expose llm cards")
+        assert_true("actual_result" not in first_board_race, "board api race should not expose actual_result")
+        assert_true("condition_predictor_ranking" not in first_board_race, "board api race should not expose condition_predictor_ranking")
+    missing_race_detail = web_app.public_race_detail_api("missing-run-id")
+    assert_true(getattr(missing_race_detail, "status_code", 0) == 404, "race detail api should return 404 for missing run")
+    detail_board = web_app.build_public_board_payload()
+    detail_target_date = str(detail_board.get("target_date", "") or "").strip()
+    detail_race_row = next(
+        (
+            dict(item or {})
+            for item in web_app._public_consolidate_board_races(
+                detail_board.get("races", []),
+                detail_board.get("morning_preview"),
+            )
+            if str((item or {}).get("run_id", "") or "").strip()
+        ),
+        {},
+    )
+    detail_run_id = str(detail_race_row.get("run_id", "") or "").strip()
+    if detail_run_id:
+        race_detail = web_app.public_race_detail_api(detail_run_id, date=detail_target_date)
+        race_detail_body = json.loads(getattr(race_detail, "body", b"{}").decode("utf-8", errors="ignore"))
+        assert_true(getattr(race_detail, "status_code", 0) == 200, "race detail api should return 200 for known run")
+        assert_true(bool((((race_detail_body.get("data") or {}).get("race") or {}).get("run_id"))), "race detail api should include race")
+        assert_true(
+            isinstance((((race_detail_body.get("data") or {}).get("race") or {}).get("condition_predictor_ranking")), dict),
+            "race detail api should include condition_predictor_ranking",
+        )
 
     prev_admin_token = os.environ.get("ADMIN_TOKEN")
     os.environ["ADMIN_TOKEN"] = "smoke-token"
