@@ -595,6 +595,42 @@ def build_policy_prediction_rows(pred_rows, name_to_no_map, win_odds_map, place_
     )
 
 
+def _load_current_shutuba_name_to_no_map(shutuba_path=None):
+    if not shutuba_path or not Path(shutuba_path).exists():
+        return {}
+    rows = load_csv_rows(shutuba_path)
+    out = {}
+    for row in rows:
+        horse_name = str(
+            row.get("HorseName")
+            or row.get("horse_name")
+            or row.get("name")
+            or ""
+        ).strip()
+        norm_name = normalize_name(horse_name)
+        if not norm_name:
+            continue
+        date_text = str(row.get("Date") or row.get("日付") or "").strip()
+        rank_value = to_int_or_none(row.get("Rank") or row.get("着順") or "")
+        is_current_row = (not date_text) or (rank_value is not None and rank_value >= 900)
+        if not is_current_row:
+            continue
+        horse_no = normalize_horse_no_text(row.get("horse_no") or row.get("HorseNo") or row.get("馬番") or "")
+        if horse_no and norm_name not in out:
+            out[norm_name] = horse_no
+    return out
+
+
+def _load_canonical_name_to_no_map(shutuba_path=None, odds_path=None):
+    out = {}
+    out.update(_load_current_shutuba_name_to_no_map(shutuba_path) or {})
+    if odds_path and Path(odds_path).exists():
+        for name, horse_no in dict(load_name_to_no(odds_path) or {}).items():
+            if name not in out:
+                out[name] = horse_no
+    return out
+
+
 def _build_predictor_history_summary(scope_key, items, predictor_ids):
     rows_by_predictor = {}
     for row in items:
@@ -2268,8 +2304,9 @@ def _public_predictor_compare_cards(row):
         return []
 
     odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    shutuba_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "shutuba_path", "shutuba")
     fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-    name_to_no_map = load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
+    name_to_no_map = _load_canonical_name_to_no_map(shutuba_path=shutuba_path, odds_path=odds_path)
     win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
     place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
     predictor_context = build_multi_predictor_context(
@@ -2621,12 +2658,7 @@ def _build_morning_preview_race_item(row):
     shutuba_path = resolve_run_asset_path(scope_key, run_id, run_row, "shutuba_path", "shutuba")
     odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "odds_path", "odds")
     fuku_odds_path = resolve_run_asset_path(scope_key, run_id, run_row, "fuku_odds_path", "fuku_odds")
-    if odds_path and Path(odds_path).exists():
-        name_to_no_map = load_name_to_no(odds_path)
-    elif shutuba_path and Path(shutuba_path).exists():
-        name_to_no_map = load_name_to_no(shutuba_path)
-    else:
-        name_to_no_map = {}
+    name_to_no_map = _load_canonical_name_to_no_map(shutuba_path=shutuba_path, odds_path=odds_path)
     win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
     place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
 
@@ -2846,9 +2878,13 @@ def _public_race_match_id(row, target_id):
 def _public_race_display_match_key(row):
     item = dict(row or {})
     location = str(item.get("location", "") or "").strip()
+    race_no_text = _public_race_id_text(item)
+    scheduled_off_time = str(item.get("scheduled_off_time", "") or "").strip()
+    off_match = re.search(r"T?(\d{2}):(\d{2})", scheduled_off_time)
+    off_clock = f"{off_match.group(1)}:{off_match.group(2)}" if off_match else ""
+    if location and race_no_text:
+        return f"slot:{location}:{race_no_text}:{off_clock}"
     race_id = str(item.get("race_id", "") or "").strip()
-    if location and race_id:
-        return f"loc:{location}:{race_id}"
     if race_id:
         return f"id:{race_id}"
     race_title = str(item.get("race_title", "") or "").strip()
@@ -4247,8 +4283,9 @@ def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id:
         raise LookupError("run not found")
 
     odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "odds_path", "odds")
+    shutuba_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "shutuba_path", "shutuba")
     fuku_odds_path = resolve_run_asset_path(scope_norm, resolved_run_id, run_row, "fuku_odds_path", "fuku_odds")
-    name_to_no_map = load_name_to_no(odds_path) if odds_path and Path(odds_path).exists() else {}
+    name_to_no_map = _load_canonical_name_to_no_map(shutuba_path=shutuba_path, odds_path=odds_path)
     win_odds_map = load_win_odds_map(odds_path) if odds_path and Path(odds_path).exists() else {}
     place_odds_map = load_place_odds_map(fuku_odds_path) if fuku_odds_path and Path(fuku_odds_path).exists() else {}
     win_snapshot = list(load_odds_snapshot(odds_path).values()) if odds_path and Path(odds_path).exists() else []

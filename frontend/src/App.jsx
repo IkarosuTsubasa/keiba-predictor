@@ -90,12 +90,34 @@ function buildMorningPreviewRace(item, baseRace = null) {
   };
 }
 
+function extractRaceNoText(race) {
+  const title = String(race?.race_title || "").trim();
+  const titleMatch = title.match(/(\d+R)$/i);
+  if (titleMatch) {
+    return titleMatch[1].toUpperCase();
+  }
+  const raceId = String(race?.race_id || "").trim();
+  const raceIdMatch = raceId.match(/(\d+R)$/i);
+  if (raceIdMatch) {
+    return raceIdMatch[1].toUpperCase();
+  }
+  if (/^\d+$/.test(raceId) && raceId.length >= 2) {
+    const raceNo = Number(raceId.slice(-2));
+    if (Number.isFinite(raceNo) && raceNo > 0) {
+      return `${raceNo}R`;
+    }
+  }
+  return "";
+}
+
 function raceDisplayMatchKey(race) {
   const location = String(race?.location || "").trim();
-  const raceId = String(race?.race_id || "").trim();
-  if (location && raceId) {
-    return `loc:${location}:${raceId}`;
+  const raceNoText = extractRaceNoText(race);
+  const offTime = String(race?.scheduled_off_time || "").match(/(\d{2}:\d{2})/)?.[1] || "";
+  if (location && raceNoText) {
+    return `slot:${location}:${raceNoText}:${offTime}`;
   }
+  const raceId = String(race?.race_id || "").trim();
   if (raceId) {
     return `id:${raceId}`;
   }

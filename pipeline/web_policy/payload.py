@@ -87,11 +87,9 @@ def build_policy_prediction_rows(
         if not horse_name:
             continue
         horse_no_raw = _pick_first_value(row, ("horse_no", "HorseNo", "umaban", "鬩ｬ逡ｪ"), "")
-        horse_no = normalize_horse_no_text(horse_no_raw)
-        if not horse_no:
-            mapped = name_to_no_map.get(normalize_name(horse_name))
-            if mapped is not None:
-                horse_no = normalize_horse_no_text(mapped)
+        mapped = name_to_no_map.get(normalize_name(horse_name))
+        mapped_horse_no = normalize_horse_no_text(mapped) if mapped is not None else ""
+        horse_no = mapped_horse_no or normalize_horse_no_text(horse_no_raw)
         top3_prob = _prediction_prob_value(row, to_float)
         explicit_rank = to_int_or_none(_pick_first_value(row, ("pred_rank", "PredRank", "rank", "Rank"), ""))
         if explicit_rank is not None and explicit_rank > 0:
