@@ -666,7 +666,7 @@ class FeatureEngineV6(FeatureEngine):
             # Prefer the current race horse number from odds/current entry.
             # If neither exists, keep horse_no empty instead of leaking a stale
             # number from the horse's prior race history.
-            feat["horse_no"] = odds_horse_no if odds_horse_no > 0 else (horse_no_val if current_row is not None else 0)
+            feat["horse_no"] = odds_horse_no if odds_horse_no > 0 else (horse_no_val if current_row is not None and horse_no_val > 0 else "")
             feat["Odds"] = float(entry_ref_feat.get("odds_win", 0.0) or 0.0)
             feat["race_id"] = "current"
             rows_out.append(feat)

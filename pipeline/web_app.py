@@ -502,8 +502,21 @@ def normalize_horse_no_text(value):
         return ""
     parsed = parse_horse_no(text)
     if parsed is not None:
+        if parsed <= 0:
+            return ""
         return str(parsed)
     return text
+
+
+def _morning_entry_key(horse_no, horse_name):
+    horse_no_text = normalize_horse_no_text(horse_no)
+    if horse_no_text:
+        return f"no:{horse_no_text}"
+    horse_name_text = str(horse_name or "").strip()
+    if not horse_name_text:
+        return ""
+    compact_name = re.sub(r"\s+", "", horse_name_text)
+    return f"name:{compact_name}" if compact_name else ""
 
 
 def _pick_first_value(row, keys, default=""):
@@ -2472,8 +2485,12 @@ def _morning_weighted_support_map(ranking):
     support_map = {}
     for idx, item in enumerate(top5):
         horse_no = normalize_horse_no_text(item.get("horse_no", ""))
-        if not horse_no:
+        horse_name = str(item.get("horse_name", "") or "").strip()
+        entry_key = _morning_entry_key(horse_no, horse_name)
+        if not entry_key:
             continue
+        if not horse_no:
+            horse_no = ""
         position_weight = _MORNING_TOP5_POSITION_WEIGHTS[min(idx, len(_MORNING_TOP5_POSITION_WEIGHTS) - 1)]
         prob_value = max(0.0, float(item.get("top3_prob_model", 0.0) or 0.0))
         prob_norm = ((prob_value - prob_min) / prob_span) if prob_max > prob_min else 1.0
@@ -2489,15 +2506,16 @@ def _morning_weighted_support_map(ranking):
                 + 0.05 * confidence_norm,
             ),
         )
-        support_map[horse_no] = {
+        support_map[entry_key] = {
             "horse_no": horse_no,
-            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "horse_name": horse_name,
             "support": round(blended_strength, 6),
             "pred_rank": int(item.get("pred_rank", 0) or 0),
             "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
             "top3_prob_model_norm": round(prob_norm, 6),
             "rank_score_norm": round(float(item.get("rank_score_norm", 0.0) or 0.0), 6),
             "confidence_score": round(float(item.get("confidence_score", 0.0) or 0.0), 6),
+            "_entry_key": entry_key,
         }
     return support_map
 
@@ -2582,7 +2600,7 @@ def _morning_absolute_support_score(item):
 
 def _morning_prepare_ranking_rows(ranking, name_to_no_map):
     prepared = []
-    seen_horse_nos = set()
+    seen_keys = set()
     lookup = dict(name_to_no_map or {})
     compact_lookup = {
         re.sub(r"\s+", "", str(key or "").strip()): str(value or "").strip()
@@ -2597,12 +2615,14 @@ def _morning_prepare_ranking_rows(ranking, name_to_no_map):
             horse_no = normalize_horse_no_text(lookup.get(horse_name, ""))
         if not horse_no and horse_name:
             horse_no = normalize_horse_no_text(compact_lookup.get(re.sub(r"\s+", "", horse_name), ""))
-        if not horse_no or horse_no in seen_horse_nos:
+        entry_key = _morning_entry_key(horse_no, horse_name)
+        if not entry_key or entry_key in seen_keys:
             continue
         row["horse_no"] = horse_no
         row["horse_name"] = horse_name
+        row["_entry_key"] = entry_key
         prepared.append(row)
-        seen_horse_nos.add(horse_no)
+        seen_keys.add(entry_key)
         if len(prepared) >= 5:
             break
     return prepared
@@ -2610,10 +2630,10 @@ def _morning_prepare_ranking_rows(ranking, name_to_no_map):
 
 def _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor):
     rows = [dict(item or {}) for item in list(aggregate_rows or []) if isinstance(item, dict)]
-    seen_horse_nos = {
-        str((item or {}).get("horse_no", "") or "").strip()
+    seen_keys = {
+        _morning_entry_key((item or {}).get("horse_no", ""), (item or {}).get("horse_name", ""))
         for item in rows
-        if str((item or {}).get("horse_no", "") or "").strip()
+        if _morning_entry_key((item or {}).get("horse_no", ""), (item or {}).get("horse_name", ""))
     }
     if len(rows) >= 5:
         return rows[:5]
@@ -2621,12 +2641,14 @@ def _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor):
     for predictor_id in ("main", "v6_kiwami"):
         for item in list((ranking_by_predictor or {}).get(predictor_id, []) or []):
             horse_no = normalize_horse_no_text(item.get("horse_no", ""))
-            if not horse_no or horse_no in seen_horse_nos:
+            horse_name = str(item.get("horse_name", "") or "").strip()
+            entry_key = _morning_entry_key(horse_no, horse_name)
+            if not entry_key or entry_key in seen_keys:
                 continue
             candidates.append(
                 {
                     "horse_no": horse_no,
-                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "horse_name": horse_name,
                     "support": 0.0,
                     "sources": [predictor_id],
                     "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
@@ -2637,9 +2659,10 @@ def _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor):
                             "top3_prob_model": float(item.get("top3_prob_model", 0.0) or 0.0),
                         }
                     ),
+                    "_entry_key": entry_key,
                 }
             )
-            seen_horse_nos.add(horse_no)
+            seen_keys.add(entry_key)
             if len(rows) + len(candidates) >= 5:
                 break
         if len(rows) + len(candidates) >= 5:
@@ -2688,31 +2711,37 @@ def _build_morning_preview_race_item(row):
     }
     aggregate = {}
     for predictor_id, support_map in support_by_predictor.items():
-        for horse_no, item in support_map.items():
+        for entry_key, item in support_map.items():
+            horse_no = normalize_horse_no_text(item.get("horse_no", ""))
+            horse_name = str(item.get("horse_name", "") or "").strip()
             entry = aggregate.setdefault(
-                horse_no,
+                entry_key,
                 {
                     "horse_no": horse_no,
-                    "horse_name": str(item.get("horse_name", "") or "").strip(),
+                    "horse_name": horse_name,
                     "support": 0.0,
                     "sources": [],
                     "top3_prob_model": 0.0,
+                    "_entry_key": entry_key,
                 },
             )
             entry["support"] += float(item.get("support", 0.0) or 0.0)
             entry["top3_prob_model"] += float(item.get("top3_prob_model", 0.0) or 0.0)
             entry["sources"].append(predictor_id)
             if not entry["horse_name"]:
-                entry["horse_name"] = str(item.get("horse_name", "") or "").strip()
+                entry["horse_name"] = horse_name
+            if not entry["horse_no"]:
+                entry["horse_no"] = horse_no
     aggregate_rows = [
         {
-            "horse_no": horse_no,
+            "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
             "horse_name": str(item.get("horse_name", "") or "").strip(),
             "support": round(float(item.get("support", 0.0) or 0.0), 6),
             "sources": list(item.get("sources", []) or []),
             "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0) / max(1, len(item.get("sources", []) or [])), 6),
+            "_entry_key": entry_key,
         }
-        for horse_no, item in aggregate.items()
+        for entry_key, item in aggregate.items()
     ]
     for item in aggregate_rows:
         item["support_score"] = _morning_absolute_support_score(item)
@@ -2722,11 +2751,23 @@ def _build_morning_preview_race_item(row):
             -int(item.get("support_score", 0) or 0),
             -float(item.get("support", 0.0) or 0.0),
             str(item.get("horse_no", "") or ""),
+            str(item.get("horse_name", "") or ""),
         ),
     )[:5]
     aggregate_rows = _morning_fill_aggregate_rows(aggregate_rows, ranking_by_predictor)
     if not aggregate_rows:
         return {}
+    public_top5 = [
+        {
+            "horse_no": normalize_horse_no_text(item.get("horse_no", "")),
+            "horse_name": str(item.get("horse_name", "") or "").strip(),
+            "support": round(float(item.get("support", 0.0) or 0.0), 6),
+            "sources": list(item.get("sources", []) or []),
+            "top3_prob_model": round(float(item.get("top3_prob_model", 0.0) or 0.0), 6),
+            "support_score": int(item.get("support_score", 0) or 0),
+        }
+        for item in aggregate_rows
+    ]
 
     agreement_score = _morning_weighted_jaccard(
         support_by_predictor.get("main", {}),
@@ -2758,15 +2799,15 @@ def _build_morning_preview_race_item(row):
         "distance_label": _format_distance_label(_safe_text(job_meta.get("target_distance")) or _safe_text(run_row.get("distance"))),
         "track_condition": _safe_text(job_meta.get("target_track_condition")) or _safe_text(run_row.get("track_condition")) or "良",
         "run_kind": str(run_row.get("run_kind", "") or "").strip() or "final_prediction",
-        "main_horse_no": str((aggregate_rows[0] or {}).get("horse_no", "") or "").strip(),
-        "main_horse_name": str((aggregate_rows[0] or {}).get("horse_name", "") or "").strip(),
+        "main_horse_no": str((public_top5[0] or {}).get("horse_no", "") or "").strip(),
+        "main_horse_name": str((public_top5[0] or {}).get("horse_name", "") or "").strip(),
         "confidence_score": round(confidence_score, 6),
         "confidence_label": _morning_confidence_label(confidence_score),
         "agreement_score": round(agreement_score, 6),
         "concentration_score": round(concentration_score, 6),
         "stability_score": round(stability_score, 6),
         "summary_text": _morning_summary_text(agreement_score, concentration_score, stability_score),
-        "top5": aggregate_rows,
+        "top5": public_top5,
         "predictor_top5": {
             predictor_id: [
                 {
