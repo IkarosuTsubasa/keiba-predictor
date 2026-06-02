@@ -15,6 +15,10 @@ STATUS_FLOW = (
     "queued_morning",
     "processing_morning",
     "scheduled",
+    "queued_agent_prediction",
+    "processing_agent_prediction",
+    "agent_prediction_ready",
+    "fetching_agent_result",
     "queued_process",
     "processing",
     "waiting_v5",
@@ -40,12 +44,17 @@ def normalize_run_kind(value):
     return RUN_KIND_FINAL
 
 
+def is_agent_prediction_job(job):
+    return str((job or {}).get("job_source", "") or "").strip().lower() == "agent_prediction"
+
+
 def _job_step_field(step_name, suffix):
     return f"{step_name}_{suffix}"
 
 
 def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
+    row.setdefault("job_source", "legacy")
     row["run_kind"] = normalize_run_kind(row.get("run_kind", ""))
     row.setdefault("race_name", "")
     row.setdefault("race_number", "")
@@ -129,6 +138,10 @@ def hydrate_job_step_states(job):
                 "running",
                 row.get("morning_started_at", "") or row.get("updated_at", ""),
             )
+        elif legacy_status == "queued_agent_prediction":
+            row = set_job_step_state(row, "predictor", "queued")
+        elif legacy_status == "processing_agent_prediction":
+            row = set_job_step_state(row, "predictor", "running", row.get("updated_at", ""))
         elif legacy_status == "queued_process":
             row = set_job_step_state(row, "odds", "queued")
         elif legacy_status == "processing":
@@ -213,6 +226,14 @@ def derive_job_display_state(job):
         return {"code": "queued_morning", "label": "速報キュー", "tone": "active"}
     if legacy_status == "processing_morning":
         return {"code": "processing_morning", "label": "速報生成中", "tone": "active"}
+    if legacy_status == "queued_agent_prediction":
+        return {"code": "queued_agent_prediction", "label": "AI予測キュー", "tone": "active"}
+    if legacy_status == "processing_agent_prediction":
+        return {"code": "processing_agent_prediction", "label": "AI予測実行中", "tone": "active"}
+    if legacy_status == "agent_prediction_ready":
+        return {"code": "agent_prediction_ready", "label": "AI予測完了", "tone": "good"}
+    if legacy_status == "fetching_agent_result":
+        return {"code": "fetching_agent_result", "label": "結果取得中", "tone": "active"}
     if legacy_status == "waiting_v5":
         return {"code": "waiting_v5", "label": "等待远程预测", "tone": "active"}
     if legacy_status == "queued_policy":
@@ -355,10 +376,17 @@ def compute_initial_status(job):
     artifact_map = _artifact_index(row.get("artifacts", []))
     has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
     run_kind = normalize_run_kind(row.get("run_kind", ""))
+    race_id = str(row.get("race_id", "") or "").strip()
     scope_key = str(row.get("scope_key", "") or "").strip()
     off_dt = _parse_dt(row.get("scheduled_off_time", ""))
     target_distance = parse_int_text(row.get("target_distance", ""))
     track_condition = str(row.get("target_track_condition", "") or "").strip()
+    if is_agent_prediction_job(row):
+        if race_id and scope_key and off_dt and target_distance and track_condition:
+            return "scheduled"
+        if race_id:
+            return "waiting_input_info"
+        return "uploaded"
     if has_required and scope_key and off_dt and target_distance and track_condition:
         if run_kind == RUN_KIND_MORNING:
             return "scheduled"
@@ -426,6 +454,7 @@ def create_job(
     target_track_condition="",
     lead_minutes=30,
     run_kind="",
+    job_source="",
     notes="",
     artifacts=None,
 ):
@@ -450,6 +479,7 @@ def create_job(
         "target_distance": str(target_distance or "").strip(),
         "target_track_condition": str(target_track_condition or "").strip(),
         "lead_minutes": lead,
+        "job_source": str(job_source or "legacy").strip() or "legacy",
         "run_kind": normalize_run_kind(run_kind),
         "status": "uploaded",
         "notes": str(notes or "").strip(),
@@ -552,11 +582,16 @@ def scan_due_jobs(base_dir, now_text=""):
             if dirty:
                 jobs[idx] = job
             continue
-        job["status"] = "queued_process"
-        job["queued_process_at"] = _dt_text(now_dt)
-        job = set_job_step_state(job, "odds", "queued")
-        job = set_job_step_state(job, "predictor", "idle")
-        job = set_job_step_state(job, "policy", "idle")
+        if is_agent_prediction_job(job):
+            job["status"] = "queued_agent_prediction"
+            job["queued_process_at"] = _dt_text(now_dt)
+            job = set_job_step_state(job, "predictor", "queued")
+        else:
+            job["status"] = "queued_process"
+            job["queued_process_at"] = _dt_text(now_dt)
+            job = set_job_step_state(job, "odds", "queued")
+            job = set_job_step_state(job, "predictor", "idle")
+            job = set_job_step_state(job, "policy", "idle")
         job["updated_at"] = _dt_text(now_dt)
         jobs[idx] = job
         dirty = True
@@ -582,7 +617,12 @@ def scan_due_diagnostics(base_dir, now_text=""):
         if effective_status == "waiting_morning":
             reason = "eligible_morning"
         elif effective_status != "scheduled":
-            if not has_required:
+            if is_agent_prediction_job(row):
+                if effective_status == "waiting_input_info":
+                    reason = "wait_input_info"
+                else:
+                    reason = f"status_{status or 'unknown'}"
+            elif not has_required:
                 reason = "missing_artifacts"
             elif effective_status == "waiting_input_info":
                 reason = "wait_input_info"
@@ -596,6 +636,8 @@ def scan_due_diagnostics(base_dir, now_text=""):
             reason = "missing_process_after"
         elif derived_process_dt > now_dt:
             reason = "wait_process_after"
+        elif is_agent_prediction_job(row):
+            reason = "eligible_agent_prediction"
         rows.append(
             {
                 "job_id": str(row.get("job_id", "") or "").strip(),
@@ -684,6 +726,24 @@ def apply_job_action(base_dir, job_id, action):
             for step_name in JOB_STEP_NAMES:
                 set_job_step_state(job, step_name, "idle")
             job["status"] = compute_initial_status(job)
+        elif action_key == "retry_agent_prediction":
+            if is_agent_prediction_job(job) and current != "settled":
+                job["status"] = "queued_agent_prediction"
+                job["current_v5_task_id"] = ""
+                job["current_run_id"] = ""
+                job["ready_at"] = ""
+                job["settling_started_at"] = ""
+                job["settled_at"] = ""
+                job["error_message"] = ""
+                set_job_step_state(job, "predictor", "queued")
+                set_job_step_state(job, "settlement", "idle")
+        elif action_key == "retry_agent_result":
+            if is_agent_prediction_job(job) and current in ("agent_prediction_ready", "fetching_agent_result", "failed"):
+                job["status"] = "agent_prediction_ready"
+                job["settling_started_at"] = ""
+                job["settled_at"] = ""
+                job["error_message"] = ""
+                set_job_step_state(job, "settlement", "idle")
         elif action_key == "mark_failed":
             job["status"] = "failed"
             job["error_message"] = "manually marked as failed"
@@ -727,6 +787,7 @@ __all__ = [
     "get_job",
     "hydrate_job_step_states",
     "initialize_job_step_fields",
+    "is_agent_prediction_job",
     "load_jobs",
     "normalize_run_kind",
     "save_artifact",

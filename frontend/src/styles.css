@@ -4869,6 +4869,142 @@ body {
   font-size: 13px;
 }
 
+.race-detail-panel--agent,
+.race-detail-panel--agent-horses {
+  gap: 12px;
+}
+
+.race-detail-agent-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.race-detail-agent-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.race-detail-agent-copy p,
+.race-detail-agent-bet p,
+.race-detail-agent-horse p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.race-detail-agent-subsection {
+  display: grid;
+  gap: 8px;
+}
+
+.race-detail-agent-subsection > strong {
+  color: var(--primary);
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+  font-size: 14px;
+}
+
+.race-detail-agent-bet-list,
+.race-detail-agent-horse-list {
+  display: grid;
+  gap: 8px;
+}
+
+.race-detail-agent-bet,
+.race-detail-agent-horse {
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  border-radius: 14px;
+  background: var(--surface-low);
+}
+
+.race-detail-agent-bet {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.race-detail-agent-bet p {
+  grid-column: 1 / -1;
+}
+
+.race-detail-agent-bet span,
+.race-detail-agent-bet em,
+.race-detail-agent-horse__head span,
+.race-detail-agent-horse__head em {
+  color: var(--muted);
+  font-family: "Work Sans", "Noto Sans JP", sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.race-detail-agent-bet strong,
+.race-detail-agent-horse__head strong {
+  min-width: 0;
+  color: var(--primary);
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.race-detail-agent-risk-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.race-detail-agent-risk-list span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 238, 238, 0.72);
+  color: #9a3f3f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.race-detail-agent-horse__head {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.race-detail-layout--agent-main {
+  align-items: start;
+}
+
+.race-detail-layout--agent-main .race-detail-panel--result {
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.race-detail-layout--agent-main .race-detail-panel--result h2 {
+  font-size: clamp(15px, 1.2vw, 18px);
+}
+
+.race-detail-layout--agent-main .race-detail-result-list {
+  gap: 4px;
+}
+
+.race-detail-layout--agent-main .race-detail-result-list li {
+  min-height: 42px;
+  padding: 6px 8px;
+  gap: 8px;
+  border-radius: 10px;
+}
+
+.race-detail-layout--agent-main .race-detail-result-list span {
+  font-size: 8px;
+}
+
+.race-detail-layout--agent-main .race-detail-result-list strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .race-detail-affiliate-card {
   overflow: hidden;
   border-radius: 22px;
@@ -5623,6 +5759,49 @@ body {
   font-family: "Manrope", "Noto Sans JP", sans-serif;
 }
 
+.history-agent-table {
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #f6f6f9);
+}
+
+.history-agent-table__head,
+.history-agent-table__row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.15fr) repeat(4, minmax(82px, 0.9fr));
+  gap: 10px;
+  align-items: center;
+}
+
+.history-agent-table__head {
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(198, 197, 212, 0.16);
+}
+
+.history-agent-table__head span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.history-agent-table__row {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(198, 197, 212, 0.14);
+}
+
+.history-agent-table__row:last-child {
+  border-bottom: none;
+}
+
+.history-agent-table__row span {
+  color: var(--primary);
+  font-family: "Manrope", "Noto Sans JP", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .history-archive-table {
   overflow: hidden;
   border-radius: 20px;
@@ -5723,6 +5902,7 @@ body {
 
 @media (max-width: 980px) {
   .history-predictor-table,
+  .history-agent-table,
   .history-archive-table {
     overflow-x: auto;
   }
@@ -5730,6 +5910,11 @@ body {
   .history-predictor-table__head,
   .history-predictor-table__row {
     min-width: 920px;
+  }
+
+  .history-agent-table__head,
+  .history-agent-table__row {
+    min-width: 620px;
   }
 
   .history-archive-table__head,

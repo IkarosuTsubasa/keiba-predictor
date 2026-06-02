@@ -1,0 +1,172 @@
+name: agent-prediction-remote
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Remote agent prediction task id
+        required: true
+        type: string
+      race_id:
+        description: netkeiba race id
+        required: true
+        type: string
+      race_url:
+        description: netkeiba shutuba URL
+        required: true
+        type: string
+      callback_url:
+        description: Render callback URL
+        required: true
+        type: string
+
+jobs:
+  agent_prediction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run agent prediction
+        id: run_agent
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          KEIBA_LLM_PROVIDER: openai
+        run: |
+          set +e
+          python keiba_llm_agent/main.py predict-race \
+            --url "${{ inputs.race_url }}" \
+            --force-refresh \
+            --skip-report \
+            --skip-social \
+            --llm-provider openai \
+            > agent_prediction_output.log 2>&1
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build callback payload
+        shell: bash
+        env:
+          RUN_EXIT_CODE: ${{ steps.run_agent.outputs.exit_code }}
+          RACE_ID: ${{ inputs.race_id }}
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          race_id = re.sub(r"\D", "", os.environ.get("RACE_ID", ""))
+          exit_code = int(str(os.environ.get("RUN_EXIT_CODE", "1") or "1"))
+          log_path = Path("agent_prediction_output.log")
+          prediction_path = Path("keiba_llm_agent/data/predictions") / f"{race_id}.json"
+
+          log_excerpt = ""
+          if log_path.exists():
+              log_excerpt = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+
+          summary = {
+              "race_id": race_id,
+              "prediction_path": str(prediction_path),
+              "exit_code": exit_code,
+          }
+
+          if exit_code == 0 and prediction_path.exists():
+              payload = {
+                  "status": "succeeded",
+                  "summary": summary,
+                  "result": {
+                      "filename": prediction_path.name,
+                      "content_base64": base64.b64encode(prediction_path.read_bytes()).decode("ascii"),
+                  },
+                  "log_excerpt": log_excerpt,
+              }
+          else:
+              error_message = f"agent prediction failed with exit_code={exit_code}"
+              if not prediction_path.exists():
+                  error_message += f" prediction_missing={prediction_path}"
+              payload = {
+                  "status": "failed",
+                  "summary": summary,
+                  "error_message": error_message,
+                  "log_excerpt": log_excerpt,
+              }
+
+          Path("callback_payload.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Post callback
+        shell: bash
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          PIPELINE_CALLBACK_SECRET: ${{ secrets.PIPELINE_CALLBACK_SECRET }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import hmac
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          payload_bytes = Path("callback_payload.json").read_bytes()
+          secret = os.environ.get("PIPELINE_CALLBACK_SECRET", "").encode("utf-8")
+          sig = "sha256=" + hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
+          req = urllib.request.Request(
+              os.environ["CALLBACK_URL"],
+              data=payload_bytes,
+              headers={
+                  "Content-Type": "application/json; charset=utf-8",
+                  "X-Hub-Signature-256": sig,
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=120) as resp:
+              print(resp.read().decode("utf-8", errors="replace"))
+          PY
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-prediction-diagnostics-${{ inputs.task_id }}
+          if-no-files-found: warn
+          path: |
+            callback_payload.json
+            agent_prediction_output.log
+            keiba_llm_agent/data/predictions/${{ inputs.race_id }}.json
+
+      - name: Fail workflow on remote failure
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path("callback_payload.json").read_text(encoding="utf-8"))
+          if str(payload.get("status", "")).lower() == "succeeded":
+              sys.exit(0)
+          print(payload.get("error_message", "agent prediction failed"))
+          print(payload.get("log_excerpt", "")[-4000:])
+          sys.exit(1)
+          PY

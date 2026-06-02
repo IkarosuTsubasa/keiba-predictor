@@ -10,6 +10,7 @@ function formatConfidence(value) {
 }
 
 export default function MorningRaceSummary({ race }) {
+  const isAgentPrediction = String(race?.source_type || "").trim() === "agent_prediction";
   const derivedSummary =
     !Array.isArray(race?.top5) || !race.top5.length
       ? buildPredictorConsensusSummary(race?.predictor_compare_cards)
@@ -30,13 +31,15 @@ export default function MorningRaceSummary({ race }) {
 
   return (
     <article className="ai-pick-summary ai-pick-summary--morning">
-      <div className="ai-pick-summary__head">
-        <ModelMetaBadge
-          label="自信度"
-          value={formatConfidence(race?.confidence_score ?? derivedSummary?.confidence_score)}
-          tone="subtle"
-        />
-      </div>
+      {!isAgentPrediction ? (
+        <div className="ai-pick-summary__head">
+          <ModelMetaBadge
+            label="自信度"
+            value={formatConfidence(race?.confidence_score ?? derivedSummary?.confidence_score)}
+            tone="subtle"
+          />
+        </div>
+      ) : null}
 
       <div className="ai-pick-summary__marks">
         <div className="ai-pick-summary__main">
@@ -59,9 +62,11 @@ export default function MorningRaceSummary({ race }) {
         ) : null}
       </div>
 
-      <div className="ai-pick-summary__meta-row">
-        <span>{`本命一致度 ${formatConfidence(race?.agreement_score ?? derivedSummary?.agreement_score)}`}</span>
-      </div>
+      {!isAgentPrediction ? (
+        <div className="ai-pick-summary__meta-row">
+          <span>{`本命一致度 ${formatConfidence(race?.agreement_score ?? derivedSummary?.agreement_score)}`}</span>
+        </div>
+      ) : null}
     </article>
   );
 }

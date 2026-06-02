@@ -23,6 +23,30 @@ const PREDICTOR_LABELS = {
   v6_kiwami: "極 KIWAMI",
 };
 const PREDICTOR_ORDER = ["main", "v2_opus", "v3_premium", "v4_gemini", "v5_stacking", "v6_kiwami"];
+const BET_TYPE_LABELS = {
+  win: "単勝",
+  place: "複勝",
+  exacta: "馬単",
+  quinella: "馬連",
+  wide: "ワイド",
+  trio: "3連複",
+  trifecta: "3連単",
+};
+const DECISION_LABELS = {
+  BET: "購入候補",
+  SKIP: "見送り",
+};
+const CONFIDENCE_LABELS = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+const PARTICIPATION_LABELS = {
+  none: "なし",
+  light: "軽め",
+  normal: "通常",
+  strong: "強め",
+};
 
 function buildBackHref(search) {
   const query = String(search || "").replace(/^\?/, "");
@@ -294,6 +318,123 @@ function PanelEmpty({ children }) {
   return <p className="race-detail-empty-note">{children}</p>;
 }
 
+function formatAgentBetType(value) {
+  const key = String(value || "").trim();
+  return BET_TYPE_LABELS[key] || key || "-";
+}
+
+function formatAgentHorseNumbers(values) {
+  const numbers = Array.isArray(values)
+    ? values.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  return numbers.length ? numbers.join("-") : "-";
+}
+
+function AgentPredictionPanel({ prediction }) {
+  if (!prediction) return null;
+  const strategy = prediction?.strategy || {};
+  const bets = Array.isArray(prediction?.bets) ? prediction.bets : [];
+  const risks = Array.isArray(prediction?.risks) ? prediction.risks.filter(Boolean) : [];
+  const decision = String(strategy?.bet_decision || "").trim();
+  const confidence = String(strategy?.confidence || "").trim();
+  const participation = String(strategy?.participation_level || "").trim();
+  const summary = String(prediction?.summary || "").trim();
+  const commentary = String(prediction?.commentary || "").trim();
+  const strategyReason = String(strategy?.reason || "").trim();
+  const paceProjection = prediction?.pace_projection || {};
+  const paceText = [
+    String(paceProjection?.projected_pace || "").trim(),
+    String(paceProjection?.reason || "").trim(),
+  ].filter(Boolean).join(" / ");
+
+  return (
+    <section className="race-detail-panel race-detail-panel--agent" id="race-detail-agent">
+      <div className="race-detail-panel__head">
+        <div>
+          <span className="race-detail-panel__eyebrow">AI予測</span>
+          <h2>予測メモ</h2>
+        </div>
+      </div>
+
+      <div className="race-detail-agent-summary-grid">
+        <DetailSummary
+          label="判断"
+          value={DECISION_LABELS[decision] || decision || "-"}
+          accent={decision === "BET"}
+        />
+        <DetailSummary label="自信度" value={CONFIDENCE_LABELS[confidence] || confidence || "-"} />
+        <DetailSummary label="参加度" value={PARTICIPATION_LABELS[participation] || participation || "-"} />
+      </div>
+
+      {[summary, commentary, strategyReason, paceText].filter(Boolean).length ? (
+        <div className="race-detail-agent-copy">
+          {summary ? <p>{summary}</p> : null}
+          {commentary ? <p>{commentary}</p> : null}
+          {strategyReason ? <p>{strategyReason}</p> : null}
+          {paceText ? <p>{paceText}</p> : null}
+        </div>
+      ) : (
+        <PanelEmpty>予測メモはまだありません。</PanelEmpty>
+      )}
+
+      <div className="race-detail-agent-subsection">
+        <strong>買い目候補</strong>
+        {bets.length ? (
+          <div className="race-detail-agent-bet-list">
+            {bets.map((bet, index) => (
+              <article key={`${bet?.bet_type || "bet"}-${index}`} className="race-detail-agent-bet">
+                <span>{formatAgentBetType(bet?.bet_type)}</span>
+                <strong>{formatAgentHorseNumbers(bet?.horse_numbers)}</strong>
+                {bet?.amount ? <em>{`${bet.amount}円`}</em> : null}
+                {bet?.reason ? <p>{bet.reason}</p> : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <PanelEmpty>このレースは買い目候補なしです。</PanelEmpty>
+        )}
+      </div>
+
+      {risks.length ? (
+        <div className="race-detail-agent-risk-list">
+          {risks.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AgentHorseMemoPanel({ prediction }) {
+  const topHorses = Array.isArray(prediction?.top_horses)
+    ? prediction.top_horses.filter(Boolean).slice(0, 5)
+    : [];
+  if (!topHorses.length) return null;
+
+  return (
+    <section className="race-detail-panel race-detail-panel--agent-horses" id="race-detail-agent-horses">
+      <div className="race-detail-panel__head">
+        <div>
+          <h2>上位馬メモ</h2>
+        </div>
+      </div>
+      <div className="race-detail-agent-horse-list">
+        {topHorses.map((item) => (
+          <article key={`${item?.mark || "rank"}-${item?.horse_no}`} className="race-detail-agent-horse">
+            <div className="race-detail-agent-horse__head">
+              <span>{item?.mark || item?.pred_rank || "-"}</span>
+              <strong>{`${item?.horse_no || "-"} ${item?.horse_name || "-"}`}</strong>
+              <em>{item?.total_score ?? "-"}</em>
+            </div>
+            {item?.reason ? <p>{item.reason}</p> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MarkGrid({ marks, itemKey }) {
   return (
     <div className="race-detail-mark-grid">
@@ -334,6 +475,31 @@ function AiIndexPanel({ signalRows }) {
         </div>
       ) : (
         <PanelEmpty>AI指数を計算できるデータがまだありません。</PanelEmpty>
+      )}
+    </section>
+  );
+}
+
+function RaceResultPanel({ resultEntries, resultText }) {
+  return (
+    <section className="race-detail-panel race-detail-panel--result" id="race-detail-result">
+      <div className="race-detail-panel__head">
+        <div>
+          <span className="race-detail-panel__eyebrow">レース結果</span>
+          <h2>確定着順</h2>
+        </div>
+      </div>
+      {resultEntries.length ? (
+        <ol className="race-detail-result-list">
+          {resultEntries.map((entry) => (
+            <li key={entry.key}>
+              <span>{entry.rank}着</span>
+              <strong>{entry.body}</strong>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="race-detail-result-placeholder">{resultText}</p>
       )}
     </section>
   );
@@ -410,6 +576,7 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
   const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
     ? race.predictor_compare_cards.filter(Boolean)
     : [];
+  const agentPrediction = race?.agent_prediction || null;
   const variant = String(race?.display_variant || "").trim();
   const isMorningPreview = variant === "morning_preview";
   const morningCompareCards = useMemo(
@@ -452,6 +619,7 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
       ? `${Math.round(Number(race?.confidence_score ?? derivedSummary?.confidence_score) * 100)}%`
       : "-";
   const conditionRanking = race?.condition_predictor_ranking || {};
+  const hasConditionRanking = Array.isArray(conditionRanking?.cards) && conditionRanking.cards.length > 0;
 
   return (
     <section className="race-detail-page">
@@ -485,34 +653,24 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
         </div>
       </div>
 
-      <div className="race-detail-layout">
-        <AiIndexPanel signalRows={signalRows} />
+      {agentPrediction ? <AgentPredictionPanel prediction={agentPrediction} /> : null}
 
-        <div className="race-detail-side-stack">
-          <section className="race-detail-panel race-detail-panel--result" id="race-detail-result">
-            <div className="race-detail-panel__head">
-              <div>
-                <span className="race-detail-panel__eyebrow">レース結果</span>
-                <h2>確定着順</h2>
-              </div>
-            </div>
-            {resultEntries.length ? (
-              <ol className="race-detail-result-list">
-                {resultEntries.map((entry) => (
-                  <li key={entry.key}>
-                    <span>{entry.rank}着</span>
-                    <strong>{entry.body}</strong>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="race-detail-result-placeholder">{resultText}</p>
-            )}
-          </section>
+      {agentPrediction ? (
+        <div className="race-detail-layout race-detail-layout--agent-main">
+          <AgentHorseMemoPanel prediction={agentPrediction} />
+          <RaceResultPanel resultEntries={resultEntries} resultText={resultText} />
         </div>
-      </div>
+      ) : (
+        <div className="race-detail-layout">
+          <AiIndexPanel signalRows={signalRows} />
+          <div className="race-detail-side-stack">
+            <RaceResultPanel resultEntries={resultEntries} resultText={resultText} />
+          </div>
+        </div>
+      )}
 
-      <div className="race-detail-layout race-detail-layout--compare">
+      {!agentPrediction ? (
+        <div className="race-detail-layout race-detail-layout--compare">
         <section
           className="race-detail-panel race-detail-panel--compare"
           id="race-detail-compare"
@@ -541,9 +699,12 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
         </section>
 
         <div className="race-detail-side-stack">
-          <ConditionPredictorRankingPanel ranking={conditionRanking} />
+          {hasConditionRanking ? (
+            <ConditionPredictorRankingPanel ranking={conditionRanking} />
+          ) : null}
         </div>
       </div>
+      ) : null}
     </section>
   );
 }

@@ -24,6 +24,7 @@ export default function PublicSideNav({
   detailHref = "",
   detailTitle = "",
   data,
+  agentMode = false,
   search = "",
   onApplyFilters,
   showTargetFilter = false,
@@ -32,6 +33,12 @@ export default function PublicSideNav({
   const normalizedPath = normalizePath(pathname);
   const normalizedDetailHref = detailHref || pathname;
   const shouldShowTargetFilter = Boolean(onApplyFilters) && (showTargetFilter || mode !== "static");
+  const isAgentMode =
+    Boolean(agentMode) ||
+    String(data?.race?.source_type || "").trim() === "agent_prediction" ||
+    Boolean(data?.race?.agent_prediction) ||
+    (Array.isArray(data?.races) &&
+      data.races.some((race) => String(race?.source_type || "").trim() === "agent_prediction"));
 
   useEffect(() => {
     const syncHash = () => setActiveHash(window.location.hash || "");
@@ -44,13 +51,13 @@ export default function PublicSideNav({
     {
       href: "/keiba",
       label: "トップページ",
-      note: "公開レースと導読",
+      note: isAgentMode ? "公開レース一覧" : "公開レースと導読",
       active: normalizedPath === "/keiba",
     },
     {
       href: "/keiba/history",
       label: "履歴分析",
-      note: "月間・年間・累計の比較",
+      note: isAgentMode ? "予測命中率の分析" : "月間・年間・累計の比較",
       active: normalizedPath === "/keiba/history",
     },
     {
@@ -59,11 +66,38 @@ export default function PublicSideNav({
       note: "日次の振り返りアーカイブ",
       active: normalizedPath === "/keiba/reports" || normalizedPath.startsWith("/keiba/reports/"),
     },
-  ];
+  ].filter(Boolean);
 
   const detailItems =
     mode === "detail"
-      ? [
+      ? isAgentMode
+        ? [
+          {
+            href: `${normalizedDetailHref}#race-detail-summary`,
+            label: "レース概要",
+            note: "基本情報と結果",
+            active: !activeHash || activeHash === "#race-detail-summary",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-agent`,
+            label: "予測メモ",
+            note: "判断と買い目候補",
+            active: activeHash === "#race-detail-agent",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-agent-horses`,
+            label: "上位馬メモ",
+            note: "評価理由",
+            active: activeHash === "#race-detail-agent-horses",
+          },
+          {
+            href: `${normalizedDetailHref}#race-detail-result`,
+            label: "レース結果",
+            note: "確定着順",
+            active: activeHash === "#race-detail-result",
+          },
+        ]
+        : [
           {
             href: `${normalizedDetailHref}#race-detail-summary`,
             label: "レース概要",
@@ -88,7 +122,7 @@ export default function PublicSideNav({
   const currentPageLabel =
     mode === "detail"
       ? detailTitle || "レース詳細"
-      : mode === "history"
+    : mode === "history"
         ? "履歴分析"
         : mode === "reports" || mode === "reportDetail"
           ? "私の日報"
@@ -98,16 +132,22 @@ export default function PublicSideNav({
 
   const focusText =
     mode === "detail"
-      ? "このレースのAI本命、AI指数、定量比較、結果を一つの流れで確認できます。"
+      ? isAgentMode
+        ? "このレースの予測メモ、上位馬評価、買い目判断、結果を一つの流れで確認できます。"
+        : "このレースのAI本命、AI指数、定量比較、結果を一つの流れで確認できます。"
       : mode === "history"
-        ? "期間ごとの成績比較と定量モデルの傾向をまとめて確認できます。"
+        ? isAgentMode
+          ? "過去日付のAI予測と結果をレース単位で確認できます。"
+          : "公開予測の結果と命中率を期間ごとに確認できます。"
         : mode === "reports"
           ? "保存済みの日報を一覧で確認し、対象日ごとの振り返りを読み返せます。"
-          : mode === "reportDetail"
-            ? "AIモデル結果と定量モデルの振り返りを記事形式で確認できます。"
+        : mode === "reportDetail"
+            ? "AI予測、結果、振り返りを記事形式で確認できます。"
         : mode === "static"
           ? "サイトの考え方と利用上の案内をまとめています。"
-          : "見どころ、深掘り分析、公開レースの順に読み進められます。";
+          : isAgentMode
+            ? "対象日の公開レースを場別に確認し、気になるレースの予測メモへ進めます。"
+            : "見どころ、深掘り分析、公開レースの順に読み進められます。";
 
   return (
     <aside className="public-side-nav" aria-label="サイトナビゲーション">

@@ -206,6 +206,14 @@ function consolidateBoardRaces(races, preview) {
   return orderedKeys.map((key) => mergedMap.get(key)).filter(Boolean);
 }
 
+function isAgentPredictionRace(race) {
+  return String(race?.source_type || "").trim() === "agent_prediction" || Boolean(race?.agent_prediction);
+}
+
+function hasAgentPredictionRows(races) {
+  return (Array.isArray(races) ? races : []).some(isAgentPredictionRace);
+}
+
 function resolveSelectedRace(boardRaces, raceDetailId) {
   const matchedRace = (Array.isArray(boardRaces) ? boardRaces : []).find((race) =>
     matchRaceIdentifier(race, raceDetailId),
@@ -576,6 +584,8 @@ export default function App() {
   const selectedRace = isRaceDetail
     ? detailData?.race || null
     : null;
+  const isAgentPredictionBoard = hasAgentPredictionRows(boardRaces);
+  const isAgentPredictionDetail = isAgentPredictionRace(selectedRace);
 
   useEffect(() => {
     const shouldHideStaticIntro =
@@ -715,6 +725,7 @@ export default function App() {
           pathname: normalizedPath,
           mode: "history",
           data,
+          agentMode: isAgentPredictionBoard,
           search,
           onApplyFilters: navigateWithSearch,
           showTargetFilter: true,
@@ -743,6 +754,7 @@ export default function App() {
             mode: "detail",
             detailHref: `${normalizedPath}${buildQuery(search)}`,
             data: detailData,
+            agentMode: isAgentPredictionDetail,
             search,
             onApplyFilters: navigateWithSearch,
             showTargetFilter: true,
@@ -780,6 +792,7 @@ export default function App() {
             selectedRace?.display_header?.title ||
             "レース詳細",
           data: detailData,
+          agentMode: isAgentPredictionDetail,
           search,
           onApplyFilters: navigateWithSearch,
           showTargetFilter: true,
@@ -800,6 +813,7 @@ export default function App() {
         pathname: normalizedPath,
         mode: "home",
         data,
+        agentMode: isAgentPredictionBoard,
         search,
         onApplyFilters: navigateWithSearch,
         showTargetFilter: true,
@@ -813,7 +827,7 @@ export default function App() {
           .filter(Boolean)
           .join(" ")}
       >
-        {!isAppShell && !isDateFocusedHome ? (
+        {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? (
           <>
             <MorningPreviewSection data={data} search={search} />
           </>
@@ -837,7 +851,11 @@ export default function App() {
               <PageSectionHeader
                 kicker="公開レース"
                 title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
-                subtitle="比較用の導読を確認したあとに、各レースの印、上位候補、結果、定量モデルごとの判断差をレース単位とモデル単位の両方から見比べられます。"
+                subtitle={
+                  isAgentPredictionBoard
+                    ? "各レースの印、買い目判断、上位馬メモ、結果をレースごとに確認できます。"
+                    : "比較用の導読を確認したあとに、各レースの印、上位候補、結果、定量モデルごとの判断差をレース単位とモデル単位の両方から見比べられます。"
+                }
                 actions={
                   data?.daily_report?.public_url
                     ? [
@@ -865,11 +883,15 @@ export default function App() {
           )}
           <TodayBoardContent data={data} races={boardRaces} appShell={isAppShell} />
         </section>
-        {!isAppShell ? <SecondaryStatsPanel data={data} /> : null}
-        {!isAppShell && !isDateFocusedHome ? <HomeHeroSection data={data} search={search} /> : null}
-        {!isAppShell && !isDateFocusedHome ? <MethodSummarySection /> : null}
-        {!isAppShell && !isDateFocusedHome ? <FeaturedContentSection data={data} /> : null}
-        {!isAppShell && !isDateFocusedHome ? <BeginnerGuideSection /> : null}
+        {!isAppShell && !isAgentPredictionBoard ? <SecondaryStatsPanel data={data} /> : null}
+        {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? (
+          <HomeHeroSection data={data} search={search} />
+        ) : null}
+        {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? <MethodSummarySection /> : null}
+        {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? (
+          <FeaturedContentSection data={data} />
+        ) : null}
+        {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? <BeginnerGuideSection /> : null}
       </div>
     </PublicFrame>
   );

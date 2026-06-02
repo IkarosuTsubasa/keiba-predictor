@@ -1,11 +1,14 @@
 import json
 import os
 import traceback
+import urllib.error
+import urllib.request
 import zipfile
 from collections import Counter
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi.responses import JSONResponse
 
@@ -14,10 +17,17 @@ from fetch_central_result import (
     fetch_html as fetch_official_result_html,
     parse_result_page as parse_official_result_page,
 )
-from race_meta_fetcher import fetch_race_meta
+from race_meta_fetcher import build_shutuba_url, fetch_race_meta
+from race_job_store import initialize_job_step_fields as _initialize_race_job_step_fields
+from race_job_store import set_job_step_state as _set_race_job_step_state
+from v5_remote_tasks import create_task as create_remote_task
+from v5_remote_tasks import find_latest_task_for_job, update_task as update_remote_task
+from web_data.agent_predictions import agent_result_path_for_race, agent_result_write_dir
+from web_admin.remote_predictors import append_job_process_log_entry
 
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
 AUTO_SETTLE_DELAY_MINUTES = 20
+AGENT_RESULT_DELAY_MINUTES = 30
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
 ACTIVE_RUN_DUE_JOB_STATUSES = {
@@ -28,6 +38,10 @@ ACTIVE_RUN_DUE_JOB_STATUSES = {
     "waiting_v5",
     "queued_policy",
     "processing_policy",
+    "queued_agent_prediction",
+    "processing_agent_prediction",
+    "agent_prediction_ready",
+    "fetching_agent_result",
     "queued_settle",
     "settling",
 }
@@ -142,7 +156,18 @@ def _maybe_run_daily_cleanup(*, base_dir, load_race_jobs):
             "last_cleanup_jst_date": last_cleanup_jst_date,
         }
 
+    from cleanup_runtime_artifacts import BASE_DIR as cleanup_runtime_base_dir
     from cleanup_runtime_artifacts import cleanup as cleanup_runtime_artifacts
+
+    if Path(cleanup_runtime_base_dir).resolve() != Path(base_dir).resolve():
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "cleanup_base_mismatch",
+            "jst_date": jst_date,
+            "cleanup_base_dir": str(Path(cleanup_runtime_base_dir).resolve()),
+            "run_due_base_dir": str(Path(base_dir).resolve()),
+        }
 
     summary = cleanup_runtime_artifacts()
     cleanup_record = {
@@ -179,6 +204,15 @@ def pick_next_settle_job_id(*, load_race_jobs):
         actual_top2 = str(job.get("actual_top2", "") or "").strip()
         actual_top3 = str(job.get("actual_top3", "") or "").strip()
         if status == "queued_settle" and actual_top1 and actual_top2 and actual_top3:
+            return str(job.get("job_id", "") or "").strip()
+    return ""
+
+
+def pick_next_agent_prediction_job_id(*, load_race_jobs):
+    jobs = load_race_jobs()
+    for job in jobs:
+        status = str(job.get("status", "") or "").strip().lower()
+        if status == "queued_agent_prediction":
             return str(job.get("job_id", "") or "").strip()
     return ""
 
@@ -221,7 +255,240 @@ def _fetch_official_result_payload_for_job(job):
     return None
 
 
+def _build_agent_result_url(job):
+    race_id = str((job or {}).get("race_id", "") or "").strip()
+    scope_key = str((job or {}).get("scope_key", "") or "").strip().lower()
+    if not race_id:
+        raise ValueError("race_id missing")
+    if scope_key == "local":
+        return f"https://nar.netkeiba.com/race/result.html?race_id={quote(race_id, safe='')}"
+    return f"https://race.netkeiba.com/race/result.html?race_id={quote(race_id, safe='')}"
+
+
+def _agent_result_output_dir(base_dir):
+    path = agent_result_write_dir(base_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _fetch_and_save_agent_result_for_job(base_dir, job):
+    repo_root = Path(base_dir).resolve().parent
+    import sys
+
+    repo_root_text = str(repo_root)
+    if repo_root_text not in sys.path:
+        sys.path.insert(0, repo_root_text)
+    from keiba_llm_agent.fetchers.netkeiba_result_fetcher import fetch_and_parse_netkeiba_result
+
+    result_url = _build_agent_result_url(job)
+    result_data = fetch_and_parse_netkeiba_result(result_url, force_refresh=True)
+    output_path = _agent_result_output_dir(base_dir) / f"{result_data.race_id}.json"
+    output_path.write_text(
+        json.dumps(result_data.model_dump(by_alias=True), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    top3_names = [str((item or {}).get("horse_name", "") or "").strip() for item in result_data.model_dump().get("finish_order", [])[:3]]
+    top3_numbers = [
+        str((item or {}).get("horse_no", "") or "").strip()
+        for item in result_data.model_dump().get("finish_order", [])[:3]
+    ]
+    return {
+        "race_id": result_data.race_id,
+        "result_url": result_url,
+        "result_path": str(output_path),
+        "top3_names": top3_names,
+        "top3_numbers": top3_numbers,
+    }
+
+
+def _public_site_url():
+    return str(os.environ.get("PIPELINE_PUBLIC_SITE_URL", "https://www.ikaimo-ai.com") or "").strip().rstrip("/")
+
+
+def _public_base_path():
+    return str(os.environ.get("PUBLIC_BASE_PATH", "/keiba") or "/keiba").strip() or "/keiba"
+
+
+def _agent_prediction_callback_url(task):
+    return (
+        f"{_public_site_url()}{_public_base_path()}/internal/v5_tasks/"
+        f"{quote(str((task or {}).get('task_id', '') or '').strip(), safe='')}/callback"
+    )
+
+
+def _agent_prediction_race_url(job):
+    race_id = str((job or {}).get("race_id", "") or "").strip()
+    scope_key = str((job or {}).get("scope_key", "") or "").strip().lower()
+    source = "local" if scope_key == "local" else ""
+    return build_shutuba_url(race_id, source=source)
+
+
+def _dispatch_agent_prediction_task(base_dir, task, job):
+    task_id = str((task or {}).get("task_id", "") or "").strip()
+    owner = str(os.environ.get("GITHUB_ACTIONS_OWNER", "") or "").strip()
+    repo = str(os.environ.get("GITHUB_ACTIONS_REPO", "") or "").strip()
+    workflow = str(
+        os.environ.get("GITHUB_ACTIONS_AGENT_WORKFLOW", "")
+        or os.environ.get("AGENT_PREDICTION_WORKFLOW", "")
+        or "agent-prediction-remote.yml"
+    ).strip()
+    ref = str(os.environ.get("GITHUB_ACTIONS_REF", "main") or "").strip() or "main"
+    token = str(os.environ.get("GITHUB_ACTIONS_TOKEN", "") or "").strip()
+    race_id = str((job or {}).get("race_id", "") or "").strip()
+    race_url = _agent_prediction_race_url(job)
+    if not task_id:
+        raise RuntimeError("agent prediction task id missing")
+    if not owner or not repo or not workflow or not token:
+        raise RuntimeError("agent prediction dispatch config missing")
+    update_remote_task(
+        base_dir,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "dispatching",
+                "attempt": int(row.get("attempt", 0) or 0) + 1,
+                "started_at": str(row.get("started_at", "") or now_text),
+                "workflow_dispatch_ref": ref,
+                "error_message": "",
+            }
+        ),
+    )
+    payload = {
+        "ref": ref,
+        "inputs": {
+            "task_id": task_id,
+            "race_id": race_id,
+            "race_url": race_url,
+            "callback_url": _agent_prediction_callback_url(task),
+        },
+    }
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "keiba-render-agent-prediction",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status_code = getattr(resp, "status", 0) or 0
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        update_remote_task(
+            base_dir,
+            task_id,
+            lambda row, now_text: row.update(
+                {"status": "failed", "finished_at": now_text, "error_message": detail or str(exc)}
+            ),
+        )
+        raise RuntimeError(f"agent prediction dispatch failed: http {exc.code} {detail}".strip())
+    except Exception as exc:
+        update_remote_task(
+            base_dir,
+            task_id,
+            lambda row, now_text: row.update(
+                {"status": "failed", "finished_at": now_text, "error_message": str(exc)}
+            ),
+        )
+        raise RuntimeError(f"agent prediction dispatch failed: {exc}")
+    update_remote_task(
+        base_dir,
+        task_id,
+        lambda row, now_text: row.update(
+            {
+                "status": "dispatched",
+                "workflow_dispatch_ref": ref,
+                "error_message": "",
+                "result_summary": {"dispatch_http_status": int(status_code)},
+            }
+        ),
+    )
+    return {
+        "task_id": task_id,
+        "workflow": workflow,
+        "ref": ref,
+        "race_id": race_id,
+        "race_url": race_url,
+        "callback_url": _agent_prediction_callback_url(task),
+        "dispatch_http_status": int(status_code),
+    }
+
+
+def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_race_job, initialize_job_step_fields, set_job_step_state):
+    target_job_id = str(job_id or "").strip()
+    job = next(
+        (item for item in load_race_jobs(base_dir) if str((item or {}).get("job_id", "") or "").strip() == target_job_id),
+        None,
+    )
+    if not job:
+        raise LookupError("job not found")
+    if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
+        raise ValueError("job is not agent prediction")
+    status = str((job or {}).get("status", "") or "").strip().lower()
+    if status not in ("queued_agent_prediction", "scheduled", "processing_agent_prediction"):
+        raise ValueError(f"job status is not dispatchable: {status or '-'}")
+
+    existing_task = find_latest_task_for_job(
+        base_dir,
+        target_job_id,
+        statuses=("queued", "dispatching", "dispatched", "running"),
+    )
+    if existing_task:
+        return {
+            "job_id": target_job_id,
+            "race_id": str((job or {}).get("race_id", "") or "").strip(),
+            "task_id": str((existing_task or {}).get("task_id", "") or "").strip(),
+            "already_dispatched": True,
+        }
+
+    race_id = str((job or {}).get("race_id", "") or "").strip()
+    scope_key = str((job or {}).get("scope_key", "") or "").strip()
+    task = create_remote_task(
+        base_dir,
+        job_id=target_job_id,
+        run_id="",
+        race_id=race_id,
+        scope_key=scope_key,
+        task_type="agent_prediction",
+        bundle_files={},
+        bundle_meta={
+            "race_id": race_id,
+            "scope_key": scope_key,
+            "race_name": str((job or {}).get("race_name", "") or "").strip(),
+            "race_date": str((job or {}).get("race_date", "") or "").strip(),
+            "scheduled_off_time": str((job or {}).get("scheduled_off_time", "") or "").strip(),
+            "location": str((job or {}).get("location", "") or "").strip(),
+            "race_url": _agent_prediction_race_url(job),
+        },
+    )
+    dispatch_info = _dispatch_agent_prediction_task(base_dir, task, job)
+
+    def _mark_dispatched(row, now_text):
+        row.update(initialize_job_step_fields(row))
+        row["status"] = "processing_agent_prediction"
+        row["current_v5_task_id"] = str(task.get("task_id", "") or "").strip()
+        row["error_message"] = ""
+        row["last_process_output"] = append_job_process_log_entry(
+            row,
+            "agent_prediction_dispatch",
+            0,
+            json.dumps(dispatch_info, ensure_ascii=False),
+        )
+        set_job_step_state(row, "predictor", "running", now_text)
+
+    update_race_job(base_dir, target_job_id, _mark_dispatched)
+    return {"job_id": target_job_id, "race_id": race_id, "task_id": str(task.get("task_id", "") or "").strip(), **dispatch_info}
+
+
 def _job_has_required_artifacts(job):
+    if str((job or {}).get("job_source", "") or "").strip().lower() == "agent_prediction":
+        return True
     artifact_types = {
         str((item or {}).get("artifact_type", "") or "").strip().lower()
         for item in list((job or {}).get("artifacts", []) or [])
@@ -243,6 +510,12 @@ def autofill_job_input_info(*, base_dir, job_id, get_race_job, update_race_job, 
     if not _job_has_required_artifacts(job):
         raise ValueError("missing required artifacts")
     payload = fetch_race_meta(race_id, source=str(job.get("scope_key", "") or "").strip(), timeout=30)
+    existing_race_date = str(job.get("race_date", "") or "").strip()
+    if existing_race_date:
+        scheduled_off_time = str(payload.get("scheduled_off_time", "") or "").strip()
+        if "T" in scheduled_off_time:
+            payload["scheduled_off_time"] = f"{existing_race_date}T{scheduled_off_time.split('T', 1)[1]}"
+        payload["race_date"] = existing_race_date
 
     def _apply(row, now_text):
         row["race_name"] = str(row.get("race_name", "") or "").strip() or str(payload.get("race_name", "") or "").strip()
@@ -359,6 +632,61 @@ def _auto_settle_diagnostics(*, load_race_jobs, now_dt=None):
     return rows
 
 
+def _agent_result_path(base_dir, race_id):
+    return agent_result_path_for_race(base_dir, race_id)
+
+
+def _agent_result_diagnostics(*, base_dir, load_race_jobs, now_dt=None):
+    current_dt = now_dt or _jst_now()
+    rows = []
+    for job in load_race_jobs():
+        if str(job.get("job_source", "") or "").strip().lower() != "agent_prediction":
+            continue
+        status = str(job.get("status", "") or "").strip().lower()
+        if status not in ("agent_prediction_ready", "fetching_agent_result"):
+            continue
+        job_id = str(job.get("job_id", "") or "").strip()
+        race_id = str(job.get("race_id", "") or "").strip()
+        scheduled_off_time = str(job.get("scheduled_off_time", "") or "").strip()
+        reason = "eligible"
+        result_path = _agent_result_path(base_dir, race_id)
+        if result_path is not None and result_path.exists():
+            reason = "already_saved"
+        else:
+            off_dt = _parse_dt_text(scheduled_off_time)
+            if off_dt is None:
+                reason = "missing_off_time"
+            elif current_dt < off_dt + timedelta(minutes=AGENT_RESULT_DELAY_MINUTES):
+                reason = "wait_30min"
+            elif not race_id:
+                reason = "missing_race_id"
+        rows.append(
+            {
+                "job_id": job_id,
+                "status": status,
+                "race_id": race_id,
+                "scheduled_off_time": scheduled_off_time,
+                "reason": reason,
+            }
+        )
+    return rows
+
+
+def list_agent_result_jobs(*, base_dir, load_race_jobs, now_dt=None):
+    diagnostics = _agent_result_diagnostics(base_dir=base_dir, load_race_jobs=load_race_jobs, now_dt=now_dt)
+    eligible_ids = {
+        str(item.get("job_id", "") or "").strip()
+        for item in diagnostics
+        if str(item.get("reason", "") or "").strip() in ("eligible", "already_saved")
+    }
+    out = []
+    for job in load_race_jobs():
+        job_id = str(job.get("job_id", "") or "").strip()
+        if job_id and job_id in eligible_ids:
+            out.append(dict(job))
+    return out
+
+
 def list_auto_settle_jobs(*, load_race_jobs, now_dt=None):
     diagnostics = _auto_settle_diagnostics(load_race_jobs=load_race_jobs, now_dt=now_dt)
     eligible_ids = {
@@ -430,15 +758,21 @@ def _compact_run_due_summary(summary):
         "autofill_count": int(row.get("autofill_count", 0) or 0),
         "queued_count": int(row.get("queued_count", 0) or 0),
         "processed_count": int(row.get("processed_count", 0) or 0),
+        "agent_dispatched_count": int(row.get("agent_dispatched_count", 0) or 0),
         "settled_count": int(row.get("settled_count", 0) or 0),
+        "agent_result_count": int(row.get("agent_result_count", 0) or 0),
         "scan_due_candidate_count": int(row.get("scan_due_candidate_count", 0) or 0),
         "scan_due_reason_counts": _diagnostic_reason_counts(row.get("scan_due_candidates", [])),
         "auto_settle_candidate_count": int(row.get("auto_settle_candidate_count", 0) or 0),
         "auto_settle_reason_counts": _diagnostic_reason_counts(row.get("auto_settle_candidates", [])),
+        "agent_result_candidate_count": int(row.get("agent_result_candidate_count", 0) or 0),
+        "agent_result_reason_counts": _diagnostic_reason_counts(row.get("agent_result_candidates", [])),
         "queued_job_ids": list(row.get("queued_job_ids", []) or [])[:8],
         "autofilled_job_ids": [str(item.get("job_id", "") or "").strip() for item in list(row.get("autofilled_jobs", []) or [])[:8]],
         "processed_job_ids": list(row.get("processed_job_ids", []) or [])[:8],
+        "agent_dispatched_job_ids": list(row.get("agent_dispatched_job_ids", []) or [])[:8],
         "settled_job_ids": list(row.get("settled_job_ids", []) or [])[:8],
+        "agent_result_job_ids": list(row.get("agent_result_job_ids", []) or [])[:8],
         "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
         "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
         "cleanup": {
@@ -468,7 +802,9 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
     _log_diagnostic_summary("scan_due_candidates", scan_due_candidates, sample_reasons=("eligible",))
     changed = scan_due_race_jobs(base_dir)
     process_results = []
+    agent_dispatch_results = []
     settle_results = []
+    agent_result_results = []
     errors = list(autofill_errors or [])
     auto_settle_skipped = []
     auto_settle_attempted = []
@@ -478,6 +814,71 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
         now_dt=auto_settle_now,
     )
     _log_diagnostic_summary("auto_settle_candidates", auto_settle_candidates, sample_reasons=("eligible",))
+    agent_result_candidates = _agent_result_diagnostics(
+        base_dir=base_dir,
+        load_race_jobs=lambda: load_race_jobs(base_dir),
+        now_dt=auto_settle_now,
+    )
+    _log_diagnostic_summary("agent_result_candidates", agent_result_candidates, sample_reasons=("eligible", "already_saved"))
+
+    while True:
+        job_id = pick_next_agent_prediction_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
+        if not job_id:
+            break
+        print(
+            "[web_app] "
+            + json.dumps(
+                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "run_due_agent_prediction_dispatch_start", "job_id": job_id},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        try:
+            result = dispatch_agent_prediction_job(
+                base_dir=base_dir,
+                job_id=job_id,
+                load_race_jobs=load_race_jobs,
+                update_race_job=update_race_job,
+                initialize_job_step_fields=_initialize_race_job_step_fields,
+                set_job_step_state=_set_race_job_step_state,
+            )
+            agent_dispatch_results.append(result)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_agent_prediction_dispatch_done",
+                        "job_id": job_id,
+                        "task_id": str((result or {}).get("task_id", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        except Exception as exc:
+            try:
+                def _mark_agent_dispatch_failed(row, now_text):
+                    row["status"] = "failed"
+                    row["error_message"] = str(exc)
+                update_race_job(base_dir, job_id, _mark_agent_dispatch_failed)
+            except Exception:
+                pass
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_agent_prediction_dispatch_error",
+                        "job_id": job_id,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            errors.append({"kind": "agent_prediction_dispatch", "job_id": job_id, "error": str(exc)})
 
     while True:
         job_id = pick_next_process_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
@@ -652,6 +1053,108 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
             )
             errors.append({"kind": "auto_settle", "job_id": job_id, "error": str(exc)})
 
+    for job in list_agent_result_jobs(
+        base_dir=base_dir,
+        load_race_jobs=lambda: load_race_jobs(base_dir),
+        now_dt=auto_settle_now,
+    ):
+        job_id = str((job or {}).get("job_id", "") or "").strip()
+        if not job_id:
+            continue
+        race_id = str((job or {}).get("race_id", "") or "").strip()
+        existing_result_path = _agent_result_path(base_dir, race_id)
+        try:
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "agent_result_fetch_start",
+                        "job_id": job_id,
+                        "race_id": race_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+            def _mark_fetching(row, now_text):
+                row["status"] = "fetching_agent_result"
+                row["settling_started_at"] = now_text
+                _set_race_job_step_state(row, "settlement", "running", now_text)
+
+            update_race_job(base_dir, job_id, _mark_fetching)
+
+            if existing_result_path is not None and existing_result_path.exists():
+                result = {
+                    "race_id": race_id,
+                    "result_path": str(existing_result_path),
+                    "result_url": "",
+                    "top3_names": [],
+                    "top3_numbers": [],
+                    "already_saved": True,
+                }
+            else:
+                result = _fetch_and_save_agent_result_for_job(base_dir, job)
+
+            def _mark_agent_result_settled(row, now_text):
+                row["status"] = "settled"
+                row["settled_at"] = now_text
+                row["error_message"] = ""
+                top3_names = list((result or {}).get("top3_names", []) or [])[:3]
+                top3_numbers = list((result or {}).get("top3_numbers", []) or [])[:3]
+                actual_values = top3_names if len(top3_names) >= 3 and all(top3_names[:3]) else top3_numbers
+                for index, field_name in enumerate(("actual_top1", "actual_top2", "actual_top3")):
+                    row[field_name] = str(actual_values[index] if index < len(actual_values) else "").strip()
+                row["last_settlement_output"] = json.dumps(result or {}, ensure_ascii=False, indent=2)
+                row["last_process_output"] = append_job_process_log_entry(
+                    row,
+                    "agent_result_fetch",
+                    0,
+                    json.dumps(result or {}, ensure_ascii=False),
+                )
+                _set_race_job_step_state(row, "settlement", "succeeded", now_text)
+
+            update_race_job(base_dir, job_id, _mark_agent_result_settled)
+            agent_result_results.append({"job_id": job_id, **dict(result or {})})
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "agent_result_fetch_done",
+                        "job_id": job_id,
+                        "race_id": race_id,
+                        "result_path": str((result or {}).get("result_path", "") or "").strip(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        except Exception as exc:
+            def _mark_agent_result_failed(row, now_text):
+                row["status"] = "agent_prediction_ready"
+                row["error_message"] = str(exc)
+                _set_race_job_step_state(row, "settlement", "failed", now_text, str(exc))
+
+            update_race_job(base_dir, job_id, _mark_agent_result_failed)
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "agent_result_fetch_error",
+                        "job_id": job_id,
+                        "race_id": race_id,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            errors.append({"kind": "agent_result_fetch", "job_id": job_id, "error": str(exc)})
+
     cleanup_summary = {}
     try:
         cleanup_summary = _maybe_run_daily_cleanup(
@@ -704,10 +1207,18 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
         ],
         "processed_count": len(process_results),
         "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
+        "agent_dispatched_count": len(agent_dispatch_results),
+        "agent_dispatched_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_dispatch_results],
+        "agent_dispatch_results": agent_dispatch_results,
         "settled_count": len(settle_results),
         "settled_job_ids": [str(item.get("job_id", "") or "").strip() for item in settle_results],
+        "agent_result_count": len(agent_result_results),
+        "agent_result_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_result_results],
+        "agent_result_results": agent_result_results,
         "auto_settle_candidate_count": len(auto_settle_candidates),
         "auto_settle_candidates": auto_settle_candidates,
+        "agent_result_candidate_count": len(agent_result_candidates),
+        "agent_result_candidates": agent_result_candidates,
         "auto_settle_attempted": auto_settle_attempted,
         "auto_settle_skipped": auto_settle_skipped,
         "cleanup": cleanup_summary,

@@ -165,6 +165,15 @@ function createDefaultCreateJobForm() {
   };
 }
 
+function createDefaultAgentRaceIdForm() {
+  return {
+    race_ids_text: "",
+    race_date: formatDateInputValue(new Date()),
+    lead_minutes: "60",
+    notes: "",
+  };
+}
+
 function statusClass(tone) {
   if (tone === "good") return "admin-job-card__status admin-job-card__status--good";
   if (tone === "danger") return "admin-job-card__status admin-job-card__status--danger";
@@ -177,6 +186,28 @@ function stepClass(tone) {
   if (tone === "danger") return "admin-step-badge admin-step-badge--danger";
   if (tone === "active") return "admin-step-badge admin-step-badge--active";
   return "admin-step-badge";
+}
+
+function remoteTaskStatusLabel(status) {
+  const key = String(status || "").trim().toLowerCase();
+  const labels = {
+    queued: "待機中",
+    dispatching: "送信中",
+    dispatched: "実行中",
+    running: "実行中",
+    succeeded: "成功",
+    failed: "失敗",
+    expired: "期限切れ",
+  };
+  return labels[key] || key || "-";
+}
+
+function remoteTaskTone(status) {
+  const key = String(status || "").trim().toLowerCase();
+  if (key === "succeeded") return "good";
+  if (key === "failed" || key === "expired") return "danger";
+  if (key === "queued" || key === "dispatching" || key === "dispatched" || key === "running") return "active";
+  return "muted";
 }
 
 function notifyMeta(job) {
@@ -408,6 +439,61 @@ function ZipCreateJobForm({ onSubmit, busy, resetToken = 0 }) {
   );
 }
 
+function AgentRaceIdCreateForm({ onSubmit, busy, resetToken = 0 }) {
+  const [form, setForm] = useState(createDefaultAgentRaceIdForm);
+
+  useEffect(() => {
+    setForm(createDefaultAgentRaceIdForm());
+  }, [resetToken]);
+
+  function updateField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  return (
+    <details className="admin-tool-panel admin-tool-panel--primary" open>
+      <summary>レースID一括登録</summary>
+      <div className="admin-tool-panel__body admin-tool-panel__body--primary">
+        <p>race_id または netkeiba URL を貼り付けると、cron がレース情報を自動取得します。</p>
+      </div>
+      <form
+        className="admin-inline-form admin-inline-form--primary"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(form);
+        }}
+      >
+        <label className="admin-inline-form__wide">
+          <span>レースIDリスト</span>
+          <textarea
+            rows={7}
+            value={form.race_ids_text}
+            placeholder="202605021211"
+            onChange={(event) => updateField("race_ids_text", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>レース日</span>
+          <input type="date" value={form.race_date} onChange={(event) => updateField("race_date", event.target.value)} />
+        </label>
+        <label>
+          <span>予測開始前(分)</span>
+          <input type="number" value={form.lead_minutes} onChange={(event) => updateField("lead_minutes", event.target.value)} />
+        </label>
+        <label className="admin-inline-form__wide">
+          <span>メモ</span>
+          <textarea rows={3} value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
+        </label>
+        <div className="admin-inline-form__actions">
+          <button type="submit" disabled={busy}>
+            {busy ? "登録中..." : "登録"}
+          </button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
 function ImportArchiveForm({ onSubmit, busy }) {
   const [archiveFile, setArchiveFile] = useState(null);
   const [overwrite, setOverwrite] = useState(false);
@@ -568,6 +654,15 @@ function OpsPanel({ busy, onReset }) {
 function JobCard({ job, onAction, busyAction }) {
   const actualText = [job.actual_top1, job.actual_top2, job.actual_top3].filter(Boolean).join(" / ") || "未確定";
   const title = `${job.location || ""}${job.race_id ? ` ${job.race_id}` : ""}`.trim() || job.job_id;
+  const isAgentJob = String(job.job_source || "").trim() === "agent_prediction";
+  const remoteTask = job.remote_task || null;
+  const remoteTaskFailed = String(remoteTask?.status || "").trim().toLowerCase() === "failed";
+  const canRetryAgentPrediction = isAgentJob && job.status !== "settled" && (job.status === "failed" || remoteTaskFailed);
+  const canRetryAgentResult =
+    isAgentJob &&
+    job.agent_prediction_saved &&
+    !job.agent_result_saved &&
+    ["agent_prediction_ready", "fetching_agent_result", "failed"].includes(String(job.status || "").trim());
   const workspaceUrl =
     job.current_run_id && job.scope_key
       ? `/keiba/console/workspace?scope_key=${encodeURIComponent(job.scope_key)}&run_id=${encodeURIComponent(job.current_run_id)}`
@@ -587,6 +682,7 @@ function JobCard({ job, onAction, busyAction }) {
       </div>
 
       <div className="admin-job-card__meta">
+        <span>種別 {isAgentJob ? "AI予測" : "CSV"}</span>
         <span>日付 {job.race_date || "-"}</span>
         <span>発走 {job.scheduled_off_time || "-"}</span>
         <span>実行ID {job.current_run_id || "-"}</span>
@@ -605,6 +701,19 @@ function JobCard({ job, onAction, busyAction }) {
         <span className={statusClass(notify.tone)}>{notify.label}</span>
         {job.notes ? <span>メモ {job.notes}</span> : null}
       </div>
+
+      {isAgentJob ? (
+        <div className="admin-job-card__meta admin-job-card__meta--stack">
+          <span className={statusClass(remoteTaskTone(remoteTask?.status))}>
+            GitHub {remoteTaskStatusLabel(remoteTask?.status)}
+          </span>
+          {remoteTask?.task_id ? <span>タスクID {remoteTask.task_id}</span> : null}
+          {remoteTask?.attempt ? <span>試行 {remoteTask.attempt}</span> : null}
+          <span>予測 {job.agent_prediction_saved ? "保存済み" : "未保存"}</span>
+          <span>結果 {job.agent_result_saved ? "保存済み" : "未保存"}</span>
+          {remoteTask?.error_message ? <span>GitHubエラー {remoteTask.error_message}</span> : null}
+        </div>
+      ) : null}
 
       {job.meta_error || job.meta_source_url ? (
         <div className="admin-job-card__meta admin-job-card__meta--stack">
@@ -625,8 +734,18 @@ function JobCard({ job, onAction, busyAction }) {
           {busy ? "再計算中..." : "スケジュール再計算"}
         </button>
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
-          {busy ? "処理中..." : "今すぐ実行"}
+          {isAgentJob ? (busy ? "実行中..." : "今すぐAI予測") : busy ? "処理中..." : "今すぐ実行"}
         </button>
+        {canRetryAgentPrediction ? (
+          <button type="button" disabled={busy} onClick={() => onAction("retry_agent_prediction", job)}>
+            AI予測を再実行
+          </button>
+        ) : null}
+        {canRetryAgentResult ? (
+          <button type="button" disabled={busy} onClick={() => onAction("retry_agent_result", job)}>
+            結果取得を再試行
+          </button>
+        ) : null}
         <button type="button" disabled={busy} onClick={() => onAction("delete", job)}>
           削除
         </button>
@@ -758,6 +877,8 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     try {
       if (kind === "reset_schedule") {
         await postJson("/api/admin/jobs/update", { job_id: jobId, action: "reset_schedule" });
+      } else if (kind === "retry_agent_prediction" || kind === "retry_agent_result") {
+        await postJson("/api/admin/jobs/update", { job_id: jobId, action: kind });
       } else {
         await postJson(`/api/admin/jobs/${kind}`, { job_id: jobId, ...payload });
       }
@@ -765,6 +886,8 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         fetch_info: `タスク ${jobId} の情報を取得しました。`,
         reset_schedule: `タスク ${jobId} のスケジュールを再計算しました。`,
         process_now: `タスク ${jobId} の処理を開始しました。`,
+        retry_agent_prediction: `タスク ${jobId} のAI予測を再実行キューに戻しました。`,
+        retry_agent_result: `タスク ${jobId} の結果取得を再試行キューに戻しました。`,
         delete: `タスク ${jobId} を削除しました。`,
         edit: `タスク ${jobId} を更新しました。`,
       };
@@ -785,7 +908,9 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
       if (kind === "scan_due") {
         setFlashMessage(`期限到来タスクを ${data.queued_count || 0} 件キューに追加しました。`);
       } else if (kind === "run_due_now") {
-        setFlashMessage(`期限到来タスクを処理しました。実行 ${data.processed_count || 0} 件、精算 ${data.settled_count || 0} 件。`);
+        setFlashMessage(
+          `期限到来タスクを処理しました。AI予測 ${data.agent_dispatched_count || 0} 件、結果 ${data.agent_result_count || 0} 件、実行 ${data.processed_count || 0} 件、精算 ${data.settled_count || 0} 件。`,
+        );
       } else if (kind === "topup_today_all_llm") {
         setFlashMessage(`全LLMの当日資金に ${data.amount_yen || 0} 円を追加しました。`);
       } else if (kind === "daily_summary_share") {
@@ -812,6 +937,9 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         if (createdCount > 1) {
           setFlashMessage(`${createdCount} 件のタスクを作成しました。`);
         }
+        setCreateFormResetTick((value) => value + 1);
+      } else if (kind === "create_agent_races") {
+        setFlashMessage(`AI予測タスクを ${data.created_count || 0} 件登録しました。重複 ${data.skipped_count || 0} 件。`);
         setCreateFormResetTick((value) => value + 1);
       } else if (kind === "import_archive") {
         setFlashMessage(`アーカイブを取り込みました。書き込み ${data.written || 0} 件、スキップ ${data.skipped || 0} 件。`);
@@ -890,6 +1018,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         </section>
 
         <section className="admin-tool-hero">
+          <AgentRaceIdCreateForm
+            busy={busyAction === "create_agent_races"}
+            resetToken={createFormResetTick}
+            onSubmit={(payload) => runToolbarAction("create_agent_races", () => postJson("/api/admin/jobs/create_agent_races", payload))}
+          />
           <ZipCreateJobForm
             busy={busyAction === "create"}
             resetToken={createFormResetTick}

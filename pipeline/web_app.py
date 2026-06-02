@@ -69,6 +69,7 @@ from race_job_store import (
     get_job as get_race_job,
     hydrate_job_step_states as hydrate_race_job_step_states,
     initialize_job_step_fields as initialize_race_job_step_fields,
+    is_agent_prediction_job,
     load_jobs as load_race_jobs,
     normalize_run_kind,
     save_artifact as save_race_job_artifact,
@@ -94,7 +95,7 @@ from web_auth import (
 from web_admin import operations as web_admin_ops
 from web_admin import remote_predictors as web_remote_predictors
 from web_admin import task_routes as web_admin_tasks
-from web_data import odds_service, run_resolver, run_store, summary_service, view_data
+from web_data import agent_predictions, odds_service, run_resolver, run_store, summary_service, view_data
 from web_helpers import (
     extract_section,
     format_path_mtime,
@@ -1950,6 +1951,10 @@ def _resolve_llm_today_target_date(target_date="", scope_key=""):
         if race_date:
             available_dates.add(race_date)
 
+    for race_date in agent_predictions.available_dates(BASE_DIR):
+        if race_date:
+            available_dates.add(race_date)
+
     available_dates = sorted(available_dates, reverse=True)
     if target_date and target_date in available_dates:
         return target_date, "", scoped_rows
@@ -3038,6 +3043,31 @@ def _resolve_public_target_context(date_text="", scope_key=""):
 def _build_public_display_races(target_date="", scope_key="", include_detail_fields=False):
     target_date = str(target_date or "").strip()
     scope_norm = normalize_scope_key(scope_key)
+    agent_rows = agent_predictions.build_public_races(
+        BASE_DIR,
+        target_date=target_date,
+        scope_key=scope_norm,
+        include_detail_fields=include_detail_fields,
+    )
+    if agent_rows:
+        races = _with_public_display_sort_fields(agent_rows)
+        predictor_public_races = [
+            dict(item or {})
+            for item in list(races or [])
+            if str((item or {}).get("display_variant", "") or "").strip() != "placeholder"
+        ]
+        settled_count = sum(
+            1
+            for item in predictor_public_races
+            if bool((((item or {}).get("actual_result", {}) or {}).get("is_settled")))
+        )
+        return {
+            "races": races,
+            "placeholder_race_count": 0,
+            "predictor_public_races": predictor_public_races,
+            "settled_count": settled_count,
+        }
+
     predictor_only_races = _build_public_predictor_only_races(target_date=target_date, scope_key=scope_norm)
     placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_norm)
     sorted_races = sorted(list(predictor_only_races) + list(placeholder_races), key=_public_race_sort_key)
@@ -3117,6 +3147,7 @@ def _public_race_detail_payload(race_path, date_text="", scope_key=""):
 def _public_board_api_race_item(row):
     item = dict(row or {})
     return {
+        "source_type": str(item.get("source_type", "") or "").strip(),
         "run_id": str(item.get("run_id", "") or "").strip(),
         "race_id": str(item.get("race_id", "") or "").strip(),
         "race_title": str(item.get("race_title", "") or "").strip(),
@@ -3206,11 +3237,13 @@ def _public_board_api_predictor_summary(item):
 def _public_board_api_history_payload(item):
     history = dict(item or {})
     predictor = dict((history.get("predictor") or {}) or {})
+    agent_prediction = dict((history.get("agent_prediction") or {}) or {})
     return {
         "predictor": {
             "periods": dict((predictor.get("periods") or {}) or {}),
             "scope_key": str(predictor.get("scope_key", "") or "").strip(),
         },
+        "agent_prediction": agent_prediction,
     }
 
 
@@ -3222,6 +3255,17 @@ def _public_board_api_daily_report(item):
         "target_date": str(report.get("target_date", "") or "").strip(),
         "target_date_label": str(report.get("target_date_label", "") or "").strip(),
         "public_url": str(report.get("public_url", "") or "").strip(),
+    }
+
+
+def _empty_public_morning_preview_payload(target_date=""):
+    return {
+        "available": False,
+        "target_date": str(target_date or "").strip(),
+        "race_count": 0,
+        "featured_race": {},
+        "confidence_ranking": [],
+        "races": [],
     }
 
 
@@ -3309,8 +3353,21 @@ def build_public_board_payload(date_text="", scope_key="", include_detail_fields
     payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
     if isinstance(payload.get("history"), dict):
         payload["history"]["llm"] = {"periods": {}}
+        payload["history"]["agent_prediction"] = agent_predictions.build_history_payload(
+            BASE_DIR,
+            target_date=target_date,
+            scope_key=scope_key,
+        )
     payload["daily_report"] = _find_daily_report_for_date(target_date)
-    payload["morning_preview"] = _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
+    has_agent_predictions = any(
+        str((item or {}).get("source_type", "") or "").strip() == "agent_prediction"
+        for item in predictor_public_races
+    )
+    payload["morning_preview"] = (
+        _empty_public_morning_preview_payload(target_date)
+        if has_agent_predictions
+        else _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
+    )
     return payload
 
 
@@ -4238,6 +4295,24 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
     for row in jobs:
         hydrated, display = _race_job_view(row)
         status = str(hydrated.get("status", "") or "").strip().lower()
+        job_id_text = str(hydrated.get("job_id", "") or "").strip()
+        race_id_text = str(hydrated.get("race_id", "") or "").strip()
+        remote_task = find_latest_task_for_job(BASE_DIR, job_id_text)
+        remote_task_payload = None
+        if remote_task:
+            remote_task_payload = {
+                "task_id": str((remote_task or {}).get("task_id", "") or "").strip(),
+                "task_type": str((remote_task or {}).get("task_type", "") or "").strip(),
+                "status": str((remote_task or {}).get("status", "") or "").strip(),
+                "attempt": int((remote_task or {}).get("attempt", 0) or 0),
+                "updated_at": str((remote_task or {}).get("updated_at", "") or "").strip(),
+                "finished_at": str((remote_task or {}).get("finished_at", "") or "").strip(),
+                "workflow_dispatch_ref": str((remote_task or {}).get("workflow_dispatch_ref", "") or "").strip(),
+                "result_path": str((remote_task or {}).get("result_path", "") or "").strip(),
+                "error_message": str((remote_task or {}).get("error_message", "") or "").strip(),
+            }
+        agent_prediction_path = agent_predictions.agent_prediction_path_for_race(BASE_DIR, race_id_text)
+        agent_result_path = agent_predictions.agent_result_path_for_race(BASE_DIR, race_id_text)
         if status == "uploaded":
             summary["uploaded"] += 1
         elif status == "waiting_input_info":
@@ -4246,9 +4321,22 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             summary["waiting_morning"] += 1
         elif status == "scheduled":
             summary["scheduled"] += 1
-        elif status in ("queued_morning", "processing_morning", "queued_process", "processing", "waiting_v5", "queued_policy", "processing_policy", "queued_settle", "settling"):
+        elif status in (
+            "queued_morning",
+            "processing_morning",
+            "queued_agent_prediction",
+            "processing_agent_prediction",
+            "fetching_agent_result",
+            "queued_process",
+            "processing",
+            "waiting_v5",
+            "queued_policy",
+            "processing_policy",
+            "queued_settle",
+            "settling",
+        ):
             summary["processing"] += 1
-        elif status in ("ready", "preview_ready"):
+        elif status in ("ready", "preview_ready", "agent_prediction_ready"):
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
@@ -4289,6 +4377,12 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "target_distance": str(hydrated.get("target_distance", "") or "").strip(),
                 "target_track_condition": str(hydrated.get("target_track_condition", "") or "").strip(),
                 "lead_minutes": hydrated.get("lead_minutes", ""),
+                "job_source": str(hydrated.get("job_source", "") or "").strip(),
+                "remote_task": remote_task_payload,
+                "agent_prediction_saved": bool(agent_prediction_path and agent_prediction_path.exists()),
+                "agent_result_saved": bool(agent_result_path and agent_result_path.exists()),
+                "agent_prediction_path": str(agent_prediction_path or ""),
+                "agent_result_path": str(agent_result_path or ""),
                 "current_run_id": str(hydrated.get("current_run_id", "") or "").strip(),
                 "actual_top1": str(hydrated.get("actual_top1", "") or "").strip(),
                 "actual_top2": str(hydrated.get("actual_top2", "") or "").strip(),
@@ -4642,6 +4736,45 @@ def _create_job_from_task_archive(*, archive_bytes, archive_filename, lead_minut
             pass
         raise
     return updated or job
+
+
+def _extract_agent_race_ids(payload):
+    raw_parts = []
+    for key in ("race_ids", "race_id_text", "race_ids_text", "text"):
+        value = (payload or {}).get(key)
+        if isinstance(value, list):
+            raw_parts.extend(str(item or "") for item in value)
+        else:
+            raw_parts.append(str(value or ""))
+    raw_text = "\n".join(raw_parts)
+    candidates = re.findall(r"(?:race_id=)?(\d{10,16})", raw_text)
+    out = []
+    seen = set()
+    for candidate in candidates:
+        race_id = normalize_race_id(candidate)
+        if not race_id or race_id in seen:
+            continue
+        seen.add(race_id)
+        out.append(race_id)
+    return out
+
+
+def _find_existing_agent_job(race_id, race_date=""):
+    race_id_text = normalize_race_id(race_id)
+    race_date_text = str(race_date or "").strip()
+    for job in load_race_jobs(BASE_DIR):
+        if not is_agent_prediction_job(job):
+            continue
+        if normalize_race_id(job.get("race_id", "")) != race_id_text:
+            continue
+        job_date = str(job.get("race_date", "") or "").strip()
+        status = str(job.get("status", "") or "").strip().lower()
+        if status == "settled":
+            continue
+        if race_date_text and job_date and job_date != race_date_text:
+            continue
+        return job
+    return None
 
 
 @app.get("/", include_in_schema=False)
@@ -5148,6 +5281,29 @@ async def admin_jobs_process_now_api(request: Request):
     job_id = str((payload or {}).get("job_id", "") or "").strip()
     if not job_id:
         return JSONResponse({"ok": False, "error": "job_id required"}, status_code=400)
+    job = get_race_job(BASE_DIR, job_id)
+    if job and is_agent_prediction_job(job):
+        try:
+            result = web_admin_tasks.dispatch_agent_prediction_job(
+                base_dir=BASE_DIR,
+                job_id=job_id,
+                load_race_jobs=load_race_jobs,
+                update_race_job=update_race_job,
+                initialize_job_step_fields=initialize_race_job_step_fields,
+                set_job_step_state=set_race_job_step_state,
+            )
+        except LookupError:
+            return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "job_id": job_id}, status_code=500)
+        return JSONResponse(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "remote_predictor_task_id": str((result or {}).get("task_id", "") or "").strip(),
+                "race_id": str((result or {}).get("race_id", "") or "").strip(),
+            }
+        )
     try:
         from race_job_runner import process_race_job
 
@@ -5320,6 +5476,70 @@ async def admin_jobs_update_api(request: Request):
     if job is None:
         return JSONResponse({"ok": False, "error": "job not found", "job_id": job_id}, status_code=404)
     return JSONResponse({"ok": True, "job_id": job_id, "action": action, "status": str(job.get("status", "") or "").strip()})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/create_agent_races")
+async def admin_jobs_create_agent_races_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    race_ids = _extract_agent_race_ids(payload or {})
+    if not race_ids:
+        return JSONResponse({"ok": False, "error": "race_id list required"}, status_code=400)
+    race_date = str((payload or {}).get("race_date", "") or "").strip() or _default_job_race_date_text()
+    notes = str((payload or {}).get("notes", "") or "").strip()
+    lead_minutes_text = str((payload or {}).get("lead_minutes", "60") or "60").strip() or "60"
+    try:
+        lead_value = max(0, int(lead_minutes_text))
+    except ValueError:
+        lead_value = 60
+
+    created = []
+    skipped = []
+    errors = []
+    for race_id in race_ids:
+        existing = _find_existing_agent_job(race_id, race_date=race_date)
+        if existing:
+            skipped.append(
+                {
+                    "race_id": race_id,
+                    "job_id": str((existing or {}).get("job_id", "") or "").strip(),
+                    "reason": "already_exists",
+                }
+            )
+            continue
+        try:
+            job = create_race_job(
+                BASE_DIR,
+                race_id=race_id,
+                race_date=race_date,
+                lead_minutes=lead_value,
+                job_source="agent_prediction",
+                notes=notes,
+                artifacts=[],
+            )
+            created.append(
+                {
+                    "race_id": race_id,
+                    "job_id": str((job or {}).get("job_id", "") or "").strip(),
+                    "status": str((job or {}).get("status", "") or "").strip(),
+                }
+            )
+        except Exception as exc:
+            errors.append({"race_id": race_id, "error": str(exc)})
+    if not created and errors:
+        return JSONResponse({"ok": False, "error": "no agent race tasks created", "errors": errors, "skipped": skipped}, status_code=500)
+    return JSONResponse(
+        {
+            "ok": True,
+            "created_count": len(created),
+            "skipped_count": len(skipped),
+            "created_jobs": created,
+            "skipped_jobs": skipped,
+            "errors": errors,
+        }
+    )
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/create")
@@ -5624,6 +5844,71 @@ def _remote_v5_result_summary_path(scope_key, race_id, run_id):
     return race_dir / f"remote_predictor_summary_{run_id}.json"
 
 
+def _agent_prediction_output_dir():
+    path = agent_predictions.agent_prediction_write_dir(BASE_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _apply_remote_agent_prediction_result(task, payload):
+    task_row = dict(task or {})
+    race_id = normalize_race_id(task_row.get("race_id", ""))
+    result_payload = dict(payload.get("result") or {})
+    prediction_payload = result_payload.get("prediction")
+    content_base64 = str(result_payload.get("content_base64", "") or "").strip()
+    if prediction_payload is None:
+        if not content_base64:
+            raise ValueError("agent prediction result content_base64 missing")
+        try:
+            raw_bytes = base64.b64decode(content_base64)
+            prediction_payload = json.loads(raw_bytes.decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"invalid agent prediction payload: {exc}") from exc
+    if not isinstance(prediction_payload, dict):
+        raise ValueError("agent prediction payload must be object")
+    payload_race_id = normalize_race_id(prediction_payload.get("race_id", ""))
+    if payload_race_id:
+        race_id = payload_race_id
+    if not race_id:
+        raise ValueError("agent prediction race_id missing")
+    output_path = _agent_prediction_output_dir() / f"{race_id}.json"
+    output_path.write_text(
+        json.dumps(prediction_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "race_id": race_id,
+        "result_path": str(output_path),
+        "prediction_path": str(output_path),
+    }
+
+
+def _promote_job_after_remote_agent_prediction(*, job_id, task_id, race_id, log_output):
+    def _mutate(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
+        current_status = str(row.get("status", "") or "").strip().lower()
+        current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
+        if current_status not in ("queued_agent_prediction", "processing_agent_prediction", "scheduled"):
+            return
+        if current_task_id and current_task_id != str(task_id or "").strip():
+            return
+        row["status"] = "agent_prediction_ready"
+        row["current_v5_task_id"] = str(task_id or "").strip()
+        row["current_run_id"] = str(race_id or "").strip()
+        row["ready_at"] = now_text
+        row["error_message"] = ""
+        row["last_process_output"] = web_remote_predictors.append_job_process_log_entry(
+            row,
+            "agent_prediction_callback",
+            0,
+            log_output,
+        )
+        set_race_job_step_state(row, "predictor", "succeeded", now_text)
+        set_race_job_step_state(row, "policy", "idle")
+
+    return update_race_job(BASE_DIR, job_id, _mutate)
+
+
 def _apply_remote_v5_result(task, payload):
     task_row = dict(task or {})
     bundle_result = dict(payload.get("result") or {})
@@ -5725,6 +6010,49 @@ async def internal_v5_task_callback(task_id: str, request: Request):
     task_type = str((task or {}).get("task_type", "") or "").strip().lower()
 
     if status == "succeeded":
+        if task_type == "agent_prediction":
+            try:
+                saved = _apply_remote_agent_prediction_result(task, payload)
+            except Exception as exc:
+                update_v5_remote_task(
+                    BASE_DIR,
+                    task_id,
+                    lambda row, now_text: row.update(
+                        {
+                            "status": "failed",
+                            "finished_at": now_text,
+                            "error_message": str(exc),
+                            "result_summary": dict(summary_payload or {}),
+                        }
+                    ),
+                )
+                if job_id:
+                    from race_job_runner import fail_race_job
+
+                    fail_race_job(BASE_DIR, job_id, str(exc))
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            update_v5_remote_task(
+                BASE_DIR,
+                task_id,
+                lambda row, now_text: row.update(
+                    {
+                        "status": "succeeded",
+                        "finished_at": now_text,
+                        "error_message": "",
+                        "result_path": str(saved.get("result_path", "") or ""),
+                        "result_summary": dict(summary_payload or {}),
+                    }
+                ),
+            )
+            if job_id:
+                _promote_job_after_remote_agent_prediction(
+                    job_id=job_id,
+                    task_id=task_id,
+                    race_id=str(saved.get("race_id", "") or ""),
+                    log_output=log_excerpt,
+                )
+            return JSONResponse({"ok": True, "status": "succeeded", "task_id": task_id, "job_id": job_id, **saved})
+
         try:
             saved = _apply_remote_v5_result(task, payload)
         except Exception as exc:
