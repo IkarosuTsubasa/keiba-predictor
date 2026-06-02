@@ -14,7 +14,7 @@
 
 当前 `render.yaml` 已包含需要的两个服务：
 
-- `keiba-web`: Web 服务，启动命令为 `cd pipeline && python web_server.py`。
+- `keiba-web`: Web 服务，build 命令为 `pip install -r requirements.txt && cd frontend && npm install --include=dev && npm run build`，启动命令为 `cd pipeline && python web_server.py`。
 - `keiba-run-due-cron`: 唯一 cron 服务，计划为 `*/5 * * * *`，启动命令为 `cd pipeline && python cron_trigger_run_due.py`。
 - persistent disk: `pipeline-data`，挂载到 `/opt/render/project/src/pipeline/data`。
 
