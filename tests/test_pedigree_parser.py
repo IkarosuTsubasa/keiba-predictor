@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from keiba_llm_agent import main as main_module
+from keiba_llm_agent.pedigree.pedigree_analyzer import fetch_pedigree_html
+from keiba_llm_agent.pedigree.pedigree_parser import parse_pedigree_info
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+HORSE_FIXTURE_PATH = ROOT_DIR / "tests" / "fixtures" / "netkeiba_horse_sample.html"
+PEDIGREE_FIXTURE_PATH = ROOT_DIR / "tests" / "fixtures" / "netkeiba_pedigree_sample.html"
+
+
+class PedigreeParserTests(unittest.TestCase):
+    def test_parse_sire_dam_damsire_from_fixture(self) -> None:
+        html = PEDIGREE_FIXTURE_PATH.read_text(encoding="utf-8")
+        pedigree = parse_pedigree_info(html, horse_id="2021104073", horse_name="サンプルホース")
+        self.assertEqual(pedigree.sire, "ハーツクライ")
+        self.assertEqual(pedigree.dam, "サンプル母")
+        self.assertEqual(pedigree.damsire, "キングカメハメハ")
+
+    def test_missing_pedigree_does_not_fail(self) -> None:
+        pedigree = parse_pedigree_info("<html><body><div>no pedigree</div></body></html>", horse_id="x")
+        self.assertIsNone(pedigree.sire)
+        self.assertIsNone(pedigree.dam)
+        self.assertIsNone(pedigree.damsire)
+
+    def test_parse_pedigree_falls_back_from_horse_page_to_pedigree_page(self) -> None:
+        horse_html = """
+        <html><body>
+          <div class="db_head_regist fc">
+            <ul class="db_detail_menu">
+              <li><a href="https://db.netkeiba.com/horse/ped/2021104073/">血統</a></li>
+            </ul>
+          </div>
+        </body></html>
+        """
+        pedigree_html = PEDIGREE_FIXTURE_PATH.read_text(encoding="utf-8")
+        initial = parse_pedigree_info(horse_html, horse_id="2021104073", horse_name="サンプルホース")
+        self.assertIsNone(initial.sire)
+        with patch("keiba_llm_agent.main.fetch_pedigree_html", return_value=pedigree_html):
+            result = main_module.run_parse_pedigree("2021104073", horse_name="サンプルホース")
+        self.assertEqual(result["sire"], "ハーツクライ")
+        self.assertEqual(result["dam"], "サンプル母")
+        self.assertEqual(result["damsire"], "キングカメハメハ")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -4,9 +4,11 @@ firebase-admin
 google-genai
 lightgbm
 numpy
+openai
 pandas
 pydantic
 python-multipart
+requests
 scikit-learn
 selenium
 uvicorn

@@ -64,6 +64,15 @@ python pipeline/init_update.py --reset
 python pipeline/run_pipeline.py
 ```
 
+### Keiba LLM Agent condition weight simulation
+What-if analysis only. This command compares conditional scoring scenarios without changing prediction, review, or result files. It does not call LLMs and does not scrape netkeiba.
+```
+python -m keiba_llm_agent.main condition-weight-simulate --from-date 2026-05-01 --to-date 2026-05-31
+```
+- JSON: `keiba_llm_agent/data/error_analysis/{from}_{to}_condition_weight_simulation.json`
+- Markdown: `keiba_llm_agent/data/error_analysis/{from}_{to}_condition_weight_simulation.md`
+- Main purpose: verify whether conditional weights, such as turf race-level support or stricter rank6 recovery, are stable enough for later scoring changes.
+
 ### Record race results
 ```
 python pipeline/record_result.py

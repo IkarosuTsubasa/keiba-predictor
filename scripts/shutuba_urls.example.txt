@@ -1,0 +1,4 @@
+# 1行に1つ、netkeiba 出馬表 URL を記入してください
+https://race.netkeiba.com/race/shutuba.html?race_id=202605010811
+https://race.netkeiba.com/race/shutuba.html?race_id=202605020811
+https://race.netkeiba.com/race/shutuba.html?race_id=202605030811

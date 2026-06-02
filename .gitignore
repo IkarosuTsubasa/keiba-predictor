@@ -3,12 +3,69 @@
 **/data/
 AGENTS.md
 *.csv
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Python cache / test artifacts
 __pycache__/
+**/__pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime logs / temp files
+*.log
+*.tmp
+*.bak
+*.cache
 tmp_*.html
 _debug_*.html
 tmp_*.log
+tmp_*
+
+# Keiba LLM Agent runtime state
+keiba_llm_agent/memory/lessons.json
+keiba_llm_agent/data/
+
+# Local batch input files; keep *.example.txt files tracked
+scripts/race_ids.txt
+scripts/shutuba_urls.txt
+scripts/result_urls.txt
+
+# Frontend dependencies / build output
 frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Pipeline generated web/build output
+pipeline/public_frontend_dist/
+pipeline/data/
+
+# Local DB files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Android local/build artifacts
 android/.gradle/
 android/.idea/
 android/local.properties
