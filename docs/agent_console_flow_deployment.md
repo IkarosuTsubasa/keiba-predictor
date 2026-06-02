@@ -65,6 +65,7 @@ GitHub workflow dispatch input 由 Render 自动传入：
 5. GitHub Actions callback 成功后显示 `AI予測完了`。
 6. 发走后 30 分钟，cron 自动进入结果取得并最终变成 `完了`。
 7. 若失败，可在 Console 使用 `AI予測を再実行` 或 `結果取得を再試行`。
+8. `AI予測ヘルスチェック` 会显示保存文件数、GitHub task、注册比赛状态、`run_due` 最近执行履歴；也可以手动执行 `期限到来を確認` 与 `run_dueを実行`。
 
 ## 数据落点
 
@@ -72,6 +73,7 @@ GitHub workflow dispatch input 由 Render 自动传入：
 
 - race jobs: `/opt/render/project/src/pipeline/data/_shared/race_jobs.json`
 - remote tasks: `/opt/render/project/src/pipeline/data/_shared/v5_remote_tasks.json`
+- run_due history: `/opt/render/project/src/pipeline/data/_shared/run_due_history.jsonl`
 - agent predictions: `/opt/render/project/src/pipeline/data/agent_predictions/{race_id}.json`
 - agent results: `/opt/render/project/src/pipeline/data/agent_results/{race_id}.json`
 

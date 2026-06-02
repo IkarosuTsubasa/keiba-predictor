@@ -584,8 +584,8 @@ export default function App() {
   const selectedRace = isRaceDetail
     ? detailData?.race || null
     : null;
-  const isAgentPredictionBoard = hasAgentPredictionRows(boardRaces);
-  const isAgentPredictionDetail = isAgentPredictionRace(selectedRace);
+  const isAgentPredictionBoard = Boolean(data?.agent_mode) || hasAgentPredictionRows(boardRaces);
+  const isAgentPredictionDetail = Boolean(detailData?.agent_mode) || isAgentPredictionRace(selectedRace);
 
   useEffect(() => {
     const shouldHideStaticIntro =
@@ -854,7 +854,7 @@ export default function App() {
                 subtitle={
                   isAgentPredictionBoard
                     ? "各レースの印、買い目判断、上位馬メモ、結果をレースごとに確認できます。"
-                    : "比較用の導読を確認したあとに、各レースの印、上位候補、結果、定量モデルごとの判断差をレース単位とモデル単位の両方から見比べられます。"
+                    : "各レースのAI予測、上位馬メモ、買い目判断、結果をレースごとに確認できます。"
                 }
                 actions={
                   data?.daily_report?.public_url

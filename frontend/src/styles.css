@@ -483,6 +483,10 @@ select {
   gap: 10px;
 }
 
+.admin-toolbar--compact {
+  margin-top: 12px;
+}
+
 .admin-toolbar button,
 .admin-toolbar a,
 .admin-job-card__actions button,
@@ -809,6 +813,139 @@ select {
 
 .admin-summary-card--danger strong {
   color: var(--red);
+}
+
+.admin-summary-grid--health {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.admin-health-panel {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(19, 34, 48, 0.98), rgba(12, 20, 31, 0.98));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+}
+
+.admin-health-panel--danger {
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+.admin-health-panel__head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-health-panel__head h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.admin-health-panel__head p,
+.admin-health-panel__details p,
+.admin-health-panel__details small {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.admin-health-pill {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-health-pill--good {
+  background: rgba(34, 197, 94, 0.22);
+  color: var(--green);
+}
+
+.admin-health-pill--danger {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--red);
+}
+
+.admin-health-panel__warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-health-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-health-panel__actions button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-health-panel__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.admin-health-panel__warnings span {
+  padding: 7px 10px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.admin-health-panel__details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.admin-health-panel__details > div {
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-health-panel__details strong {
+  font-size: 13px;
+}
+
+.admin-health-panel__history {
+  grid-column: 1 / -1;
+}
+
+.admin-health-panel__history ul {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-health-panel__history li {
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .admin-job-list {

@@ -79,7 +79,7 @@ from race_job_store import (
     update_job as update_race_job,
 )
 from surface_scope import get_data_dir, migrate_legacy_data, normalize_scope_key
-from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, update_task as update_v5_remote_task
+from v5_remote_tasks import find_latest_task_for_job, get_task as get_v5_remote_task, load_tasks as load_v5_remote_tasks, update_task as update_v5_remote_task
 from public_share_copy import (
     PUBLIC_SHARE_DETAIL_LABEL,
     PUBLIC_SHARE_HASHTAG,
@@ -184,6 +184,7 @@ def run_due_jobs_once():
         load_race_jobs=load_race_jobs,
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
+        history_source="admin",
     )
 
 
@@ -3030,7 +3031,17 @@ def _public_consolidate_board_races(races, preview):
 def _resolve_public_target_context(date_text="", scope_key=""):
     requested_date = _normalize_report_date_text(date_text) or _daily_summary_jst_date_text()
     scope_norm = normalize_scope_key(scope_key)
-    target_date, fallback_notice, _ = _resolve_llm_today_target_date(requested_date, scope_norm)
+    available_dates = sorted(agent_predictions.available_dates(BASE_DIR, scope_key=scope_norm), reverse=True)
+    fallback_notice = ""
+    if requested_date and requested_date in available_dates:
+        target_date = requested_date
+    elif available_dates:
+        target_date = available_dates[0]
+        if requested_date and requested_date != target_date:
+            fallback_notice = f"{requested_date} は利用できないため、最新のAI予測日 {target_date} に切り替えました"
+    else:
+        target_date = requested_date
+        fallback_notice = "公開中のAI予測はまだありません。"
     return {
         "requested_date": requested_date,
         "target_date": str(target_date or "").strip(),
@@ -3068,47 +3079,11 @@ def _build_public_display_races(target_date="", scope_key="", include_detail_fie
             "settled_count": settled_count,
         }
 
-    predictor_only_races = _build_public_predictor_only_races(target_date=target_date, scope_key=scope_norm)
-    placeholder_races = _build_public_placeholder_races(target_date=target_date, scope_key=scope_norm)
-    sorted_races = sorted(list(predictor_only_races) + list(placeholder_races), key=_public_race_sort_key)
-    enriched_races = []
-    condition_cache = {}
-    for item in sorted_races:
-        row = dict(item or {})
-        row["predictor_compare_cards"] = _public_predictor_compare_cards(row)
-        if include_detail_fields:
-            condition_key = (
-                str(row.get("scope_key", "") or scope_norm or "").strip(),
-                str(row.get("location", "") or "").strip(),
-                _condition_distance_value(row.get("target_distance", "") or row.get("distance", "") or row.get("distance_label", "")),
-                str(row.get("target_track_condition", "") or row.get("track_condition", "") or "").strip() or "良",
-            )
-            if condition_key not in condition_cache:
-                condition_cache[condition_key] = _public_condition_predictor_ranking(
-                    location=condition_key[1],
-                    target_distance=condition_key[2],
-                    track_condition=condition_key[3],
-                    scope_key=condition_key[0],
-                )
-            row["condition_predictor_ranking"] = dict(condition_cache.get(condition_key) or {})
-        enriched_races.append(row)
-
-    races = _with_public_display_sort_fields(enriched_races)
-    predictor_public_races = [
-        dict(item or {})
-        for item in list(races or [])
-        if str((item or {}).get("display_variant", "") or "").strip() != "placeholder"
-    ]
-    settled_count = sum(
-        1
-        for item in predictor_public_races
-        if bool((((item or {}).get("actual_result", {}) or {}).get("is_settled")))
-    )
     return {
-        "races": races,
-        "placeholder_race_count": len(placeholder_races),
-        "predictor_public_races": predictor_public_races,
-        "settled_count": settled_count,
+        "races": [],
+        "placeholder_race_count": 0,
+        "predictor_public_races": [],
+        "settled_count": 0,
     }
 
 
@@ -3122,11 +3097,7 @@ def _public_race_detail_payload(race_path, date_text="", scope_key=""):
         scope_key=str(target_context.get("scope_key", "") or "").strip(),
         include_detail_fields=True,
     )
-    morning_preview = _build_public_morning_preview_payload(
-        target_date=target_date,
-        scope_key=str(target_context.get("scope_key", "") or "").strip(),
-    )
-    races = _public_consolidate_board_races(race_bundle.get("races", []), morning_preview)
+    races = [dict(item or {}) for item in list(race_bundle.get("races", []) or []) if isinstance(item, dict)]
     target_id = str(race_path or "").strip()
     race = next((dict(item or {}) for item in races if _public_race_match_id(item, target_id)), None)
     if not race:
@@ -3139,6 +3110,7 @@ def _public_race_detail_payload(race_path, date_text="", scope_key=""):
             "target_date": target_date,
             "target_date_label": str(target_context.get("target_date_label", "") or "").strip(),
             "fallback_notice": str(target_context.get("fallback_notice", "") or "").strip(),
+            "agent_mode": True,
             "race": race,
         },
     }
@@ -3277,6 +3249,7 @@ def _public_board_api_payload(payload):
         "target_date": str(board.get("target_date", "") or "").strip(),
         "target_date_label": str(board.get("target_date_label", "") or "").strip(),
         "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
+        "agent_mode": bool(board.get("agent_mode", True)),
         "races": [_public_board_api_race_item(row) for row in list(board.get("races", []) or []) if isinstance(row, dict)],
         "totals": {
             "race_count": int(totals.get("race_count", 0) or 0),
@@ -3294,34 +3267,14 @@ def _public_board_api_payload(payload):
 
 
 def build_public_board_payload(date_text="", scope_key="", include_detail_fields=False):
-    payload = web_public_llm.build_public_board_payload(
-        date_text=date_text,
-        scope_key=scope_key,
-        normalize_report_date_text=_normalize_report_date_text,
-        llm_today_scope_keys=_llm_today_scope_keys,
-        resolve_llm_today_target_date=_resolve_llm_today_target_date,
-        load_actual_result_map=_load_actual_result_map,
-        load_combined_llm_report_runs=_load_combined_llm_report_runs,
-        find_job_meta_for_run=_find_job_meta_for_run,
-        load_policy_payloads=load_policy_payloads,
-        normalize_policy_engine=normalize_policy_engine,
-        actual_result_snapshot=_actual_result_snapshot,
-        load_policy_run_ticket_rows=load_policy_run_ticket_rows,
-        summarize_ticket_rows=_summarize_ticket_rows,
-        format_triplet_text=_format_triplet_text,
-        marks_result_triplet=_marks_result_triplet,
-        format_confidence_text=_format_confidence_text,
-        format_distance_label=_format_distance_label,
-        public_all_time_roi_summary=_public_all_time_roi_summary,
-        public_trend_series=_public_trend_series,
-        parse_run_date=_parse_run_date,
-        share_detail_label=PUBLIC_SHARE_DETAIL_LABEL,
-        share_url=_public_share_detail_url,
-        share_hashtag=PUBLIC_SHARE_HASHTAG,
-        share_max_chars=PUBLIC_SHARE_MAX_CHARS,
-        to_int_or_none=to_int_or_none,
-    )
-    payload = dict(payload or {})
+    target_context = _resolve_public_target_context(date_text=date_text, scope_key=scope_key)
+    payload = {
+        "target_date": str(target_context.get("target_date", "") or "").strip(),
+        "target_date_label": str(target_context.get("target_date_label", "") or "").strip(),
+        "fallback_notice": str(target_context.get("fallback_notice", "") or "").strip(),
+        "scope_key": str(target_context.get("scope_key", "") or "").strip(),
+        "agent_mode": True,
+    }
     target_date = str(payload.get("target_date", "") or "").strip()
     race_bundle = _build_public_display_races(
         target_date=target_date,
@@ -3345,29 +3298,22 @@ def build_public_board_payload(date_text="", scope_key="", include_detail_fields
         "pending_count": max(0, len(predictor_public_races) - settled_count),
         "roi_text": "-",
     }
-    payload["daily_predictor"] = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
+    payload["daily_predictor"] = {"target_date": target_date, "cards": [], "top5to3_leader": {}}
     payload["hero"] = {
         "lead_race": predictor_public_races[0] if predictor_public_races else {},
-        "leader": dict((payload.get("daily_predictor", {}) or {}).get("top5to3_leader", {}) or {}),
+        "leader": {},
     }
-    payload["history"] = _build_public_history_payload(payload, scope_key=scope_key)
-    if isinstance(payload.get("history"), dict):
-        payload["history"]["llm"] = {"periods": {}}
-        payload["history"]["agent_prediction"] = agent_predictions.build_history_payload(
+    payload["history"] = {
+        "llm": {"periods": {}},
+        "predictor": {"periods": {}, "scope_key": normalize_scope_key(scope_key)},
+        "agent_prediction": agent_predictions.build_history_payload(
             BASE_DIR,
             target_date=target_date,
             scope_key=scope_key,
-        )
+        ),
+    }
     payload["daily_report"] = _find_daily_report_for_date(target_date)
-    has_agent_predictions = any(
-        str((item or {}).get("source_type", "") or "").strip() == "agent_prediction"
-        for item in predictor_public_races
-    )
-    payload["morning_preview"] = (
-        _empty_public_morning_preview_payload(target_date)
-        if has_agent_predictions
-        else _build_public_morning_preview_payload(target_date=target_date, scope_key=scope_key)
-    )
+    payload["morning_preview"] = _empty_public_morning_preview_payload(target_date)
     return payload
 
 
@@ -4410,6 +4356,174 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
     }
 
 
+def _count_json_files(path):
+    try:
+        return len(list(Path(path).glob("*.json"))) if Path(path).exists() else 0
+    except Exception:
+        return 0
+
+
+def _latest_by_text(rows, *fields):
+    candidates = []
+    for row in list(rows or []):
+        if not isinstance(row, dict):
+            continue
+        latest_text = ""
+        for field_name in fields:
+            value = str(row.get(field_name, "") or "").strip()
+            if value and value > latest_text:
+                latest_text = value
+        if latest_text:
+            candidates.append((latest_text, row))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0])
+    return dict(candidates[-1][1] or {})
+
+
+def _agent_health_env_status():
+    required = [
+        "ADMIN_TOKEN",
+        "RUN_DUE_TRIGGER_URL",
+        "PIPELINE_PUBLIC_SITE_URL",
+        "PIPELINE_CALLBACK_SECRET",
+        "GITHUB_ACTIONS_OWNER",
+        "GITHUB_ACTIONS_REPO",
+        "GITHUB_ACTIONS_TOKEN",
+    ]
+    optional = [
+        "GITHUB_ACTIONS_REF",
+        "GITHUB_ACTIONS_AGENT_WORKFLOW",
+        "KEIBA_AGENT_PREDICTIONS_DIR",
+        "KEIBA_AGENT_RESULTS_DIR",
+    ]
+    items = []
+    for key in required:
+        present = bool(str(os.environ.get(key, "") or "").strip())
+        items.append({"key": key, "required": True, "present": present})
+    for key in optional:
+        present = bool(str(os.environ.get(key, "") or "").strip())
+        items.append({"key": key, "required": False, "present": present})
+    missing_required = [item["key"] for item in items if item["required"] and not item["present"]]
+    return {
+        "items": items,
+        "missing_required": missing_required,
+        "ok": not bool(missing_required),
+    }
+
+
+def _build_agent_health_payload():
+    jobs = [dict(job or {}) for job in load_race_jobs(BASE_DIR) if is_agent_prediction_job(job)]
+    tasks = [
+        dict(task or {})
+        for task in load_v5_remote_tasks(BASE_DIR)
+        if str((task or {}).get("task_type", "") or "").strip().lower() == "agent_prediction"
+    ]
+    prediction_dir = agent_predictions.agent_prediction_write_dir(BASE_DIR)
+    result_dir = agent_predictions.agent_result_write_dir(BASE_DIR)
+    status_counts = {}
+    for job in jobs:
+        status = str(job.get("status", "") or "").strip().lower() or "unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+    task_status_counts = {}
+    for task in tasks:
+        status = str(task.get("status", "") or "").strip().lower() or "unknown"
+        task_status_counts[status] = task_status_counts.get(status, 0) + 1
+
+    latest_job = _latest_by_text(jobs, "updated_at", "created_at")
+    latest_task = _latest_by_text(tasks, "updated_at", "finished_at", "created_at")
+    latest_failed_task = _latest_by_text(
+        [task for task in tasks if str(task.get("status", "") or "").strip().lower() == "failed"],
+        "updated_at",
+        "finished_at",
+        "created_at",
+    )
+    cleanup_state_path = BASE_DIR / "data" / "_shared" / web_admin_tasks.RUN_DUE_CLEANUP_STATE_FILE
+    try:
+        cleanup_state = json.loads(cleanup_state_path.read_text(encoding="utf-8")) if cleanup_state_path.exists() else {}
+    except Exception:
+        cleanup_state = {}
+    lock_path = BASE_DIR / "data" / "_shared" / "run_due.lock"
+    try:
+        lock_payload = json.loads(lock_path.read_text(encoding="utf-8")) if lock_path.exists() else {}
+    except Exception:
+        lock_payload = {}
+    run_due_history = web_admin_tasks.load_run_due_history(BASE_DIR, limit=6)
+    latest_run_due = dict(run_due_history[0] or {}) if run_due_history else {}
+
+    env_status = _agent_health_env_status()
+    failure_count = int(status_counts.get("failed", 0) or 0) + int(task_status_counts.get("failed", 0) or 0)
+    warnings = []
+    if not env_status["ok"]:
+        warnings.append("GitHubまたはcallback設定が不足しています。")
+    if not _count_json_files(prediction_dir):
+        warnings.append("保存済みAI予測ファイルがありません。")
+    if failure_count:
+        warnings.append("失敗中のAI予測タスクがあります。")
+    if lock_payload:
+        warnings.append("run_dueロックが残っています。")
+    if latest_run_due and not latest_run_due.get("ok") and not latest_run_due.get("skipped"):
+        warnings.append("直近のrun_dueでエラーがあります。")
+
+    return {
+        "authorized": True,
+        "ok": not bool(warnings),
+        "warnings": warnings,
+        "files": {
+            "prediction_dir": str(prediction_dir),
+            "result_dir": str(result_dir),
+            "prediction_count": _count_json_files(prediction_dir),
+            "result_count": _count_json_files(result_dir),
+        },
+        "jobs": {
+            "total": len(jobs),
+            "status_counts": dict(sorted(status_counts.items())),
+            "processing": sum(
+                int(status_counts.get(status, 0) or 0)
+                for status in ("queued_agent_prediction", "processing_agent_prediction", "fetching_agent_result")
+            ),
+            "failed": int(status_counts.get("failed", 0) or 0),
+            "latest": {
+                "job_id": str(latest_job.get("job_id", "") or "").strip(),
+                "race_id": str(latest_job.get("race_id", "") or "").strip(),
+                "status": str(latest_job.get("status", "") or "").strip(),
+                "updated_at": str(latest_job.get("updated_at", "") or "").strip(),
+                "error_message": str(latest_job.get("error_message", "") or "").strip(),
+            },
+        },
+        "remote_tasks": {
+            "total": len(tasks),
+            "status_counts": dict(sorted(task_status_counts.items())),
+            "failed": int(task_status_counts.get("failed", 0) or 0),
+            "latest": {
+                "task_id": str(latest_task.get("task_id", "") or "").strip(),
+                "job_id": str(latest_task.get("job_id", "") or "").strip(),
+                "race_id": str(latest_task.get("race_id", "") or "").strip(),
+                "status": str(latest_task.get("status", "") or "").strip(),
+                "attempt": int(latest_task.get("attempt", 0) or 0),
+                "updated_at": str(latest_task.get("updated_at", "") or "").strip(),
+                "finished_at": str(latest_task.get("finished_at", "") or "").strip(),
+                "error_message": str(latest_task.get("error_message", "") or "").strip(),
+            },
+            "latest_failed": {
+                "task_id": str(latest_failed_task.get("task_id", "") or "").strip(),
+                "race_id": str(latest_failed_task.get("race_id", "") or "").strip(),
+                "updated_at": str(latest_failed_task.get("updated_at", "") or "").strip(),
+                "error_message": str(latest_failed_task.get("error_message", "") or "").strip(),
+            },
+        },
+        "run_due": {
+            "cleanup_last_at": str(cleanup_state.get("last_cleanup_at", "") or "").strip(),
+            "cleanup_last_jst_date": str(cleanup_state.get("last_cleanup_jst_date", "") or "").strip(),
+            "lock_active": bool(lock_payload),
+            "lock_started_at": str(lock_payload.get("started_at", "") or "").strip(),
+            "latest": latest_run_due,
+            "history": run_due_history,
+        },
+        "env": env_status,
+    }
+
+
 def _build_admin_workspace_payload(token: str = "", scope_key: str = "", run_id: str = ""):
     scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
     if not scope_norm:
@@ -4983,6 +5097,14 @@ def admin_jobs_api(request: Request, token: str = "", show_settled: str = ""):
         return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
     show_settled_flag = str(show_settled or "").strip().lower() in ("1", "true", "yes", "on")
     return JSONResponse(_build_admin_jobs_payload(token=supplied, show_settled=show_settled_flag))
+
+
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/agent_health")
+def admin_agent_health_api(request: Request, token: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    if _admin_token_enabled() and not _admin_token_valid(supplied):
+        return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
+    return JSONResponse(_build_agent_health_payload())
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/runs")
@@ -5736,11 +5858,17 @@ async def admin_jobs_scan_due_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/run_due_now")
 def admin_jobs_run_due_now_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
-        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
-    summary = run_due_jobs_once()
-    ok = not bool(list(summary.get("errors", []) or []))
-    return JSONResponse({"ok": ok, **summary}, status_code=200 if ok else 500)
+    return web_admin_tasks.internal_run_due_response(
+        base_dir=BASE_DIR,
+        token=supplied,
+        admin_token_valid=_admin_token_valid,
+        scan_due_race_jobs=scan_due_race_jobs,
+        scan_due_race_job_diagnostics=scan_due_race_job_diagnostics,
+        load_race_jobs=load_race_jobs,
+        update_race_job=update_race_job,
+        compute_race_job_initial_status=compute_race_job_initial_status,
+        history_source="admin",
+    )
 
 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/daily_summary_share")

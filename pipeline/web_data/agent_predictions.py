@@ -152,9 +152,11 @@ def _iter_prediction_payloads(base_dir):
             yield payload
 
 
-def available_dates(base_dir):
+def available_dates(base_dir, scope_key=""):
     dates = set()
     for payload in _iter_prediction_payloads(base_dir):
+        if not _scope_matches(payload, scope_key):
+            continue
         race_info = dict(payload.get("race_info") or {})
         race_date = _safe_text(race_info.get("race_date"))
         if race_date:

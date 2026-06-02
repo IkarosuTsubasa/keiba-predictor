@@ -239,6 +239,186 @@ function SummaryCard({ label, value, tone = "neutral" }) {
   );
 }
 
+function formatHealthCountMap(counts) {
+  const entries = Object.entries(counts || {}).filter(([, value]) => Number(value || 0) > 0);
+  if (!entries.length) return "-";
+  return entries.map(([key, value]) => `${key}: ${value}`).join(" / ");
+}
+
+function HealthStatusPill({ ok }) {
+  return (
+    <span className={`admin-health-pill${ok ? " admin-health-pill--good" : " admin-health-pill--danger"}`}>
+      {ok ? "正常" : "要確認"}
+    </span>
+  );
+}
+
+function runDueSourceLabel(source) {
+  const value = String(source || "").trim();
+  if (value === "internal") return "定期実行";
+  if (value === "admin" || value === "manual") return "手動実行";
+  return "実行";
+}
+
+function formatRunDueHistoryLine(item) {
+  if (!item) return "";
+  const rawExecutedAt = String(item.executed_at || "").trim();
+  if (!rawExecutedAt && !String(item.source || "").trim()) return "";
+  const executedAt = rawExecutedAt || "-";
+  const source = runDueSourceLabel(item.source);
+  if (item.skipped) {
+    return `${executedAt} / ${source} / スキップ ${item.reason || "-"}`;
+  }
+  return `${executedAt} / ${source} / AI予測 ${item.agent_dispatched_count || 0}件 / 結果 ${
+    item.agent_result_count || 0
+  }件 / エラー ${item.error_count || 0}件`;
+}
+
+function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, onScanDue, onRunDue }) {
+  const actionBusy = Boolean(busyAction);
+  if (loading) {
+    return (
+      <section className="admin-health-panel">
+        <div className="admin-health-panel__head">
+          <div>
+            <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+            <h2>状態を読み込んでいます</h2>
+          </div>
+          <div className="admin-health-panel__actions">
+            <button type="button" disabled>
+              読み込み中...
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  if (error) {
+    return (
+      <section className="admin-health-panel admin-health-panel--danger">
+        <div className="admin-health-panel__head">
+          <div>
+            <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+            <h2>取得に失敗しました</h2>
+            <p>{error}</p>
+          </div>
+          <HealthStatusPill ok={false} />
+        </div>
+        <div className="admin-health-panel__actions">
+          <button type="button" onClick={onRefresh}>
+            状態を再取得
+          </button>
+        </div>
+      </section>
+    );
+  }
+  if (!health) return null;
+
+  const files = health.files || {};
+  const jobs = health.jobs || {};
+  const tasks = health.remote_tasks || {};
+  const env = health.env || {};
+  const latestTask = tasks.latest || {};
+  const latestJob = jobs.latest || {};
+  const runDue = health.run_due || {};
+  const latestRunDue = runDue.latest || {};
+  const runDueHistory = Array.isArray(runDue.history) ? runDue.history : [];
+  const warnings = Array.isArray(health.warnings) ? health.warnings : [];
+
+  const cards = [
+    { label: "AI予測ファイル", value: files.prediction_count || 0, tone: files.prediction_count ? "good" : "danger" },
+    { label: "結果ファイル", value: files.result_count || 0, tone: files.result_count ? "good" : "neutral" },
+    { label: "登録レース", value: jobs.total || 0, tone: jobs.total ? "active" : "neutral" },
+    { label: "処理中", value: jobs.processing || 0, tone: jobs.processing ? "active" : "neutral" },
+    { label: "失敗", value: (jobs.failed || 0) + (tasks.failed || 0), tone: (jobs.failed || 0) + (tasks.failed || 0) ? "danger" : "good" },
+    { label: "GitHub設定", value: env.ok ? "OK" : "不足", tone: env.ok ? "good" : "danger" },
+  ];
+
+  return (
+    <section className={`admin-health-panel${health.ok ? "" : " admin-health-panel--danger"}`}>
+      <div className="admin-health-panel__head">
+        <div>
+          <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+          <h2>Consoleから自動化の状態を確認できます</h2>
+          <p>ファイル保存、GitHub Actions、run_due、登録レースの状態をまとめて表示します。</p>
+        </div>
+        <HealthStatusPill ok={health.ok} />
+      </div>
+
+      <div className="admin-health-panel__actions">
+        <button type="button" disabled={loading || actionBusy} onClick={onRefresh}>
+          状態を再取得
+        </button>
+        <button type="button" disabled={loading || actionBusy} onClick={onScanDue}>
+          期限到来を確認
+        </button>
+        <button type="button" disabled={loading || actionBusy} onClick={onRunDue}>
+          run_dueを実行
+        </button>
+      </div>
+
+      <div className="admin-summary-grid admin-summary-grid--health">
+        {cards.map((item) => (
+          <SummaryCard key={item.label} label={item.label} value={item.value} tone={item.tone} />
+        ))}
+      </div>
+
+      {warnings.length ? (
+        <div className="admin-health-panel__warnings">
+          {warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="admin-health-panel__details">
+        <div>
+          <strong>最新GitHubタスク</strong>
+          <p>
+            {latestTask.task_id
+              ? `${remoteTaskStatusLabel(latestTask.status)} / race ${latestTask.race_id || "-"} / ${latestTask.updated_at || "-"}`
+              : "タスクはまだありません。"}
+          </p>
+          {latestTask.error_message ? <small>{latestTask.error_message}</small> : null}
+        </div>
+        <div>
+          <strong>最新登録レース</strong>
+          <p>
+            {latestJob.job_id
+              ? `${latestJob.status || "-"} / race ${latestJob.race_id || "-"} / ${latestJob.updated_at || "-"}`
+              : "登録レースはまだありません。"}
+          </p>
+          {latestJob.error_message ? <small>{latestJob.error_message}</small> : null}
+        </div>
+        <div>
+          <strong>run_due</strong>
+          <p>
+            {runDue.lock_active ? `ロック中: ${runDue.lock_started_at || "-"}` : `ロックなし / ${formatRunDueHistoryLine(latestRunDue) || "実行履歴はまだありません。"}`}
+          </p>
+          <small>最終cleanup: {runDue.cleanup_last_at || "-"}</small>
+        </div>
+        <div>
+          <strong>状態分布</strong>
+          <p>{formatHealthCountMap(jobs.status_counts)}</p>
+          <small>GitHub: {formatHealthCountMap(tasks.status_counts)}</small>
+        </div>
+        <div className="admin-health-panel__history">
+          <strong>run_due履歴</strong>
+          {runDueHistory.length ? (
+            <ul>
+              {runDueHistory.map((item, index) => (
+                <li key={`${item.executed_at || "run_due"}-${index}`}>{formatRunDueHistoryLine(item)}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>履歴はまだありません。</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProcessLog({ entries }) {
   if (!entries?.length) return null;
   return (
@@ -770,15 +950,22 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     error: "",
     data: null,
   });
+  const [healthState, setHealthState] = useState({
+    loading: false,
+    error: "",
+    data: null,
+  });
 
   useEffect(() => {
     if (!token.trim()) {
       setState({ loading: false, error: "", data: null });
+      setHealthState({ loading: false, error: "", data: null });
       return;
     }
 
     let alive = true;
     setState((prev) => ({ ...prev, loading: true, error: "" }));
+    setHealthState((prev) => ({ ...prev, loading: true, error: "" }));
     fetch(`${appBasePath}/api/admin/jobs?show_settled=${showSettled ? "1" : "0"}`, {
       headers: {
         Accept: "application/json",
@@ -805,6 +992,30 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           setToken("");
         }
         setState({ loading: false, error: error?.message || "管理タスクの読み込みに失敗しました。", data: null });
+      });
+
+    fetch(`${appBasePath}/api/admin/agent_health`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token.trim()}`,
+      },
+    })
+      .then((response) => {
+        if (response.status === 403) {
+          throw new Error("管理トークンが無効です。");
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!alive) return;
+        setHealthState({ loading: false, error: "", data });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setHealthState({ loading: false, error: error?.message || "ヘルスチェックの読み込みに失敗しました。", data: null });
       });
 
     return () => {
@@ -988,33 +1199,6 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           <button type="button" onClick={() => setReloadTick((value) => value + 1)}>
             再読み込み
           </button>
-          <button type="button" disabled={busyAction === "scan_due"} onClick={() => runToolbarAction("scan_due", () => postJson("/api/admin/jobs/scan_due", {}))}>
-            {busyAction === "scan_due" ? "確認中..." : "期限到来を確認"}
-          </button>
-          <button type="button" disabled={busyAction === "run_due_now"} onClick={() => runToolbarAction("run_due_now", () => postJson("/api/admin/jobs/run_due_now", {}))}>
-            {busyAction === "run_due_now" ? "実行中..." : "期限到来を実行"}
-          </button>
-          <button
-            type="button"
-            disabled={busyAction === "topup_today_all_llm"}
-            onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
-          >
-            {busyAction === "topup_today_all_llm" ? "反映中..." : "全LLM追加入金"}
-          </button>
-          <button
-            type="button"
-            disabled={busyAction === "daily_summary_share"}
-            onClick={() => runToolbarAction("daily_summary_share", () => postJson("/api/admin/jobs/daily_summary_share", {}))}
-          >
-            {busyAction === "daily_summary_share" ? "準備中..." : "日次サマリー共有"}
-          </button>
-          <button
-            type="button"
-            disabled={busyAction === "generate_daily_report"}
-            onClick={() => runToolbarAction("generate_daily_report", () => postJson("/api/admin/jobs/generate_daily_report", {}))}
-          >
-            {busyAction === "generate_daily_report" ? "生成中..." : "私の日報を生成"}
-          </button>
         </section>
 
         <section className="admin-tool-hero">
@@ -1035,11 +1219,48 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           <div className="admin-tool-grid">
             <ImportArchiveForm busy={busyAction === "import_archive"} onSubmit={(payload) => runToolbarAction("import_archive", () => postForm("/api/admin/jobs/import_archive", payload))} />
             <OpsPanel busy={busyAction === "reset_llm_state"} onReset={() => runToolbarAction("reset_llm_state", () => postJson("/api/admin/ops/reset_llm_state", {}))} />
+            <div className="admin-tool-panel__body">
+              <span className="admin-tool-panel__eyebrow">旧補助操作</span>
+              <p>必要な場合のみ、旧LLM系の補助処理を手動で実行します。</p>
+              <div className="admin-toolbar admin-toolbar--compact">
+                <button
+                  type="button"
+                  disabled={busyAction === "topup_today_all_llm"}
+                  onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
+                >
+                  {busyAction === "topup_today_all_llm" ? "反映中..." : "全LLM追加入金"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busyAction === "daily_summary_share"}
+                  onClick={() => runToolbarAction("daily_summary_share", () => postJson("/api/admin/jobs/daily_summary_share", {}))}
+                >
+                  {busyAction === "daily_summary_share" ? "準備中..." : "日次サマリー共有"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busyAction === "generate_daily_report"}
+                  onClick={() => runToolbarAction("generate_daily_report", () => postJson("/api/admin/jobs/generate_daily_report", {}))}
+                >
+                  {busyAction === "generate_daily_report" ? "生成中..." : "私の日報を生成"}
+                </button>
+              </div>
+            </div>
           </div>
         </details>
 
         {flashMessage ? <section className="notice-strip">{flashMessage}</section> : null}
         {state.error ? <section className="notice-strip">{state.error}</section> : null}
+
+        <AgentHealthPanel
+          health={healthState.data}
+          loading={healthState.loading}
+          error={healthState.error}
+          busyAction={busyAction}
+          onRefresh={() => setReloadTick((value) => value + 1)}
+          onScanDue={() => runToolbarAction("scan_due", () => postJson("/api/admin/jobs/scan_due", {}))}
+          onRunDue={() => runToolbarAction("run_due_now", () => postJson("/api/admin/jobs/run_due_now", {}))}
+        />
 
         <section className="admin-summary-grid">
           {summaryItems.map((item) => (

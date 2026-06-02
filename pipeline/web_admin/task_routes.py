@@ -30,6 +30,8 @@ AUTO_SETTLE_DELAY_MINUTES = 20
 AGENT_RESULT_DELAY_MINUTES = 30
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
+RUN_DUE_HISTORY_FILE = "run_due_history.jsonl"
+RUN_DUE_HISTORY_MAX_LINES = 120
 ACTIVE_RUN_DUE_JOB_STATUSES = {
     "queued_morning",
     "processing_morning",
@@ -53,6 +55,85 @@ def _run_due_lock_path(base_dir):
 
 def _run_due_cleanup_state_path(base_dir):
     return Path(base_dir) / "data" / "_shared" / RUN_DUE_CLEANUP_STATE_FILE
+
+
+def _run_due_history_path(base_dir):
+    return Path(base_dir) / "data" / "_shared" / RUN_DUE_HISTORY_FILE
+
+
+def _trim_run_due_history(path):
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return
+    except Exception:
+        return
+    if len(lines) <= RUN_DUE_HISTORY_MAX_LINES:
+        return
+    path.write_text("\n".join(lines[-RUN_DUE_HISTORY_MAX_LINES:]) + "\n", encoding="utf-8")
+
+
+def append_run_due_history(base_dir, summary, *, source="manual", skipped=False, reason="", lock=None):
+    compact = _compact_run_due_summary(summary or {})
+    errors = list(compact.get("errors", []) or [])
+    record = {
+        "executed_at": datetime.now().isoformat(timespec="seconds"),
+        "source": str(source or "").strip() or "manual",
+        "ok": not bool(errors),
+        "skipped": bool(skipped),
+        "reason": str(reason or "").strip(),
+        "error_count": len(errors),
+        **compact,
+    }
+    if isinstance(lock, dict) and lock:
+        record["lock_started_at"] = str(lock.get("started_at", "") or "").strip()
+        record["lock_pid"] = str(lock.get("pid", "") or "").strip()
+    history_path = _run_due_history_path(base_dir)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+    _trim_run_due_history(history_path)
+    return record
+
+
+def safe_append_run_due_history(base_dir, summary, *, source="manual", skipped=False, reason="", lock=None):
+    try:
+        return append_run_due_history(base_dir, summary, source=source, skipped=skipped, reason=reason, lock=lock)
+    except Exception as exc:
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_history_write_error",
+                    "error": str(exc),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return {}
+
+
+def load_run_due_history(base_dir, limit=8):
+    history_path = _run_due_history_path(base_dir)
+    if not history_path.exists():
+        return []
+    try:
+        lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except Exception:
+        return []
+    rows = []
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+        if len(rows) >= int(limit or 8):
+            break
+    return rows
 
 
 def _acquire_run_due_lock(base_dir):
@@ -789,7 +870,16 @@ def _compact_run_due_summary(summary):
     }
 
 
-def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs, update_race_job, compute_race_job_initial_status):
+def run_due_jobs_once(
+    *,
+    base_dir,
+    scan_due_race_jobs,
+    scan_due_race_job_diagnostics,
+    load_race_jobs,
+    update_race_job,
+    compute_race_job_initial_status,
+    history_source="manual",
+):
     autofilled_jobs, autofill_errors = _autofill_waiting_input_info_jobs(
         base_dir=base_dir,
         load_race_jobs=load_race_jobs,
@@ -1195,7 +1285,7 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
             flush=True,
         )
 
-    return {
+    summary = {
         "autofill_count": len(autofilled_jobs),
         "autofilled_jobs": autofilled_jobs,
         "queued_count": len(changed),
@@ -1224,6 +1314,8 @@ def run_due_jobs_once(*, base_dir, scan_due_race_jobs, scan_due_race_job_diagnos
         "cleanup": cleanup_summary,
         "errors": errors,
     }
+    safe_append_run_due_history(base_dir, summary, source=history_source)
+    return summary
 
 
 def import_history_zip(*, base_dir, archive_bytes, overwrite=False):
@@ -1264,11 +1356,30 @@ def import_history_zip(*, base_dir, archive_bytes, overwrite=False):
     return {"written": written, "skipped": skipped, "sample_paths": imported_paths[:8]}
 
 
-def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_race_jobs, scan_due_race_job_diagnostics, load_race_jobs, update_race_job, compute_race_job_initial_status):
+def internal_run_due_response(
+    *,
+    base_dir,
+    token,
+    admin_token_valid,
+    scan_due_race_jobs,
+    scan_due_race_job_diagnostics,
+    load_race_jobs,
+    update_race_job,
+    compute_race_job_initial_status,
+    history_source="internal",
+):
     if not admin_token_valid(token):
         return JSONResponse({"ok": False, "error": "invalid_admin_token"}, status_code=403)
     locked, lock_payload, lock_path = _acquire_run_due_lock(base_dir)
     if not locked:
+        safe_append_run_due_history(
+            base_dir,
+            {"errors": []},
+            source=history_source,
+            skipped=True,
+            reason="already_running",
+            lock=lock_payload,
+        )
         return JSONResponse(
             {
                 "ok": True,
@@ -1285,6 +1396,7 @@ def internal_run_due_response(*, base_dir, token, admin_token_valid, scan_due_ra
             load_race_jobs=load_race_jobs,
             update_race_job=update_race_job,
             compute_race_job_initial_status=compute_race_job_initial_status,
+            history_source=history_source,
         )
         ok = not bool(list(summary.get("errors", []) or []))
         return JSONResponse({"ok": ok, "skipped": False, **_compact_run_due_summary(summary)}, status_code=200 if ok else 500)

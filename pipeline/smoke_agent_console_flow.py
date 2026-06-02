@@ -177,6 +177,9 @@ def main():
 
         assert_true(dispatch_summary.get("queued_count") == 1, "run_due should queue due agent job")
         assert_true(dispatch_summary.get("agent_dispatched_count") == 1, "run_due should dispatch agent prediction")
+        first_history = task_routes.load_run_due_history(base_dir)
+        assert_true(bool(first_history), "run_due should write history")
+        assert_true(first_history[0].get("agent_dispatched_count") == 1, "history should include dispatch count")
         dispatched_job = get_job(base_dir, job_id) or {}
         assert_true(dispatched_job.get("status") == "processing_agent_prediction", "job should wait for agent callback")
         assert_true(dispatched_job.get("predictor_status") == "running", "predictor step should be running")
@@ -197,6 +200,8 @@ def main():
 
         result_summary = run_due_once(base_dir)
         assert_true(result_summary.get("agent_result_count") == 1, "run_due should settle saved agent result")
+        latest_history = task_routes.load_run_due_history(base_dir)
+        assert_true(latest_history[0].get("agent_result_count") == 1, "history should include result count")
         settled_job = get_job(base_dir, job_id) or {}
         assert_true(settled_job.get("status") == "settled", "agent job should be settled")
         assert_true(settled_job.get("settlement_status") == "succeeded", "settlement step should succeed")
