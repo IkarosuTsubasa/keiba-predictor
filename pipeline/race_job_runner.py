@@ -318,7 +318,25 @@ def _mark_ntfy_notify_failed(row, now_text, run_id, error_text):
     row["ntfy_notify_error"] = str(error_text or "").strip()
 
 
+def _auto_prediction_notification_enabled():
+    raw = str(os.environ.get("PIPELINE_AUTO_PREDICTION_NOTIFY_ENABLED", "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id):
+    if not _auto_prediction_notification_enabled():
+        _log_runner_event(
+            "ntfy_notify_skipped",
+            job_id=job_id,
+            run_id=run_id,
+            reason="auto_prediction_notification_disabled",
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "auto_prediction_notification_disabled",
+        }
+
     from ntfy_notifier import publish_share_notifications
 
     job = get_job(base_path, job_id) or {}

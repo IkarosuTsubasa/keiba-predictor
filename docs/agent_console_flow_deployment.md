@@ -35,6 +35,7 @@
 - `GITHUB_ACTIONS_AGENT_WORKFLOW`: 可选，默认 `agent-prediction-remote.yml`。
 - `KEIBA_AGENT_PREDICTIONS_DIR`: 可选，默认写入 `pipeline/data/agent_predictions`。
 - `KEIBA_AGENT_RESULTS_DIR`: 可选，默认写入 `pipeline/data/agent_results`。
+- `PIPELINE_AUTO_PREDICTION_NOTIFY_ENABLED`: 可选，默认关闭。只有设为 `1/true/yes/on` 时，预测完成后才会自动发送 ntfy/FCM 通知。
 
 如果线上已经配置过 v5 remote predictor，通常只需要确认旧变量仍然存在。预测和结果默认会写入 Render persistent disk，所以不额外配置 `KEIBA_AGENT_PREDICTIONS_DIR` 与 `KEIBA_AGENT_RESULTS_DIR` 也可以。
 
