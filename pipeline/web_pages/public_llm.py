@@ -4,7 +4,6 @@ import html
 import re
 from datetime import datetime, timedelta
 
-from public_share_copy import PUBLIC_SHARE_TICKETS_LABEL
 from surface_scope import normalize_scope_key
 from web_report.helpers import (
     LLM_BATTLE_LABELS,
@@ -139,26 +138,6 @@ def _share_ticket_target_text(bet_type, target):
     return "-".join(parts) if parts else text
 
 
-def _share_ticket_segments(ticket_rows, *, to_int_or_none):
-    segments = []
-    for row in list(ticket_rows or []):
-        bet_type_key = safe_text(row.get("bet_type")).lower()
-        bet_type = BET_TYPE_TEXT_MAP.get(bet_type_key, safe_text(row.get("bet_type")) or "-")
-        target_text = _share_ticket_target_text(
-            bet_type_key,
-            safe_text(row.get("horse_no")) or safe_text(row.get("target")),
-        )
-        amount = to_int_or_none(row.get("amount_yen"))
-        if amount is None:
-            amount = to_int_or_none(row.get("stake_yen"))
-        amount_text = f"¥{int(amount)}" if amount is not None else ""
-        core = f"{bet_type}{target_text}"
-        segment = f"{core}{amount_text}" if amount_text else core
-        if segment and segment not in segments:
-            segments.append(segment)
-    return segments
-
-
 def _share_marks_text(marks_map, *, to_int_or_none):
     if not marks_map:
         return "印なし"
@@ -204,6 +183,7 @@ def build_public_share_text(
     to_int_or_none,
 ):
     del engine
+    del ticket_rows
     header = _share_hashtag_race_label(run_row)
     share_url_text = share_url(run_row) if callable(share_url) else share_url
     tail_variants = [
@@ -211,51 +191,26 @@ def build_public_share_text(
         ([str(share_url_text or "").strip(), share_hashtag], 0),
         ([str(share_url_text or "").strip()], 0),
     ]
-    ticket_segments = _share_ticket_segments(ticket_rows, to_int_or_none=to_int_or_none)
     marks_variants = _share_marks_variants(marks_map, to_int_or_none=to_int_or_none)
-    ticket_label_variants = [PUBLIC_SHARE_TICKETS_LABEL, "買い目", ""]
 
     best_text = ""
     best_score = None
 
     for marks_variant_index, (marks_text, marks_count) in enumerate(marks_variants):
         for tail_lines, detail_score in tail_variants:
-            for label_index, ticket_label in enumerate(ticket_label_variants):
-                chosen_segments = []
-                if ticket_segments:
-                    for segment in ticket_segments:
-                        next_segments = chosen_segments + [segment]
-                        joined_segments = " / ".join(next_segments)
-                        ticket_line = f"{ticket_label} {joined_segments}".strip() if ticket_label else joined_segments
-                        candidate = _compose_share_text([header, marks_text, ticket_line], tail_lines)
-                        if len(candidate) > int(max_chars):
-                            break
-                        chosen_segments = next_segments
-                else:
-                    placeholder = f"{ticket_label} 買い目なし".strip() if ticket_label else "買い目なし"
-                    candidate = _compose_share_text([header, marks_text, placeholder], tail_lines)
-                    if len(candidate) <= int(max_chars):
-                        chosen_segments = ["買い目なし"]
+            candidate_text = _compose_share_text([header, marks_text], tail_lines)
+            if len(candidate_text) > int(max_chars):
+                continue
 
-                lines = [header, marks_text]
-                if chosen_segments:
-                    joined_segments = " / ".join(chosen_segments)
-                    lines.append(f"{ticket_label} {joined_segments}".strip() if ticket_label else joined_segments)
-                candidate_text = _compose_share_text(lines, tail_lines)
-                if len(candidate_text) > int(max_chars):
-                    continue
-
-                score = (
-                    len(chosen_segments),
-                    marks_count,
-                    detail_score,
-                    -marks_variant_index,
-                    -label_index,
-                    len(candidate_text),
-                )
-                if best_score is None or score > best_score:
-                    best_score = score
-                    best_text = candidate_text
+            score = (
+                marks_count,
+                detail_score,
+                -marks_variant_index,
+                len(candidate_text),
+            )
+            if best_score is None or score > best_score:
+                best_score = score
+                best_text = candidate_text
 
     if best_text:
         return best_text

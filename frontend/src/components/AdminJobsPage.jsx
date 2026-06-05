@@ -324,6 +324,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
   const latestRunDue = runDue.latest || {};
   const runDueHistory = Array.isArray(runDue.history) ? runDue.history : [];
   const warnings = Array.isArray(health.warnings) ? health.warnings : [];
+  const missingEnvKeys = Array.isArray(env.missing_required) ? env.missing_required : [];
 
   const cards = [
     { label: "AI予測ファイル", value: files.prediction_count || 0, tone: files.prediction_count ? "good" : "danger" },
@@ -331,7 +332,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
     { label: "登録レース", value: jobs.total || 0, tone: jobs.total ? "active" : "neutral" },
     { label: "処理中", value: jobs.processing || 0, tone: jobs.processing ? "active" : "neutral" },
     { label: "失敗", value: (jobs.failed || 0) + (tasks.failed || 0), tone: (jobs.failed || 0) + (tasks.failed || 0) ? "danger" : "good" },
-    { label: "GitHub設定", value: env.ok ? "OK" : "不足", tone: env.ok ? "good" : "danger" },
+    { label: "GitHub設定", value: env.ok ? "OK" : `不足 ${missingEnvKeys.length}`, tone: env.ok ? "good" : "danger" },
   ];
 
   return (
@@ -389,6 +390,11 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
               : "登録レースはまだありません。"}
           </p>
           {latestJob.error_message ? <small>{latestJob.error_message}</small> : null}
+        </div>
+        <div>
+          <strong>GitHub設定</strong>
+          <p>{env.ok ? "必要な環境変数は設定済みです。" : `不足: ${missingEnvKeys.join(" / ") || "-"}`}</p>
+          <small>RenderのEnvironmentで設定してください。</small>
         </div>
         <div>
           <strong>run_due</strong>

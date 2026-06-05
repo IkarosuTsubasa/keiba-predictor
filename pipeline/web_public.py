@@ -640,12 +640,6 @@ def _public_share_runtime_html():
     return raceNo || "#\\u7af6\\u99acAI";
   };
 
-  const splitLines = (text) =>
-    String(text || "")
-      .split(/\\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
   const toAbsoluteUrl = (href) => {
     const text = String(href || "").trim();
     if (!text) {
@@ -685,11 +679,9 @@ def _public_share_runtime_html():
     if (presetText) {
       return replaceShareUrl(presetText, detailUrl);
     }
-    let ticketText = "";
     let marksText = "\\u5370\\u306a\\u3057";
     if (card.matches(".model-card")) {
       const blocks = Array.from(card.querySelectorAll(".model-block"));
-      ticketText = blocks[0]?.querySelector("p")?.innerText || "";
       marksText = blocks[2]?.querySelector("p")?.innerText || "\\u5370\\u306a\\u3057";
     } else {
       const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
@@ -706,30 +698,10 @@ def _public_share_runtime_html():
       if (markParts.length) {
         marksText = markParts.join(" ");
       }
-      ticketText = Array.from(card.querySelectorAll(".bet-preview-list li")).map((item) => item.textContent?.trim() || "").filter(Boolean).join("\\n");
     }
     const header = parseRaceHeader(raceTitle);
-    const ticketLines = splitLines(ticketText);
     const tailLines = [SHARE_DETAIL_LABEL, detailUrl, SHARE_HASHTAG];
-    const lines = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", "\\u8cb7\\u3044\\u76ee\\uff08\\u4e00\\u90e8\\uff09"];
-    for (const ticketLine of ticketLines) {
-      const candidate = [...lines, ticketLine, "", ...tailLines].join("\\n");
-      if (candidate.length > SHARE_MAX_CHARS) {
-        break;
-      }
-      lines.push(ticketLine);
-    }
-    if (lines.length === 4) {
-      const fallback = [...lines, "\\u8cb7\\u3044\\u76ee\\u306a\\u3057", "", ...tailLines].join("\\n");
-      if (fallback.length <= SHARE_MAX_CHARS) {
-        lines.push("\\u8cb7\\u3044\\u76ee\\u306a\\u3057");
-      }
-    }
-    let text = [...lines, "", ...tailLines].join("\\n");
-    if (text.length <= SHARE_MAX_CHARS) {
-      return text;
-    }
-    text = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", ...tailLines].join("\\n");
+    let text = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", ...tailLines].join("\\n");
     if (text.length <= SHARE_MAX_CHARS) {
       return text;
     }
