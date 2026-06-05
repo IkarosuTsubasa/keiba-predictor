@@ -4384,7 +4384,6 @@ def _latest_by_text(rows, *fields):
 def _agent_health_env_status():
     required = [
         "ADMIN_TOKEN",
-        "RUN_DUE_TRIGGER_URL",
         "PIPELINE_PUBLIC_SITE_URL",
         "PIPELINE_CALLBACK_SECRET",
         "GITHUB_ACTIONS_OWNER",
@@ -4392,6 +4391,7 @@ def _agent_health_env_status():
         "GITHUB_ACTIONS_TOKEN",
     ]
     optional = [
+        "RUN_DUE_TRIGGER_URL",
         "GITHUB_ACTIONS_REF",
         "GITHUB_ACTIONS_AGENT_WORKFLOW",
         "KEIBA_AGENT_PREDICTIONS_DIR",

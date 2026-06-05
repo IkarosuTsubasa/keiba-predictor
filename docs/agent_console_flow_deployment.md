@@ -25,12 +25,12 @@
 这些变量继续沿用既有远程任务配置：
 
 - `ADMIN_TOKEN`: cron 调用 `/internal/run_due` 的鉴权 token。
-- `RUN_DUE_TRIGGER_URL`: `https://<your-domain>/internal/run_due`。
 - `PIPELINE_PUBLIC_SITE_URL`: 公开站点根地址，例如 `https://www.ikaimo-ai.com`。
 - `PIPELINE_CALLBACK_SECRET`: GitHub Actions callback HMAC secret。
 - `GITHUB_ACTIONS_OWNER`: GitHub owner。
 - `GITHUB_ACTIONS_REPO`: GitHub repo。
 - `GITHUB_ACTIONS_TOKEN`: 允许 dispatch workflow 的 GitHub token。
+- `RUN_DUE_TRIGGER_URL`: cron 服务使用，`https://<your-domain>/internal/run_due`。Web 服务不需要依赖它。
 - `GITHUB_ACTIONS_REF`: 可选，默认 `main`。
 - `GITHUB_ACTIONS_AGENT_WORKFLOW`: 可选，默认 `agent-prediction-remote.yml`。
 - `KEIBA_AGENT_PREDICTIONS_DIR`: 可选，默认写入 `pipeline/data/agent_predictions`。
