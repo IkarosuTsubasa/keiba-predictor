@@ -34,6 +34,25 @@ function buildQuery(search) {
   return search ? `?${search}` : "";
 }
 
+function readInitialBoardData(search) {
+  if (String(search || "").trim()) {
+    return null;
+  }
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const dataNode = document.getElementById("keiba-public-board-data");
+  if (!dataNode) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(dataNode.textContent || "{}");
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildMorningBadges(item, baseRace) {
   const baseBadges = Array.isArray(baseRace?.display_header?.badges)
     ? baseRace.display_header.badges.filter(Boolean)
@@ -299,10 +318,13 @@ function extractReportSlug(pathname) {
 }
 
 function useBoardData(search, enabled = true) {
-  const [state, setState] = useState({
-    loading: enabled,
-    error: "",
-    data: null,
+  const [state, setState] = useState(() => {
+    const initialData = enabled ? readInitialBoardData(search) : null;
+    return {
+      loading: enabled && !initialData,
+      error: "",
+      data: initialData,
+    };
   });
 
   useEffect(() => {
@@ -311,12 +333,17 @@ function useBoardData(search, enabled = true) {
       return;
     }
 
+    const initialData = readInitialBoardData(search);
+    if (initialData) {
+      setState({ loading: false, error: "", data: initialData });
+      return;
+    }
+
     let alive = true;
     setState({ loading: true, error: "", data: null });
 
     fetch(`${PUBLIC_BOARD_API_PATH}${buildQuery(search)}`, {
       headers: { Accept: "application/json" },
-      cache: "no-store",
     })
       .then((response) => {
         if (!response.ok) {
@@ -363,7 +390,6 @@ function useRaceDetailData(raceId, search, enabled = true) {
 
     fetch(`${PUBLIC_RACE_DETAIL_API_PATH}/${encodeURIComponent(raceId)}${buildQuery(search)}`, {
       headers: { Accept: "application/json" },
-      cache: "no-store",
     })
       .then(async (response) => {
         if (response.status === 404) {
@@ -545,7 +571,8 @@ export default function App() {
     trackPageView(pagePath, document.title);
   }, [isAdminConsole, isAdminWorkspace, normalizedPath, search]);
 
-  const shouldLoadPublicHeaderData = !isAdminConsole && !isAdminWorkspace && !isAppShell;
+  const shouldLoadPublicHeaderData =
+    !isAdminConsole && !isAdminWorkspace && !isAppShell && normalizedPath !== APP_BASE_PATH;
   const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
   const { loading, error, data } = useBoardData(
     search,

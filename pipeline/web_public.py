@@ -569,6 +569,29 @@ def inject_public_home_intro(content="", path="", payload=None):
     return intro_html + html_text
 
 
+def inject_public_initial_board_data(content="", path="", payload=None):
+    html_text = str(content or "")
+    normalized_path = str(path or "").rstrip("/") or PUBLIC_BASE_PATH
+    if normalized_path != PUBLIC_BASE_PATH or not html_text or payload is None:
+        return html_text
+    if 'id="keiba-public-board-data"' in html_text:
+        return html_text
+    try:
+        json_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    except (TypeError, ValueError):
+        return html_text
+    script = (
+        '<script id="keiba-public-board-data" type="application/json">'
+        f"{html.escape(json_text)}"
+        "</script>"
+    )
+    if '<div id="root"></div>' in html_text:
+        return html_text.replace('<div id="root"></div>', f"{script}\n    <div id=\"root\"></div>", 1)
+    if "</body>" in html_text:
+        return html_text.replace("</body>", f"{script}\n</body>", 1)
+    return html_text + script
+
+
 def _public_share_runtime_html():
     runtime = """
 <style>
@@ -984,11 +1007,12 @@ def inject_public_share_runtime(html_text):
     return content + runtime
 
 
-def build_public_index_response(path="", home_intro_payload=None):
+def build_public_index_response(path="", home_intro_payload=None, initial_board_payload=None):
     html_text = load_public_index_html()
     html_text = prefix_public_html_routes(html_text)
     html_text = inject_public_meta_tags(html_text, path=path)
     html_text = inject_public_home_intro(html_text, path=path, payload=home_intro_payload)
+    html_text = inject_public_initial_board_data(html_text, path=path, payload=initial_board_payload)
     html_text = inject_public_share_runtime(html_text)
     return HTMLResponse(html_text)
 

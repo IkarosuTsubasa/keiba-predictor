@@ -176,6 +176,15 @@ mount_public_assets(app)
 register_public_static_routes(app)
 
 
+@app.middleware("http")
+async def add_public_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = str(request.url.path or "")
+    if path.startswith(f"{PUBLIC_BASE_PATH}/assets/") or path.startswith("/assets/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    return response
+
+
 def run_due_jobs_once():
     return web_admin_tasks.run_due_jobs_once(
         base_dir=BASE_DIR,
@@ -3266,7 +3275,26 @@ def _public_board_api_payload(payload):
     }
 
 
-def build_public_board_payload(date_text="", scope_key="", include_detail_fields=False):
+_PUBLIC_BOARD_PAYLOAD_CACHE = {}
+_PUBLIC_BOARD_PAYLOAD_CACHE_LOCK = threading.Lock()
+
+
+def _public_board_cache_ttl_seconds():
+    try:
+        return max(0, int(os.environ.get("PUBLIC_BOARD_CACHE_TTL_SECONDS", "120") or "120"))
+    except ValueError:
+        return 120
+
+
+def _public_board_cache_key(date_text="", scope_key="", include_detail_fields=False):
+    return (
+        str(date_text or "").strip(),
+        normalize_scope_key(scope_key),
+        bool(include_detail_fields),
+    )
+
+
+def _build_public_board_payload_uncached(date_text="", scope_key="", include_detail_fields=False):
     target_context = _resolve_public_target_context(date_text=date_text, scope_key=scope_key)
     payload = {
         "target_date": str(target_context.get("target_date", "") or "").strip(),
@@ -3315,6 +3343,40 @@ def build_public_board_payload(date_text="", scope_key="", include_detail_fields
     payload["daily_report"] = _find_daily_report_for_date(target_date)
     payload["morning_preview"] = _empty_public_morning_preview_payload(target_date)
     return payload
+
+
+def build_public_board_payload(date_text="", scope_key="", include_detail_fields=False):
+    ttl_seconds = _public_board_cache_ttl_seconds()
+    if ttl_seconds <= 0 or include_detail_fields:
+        return _build_public_board_payload_uncached(
+            date_text=date_text,
+            scope_key=scope_key,
+            include_detail_fields=include_detail_fields,
+        )
+
+    key = _public_board_cache_key(date_text, scope_key, include_detail_fields)
+    now = time.time()
+    cached = _PUBLIC_BOARD_PAYLOAD_CACHE.get(key)
+    if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+        return cached.get("payload") or {}
+
+    with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+        cached = _PUBLIC_BOARD_PAYLOAD_CACHE.get(key)
+        if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+            return cached.get("payload") or {}
+        payload = _build_public_board_payload_uncached(
+            date_text=date_text,
+            scope_key=scope_key,
+            include_detail_fields=include_detail_fields,
+        )
+        _PUBLIC_BOARD_PAYLOAD_CACHE[key] = {"created_at": time.time(), "payload": payload}
+        return payload
+
+
+def _public_api_headers():
+    return {
+        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+    }
 
 
 def _mobile_app_token_expected():
@@ -4919,9 +4981,15 @@ def console_workspace_spa():
 @app.get(PUBLIC_BASE_PATH, response_class=HTMLResponse)
 def llm_today(date: str = "", scope_key: str = ""):
     home_intro_payload = None
+    initial_board_payload = None
     if not str(date or "").strip():
         home_intro_payload = build_public_board_payload(date_text=date, scope_key=scope_key)
-    return build_public_index_response(PUBLIC_BASE_PATH, home_intro_payload=home_intro_payload)
+        initial_board_payload = _public_board_api_payload(home_intro_payload)
+    return build_public_index_response(
+        PUBLIC_BASE_PATH,
+        home_intro_payload=home_intro_payload,
+        initial_board_payload=initial_board_payload,
+    )
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/race/{{race_path:path}}", response_class=HTMLResponse)
@@ -5022,7 +5090,7 @@ def public_board_api(date: str = "", scope_key: str = ""):
     payload = build_public_board_payload(date_text=date, scope_key=scope_key)
     return JSONResponse(
         _public_board_api_payload(payload),
-        headers=_mobile_api_headers(),
+        headers=_public_api_headers(),
     )
 
 
@@ -5031,8 +5099,8 @@ def public_board_api(date: str = "", scope_key: str = ""):
 def public_race_detail_api(race_path: str, date: str = "", scope_key: str = ""):
     payload = _public_race_detail_payload(race_path=race_path, date_text=date, scope_key=scope_key)
     if not payload:
-        return JSONResponse({"ok": False, "error": "race not found"}, status_code=404, headers=_mobile_api_headers())
-    return JSONResponse(payload, headers=_mobile_api_headers())
+        return JSONResponse({"ok": False, "error": "race not found"}, status_code=404, headers=_public_api_headers())
+    return JSONResponse(payload, headers=_public_api_headers())
 
 
 @app.get(f"{PUBLIC_BASE_PATH}/api/mobile/v1/races")

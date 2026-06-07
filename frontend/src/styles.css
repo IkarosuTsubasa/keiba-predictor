@@ -9521,6 +9521,52 @@ body.home-app-ready .site-footer {
 }
 
 @media (max-width: 760px) {
+  .dashboard-board__table,
+  .dashboard-board .race-grid-section,
+  .dashboard-board .race-grid__viewport,
+  .dashboard-board .race-grid,
+  .dashboard-board .race-card {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dashboard-board .race-grid-section {
+    --race-row-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-board .race-card {
+    grid-template-columns: var(--race-row-columns);
+  }
+
+  .dashboard-board .race-card__race-cell,
+  .dashboard-board .race-card__main-cell,
+  .dashboard-board .race-card__ticket-cell,
+  .dashboard-board .race-card__result-cell,
+  .dashboard-board .race-card__detail-cell {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-board .race-card__detail-cell {
+    min-height: 56px;
+    padding: 10px 12px 14px;
+    justify-content: stretch;
+    align-content: center;
+  }
+
+  .dashboard-board .race-card__toggle {
+    width: 100%;
+    max-width: 100%;
+    min-height: 42px;
+    display: flex;
+    color: var(--dashboard-ink);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .dashboard-race-memo__bar {
     min-height: 0;
     padding: 12px;
