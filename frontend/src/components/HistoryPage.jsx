@@ -113,7 +113,7 @@ function AgentPredictionHistory({ data }) {
         </div>
       </div>
 
-      <div className="history-highlight-strip history-highlight-strip--agent">
+      <div className="history-kpi-board history-kpi-board--agent">
         <OverviewCard
           label="本命1着率"
           value={activePeriod?.main_win_rate_text || "-"}
@@ -130,16 +130,13 @@ function AgentPredictionHistory({ data }) {
           value={activePeriod?.top5_cover_rate_text || "-"}
           note={`${activePeriod?.top5_cover_hits || 0}/${(activePeriod?.settled_races || 0) * 3}頭`}
         />
-      </div>
-
-      <div className="history-highlight-strip history-highlight-strip--agent">
         <OverviewCard
           label="予測レース"
           value={`${activePeriod?.predicted_races || 0}レース`}
           note={`結果確定 ${activePeriod?.settled_races || 0}レース`}
         />
         <OverviewCard
-          label="購入候補"
+          label="高評価"
           value={`${activePeriod?.bet_races || 0}レース`}
           note={`見送り ${activePeriod?.skip_races || 0}レース`}
         />
@@ -150,20 +147,22 @@ function AgentPredictionHistory({ data }) {
         />
       </div>
 
-      <AgentHistoryTable
-        title="場別の命中傾向"
-        eyebrow="場別集計"
-        columns={courseColumns}
-        rows={courseRows}
-        rowKey={(item) => item?.course || "course"}
-      />
-      <AgentHistoryTable
-        title="日別の予測成績"
-        eyebrow="日別集計"
-        columns={dailyColumns}
-        rows={dailyRows}
-        rowKey={(item) => item?.race_date || "date"}
-      />
+      <div className="history-table-layout">
+        <AgentHistoryTable
+          title="場別の命中傾向"
+          eyebrow="場別集計"
+          columns={courseColumns}
+          rows={courseRows}
+          rowKey={(item) => item?.course || "course"}
+        />
+        <AgentHistoryTable
+          title="日別の予測成績"
+          eyebrow="日別集計"
+          columns={dailyColumns}
+          rows={dailyRows}
+          rowKey={(item) => item?.race_date || "date"}
+        />
+      </div>
     </section>
   );
 }

@@ -2,11 +2,26 @@ import React from "react";
 import FilterBar from "./FilterBar";
 
 const HEADER_LINKS = [
-  { href: "/keiba", label: "トップ" },
-  { href: "/keiba/about", label: "このサイトについて" },
-  { href: "/keiba/guide", label: "ガイド" },
-  { href: "/keiba/methodology", label: "分析方針" },
+  { href: "/keiba", label: "公開レース" },
+  { href: "/keiba/history", label: "検証成績" },
+  { href: "/keiba/reports", label: "履歴・結果" },
+  { href: "/keiba/guide", label: "使い方ガイド" },
 ];
+
+function normalizePath(pathname) {
+  return String(pathname || "").replace(/\/+$/, "") || "/";
+}
+
+function isHeaderLinkActive(pathname, href) {
+  const current = normalizePath(pathname);
+  if (href === "/keiba") {
+    return current === "/keiba" || current.startsWith("/keiba/race/");
+  }
+  if (href === "/keiba/reports") {
+    return current === href || current.startsWith("/keiba/reports/");
+  }
+  return current === href;
+}
 
 export default function AppHeader({
   data,
@@ -48,7 +63,11 @@ export default function AppHeader({
 
           <nav className="app-header__nav" aria-label="サイトナビゲーション">
             {HEADER_LINKS.map((item) => (
-              <a key={item.href} href={item.href}>
+              <a
+                key={item.href}
+                href={item.href}
+                aria-current={isHeaderLinkActive(window.location.pathname, item.href) ? "page" : undefined}
+              >
                 {item.label}
               </a>
             ))}

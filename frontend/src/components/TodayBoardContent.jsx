@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { DashboardInsightPanel, DashboardRaceMemo } from "./DashboardInsightPanel";
 import EmptyRaceState from "./EmptyRaceState";
 import RaceGrid from "./RaceGrid";
 
@@ -9,7 +10,15 @@ function hasAgentPredictionRows(races) {
 }
 
 export default function TodayBoardContent({ data, races, appShell = false }) {
+  const [visibleRaces, setVisibleRaces] = useState(races);
   const isAgentPredictionBoard = Boolean(data?.agent_mode) || hasAgentPredictionRows(races);
+  const handleVisibleRacesChange = useCallback((nextRaces) => {
+    setVisibleRaces(nextRaces);
+  }, []);
+
+  useEffect(() => {
+    setVisibleRaces(races);
+  }, [races]);
 
   return (
     <>
@@ -18,7 +27,21 @@ export default function TodayBoardContent({ data, races, appShell = false }) {
       ) : null}
 
       {races.length ? (
-        <RaceGrid races={races} appShell={appShell} />
+        appShell ? (
+          <RaceGrid races={races} appShell={appShell} />
+        ) : (
+          <div className="dashboard-board">
+            <div className="dashboard-board__table">
+              <RaceGrid
+                races={races}
+                appShell={appShell}
+                onVisibleRacesChange={handleVisibleRacesChange}
+              />
+            </div>
+            <DashboardInsightPanel data={data} races={visibleRaces} />
+            <DashboardRaceMemo races={visibleRaces} />
+          </div>
+        )
       ) : (
         <EmptyRaceState agentMode={isAgentPredictionBoard} />
       )}

@@ -853,8 +853,8 @@ export default function App() {
                 title={targetDateContext?.raceBoardTitle || "対象日の公開レース"}
                 subtitle={
                   isAgentPredictionBoard
-                    ? "各レースの印、買い目判断、上位馬メモ、結果をレースごとに確認できます。"
-                    : "各レースのAI予測、上位馬メモ、買い目判断、結果をレースごとに確認できます。"
+                    ? "各レースの予測印、上位馬メモ、判断理由、結果をレースごとに確認できます。"
+                    : "各レースのAI予測、上位馬メモ、判断理由、結果をレースごとに確認できます。"
                 }
                 actions={
                   data?.daily_report?.public_url

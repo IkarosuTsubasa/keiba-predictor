@@ -33,7 +33,6 @@ export default function PublicSideNav({
   const normalizedPath = normalizePath(pathname);
   const normalizedDetailHref = detailHref || pathname;
   const shouldShowTargetFilter = Boolean(onApplyFilters) && (showTargetFilter || mode !== "static");
-  const isAgentMode = true;
 
   useEffect(() => {
     const syncHash = () => setActiveHash(window.location.hash || "");
@@ -73,10 +72,10 @@ export default function PublicSideNav({
             active: !activeHash || activeHash === "#race-detail-summary",
           },
           {
-            href: `${normalizedDetailHref}#race-detail-agent`,
-            label: "予測メモ",
-            note: "判断と買い目候補",
-            active: activeHash === "#race-detail-agent",
+            href: `${normalizedDetailHref}#race-detail-marks`,
+            label: "予測印",
+            note: "印一覧と判断理由",
+            active: activeHash === "#race-detail-marks",
           },
           {
             href: `${normalizedDetailHref}#race-detail-agent-horses`,
@@ -106,7 +105,7 @@ export default function PublicSideNav({
 
   const focusText =
     mode === "detail"
-      ? "このレースの予測メモ、上位馬評価、買い目判断、結果を一つの流れで確認できます。"
+      ? "このレースの予測印、上位馬評価、判断理由、結果を一つの流れで確認できます。"
       : mode === "history"
         ? "過去日付のAI予測と結果をレース単位で確認できます。"
         : mode === "reports"
@@ -115,29 +114,14 @@ export default function PublicSideNav({
             ? "AI予測、結果、振り返りを記事形式で確認できます。"
         : mode === "static"
           ? "サイトの考え方と利用上の案内をまとめています。"
-          : "対象日の公開レースを場別に確認し、気になるレースの予測メモへ進めます。";
+          : "対象日の公開レースを場別に確認し、気になるレースの予測印へ進めます。";
 
   return (
     <aside className="public-side-nav" aria-label="サイトナビゲーション">
       <div className="public-side-nav__panel">
         <div className="public-side-nav__brand">
-          <span className="public-side-nav__eyebrow">Navigation</span>
+          <span className="public-side-nav__eyebrow">メニュー</span>
           <strong className="public-side-nav__title">いかいもAI競馬</strong>
-        </div>
-
-        <div className="public-side-nav__section">
-          <span className="public-side-nav__section-label">ナビゲーション</span>
-          <nav className="public-side-nav__links">
-            {primaryItems.map((item) => (
-              <SideNavLink
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                note={item.note}
-                active={item.active}
-              />
-            ))}
-          </nav>
         </div>
 
         {shouldShowTargetFilter ? (
@@ -159,6 +143,21 @@ export default function PublicSideNav({
             />
           </div>
         ) : null}
+
+        <div className="public-side-nav__section">
+          <span className="public-side-nav__section-label">ナビゲーション</span>
+          <nav className="public-side-nav__links">
+            {primaryItems.map((item) => (
+              <SideNavLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                note={item.note}
+                active={item.active}
+              />
+            ))}
+          </nav>
+        </div>
 
         {detailItems.length ? (
           <div className="public-side-nav__section">

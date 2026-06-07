@@ -5161,7 +5161,6 @@ async def admin_workspace_run_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
     if _admin_token_enabled() and not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
-    return _llm_buy_disabled_response()
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
     run_id = str((payload or {}).get("run_id", "") or "").strip()
@@ -5171,6 +5170,7 @@ async def admin_workspace_run_llm_buy_api(request: Request):
     scope_norm, run_row, resolved_run_id = resolve_run_selection(scope_key, run_id)
     if not scope_norm or run_row is None or not resolved_run_id:
         return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    return _llm_buy_disabled_response()
     refresh_ok, refresh_message, refresh_warnings = maybe_refresh_run_odds(scope_norm, run_row, resolved_run_id, refresh_enabled)
     if not refresh_ok:
         return JSONResponse(

@@ -140,7 +140,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba", appShell = fa
           <div className="daily-report-panel__head">
             <div>
               <span className="daily-report-panel__eyebrow">最新日報</span>
-              <h2>Latest Entry</h2>
+              <h2>最新エントリー</h2>
             </div>
           </div>
           <ReportCard item={latest} featured appShell={appShell} />
@@ -152,7 +152,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba", appShell = fa
           <div className="daily-report-panel__head">
             <div>
               <span className="daily-report-panel__eyebrow">アーカイブ</span>
-              <h2>Saved Reports</h2>
+              <h2>保存済み日報</h2>
             </div>
           </div>
           {items.length ? (

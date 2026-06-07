@@ -32,7 +32,7 @@ export default function FilterBar({ data, search, onApply, className = "", conte
   const fieldLabel = isSidebar ? "レース一覧の日付" : "対象日";
   const prevLabel = isSidebar ? "前日一覧" : "前日";
   const nextLabel = isSidebar ? "翌日一覧" : "翌日";
-  const submitLabel = isSidebar ? "一覧表示" : "Go";
+  const submitLabel = isSidebar ? "一覧表示" : "表示";
 
   useEffect(() => {
     setDate(initialDate);

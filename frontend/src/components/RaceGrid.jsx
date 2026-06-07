@@ -35,21 +35,28 @@ function isSettledRace(race) {
   return displayVariant(race) === "settled";
 }
 
-function filterRacesByTab(races, tab) {
-  if (tab === "settled") {
-    return (races || []).filter(isSettledRace);
+function filterRaces(races, statusFilter, locationFilter) {
+  let filtered = races || [];
+  if (statusFilter === "settled") {
+    filtered = filtered.filter(isSettledRace);
+  } else if (statusFilter === "open") {
+    filtered = filtered.filter((race) => !isSettledRace(race));
   }
-  if (tab === "open") {
-    return (races || []).filter((race) => !isSettledRace(race));
+  if (locationFilter !== "all") {
+    filtered = filtered.filter((race) => raceLocation(race) === locationFilter);
   }
-  if (tab !== "all") {
-    return (races || []).filter((race) => raceLocation(race) === tab);
-  }
-  return races || [];
+  return filtered;
 }
 
-export default function RaceGrid({ races, appShell = false }) {
-  const [tab, setTab] = useState("all");
+const STATUS_TABS = [
+  { key: "all", label: "すべて" },
+  { key: "open", label: "発売中" },
+  { key: "settled", label: "確定済み" },
+];
+
+export default function RaceGrid({ races, appShell = false, onVisibleRacesChange = null }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
   const [viewportPhase, setViewportPhase] = useState("idle");
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 });
   const tabsRef = useRef(null);
@@ -71,27 +78,23 @@ export default function RaceGrid({ races, appShell = false }) {
     return items;
   }, [races]);
 
-  const tabs = useMemo(
-    () => [
-      { key: "all", label: "すべて" },
-      { key: "open", label: "発売中" },
-      { key: "settled", label: "確定済み" },
-      ...locationTabs.map((location) => ({ key: location, label: location })),
-    ],
-    [locationTabs],
-  );
-
   const filtered = useMemo(
-    () => sortRacesForDisplay(filterRacesByTab(races, tab)),
-    [races, tab],
+    () => sortRacesForDisplay(filterRaces(races, statusFilter, locationFilter)),
+    [races, statusFilter, locationFilter],
   );
 
   useEffect(() => {
-    if (tab === "all" || tab === "open" || tab === "settled") return;
-    if (!locationTabs.includes(tab)) {
-      setTab("all");
+    if (typeof onVisibleRacesChange === "function") {
+      onVisibleRacesChange(filtered);
     }
-  }, [locationTabs, tab]);
+  }, [filtered, onVisibleRacesChange]);
+
+  useEffect(() => {
+    if (locationFilter === "all") return;
+    if (!locationTabs.includes(locationFilter)) {
+      setLocationFilter("all");
+    }
+  }, [locationFilter, locationTabs]);
 
   useEffect(() => {
     return () => {
@@ -102,7 +105,7 @@ export default function RaceGrid({ races, appShell = false }) {
 
   useLayoutEffect(() => {
     const container = tabsRef.current;
-    const active = buttonRefs.current.get(tab);
+    const active = buttonRefs.current.get(statusFilter);
     if (!container || !active) {
       setIndicator((current) => ({ ...current, opacity: 0 }));
       return;
@@ -114,7 +117,7 @@ export default function RaceGrid({ races, appShell = false }) {
       width: activeRect.width,
       opacity: 1,
     });
-  }, [tab, filtered.length, tabs.length]);
+  }, [filtered.length, statusFilter]);
 
   useLayoutEffect(() => {
     const nextRects = new Map();
@@ -157,13 +160,12 @@ export default function RaceGrid({ races, appShell = false }) {
     rectsRef.current = nextRects;
   }, [filtered]);
 
-  const changeTab = (nextTab) => {
-    if (nextTab === tab) return;
+  const queueFilterChange = (update) => {
     window.clearTimeout(fadeOutTimerRef.current);
     window.clearTimeout(fadeInTimerRef.current);
     setViewportPhase("out");
     fadeOutTimerRef.current = window.setTimeout(() => {
-      startTransition(() => setTab(nextTab));
+      startTransition(update);
       setViewportPhase("in");
       fadeInTimerRef.current = window.setTimeout(() => {
         setViewportPhase("idle");
@@ -171,40 +173,84 @@ export default function RaceGrid({ races, appShell = false }) {
     }, 100);
   };
 
+  const changeStatusFilter = (nextStatus) => {
+    if (nextStatus === statusFilter) return;
+    queueFilterChange(() => setStatusFilter(nextStatus));
+  };
+
+  const changeLocationFilter = (nextLocation) => {
+    if (nextLocation === locationFilter) return;
+    queueFilterChange(() => setLocationFilter(nextLocation));
+  };
+
   return (
     <div className="race-grid-section">
       {!appShell ? (
-        <div className="race-grid-tabs" ref={tabsRef}>
-          <span
-            className="race-grid-tabs__indicator"
-            aria-hidden="true"
-            style={{
-              width: `${indicator.width}px`,
-              transform: `translateX(${indicator.left}px)`,
-              opacity: indicator.opacity,
-            }}
-          />
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              ref={(node) => {
-                if (node) {
-                  buttonRefs.current.set(item.key, node);
-                } else {
-                  buttonRefs.current.delete(item.key);
-                }
+        <div className="race-grid-controls">
+          <div className="race-grid-tabs" ref={tabsRef} aria-label="公開状態">
+            <span
+              className="race-grid-tabs__indicator"
+              aria-hidden="true"
+              style={{
+                width: `${indicator.width}px`,
+                transform: `translateX(${indicator.left}px)`,
+                opacity: indicator.opacity,
               }}
-              type="button"
-              className={tab === item.key ? "is-active" : ""}
-              onClick={() => changeTab(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
+            />
+            {STATUS_TABS.map((item) => (
+              <button
+                key={item.key}
+                ref={(node) => {
+                  if (node) {
+                    buttonRefs.current.set(item.key, node);
+                  } else {
+                    buttonRefs.current.delete(item.key);
+                  }
+                }}
+                type="button"
+                className={statusFilter === item.key ? "is-active" : ""}
+                onClick={() => changeStatusFilter(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {locationTabs.length ? (
+            <label className="race-grid-course-filter">
+              <span>競馬場</span>
+              <select
+                value={locationFilter}
+                onChange={(event) => changeLocationFilter(event.target.value)}
+              >
+                <option value="all">すべての競馬場</option>
+                {locationTabs.map((location) => (
+                  <option key={location} value={location}>
+                    {location}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <span className="race-grid-filter-summary">
+            表示 {filtered.length}レース
+          </span>
         </div>
       ) : null}
 
       <div className={`race-grid__viewport race-grid__viewport--${viewportPhase}`}>
+        {!appShell ? (
+          <div className="race-grid-table-head" aria-hidden="true">
+            <span>レース</span>
+            <span>判断</span>
+            <span>信頼度</span>
+            <span>本命</span>
+            <span>上位印</span>
+            <span>結果</span>
+            <span>詳細</span>
+          </div>
+        ) : null}
         <div className="race-grid">
           {filtered.map((race) => {
             const key = raceKey(race);

@@ -1,7 +1,83 @@
 import React from "react";
+import AutoFitLine from "./AutoFitLine";
 import MorningRaceSummary from "./MorningRaceSummary";
-import RaceCardHeader from "./RaceCardHeader";
 import { buildRaceDetailHref } from "../lib/publicRace";
+
+const DECISION_LABELS = {
+  high: "高評価",
+  medium: "要確認",
+  low: "見送り",
+};
+const MARK_LABELS = ["◎", "○", "▲", "△", "☆"];
+
+function formatConfidence(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${Math.round(number * 100)}%`;
+}
+
+function isTrackConditionBadge(value) {
+  return ["良", "稍重", "重", "不良"].includes(String(value || "").trim());
+}
+
+function parseResultEntries(text) {
+  const source = String(text || "").trim();
+  if (!source || source.includes("未") || source.includes("確定前")) {
+    return [];
+  }
+  return source
+    .split("/")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((item, index) => {
+      const match = item.match(/^([1-3])着\s*(.+)$/);
+      const rank = Number(match?.[1] || index + 1);
+      const body = String(match?.[2] || item).trim();
+      return { key: `${rank}-${body}`, rank, body };
+    })
+    .filter((item) => item.body);
+}
+
+function resolveStatus(race) {
+  const status = race?.display_status || {};
+  return {
+    label: String(status.label || "").trim() || "公開中",
+    tone: String(status.tone || "").trim() || "open",
+  };
+}
+
+function resolveDecision(race) {
+  const explicitDecision = String(race?.agent_prediction?.strategy?.bet_decision || "").trim();
+  if (explicitDecision === "BET") return { label: "高評価", tone: "bet" };
+  if (explicitDecision === "SKIP") return { label: "見送り", tone: "skip" };
+
+  const metaValue = String(race?.predictor_compare_cards?.[0]?.metaValue || "").trim();
+  const confidence = Number(race?.confidence_score);
+  if (metaValue === "high" || confidence >= 0.62) return { label: DECISION_LABELS.high, tone: "bet" };
+  if (metaValue === "medium" || confidence >= 0.45) return { label: DECISION_LABELS.medium, tone: "watch" };
+  if (metaValue === "low" || Number.isFinite(confidence)) return { label: DECISION_LABELS.low, tone: "skip" };
+  return { label: "確認待ち", tone: "watch" };
+}
+
+function mainHorse(race) {
+  const top5 = Array.isArray(race?.top5) ? race.top5 : [];
+  return top5[0] || null;
+}
+
+function topMarksText(race) {
+  const top5 = Array.isArray(race?.top5) ? race.top5 : [];
+  const marks = top5
+    .filter(Boolean)
+    .slice(0, MARK_LABELS.length)
+    .map((item, index) => {
+      const horseNo = String(item?.horse_no || "").trim();
+      if (!horseNo) return "";
+      return `${MARK_LABELS[index] || ""}${horseNo}`;
+    })
+    .filter(Boolean);
+  return marks.length ? marks.join(" / ") : "-";
+}
 
 export default function RaceCard({ race, style = undefined }) {
   const cards = Array.isArray(race?.predictor_compare_cards) && race.predictor_compare_cards.length
@@ -18,6 +94,24 @@ export default function RaceCard({ race, style = undefined }) {
     race?.display_body?.message || "現在レースデータを反映しています。",
   );
   const detailHref = buildRaceDetailHref(race, window.location.search);
+  const decision = resolveDecision(race);
+  const status = resolveStatus(race);
+  const main = mainHorse(race);
+  const confidenceText = formatConfidence(race?.confidence_score);
+  const markText = topMarksText(race);
+  const title = String(race?.display_header?.title || "-");
+  const subtitle = String(race?.display_header?.subtitle || "").trim();
+  const badges = Array.isArray(race?.display_header?.badges)
+    ? race.display_header.badges.filter(
+        (item) => item && !isTrackConditionBadge(item),
+      )
+    : [];
+  const isMorningPreview = variant === "morning_preview";
+  const showResult = !isPlaceholder && !isMorningPreview;
+  const resultText = String(
+    race?.display_body?.result_text || "結果は確定後に表示されます",
+  );
+  const resultEntries = parseResultEntries(resultText);
   const handleNavigate = () => {
     if (!hasDetail) return;
     window.location.assign(detailHref);
@@ -51,16 +145,87 @@ export default function RaceCard({ race, style = undefined }) {
       role={isLinkable ? "link" : undefined}
       tabIndex={isLinkable ? 0 : undefined}
     >
-      <RaceCardHeader
-        race={race}
-        actions={
-          isLinkable ? (
-            <a href={detailHref} className="race-card__toggle">
-              詳細を見る
-            </a>
-          ) : null
-        }
-      />
+      <div className="race-card__race-cell">
+        <div className="race-card-header">
+          <div className="race-card-header__main">
+            <div className="race-card-header__title-group">
+              <h3>{isPlaceholder ? placeholderTitle : title}</h3>
+              {subtitle && !isPlaceholder ? (
+                <AutoFitLine
+                  as="p"
+                  className="race-card-header__subtitle"
+                  maxFontSize={16}
+                  minFontSize={10}
+                >
+                  {subtitle}
+                </AutoFitLine>
+              ) : null}
+              {badges.length && !isPlaceholder ? (
+                <div className="race-card-header__badges">
+                  {badges.map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </div>
+              ) : null}
+              {isPlaceholder ? (
+                <p className="race-card__placeholder-time">{placeholderMessage}</p>
+              ) : null}
+            </div>
+            {!isPlaceholder ? (
+              <span
+                className={`race-card-header__status race-card-header__status--${status.tone}`}
+              >
+                {status.label}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {!isPlaceholder ? (
+        <>
+          <div className={`race-card__decision-cell race-card__decision-cell--${decision.tone}`}>
+            <span className="race-card__cell-label">判断</span>
+            <strong>{decision.label}</strong>
+          </div>
+          <div className="race-card__metric-cell">
+            <span className="race-card__cell-label">信頼度</span>
+            <strong>{confidenceText}</strong>
+          </div>
+          <div className="race-card__main-cell">
+            <span className="race-card__cell-label">本命</span>
+            <strong>{main ? `◎ ${main.horse_no || "-"} ${main.horse_name || ""}`.trim() : "-"}</strong>
+          </div>
+          <div className="race-card__ticket-cell">
+            <span className="race-card__cell-label">上位印</span>
+            <strong>{markText}</strong>
+          </div>
+          <div className="race-card__result-cell">
+            <span className="race-card__cell-label">結果</span>
+            {showResult && resultEntries.length ? (
+              <ul className="race-card__result-list">
+                {resultEntries.map((entry) => (
+                  <li key={entry.key}>
+                    <span className="race-card__result-medal" aria-hidden="true">
+                      {entry.rank}着
+                    </span>
+                    <span>{entry.body}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>{showResult ? resultText : "結果は確定後に表示されます"}</p>
+            )}
+          </div>
+          <div className="race-card__detail-cell">
+            {isLinkable ? (
+              <a href={detailHref} className="race-card__toggle">
+                詳細を見る
+              </a>
+            ) : null}
+          </div>
+        </>
+      ) : null}
 
       {isPlaceholder ? (
         <div className="race-card__summary-grid">

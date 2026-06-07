@@ -1,5 +1,4 @@
 import React from "react";
-import BetPreviewList from "./BetPreviewList";
 import ModelMetaBadge from "./ModelMetaBadge";
 
 function parseMarks(text) {
@@ -53,8 +52,6 @@ export default function ExpandablePredictionPanel({
               <span className="expandable-prediction-panel__empty">印なし</span>
             )}
           </div>
-
-          <BetPreviewList text={card?.ticket_plan_text || ""} />
 
           <div
             className={`expandable-prediction-panel__result expandable-prediction-panel__result--${resultTone(card)}`}
