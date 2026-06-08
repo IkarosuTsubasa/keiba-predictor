@@ -9312,8 +9312,26 @@ body.home-app-ready .site-footer {
   font-size: 11px;
 }
 
+.dashboard-board .share-title-inline {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-board .share-title-inline h3 {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .dashboard-board .share-inline-button {
-  display: none;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-color: rgba(7, 17, 31, 0.16);
+  background: #07111f;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(7, 17, 31, 0.12);
 }
 
 .dashboard-insight-panel {
