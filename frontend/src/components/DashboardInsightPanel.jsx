@@ -1,16 +1,6 @@
-import React from "react";
-
 function safeText(value) {
   return String(value || "").trim();
 }
-
-function formatConfidence(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return `${Math.round(number * 100)}%`;
-}
-
-const MARK_LABELS = ["◎", "○", "▲", "△", "☆"];
 
 function resolveDecision(race) {
   const explicitDecision = safeText(race?.agent_prediction?.strategy?.bet_decision);
@@ -22,38 +12,6 @@ function resolveDecision(race) {
   if (confidence >= 0.45) return { label: "要確認", tone: "watch" };
   if (Number.isFinite(confidence)) return { label: "見送り", tone: "skip" };
   return { label: "確認待ち", tone: "watch" };
-}
-
-function mainHorseText(race) {
-  const top5 = Array.isArray(race?.top5) ? race.top5 : [];
-  const main = top5[0] || null;
-  if (!main) return "-";
-  return `◎ ${main.horse_no || "-"} ${main.horse_name || ""}`.trim();
-}
-
-function topMarksText(race) {
-  const top5 = Array.isArray(race?.top5) ? race.top5 : [];
-  const marks = top5
-    .filter(Boolean)
-    .slice(0, MARK_LABELS.length)
-    .map((item, index) => {
-      const horseNo = safeText(item?.horse_no);
-      if (!horseNo) return "";
-      return `${MARK_LABELS[index] || ""}${horseNo}`;
-    })
-    .filter(Boolean);
-  return marks.length ? marks.join(" / ") : "-";
-}
-
-function resultText(race) {
-  return safeText(race?.display_body?.result_text) || "結果は確定後に表示されます";
-}
-
-function pickFocusRace(races) {
-  const available = (Array.isArray(races) ? races : []).filter(
-    (race) => safeText(race?.display_variant) !== "placeholder",
-  );
-  return available.find((race) => resolveDecision(race).tone === "bet") || available[0] || null;
 }
 
 function MetricCard({ label, value, note = "", accent = false }) {
@@ -138,45 +96,5 @@ export function DashboardInsightPanel({ data, races }) {
         </p>
       </section>
     </aside>
-  );
-}
-
-export function DashboardRaceMemo({ races }) {
-  const focusRace = pickFocusRace(races);
-  if (!focusRace) return null;
-
-  const decision = resolveDecision(focusRace);
-  const title = safeText(focusRace?.display_header?.title) || "注目レース";
-  const subtitle = safeText(focusRace?.display_header?.subtitle);
-  const confidence = formatConfidence(focusRace?.confidence_score);
-  const result = resultText(focusRace);
-  const marks = topMarksText(focusRace);
-
-  return (
-    <section className={`dashboard-race-memo dashboard-race-memo--${decision.tone}`}>
-      <div className="dashboard-race-memo__bar">
-        <strong>{subtitle ? `${title} ${subtitle}` : title}</strong>
-        <span>{decision.label}</span>
-        <span>信頼度 {confidence}</span>
-      </div>
-      <div className="dashboard-race-memo__grid">
-        <article>
-          <span>本命馬</span>
-          <strong>{mainHorseText(focusRace)}</strong>
-        </article>
-        <article>
-          <span>AIの判断理由</span>
-          <p>信頼度と上位馬評価をもとに、詳細ページで予測印を確認できます。</p>
-        </article>
-        <article>
-          <span>上位印</span>
-          <strong>{marks}</strong>
-        </article>
-        <article>
-          <span>結果</span>
-          <p>{result}</p>
-        </article>
-      </div>
-    </section>
   );
 }

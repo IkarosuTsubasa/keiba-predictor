@@ -79,6 +79,37 @@ function topMarksText(race) {
   return marks.length ? marks.join(" / ") : "-";
 }
 
+function normalizeHorseNo(value) {
+  const match = String(value || "").match(/\d+/);
+  if (!match) return "";
+  return String(Number(match[0]));
+}
+
+function normalizeHorseName(value) {
+  return String(value || "").replace(/\s+/g, "").trim();
+}
+
+function predictionMarkForResult(race, body) {
+  const top5 = Array.isArray(race?.top5) ? race.top5 : [];
+  const bodyText = String(body || "").trim();
+  const resultNo = normalizeHorseNo(bodyText.match(/^(\d+)/)?.[1] || "");
+  const resultName = normalizeHorseName(bodyText.replace(/^\d+\s*/, ""));
+
+  for (let index = 0; index < top5.length && index < MARK_LABELS.length; index += 1) {
+    const item = top5[index] || {};
+    const mark = MARK_LABELS[index] || "";
+    const horseNo = normalizeHorseNo(item?.horse_no);
+    const horseName = normalizeHorseName(item?.horse_name);
+    if (resultNo && horseNo && resultNo === horseNo) {
+      return mark;
+    }
+    if (resultName && horseName && resultName === horseName) {
+      return mark;
+    }
+  }
+  return "";
+}
+
 export default function RaceCard({ race, style = undefined }) {
   const cards = Array.isArray(race?.predictor_compare_cards) && race.predictor_compare_cards.length
     ? race.predictor_compare_cards
@@ -204,14 +235,28 @@ export default function RaceCard({ race, style = undefined }) {
             <span className="race-card__cell-label">結果</span>
             {showResult && resultEntries.length ? (
               <ul className="race-card__result-list">
-                {resultEntries.map((entry) => (
-                  <li key={entry.key}>
-                    <span className="race-card__result-medal" aria-hidden="true">
-                      {entry.rank}着
-                    </span>
-                    <span>{entry.body}</span>
-                  </li>
-                ))}
+                {resultEntries.map((entry) => {
+                  const hitMark = predictionMarkForResult(race, entry.body);
+                  return (
+                    <li key={entry.key}>
+                      <span className="race-card__result-medal" aria-hidden="true">
+                        {entry.rank}着
+                      </span>
+                      <span className="race-card__result-body">
+                        {hitMark ? (
+                          <span
+                            className="race-card__result-hit"
+                            title={`予測印 ${hitMark}`}
+                            aria-label={`予測印 ${hitMark}`}
+                          >
+                            🌸
+                          </span>
+                        ) : null}
+                        <span>{entry.body}</span>
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p>{showResult ? resultText : "結果は確定後に表示されます"}</p>

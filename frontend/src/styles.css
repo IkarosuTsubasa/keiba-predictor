@@ -9078,6 +9078,20 @@ body {
   font-weight: 900;
 }
 
+.race-card__result-body {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+
+.race-card__result-hit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .race-card__toggle {
   min-width: 76px;
   min-height: 34px;
@@ -9424,82 +9438,6 @@ body.home-app-ready .site-footer {
   line-height: 1.6;
 }
 
-.dashboard-race-memo {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  border: 1px solid var(--dashboard-line);
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: var(--dashboard-shadow);
-}
-
-.dashboard-race-memo__bar {
-  min-height: 48px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  background: linear-gradient(180deg, #07111f, #0d1a2d);
-  color: #ffffff;
-}
-
-.dashboard-race-memo--bet .dashboard-race-memo__bar {
-  background: linear-gradient(180deg, #0f6f35, #198a3e);
-}
-
-.dashboard-race-memo__bar strong {
-  min-width: 0;
-  flex: 1 1 auto;
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.dashboard-race-memo__bar span {
-  flex: 0 0 auto;
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.dashboard-race-memo__grid {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.4fr) minmax(160px, 0.7fr) minmax(190px, 0.8fr);
-  gap: 0;
-}
-
-.dashboard-race-memo__grid article {
-  min-height: 104px;
-  padding: 14px;
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  border-right: 1px solid var(--dashboard-line);
-}
-
-.dashboard-race-memo__grid article:last-child {
-  border-right: none;
-}
-
-.dashboard-race-memo__grid span {
-  color: var(--dashboard-muted);
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.dashboard-race-memo__grid strong,
-.dashboard-race-memo__grid p {
-  margin: 0;
-  color: var(--dashboard-ink);
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.5;
-}
-
-.dashboard-race-memo__grid p {
-  font-size: 13px;
-  font-weight: 800;
-}
-
 @media (max-width: 1500px) {
   .dashboard-board {
     grid-template-columns: 1fr;
@@ -9567,26 +9505,6 @@ body.home-app-ready .site-footer {
     text-overflow: ellipsis;
   }
 
-  .dashboard-race-memo__bar {
-    min-height: 0;
-    padding: 12px;
-    display: grid;
-    gap: 8px;
-  }
-
-  .dashboard-race-memo__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-race-memo__grid article {
-    min-height: 0;
-    border-right: none;
-    border-bottom: 1px solid var(--dashboard-line);
-  }
-
-  .dashboard-race-memo__grid article:last-child {
-    border-bottom: none;
-  }
 }
 
 /* Stable race filters */

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { DashboardInsightPanel, DashboardRaceMemo } from "./DashboardInsightPanel";
+import { DashboardInsightPanel } from "./DashboardInsightPanel";
 import EmptyRaceState from "./EmptyRaceState";
 import RaceGrid from "./RaceGrid";
 
@@ -39,7 +39,6 @@ export default function TodayBoardContent({ data, races, appShell = false }) {
               />
             </div>
             <DashboardInsightPanel data={data} races={visibleRaces} />
-            <DashboardRaceMemo races={visibleRaces} />
           </div>
         )
       ) : (
