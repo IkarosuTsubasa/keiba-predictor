@@ -6,11 +6,15 @@ from pathlib import Path
 
 from keiba_llm_agent.backtest.scoring_comparator import calculate_weighted_score, result_top3_list
 from keiba_llm_agent.config.scoring_config import effective_scoring_weights, resolve_scoring_config
+from keiba_llm_agent.parsers.netkeiba_race_parser import infer_scope_key, infer_source_from_race_id
 from keiba_llm_agent.scoring.borderline_recovery import apply_top5_borderline_recovery
 from keiba_llm_agent.schemas.prediction import HorseScore, Prediction
 from keiba_llm_agent.schemas.race_data import RaceData
 from keiba_llm_agent.schemas.result import ResultData
 from keiba_llm_agent.schemas.review import Review
+
+
+VALID_SCOPE_KEYS = {"central", "central_turf", "central_dirt", "local"}
 
 
 def _load_prediction(path: Path) -> Prediction:
@@ -35,13 +39,60 @@ def _load_race_data(path: Path) -> RaceData | None:
     return RaceData.from_json_file(path)
 
 
+def _normalize_scope_key(scope_key: str | None) -> str | None:
+    text = str(scope_key or "").strip().lower()
+    if not text or text in {"all", "any"}:
+        return None
+    if text not in VALID_SCOPE_KEYS:
+        raise ValueError(f"invalid scope_key: {scope_key}")
+    return text
+
+
+def _prediction_scope_key(prediction: Prediction) -> str | None:
+    race_info = prediction.race_info
+    explicit_scope = str(getattr(race_info, "scope_key", "") or "").strip().lower() if race_info else ""
+    if explicit_scope:
+        return explicit_scope
+
+    explicit_source = str(getattr(race_info, "source", "") or "").strip().lower() if race_info else ""
+    if explicit_source == "local":
+        return "local"
+
+    inferred_scope = infer_scope_key(
+        prediction.race_id,
+        surface=getattr(race_info, "surface", None) if race_info else None,
+        course=getattr(race_info, "course", None) if race_info else None,
+    )
+    if inferred_scope:
+        return inferred_scope
+
+    inferred_source = infer_source_from_race_id(prediction.race_id)
+    if inferred_source == "local":
+        return "local"
+    if explicit_source == "central" or inferred_source == "central":
+        return "central"
+    return None
+
+
+def _prediction_matches_scope(prediction: Prediction, scope_key: str | None) -> bool:
+    normalized_scope = _normalize_scope_key(scope_key)
+    if normalized_scope is None:
+        return True
+    prediction_scope = _prediction_scope_key(prediction)
+    if normalized_scope == "central":
+        return prediction_scope in {"central", "central_turf", "central_dirt"}
+    return prediction_scope == normalized_scope
+
+
 def _collect_predictions_in_period(
     predictions_dir: Path,
     from_date: str,
     to_date: str,
+    scope_key: str | None = None,
 ) -> tuple[list[Prediction], list[str]]:
     predictions: list[Prediction] = []
     warnings: list[str] = []
+    normalized_scope = _normalize_scope_key(scope_key)
     if not predictions_dir.exists():
         return predictions, warnings
 
@@ -50,7 +101,7 @@ def _collect_predictions_in_period(
         if prediction.race_info is None or not prediction.race_info.race_date:
             warnings.append(f"prediction skipped because race_info.race_date is missing: race_id={prediction.race_id}")
             continue
-        if from_date <= prediction.race_info.race_date <= to_date:
+        if from_date <= prediction.race_info.race_date <= to_date and _prediction_matches_scope(prediction, normalized_scope):
             predictions.append(prediction)
     return predictions, warnings
 
@@ -231,7 +282,9 @@ def run_missed_top3_analysis(
     finish_filter: int | None = None,
     top_n: int = 5,
     simulate_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
+    normalized_scope = _normalize_scope_key(scope_key)
     scoring_config, scoring_warnings = resolve_scoring_config(
         scoring_mode=scoring_mode,
         pedigree_weight=pedigree_weight,
@@ -239,7 +292,12 @@ def run_missed_top3_analysis(
         pace_weight=pace_weight,
     )
     warnings = list(scoring_warnings)
-    predictions, prediction_warnings = _collect_predictions_in_period(predictions_dir, from_date, to_date)
+    predictions, prediction_warnings = _collect_predictions_in_period(
+        predictions_dir,
+        from_date,
+        to_date,
+        scope_key=normalized_scope,
+    )
     warnings.extend(prediction_warnings)
 
     race_count = len(predictions)
@@ -400,8 +458,10 @@ def run_missed_top3_analysis(
 
     return {
         "period": {"from": from_date, "to": to_date},
+        "scope_key": normalized_scope,
         "analysis_config": {
             "scoring_mode": scoring_config.scoring_mode,
+            "scope_key": normalized_scope,
             "pedigree_weight": scoring_config.pedigree_weight,
             "race_level_weight": scoring_config.race_level_weight,
             "pace_weight": scoring_config.pace_weight,

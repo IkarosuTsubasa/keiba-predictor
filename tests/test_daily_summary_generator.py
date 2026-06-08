@@ -22,6 +22,10 @@ def _prediction_payload(
     bets: list[dict],
     *,
     with_race_info: bool = True,
+    course: str = "東京",
+    surface: str = "芝",
+    scope_key: str | None = None,
+    source: str | None = None,
 ) -> dict:
     return {
         "race_id": race_id,
@@ -29,11 +33,13 @@ def _prediction_payload(
             "race_id": race_id,
             "race_name": race_name,
             "race_date": TARGET_DATE,
-            "course": "東京",
-            "surface": "芝",
+            "course": course,
+            "surface": surface,
             "distance": 1600,
             "track_condition": "良",
             "weather": "晴",
+            "scope_key": scope_key,
+            "source": source,
         }
         if with_race_info
         else None,
@@ -295,6 +301,8 @@ class DailySummaryGeneratorTests(unittest.TestCase):
             lessons_path=self.lessons_path,
         )
         self.assertIn("# 2026-05-17 AI競馬 Daily Summary", markdown)
+        self.assertIn("対象スコープ: 全場", markdown)
+        self.assertIn("中央芝 3R", markdown)
         self.assertIn("対象レース数: 3", markdown)
         self.assertIn("予想済みレース数: 3", markdown)
         self.assertIn("回顧済みレース数: 2", markdown)
@@ -303,12 +311,12 @@ class DailySummaryGeneratorTests(unittest.TestCase):
         self.assertIn("ROI: 200.0%", markdown)
         self.assertIn("◎ Top3率: 50.0%", markdown)
         self.assertIn("印内Top3率: 50.0%", markdown)
-        self.assertIn("| race_b | B Stakes | BET | medium | 16 ニシノティアモ | - | - | - | 0 | 0 | - |", markdown)
-        self.assertIn("| race_c | C Stakes | SKIP | medium | 16 ニシノティアモ | 9 / 1 / 3 | 1 | 見送り | 0 | 0 | 0.0% |", markdown)
+        self.assertIn("| 中央芝 | race_b | B Stakes | BET | medium | 16 ニシノティアモ | - | - | - | 0 | 0 | - |", markdown)
+        self.assertIn("| 中央芝 | race_c | C Stakes | SKIP | medium | 16 ニシノティアモ | 9 / 1 / 3 | 1 | 見送り | 0 | 0 | 0.0% |", markdown)
         self.assertIn("## 未回顧レース", markdown)
         self.assertIn("- race_b B Stakes", markdown)
         self.assertIn("## BET一覧", markdown)
-        self.assertIn("| race_a | A Stakes | ワイド | 16-6 | 100 | 的中 | 200 |", markdown)
+        self.assertIn("| 中央芝 | race_a | A Stakes | ワイド | 16-6 | 100 | 的中 | 200 |", markdown)
         self.assertIn("[medium / score=0.55] 同距離重視", markdown)
         self.assertNotIn("近走精査不足", markdown)
         self.assertEqual(context["metrics"]["bet_race_count"], 2)
@@ -320,6 +328,60 @@ class DailySummaryGeneratorTests(unittest.TestCase):
         self.assertEqual(context["metrics"]["marked_top3_rate"], 0.5)
         self.assertEqual(context["metrics"]["bet_hit_rate"], 0.5)
         self.assertTrue(context["warnings"])
+
+    def test_daily_report_can_filter_local_scope(self) -> None:
+        (self.predictions_dir / "202644050101.json").write_text(
+            json.dumps(
+                _prediction_payload(
+                    "202644050101",
+                    "Local Stakes",
+                    [{"bet_type": "ワイド", "horse_numbers": [16, 6], "amount": 100, "reason": "reason"}],
+                    course="大井",
+                    surface="ダート",
+                    scope_key="local",
+                    source="local",
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (self.reviews_dir / "202644050101.json").write_text(
+            json.dumps(
+                _review_payload(
+                    "202644050101",
+                    bet_hit=True,
+                    roi=1.5,
+                    total_stake=100,
+                    total_return=150,
+                    marked_count=2,
+                    main_top3=True,
+                    lesson_text="地方は近走内容を重視",
+                    good_points=["地方条件を分けて見られた。"],
+                    bad_points=[],
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        markdown, context = generate_daily_report(
+            target_date=TARGET_DATE,
+            predictions_dir=self.predictions_dir,
+            reviews_dir=self.reviews_dir,
+            results_dir=self.results_dir,
+            lessons_path=self.lessons_path,
+            scope_key="local",
+        )
+
+        self.assertIn("対象スコープ: 地方", markdown)
+        self.assertIn("地方 1R", markdown)
+        self.assertIn("| 地方 | 202644050101 | Local Stakes | BET |", markdown)
+        self.assertNotIn("A Stakes", markdown)
+        self.assertEqual(context["scope_key"], "local")
+        self.assertEqual(context["metrics"]["target_race_count"], 1)
+        self.assertEqual(context["metrics"]["scope_counts"], {"local": 1})
 
     def test_daily_social_post_is_within_limit(self) -> None:
         _, context = generate_daily_report(
@@ -374,6 +436,40 @@ class DailySummaryGeneratorTests(unittest.TestCase):
         self.assertEqual(result["reviewed_race_count"], 2)
         self.assertEqual(result["bet_race_count"], 2)
         self.assertEqual(result["hit_count"], 1)
+
+    def test_daily_summary_command_saves_scope_specific_files(self) -> None:
+        (self.predictions_dir / "202644050101.json").write_text(
+            json.dumps(
+                _prediction_payload(
+                    "202644050101",
+                    "Local Stakes",
+                    [],
+                    course="大井",
+                    surface="ダート",
+                    scope_key="local",
+                    source="local",
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        with (
+            patch.object(main_module, "DEFAULT_PREDICTIONS_DIR", self.predictions_dir),
+            patch.object(main_module, "DEFAULT_REVIEWS_DIR", self.reviews_dir),
+            patch.object(main_module, "DEFAULT_RESULTS_DIR", self.results_dir),
+            patch.object(main_module, "DEFAULT_DAILY_REPORTS_DIR", self.daily_reports_dir),
+            patch.object(main_module, "DEFAULT_SOCIAL_POSTS_DIR", self.social_posts_dir),
+            patch.object(main_module, "DEFAULT_LESSONS_PATH", self.lessons_path),
+        ):
+            result = main_module.run_daily_summary(TARGET_DATE, skip_report=False, scope_key="local")
+
+        self.assertEqual(result["scope_key"], "local")
+        self.assertEqual(result["scope_label"], "地方")
+        self.assertTrue(str(result["daily_report_path"]).endswith("2026-05-17_local.md"))
+        self.assertTrue(str(result["daily_social_post_path"]).endswith("2026-05-17_local_daily.txt"))
+        self.assertEqual(result["target_race_count"], 1)
 
     def test_daily_summary_default_skips_report(self) -> None:
         with (

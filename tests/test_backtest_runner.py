@@ -170,6 +170,36 @@ class BacktestRunnerTests(unittest.TestCase):
         self.assertEqual(pending["status"], "pending")
         self.assertIn("result missing for race_id=r2", report["warnings"])
 
+    def test_run_backtest_can_filter_local_scope(self) -> None:
+        local_payload = _prediction_payload(
+            "202644050101",
+            "2026-05-19",
+            [
+                {"horse_no": 10, "base": 30.0, "pedigree": 0.0, "race_level": 0.0, "pace": 0.0},
+                {"horse_no": 11, "base": 29.0, "pedigree": 0.0, "race_level": 0.0, "pace": 0.0},
+                {"horse_no": 12, "base": 28.0, "pedigree": 0.0, "race_level": 0.0, "pace": 0.0},
+            ],
+        )
+        local_payload["race_info"]["course"] = "大井"
+        local_payload["race_info"]["surface"] = "ダート"
+        (self.predictions_dir / "202644050101.json").write_text(
+            json.dumps(local_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        report = run_backtest(
+            from_date="2026-05-01",
+            to_date="2026-05-31",
+            predictions_dir=self.predictions_dir,
+            results_dir=self.results_dir,
+            reviews_dir=self.reviews_dir,
+            scope_key="local",
+        )
+
+        self.assertEqual(report["scope_key"], "local")
+        self.assertEqual(report["race_count"], 1)
+        self.assertEqual(report["race_details"][0]["race_id"], "202644050101")
+
     def test_markdown_report_is_generated(self) -> None:
         report = run_backtest(
             from_date="2026-05-01",

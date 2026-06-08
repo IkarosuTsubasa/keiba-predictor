@@ -15,12 +15,14 @@ from keiba_llm_agent.backtest.scoring_comparator import (
     evaluate_weight_tuning_mode_against_result,
     result_top3_list,
 )
+from keiba_llm_agent.parsers.netkeiba_race_parser import infer_scope_key, infer_source_from_race_id
 from keiba_llm_agent.schemas.prediction import Prediction
 from keiba_llm_agent.schemas.result import ResultData
 from keiba_llm_agent.schemas.review import Review
 
 
 DEFAULT_MODES: tuple[BacktestMode, ...] = ("base_only", "pedigree_only", "full_adjusted")
+VALID_SCOPE_KEYS = {"central", "central_turf", "central_dirt", "local"}
 DEFAULT_WEIGHT_TUNING_MODES: tuple[WeightTuningMode, ...] = (
     "base_only",
     "current_full",
@@ -32,6 +34,10 @@ DEFAULT_WEIGHT_TUNING_MODES: tuple[WeightTuningMode, ...] = (
     "pedigree_only",
     "candidate_default",
     "candidate_default_recovered",
+)
+LOCAL_WEIGHT_TUNING_MODES: tuple[WeightTuningMode, ...] = (
+    "local_candidate_default",
+    "local_candidate_default_recovered",
 )
 
 
@@ -66,13 +72,60 @@ def _result_text(result_data: ResultData | None) -> str:
     return "→".join(str(item) for item in top3)
 
 
+def _normalize_scope_key(scope_key: str | None) -> str | None:
+    text = str(scope_key or "").strip().lower()
+    if not text or text in {"all", "any"}:
+        return None
+    if text not in VALID_SCOPE_KEYS:
+        raise ValueError(f"invalid scope_key: {scope_key}")
+    return text
+
+
+def _prediction_scope_key(prediction: Prediction) -> str | None:
+    race_info = prediction.race_info
+    explicit_scope = str(getattr(race_info, "scope_key", "") or "").strip().lower() if race_info else ""
+    if explicit_scope:
+        return explicit_scope
+
+    explicit_source = str(getattr(race_info, "source", "") or "").strip().lower() if race_info else ""
+    if explicit_source == "local":
+        return "local"
+
+    inferred_scope = infer_scope_key(
+        prediction.race_id,
+        surface=getattr(race_info, "surface", None) if race_info else None,
+        course=getattr(race_info, "course", None) if race_info else None,
+    )
+    if inferred_scope:
+        return inferred_scope
+
+    inferred_source = infer_source_from_race_id(prediction.race_id)
+    if inferred_source == "local":
+        return "local"
+    if explicit_source == "central" or inferred_source == "central":
+        return "central"
+    return None
+
+
+def _prediction_matches_scope(prediction: Prediction, scope_key: str | None) -> bool:
+    normalized_scope = _normalize_scope_key(scope_key)
+    if normalized_scope is None:
+        return True
+    prediction_scope = _prediction_scope_key(prediction)
+    if normalized_scope == "central":
+        return prediction_scope in {"central", "central_turf", "central_dirt"}
+    return prediction_scope == normalized_scope
+
+
 def _collect_predictions_in_period(
     predictions_dir: Path,
     from_date: str,
     to_date: str,
+    scope_key: str | None = None,
 ) -> tuple[list[Prediction], list[str]]:
     predictions: list[Prediction] = []
     warnings: list[str] = []
+    normalized_scope = _normalize_scope_key(scope_key)
     if not predictions_dir.exists():
         return predictions, warnings
 
@@ -82,7 +135,7 @@ def _collect_predictions_in_period(
         if race_info is None or not race_info.race_date:
             warnings.append(f"prediction skipped because race_info.race_date is missing: race_id={prediction.race_id}")
             continue
-        if from_date <= race_info.race_date <= to_date:
+        if from_date <= race_info.race_date <= to_date and _prediction_matches_scope(prediction, normalized_scope):
             predictions.append(prediction)
     return predictions, warnings
 
@@ -155,9 +208,11 @@ def run_backtest(
     modes: list[BacktestMode] | None = None,
     min_races: int = 1,
     enable_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
     active_modes = modes or list(DEFAULT_MODES)
-    predictions, warnings = _collect_predictions_in_period(predictions_dir, from_date, to_date)
+    normalized_scope = _normalize_scope_key(scope_key)
+    predictions, warnings = _collect_predictions_in_period(predictions_dir, from_date, to_date, scope_key=normalized_scope)
     race_count = len(predictions)
     if race_count < min_races:
         warnings.append(f"race_count below min_races: {race_count} < {min_races}")
@@ -250,6 +305,7 @@ def run_backtest(
 
     return {
         "period": {"from": from_date, "to": to_date},
+        "scope_key": normalized_scope,
         "race_count": race_count,
         "reviewed_race_count": reviewed_race_count,
         "pending_race_count": pending_race_count,
@@ -416,8 +472,15 @@ def run_backtest_weights(
     race_level_weight: float | None = None,
     pace_weight: float | None = None,
     enable_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
-    active_modes = list(dict.fromkeys(modes or DEFAULT_WEIGHT_TUNING_MODES))
+    normalized_scope = _normalize_scope_key(scope_key)
+    default_modes = (
+        (*DEFAULT_WEIGHT_TUNING_MODES, *LOCAL_WEIGHT_TUNING_MODES)
+        if modes is None and normalized_scope == "local"
+        else DEFAULT_WEIGHT_TUNING_MODES
+    )
+    active_modes = list(dict.fromkeys(modes or default_modes))
     evaluation_modes = list(active_modes)
     if any(mode != "base_only" for mode in active_modes) and "base_only" not in evaluation_modes:
         evaluation_modes.append("base_only")
@@ -433,7 +496,7 @@ def run_backtest_weights(
         if "custom" not in evaluation_modes:
             evaluation_modes.append("custom")
 
-    predictions, warnings = _collect_predictions_in_period(predictions_dir, from_date, to_date)
+    predictions, warnings = _collect_predictions_in_period(predictions_dir, from_date, to_date, scope_key=normalized_scope)
     race_count = len(predictions)
     if race_count < min_races:
         warnings.append(f"race_count below min_races: {race_count} < {min_races}")
@@ -582,6 +645,7 @@ def run_backtest_weights(
 
     return {
         "period": {"from": from_date, "to": to_date},
+        "scope_key": normalized_scope,
         "race_count": race_count,
         "reviewed_race_count": reviewed_race_count,
         "pending_race_count": pending_race_count,

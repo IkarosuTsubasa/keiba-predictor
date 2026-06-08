@@ -22,6 +22,10 @@ class NetkeibaUrlParserTests(unittest.TestCase):
         url = "http://race.netkeiba.com/race/shutuba.html?race_id=202605180511"
         self.assertEqual(extract_race_id(url), "202605180511")
 
+    def test_extracts_race_id_from_nar_shutuba_url(self) -> None:
+        url = "https://nar.netkeiba.com/race/shutuba.html?race_id=202644031102"
+        self.assertEqual(extract_race_id(url), "202644031102")
+
     def test_raises_when_race_id_missing(self) -> None:
         url = "https://race.netkeiba.com/race/shutuba.html?rf=race_list"
         with self.assertRaisesRegex(ValueError, "race_id not found in netkeiba URL"):

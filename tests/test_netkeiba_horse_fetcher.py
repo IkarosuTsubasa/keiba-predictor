@@ -54,12 +54,14 @@ class NetkeibaHorseFetcherTests(unittest.TestCase):
         mock_get.assert_not_called()
 
     def test_fetch_horse_html_fetches_and_saves_cache(self) -> None:
+        response = FakeResponse(FIXTURE_HTML)
         with patch(
             "keiba_llm_agent.fetchers.netkeiba_horse_fetcher.requests.get",
-            return_value=FakeResponse(FIXTURE_HTML),
+            return_value=response,
         ) as mock_get:
             html = fetch_horse_html("2021104073")
         self.assertEqual(html, FIXTURE_HTML)
+        self.assertEqual(response.encoding, netkeiba_horse_fetcher.DB_NETKEIBA_ENCODING)
         mock_get.assert_called_once()
         self.assertTrue((self.horse_cache_dir / "2021104073.html").exists())
 

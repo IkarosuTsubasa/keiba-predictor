@@ -188,6 +188,22 @@ def main():
         assert_true(bool(task), "remote task should be created")
         assert_true(task.get("status") == "dispatched", "remote task should be dispatched")
 
+        repeat_dispatch = task_routes.dispatch_agent_prediction_job(
+            base_dir=base_dir,
+            job_id=job_id,
+            load_race_jobs=load_jobs,
+            update_race_job=update_job,
+            initialize_job_step_fields=initialize_job_step_fields,
+            set_job_step_state=set_job_step_state,
+        )
+        assert_true(repeat_dispatch.get("already_dispatched") is True, "existing task should not dispatch again")
+        repeat_job = get_job(base_dir, job_id) or {}
+        assert_true(repeat_job.get("status") == "processing_agent_prediction", "existing task branch should keep job processing")
+        assert_true(
+            repeat_job.get("current_v5_task_id") == task.get("task_id"),
+            "existing task branch should preserve current task id",
+        )
+
         saved_prediction = save_agent_prediction_via_callback(base_dir, dispatched_job, task)
         prediction_path = Path(str(saved_prediction.get("prediction_path", "") or ""))
         assert_true(prediction_path.exists(), "callback should save prediction json")

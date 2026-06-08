@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from keiba_llm_agent import main as main_module
 from keiba_llm_agent.fetchers import netkeiba_fetcher
-from keiba_llm_agent.schemas.race_data import RaceData, RecentRun
+from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, RecentRun
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -70,6 +70,73 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
                 main_module.main(["analyze-url", "--url", SAMPLE_URL, "--force-refresh", "--dry-run"])
 
         mock_fetch.assert_called_once_with(SAMPLE_URL, force_refresh=True)
+
+    def test_analyze_url_auto_selects_local_profile(self) -> None:
+        local_race_data = RaceData(
+            race_info=RaceInfo(
+                race_id="202644031102",
+                race_name="地方サンプル",
+                race_date="2026-06-08",
+                course="大井",
+                surface="ダート",
+                distance=1400,
+                source="local",
+                scope_key="local",
+            ),
+            horses=[HorseEntry(horse_no=1, horse_name="ローカルホース", jockey="騎手A")],
+        )
+        with patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=local_race_data):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main_module.main(
+                    [
+                        "analyze-url",
+                        "--url",
+                        "https://nar.netkeiba.com/race/shutuba.html?race_id=202644031102",
+                        "--dry-run",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["scope_key"], "local")
+        self.assertEqual(payload["scoring_profile"], "local_accuracy_default")
+
+    def test_predict_race_auto_selects_local_profile(self) -> None:
+        local_race_data = RaceData(
+            race_info=RaceInfo(
+                race_id="202644031102",
+                race_name="地方サンプル",
+                race_date="2026-06-08",
+                course="大井",
+                surface="ダート",
+                distance=1400,
+                source="local",
+                scope_key="local",
+            ),
+            horses=[],
+        )
+        captured = {}
+
+        def fake_run_analysis(*args, **kwargs):
+            captured["scoring_profile"] = kwargs.get("scoring_profile")
+            output_path = Path(kwargs["output_path"])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text("{}", encoding="utf-8")
+            return object(), output_path
+
+        with patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=local_race_data), patch.object(
+            main_module, "run_analysis", side_effect=fake_run_analysis
+        ):
+            result = main_module.run_predict_race(
+                "https://nar.netkeiba.com/race/shutuba.html?race_id=202644031102",
+                skip_report=True,
+                skip_social=True,
+            )
+
+        self.assertEqual(captured["scoring_profile"], "local_accuracy_default")
+        self.assertEqual(result["scope_key"], "local")
+        self.assertEqual(result["scoring_profile"], "local_accuracy_default")
 
     def test_with_recent_runs_enriches_before_analysis(self) -> None:
         enriched_race_data = SAMPLE_RACE_DATA.model_copy(

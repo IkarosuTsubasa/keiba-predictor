@@ -592,6 +592,11 @@ python -m keiba_llm_agent.main review-url --url "https://race.netkeiba.com/race/
   - `scoring_mode = candidate_default`
   - `borderline_recovery_enabled = true`
   - 当前 v1.0 的 accuracy-oriented 推奨設定
+- `local_accuracy_default`:
+  - `scoring_mode = local_candidate_default`
+  - base weights: `pedigree_weight = 0.75 / race_level_weight = 0.1 / pace_weight = 1.0`
+  - `borderline_recovery_enabled = false`
+  - 2026-06-04〜2026-06-07 の地方96レースでは、旧設定より印内Top3平均とTop5 winner率を優先して改善
 - `safe_baseline`:
   - `scoring_mode = base_only`
   - `borderline_recovery_enabled = false`

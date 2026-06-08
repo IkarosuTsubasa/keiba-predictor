@@ -60,6 +60,7 @@ from llm.daily_report_runtime import (
 )
 from llm_state import reset_llm_state as reset_llm_state_files
 from local_env import load_local_env
+from race_meta_fetcher import fetch_race_meta
 from race_job_store import (
     apply_job_action as apply_race_job_action,
     compute_initial_status as compute_race_job_initial_status,
@@ -4953,6 +4954,34 @@ def _find_existing_agent_job(race_id, race_date=""):
     return None
 
 
+def _fetch_agent_race_meta_for_create(race_id, race_date=""):
+    race_id_text = normalize_race_id(race_id)
+    if not race_id_text:
+        raise ValueError("race_id required")
+    payload = fetch_race_meta(race_id_text, source="", timeout=30)
+    race_date_text = str(race_date or "").strip()
+    if race_date_text:
+        scheduled_off_time = str(payload.get("scheduled_off_time", "") or "").strip()
+        if "T" in scheduled_off_time:
+            payload["scheduled_off_time"] = f"{race_date_text}T{scheduled_off_time.split('T', 1)[1]}"
+        payload["race_date"] = race_date_text
+    return payload
+
+
+def _annotate_created_agent_job(job_id, meta_payload):
+    payload = dict(meta_payload or {})
+
+    def _apply(row, now_text):
+        row["race_number"] = str(payload.get("race_number", "") or "").strip()
+        row["meta_source_url"] = str(payload.get("source_url", "") or "").strip()
+        row["meta_fetched_at"] = now_text
+        row["meta_error"] = ""
+        row["meta_retry_count"] = str(row.get("meta_retry_count", "0") or "0")
+        row["status"] = compute_race_job_initial_status(row)
+
+    return update_race_job(BASE_DIR, job_id, _apply)
+
+
 @app.get("/", include_in_schema=False)
 def index():
     return RedirectResponse(url=PUBLIC_BASE_PATH, status_code=307)
@@ -5700,20 +5729,35 @@ async def admin_jobs_create_agent_races_api(request: Request):
             )
             continue
         try:
+            meta_payload = _fetch_agent_race_meta_for_create(race_id, race_date=race_date)
             job = create_race_job(
                 BASE_DIR,
                 race_id=race_id,
+                scope_key=str(meta_payload.get("scope_key", "") or "").strip(),
+                race_name=str(meta_payload.get("race_name", "") or "").strip(),
+                location=str(meta_payload.get("location", "") or "").strip(),
                 race_date=race_date,
+                scheduled_off_time=str(meta_payload.get("scheduled_off_time", "") or "").strip(),
+                target_surface=str(meta_payload.get("target_surface", "") or "").strip(),
+                target_distance=str(meta_payload.get("target_distance", "") or "").strip(),
+                target_track_condition=str(meta_payload.get("target_track_condition", "") or "").strip() or "良",
                 lead_minutes=lead_value,
                 job_source="agent_prediction",
                 notes=notes,
                 artifacts=[],
             )
+            job = _annotate_created_agent_job(
+                str((job or {}).get("job_id", "") or "").strip(),
+                meta_payload,
+            ) or job
             created.append(
                 {
                     "race_id": race_id,
                     "job_id": str((job or {}).get("job_id", "") or "").strip(),
                     "status": str((job or {}).get("status", "") or "").strip(),
+                    "scope_key": str((job or {}).get("scope_key", "") or "").strip(),
+                    "race_name": str((job or {}).get("race_name", "") or "").strip(),
+                    "scheduled_off_time": str((job or {}).get("scheduled_off_time", "") or "").strip(),
                 }
             )
         except Exception as exc:

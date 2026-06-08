@@ -67,7 +67,10 @@ class PredictionPedigreeScoringTests(unittest.TestCase):
 
         race_data = RaceData.from_json_file(SAMPLE_RACE_DATA)
         markdown = generate_prediction_report(prediction, race_data=race_data)
-        self.assertIn("| 印 | 馬番 | 馬名 | base | pedigree | raceLv | pace | total | odds | 人気 | reason |", markdown)
+        self.assertIn(
+            "| 印 | 馬番 | 馬名 | base | pedigree | raceLv | pace | border_adj | total | odds(参考) | 人気(参考) | reason |",
+            markdown,
+        )
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 HORSE_HTML_CACHE_DIR = BASE_DIR / "data" / "horse_html_cache"
+DB_NETKEIBA_ENCODING = "euc_jp"
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -52,8 +53,7 @@ def fetch_horse_html(horse_id: str, force_refresh: bool = False) -> str:
     except requests.RequestException as exc:
         raise RuntimeError(f"failed to fetch netkeiba horse page: {horse_id}") from exc
 
-    if getattr(response, "apparent_encoding", None):
-        response.encoding = response.apparent_encoding
+    response.encoding = DB_NETKEIBA_ENCODING
     html = response.text
     cache_path.write_text(html, encoding="utf-8")
     return html

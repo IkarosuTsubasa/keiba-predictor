@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 
 import requests
 
 from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import (
+    DB_NETKEIBA_ENCODING,
     DEFAULT_HEADERS,
     fetch_horse_html,
     get_horse_cache_path,
@@ -48,8 +50,7 @@ def fetch_pedigree_html(
     except requests.RequestException as exc:
         raise RuntimeError(f"failed to fetch pedigree page: horse_id={horse_id}") from exc
 
-    if getattr(response, "apparent_encoding", None):
-        response.encoding = response.apparent_encoding
+    response.encoding = DB_NETKEIBA_ENCODING
     html = response.text
     cache_path.write_text(html, encoding="utf-8")
     return html
@@ -89,6 +90,17 @@ def _merge_traits(*trait_groups: list[str]) -> list[str]:
             if trait not in merged:
                 merged.append(trait)
     return merged
+
+
+def normalize_pedigree_name(value: str | None) -> str:
+    text = " ".join(str(value or "").replace("\xa0", " ").split())
+    if not text:
+        return ""
+    text = re.sub(r"\s*[（(][^)）]+[)）]\s*$", "", text).strip()
+    match = re.match(r"^(.+?)\s+[A-Za-z][A-Za-z '.-]*$", text)
+    if match and re.search(r"[ぁ-んァ-ン一-龥]", match.group(1)):
+        text = match.group(1).strip()
+    return text
 
 
 def _pace_tendency_from_traits(traits: list[str]) -> str:
@@ -139,8 +151,10 @@ def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int 
     if not pedigree.sire and not pedigree.damsire:
         return _unknown_analysis(horse_no, final_horse_name, pedigree)
 
-    sire_knowledge = PEDIGREE_KNOWLEDGE.get(pedigree.sire) if pedigree.sire else None
-    damsire_knowledge = PEDIGREE_KNOWLEDGE.get(pedigree.damsire) if pedigree.damsire else None
+    sire_lookup_name = normalize_pedigree_name(pedigree.sire)
+    damsire_lookup_name = normalize_pedigree_name(pedigree.damsire)
+    sire_knowledge = PEDIGREE_KNOWLEDGE.get(sire_lookup_name) if sire_lookup_name else None
+    damsire_knowledge = PEDIGREE_KNOWLEDGE.get(damsire_lookup_name) if damsire_lookup_name else None
 
     if sire_knowledge is None and damsire_knowledge is None:
         return PedigreeAnalysis(

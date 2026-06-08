@@ -275,6 +275,7 @@ class WeightTuningBacktestTests(unittest.TestCase):
         self.assertEqual(score_for_weight_tuning_mode(horse, "conservative_full"), 35.9)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_pace"), 36.4)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_race_level"), 36.2)
+        self.assertEqual(score_for_weight_tuning_mode(horse, "local_candidate_default"), 36.1)
         self.assertEqual(score_for_weight_tuning_mode(horse, "custom", custom_weights=(0.25, 0.5, 1.0)), 35.9)
 
     def test_run_backtest_weights_computes_counts_and_heavy_races(self) -> None:
@@ -309,6 +310,40 @@ class WeightTuningBacktestTests(unittest.TestCase):
         self.assertIn("## Best Mode", markdown)
         self.assertIn("current_full", markdown)
         self.assertIn("recommended reason", markdown)
+
+    def test_run_backtest_weights_can_filter_local_scope(self) -> None:
+        local_payload = _prediction_payload(
+            "202644050101",
+            "2026-05-21",
+            [
+                _horse_score(1, 36.0),
+                _horse_score(2, 35.5),
+                _horse_score(3, 35.0),
+                _horse_score(4, 34.5),
+                _horse_score(5, 34.0),
+            ],
+        )
+        local_payload["race_info"]["course"] = "大井"
+        local_payload["race_info"]["surface"] = "ダート"
+        (self.predictions_dir / "202644050101.json").write_text(
+            json.dumps(local_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        report = run_backtest_weights(
+            from_date="2026-05-01",
+            to_date="2026-05-31",
+            predictions_dir=self.predictions_dir,
+            results_dir=self.results_dir,
+            reviews_dir=self.reviews_dir,
+            scope_key="local",
+        )
+
+        self.assertEqual(report["scope_key"], "local")
+        self.assertEqual(report["race_count"], 1)
+        self.assertEqual(report["race_details"][0]["race_id"], "202644050101")
+        self.assertIn("local_candidate_default", report["modes"])
+        self.assertIn("local_candidate_default_recovered", report["modes"])
 
     def test_command_saves_weight_tuning_outputs(self) -> None:
         with (

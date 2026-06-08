@@ -330,6 +330,31 @@ class MissedTop3AnalyzerTests(unittest.TestCase):
         self.assertEqual(report["category_counts"]["RACE_LEVEL_UNDERESTIMATED"], 1)
         self.assertNotIn("RISK_OVER_PENALIZED classification may still be too broad.", report["warnings"])
 
+    def test_missed_top3_analysis_can_filter_local_scope(self) -> None:
+        payload = json.loads((self.predictions_dir / "r2.json").read_text(encoding="utf-8"))
+        payload["race_info"]["scope_key"] = "local"
+        payload["race_info"]["source"] = "local"
+        (self.predictions_dir / "r2.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        report = run_missed_top3_analysis(
+            from_date="2026-05-01",
+            to_date="2026-05-31",
+            predictions_dir=self.predictions_dir,
+            results_dir=self.results_dir,
+            reviews_dir=self.reviews_dir,
+            race_data_dir=self.race_data_dir,
+            scope_key="local",
+            top_n=5,
+        )
+
+        self.assertEqual(report["scope_key"], "local")
+        self.assertEqual(report["summary"]["reviewed_race_count"], 1)
+        self.assertEqual([detail["race_id"] for detail in report["race_details"]], ["r2"])
+        self.assertEqual({case["race_id"] for case in report["missed_cases"]}, {"r2"})
+
     def test_simulate_borderline_recovery_reports_recoverable_cases(self) -> None:
         report = run_missed_top3_analysis(
             from_date="2026-05-01",

@@ -49,6 +49,7 @@ from keiba_llm_agent.fetchers.netkeiba_result_fetcher import (
 )
 from keiba_llm_agent.config import (
     DEFAULT_SCORING_PROFILE,
+    LOCAL_SCORING_PROFILE,
     SCORING_MODES,
     SCORING_PROFILES,
     get_llm_config,
@@ -142,6 +143,8 @@ DEFAULT_ANALYSIS_REPORTS_DIR = BASE_DIR / "data" / "analysis_reports"
 
 SCORING_MODE_CHOICES = [*SCORING_MODES.keys(), "custom"]
 SCORING_PROFILE_CHOICES = list(SCORING_PROFILES.keys())
+SCOPE_KEY_CHOICES = ["central", "central_turf", "central_dirt", "local"]
+LOCAL_VENUE_CODES = {"30", "35", "36", "42", "43", "44", "45", "46", "47", "48", "50", "51", "54", "55"}
 
 
 def _configure_stdio_encoding() -> None:
@@ -174,6 +177,35 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="禁用 Top5 境界補正",
     )
+
+
+def _infer_scope_key_from_race_id(race_id: str | None) -> str:
+    race_id_text = str(race_id or "").strip()
+    if len(race_id_text) < 6:
+        return ""
+    if race_id_text[4:6] in LOCAL_VENUE_CODES:
+        return "local"
+    return ""
+
+
+def _scope_output_suffix(scope_key: str | None) -> str:
+    normalized_scope = str(scope_key or "").strip().lower()
+    return f"_{normalized_scope}" if normalized_scope else ""
+
+
+def _resolve_scoring_profile_for_race(
+    race_data: RaceData,
+    scoring_profile: str | None,
+) -> str | None:
+    if scoring_profile:
+        return scoring_profile
+    race_info = race_data.race_info
+    scope_key = str(race_info.scope_key or "").strip().lower()
+    if not scope_key:
+        scope_key = _infer_scope_key_from_race_id(race_info.race_id)
+    if scope_key == "local":
+        return LOCAL_SCORING_PROFILE
+    return None
 
 
 def _resolve_borderline_recovery_enabled(
@@ -402,6 +434,7 @@ def run_analyze_url(
     borderline_recovery_enabled: bool | None = None,
 ) -> dict[str, str | None]:
     race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
+    resolved_scoring_profile = _resolve_scoring_profile_for_race(race_data, scoring_profile)
     if with_recent_runs:
         race_data = enrich_race_data_with_recent_runs(
             race_data,
@@ -418,7 +451,7 @@ def run_analyze_url(
             output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
             lessons_path=final_lessons_path,
             llm_provider=llm_provider,
-            scoring_profile=scoring_profile,
+            scoring_profile=resolved_scoring_profile,
             scoring_mode=scoring_mode,
             pedigree_weight=pedigree_weight,
             race_level_weight=race_level_weight,
@@ -428,6 +461,9 @@ def run_analyze_url(
 
     return {
         "race_id": race_data.race_info.race_id,
+        "source": race_data.race_info.source,
+        "scope_key": race_data.race_info.scope_key,
+        "scoring_profile": resolved_scoring_profile or DEFAULT_SCORING_PROFILE,
         "race_data_path": str(race_data_path),
         "prediction_path": str(prediction_path) if prediction_path else None,
     }
@@ -652,6 +688,7 @@ def run_predict_race(
     borderline_recovery_enabled: bool | None = None,
 ) -> dict[str, object]:
     race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
+    resolved_scoring_profile = _resolve_scoring_profile_for_race(race_data, scoring_profile)
     warning_messages: list[str] = []
     if not race_data.horses:
         warning_messages.append("no horses parsed from shutuba HTML")
@@ -672,7 +709,7 @@ def run_predict_race(
         output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
         lessons_path=lessons_path,
         llm_provider=llm_provider,
-        scoring_profile=scoring_profile,
+        scoring_profile=resolved_scoring_profile,
         scoring_mode=scoring_mode,
         pedigree_weight=pedigree_weight,
         race_level_weight=race_level_weight,
@@ -691,6 +728,9 @@ def run_predict_race(
 
     result: dict[str, object] = {
         "race_id": race_data.race_info.race_id,
+        "source": race_data.race_info.source,
+        "scope_key": race_data.race_info.scope_key,
+        "scoring_profile": resolved_scoring_profile or DEFAULT_SCORING_PROFILE,
         "race_data_path": str(race_data_path),
         "prediction_path": str(prediction_path),
         "prediction_report_path": report_path,
@@ -853,6 +893,7 @@ def run_daily_summary(
     skip_report: bool = True,
     skip_social: bool = False,
     lessons_path: str | Path = DEFAULT_LESSONS_PATH,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
     markdown, context = generate_daily_report(
         target_date=target_date,
@@ -860,17 +901,21 @@ def run_daily_summary(
         reviews_dir=DEFAULT_REVIEWS_DIR,
         results_dir=DEFAULT_RESULTS_DIR,
         lessons_path=Path(lessons_path),
+        scope_key=scope_key,
     )
+    output_key = f"{target_date}{_scope_output_suffix(scope_key)}"
     report_path: Path | None = None
     social_path: Path | None = None
     if not skip_report:
-        report_path = save_daily_report(markdown, DEFAULT_DAILY_REPORTS_DIR / f"{target_date}.md")
+        report_path = save_daily_report(markdown, DEFAULT_DAILY_REPORTS_DIR / f"{output_key}.md")
     if not skip_social:
         social_text = generate_daily_social_post(context)
-        social_path = save_post(social_text, DEFAULT_SOCIAL_POSTS_DIR / f"{target_date}_daily.txt")
+        social_path = save_post(social_text, DEFAULT_SOCIAL_POSTS_DIR / f"{output_key}_daily.txt")
     metrics = context["metrics"]
     return {
         "date": target_date,
+        "scope_key": context.get("scope_key"),
+        "scope_label": context.get("scope_label"),
         "daily_report_path": str(report_path) if report_path is not None else None,
         "daily_social_post_path": str(social_path) if social_path is not None else None,
         "target_race_count": metrics["target_race_count"],
@@ -893,6 +938,7 @@ def run_backtest_command(
     write_json: bool | None = None,
     write_md: bool | None = None,
     enable_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
     report = run_backtest(
         from_date=from_date,
@@ -903,8 +949,9 @@ def run_backtest_command(
         modes=modes,
         min_races=min_races,
         enable_borderline_recovery=enable_borderline_recovery,
+        scope_key=scope_key,
     )
-    period_key = f"{from_date}_{to_date}"
+    period_key = f"{from_date}_{to_date}{_scope_output_suffix(scope_key)}"
     should_write_json = True if write_json is None and write_md is None else bool(write_json)
     should_write_md = True if write_json is None and write_md is None else bool(write_md)
     json_path: Path | None = None
@@ -916,6 +963,7 @@ def run_backtest_command(
         md_path = save_backtest_markdown(markdown, DEFAULT_BACKTESTS_DIR / f"{period_key}.md")
     return {
         "period": report["period"],
+        "scope_key": report.get("scope_key"),
         "race_count": report["race_count"],
         "reviewed_race_count": report["reviewed_race_count"],
         "pending_race_count": report["pending_race_count"],
@@ -940,6 +988,7 @@ def run_backtest_weights_command(
     write_json: bool | None = None,
     write_md: bool | None = None,
     enable_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
     report = run_backtest_weights(
         from_date=from_date,
@@ -953,8 +1002,9 @@ def run_backtest_weights_command(
         race_level_weight=race_level_weight,
         pace_weight=pace_weight,
         enable_borderline_recovery=enable_borderline_recovery,
+        scope_key=scope_key,
     )
-    period_key = f"{from_date}_{to_date}_weight_tuning"
+    period_key = f"{from_date}_{to_date}{_scope_output_suffix(scope_key)}_weight_tuning"
     should_write_json = True if write_json is None and write_md is None else bool(write_json)
     should_write_md = True if write_json is None and write_md is None else bool(write_md)
     json_path: Path | None = None
@@ -966,6 +1016,7 @@ def run_backtest_weights_command(
         md_path = save_backtest_markdown(markdown, DEFAULT_BACKTESTS_DIR / f"{period_key}.md")
     return {
         "period": report["period"],
+        "scope_key": report.get("scope_key"),
         "race_count": report["race_count"],
         "reviewed_race_count": report["reviewed_race_count"],
         "pending_race_count": report["pending_race_count"],
@@ -992,6 +1043,7 @@ def run_missed_top3_analysis_command(
     write_json: bool | None = None,
     write_md: bool | None = None,
     simulate_borderline_recovery: bool = False,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
     report = run_missed_top3_analysis(
         from_date=from_date,
@@ -1008,8 +1060,9 @@ def run_missed_top3_analysis_command(
         finish_filter=finish_filter,
         top_n=top_n,
         simulate_borderline_recovery=simulate_borderline_recovery,
+        scope_key=scope_key,
     )
-    period_key = f"{from_date}_{to_date}_missed_top3"
+    period_key = f"{from_date}_{to_date}{_scope_output_suffix(scope_key)}_missed_top3"
     should_write_json = True if write_json is None and write_md is None else bool(write_json)
     should_write_md = True if write_json is None and write_md is None else bool(write_md)
     json_path: Path | None = None
@@ -1021,6 +1074,7 @@ def run_missed_top3_analysis_command(
         md_path = save_missed_top3_markdown(markdown, DEFAULT_ERROR_ANALYSIS_DIR / f"{period_key}.md")
     return {
         "period": report["period"],
+        "scope_key": report.get("scope_key"),
         "reviewed_race_count": report["summary"]["reviewed_race_count"],
         "captured_top3_horses": report["summary"]["captured_top3_horses"],
         "missed_top3_horses": report["summary"]["missed_top3_horses"],
@@ -1596,6 +1650,11 @@ def build_parser() -> argparse.ArgumentParser:
     daily_summary_parser = subparsers.add_parser("daily-summary", help="生成指定日期的日次汇总报告与社交短文")
     daily_summary_parser.add_argument("--date", required=True, help="目标日期，格式 YYYY-MM-DD")
     daily_summary_parser.add_argument(
+        "--scope-key",
+        choices=SCOPE_KEY_CHOICES,
+        help="仅汇总指定 scope 的预测样本",
+    )
+    daily_summary_parser.add_argument(
         "--skip-report",
         action="store_true",
         help="跳过 daily markdown report 生成",
@@ -1614,6 +1673,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser = subparsers.add_parser("backtest", help="比较不同 scoring 模式在指定期间的表现")
     backtest_parser.add_argument("--from-date", required=True, help="开始日期，格式 YYYY-MM-DD")
     backtest_parser.add_argument("--to-date", required=True, help="结束日期，格式 YYYY-MM-DD")
+    backtest_parser.add_argument(
+        "--scope-key",
+        choices=SCOPE_KEY_CHOICES,
+        help="仅统计指定 scope 的预测样本",
+    )
     backtest_parser.add_argument(
         "--mode",
         action="append",
@@ -1645,6 +1709,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_weights_parser.add_argument("--from-date", required=True, help="开始日期，格式 YYYY-MM-DD")
     backtest_weights_parser.add_argument("--to-date", required=True, help="结束日期，格式 YYYY-MM-DD")
     backtest_weights_parser.add_argument(
+        "--scope-key",
+        choices=SCOPE_KEY_CHOICES,
+        help="仅统计指定 scope 的预测样本",
+    )
+    backtest_weights_parser.add_argument(
         "--mode",
         action="append",
         choices=[
@@ -1658,6 +1727,8 @@ def build_parser() -> argparse.ArgumentParser:
             "pedigree_only",
             "candidate_default",
             "candidate_default_recovered",
+            "local_candidate_default",
+            "local_candidate_default_recovered",
             "custom",
         ],
         help="仅输出指定 mode，可重复传入",
@@ -1689,6 +1760,11 @@ def build_parser() -> argparse.ArgumentParser:
     missed_top3_parser = subparsers.add_parser("missed-top3-analysis", help="分析实际Top3中漏出 predicted topN 的马")
     missed_top3_parser.add_argument("--from-date", required=True, help="开始日期，格式 YYYY-MM-DD")
     missed_top3_parser.add_argument("--to-date", required=True, help="结束日期，格式 YYYY-MM-DD")
+    missed_top3_parser.add_argument(
+        "--scope-key",
+        choices=SCOPE_KEY_CHOICES,
+        help="仅统计指定 scope 的预测样本",
+    )
     missed_top3_parser.add_argument(
         "--scoring-mode",
         choices=SCORING_MODE_CHOICES,
@@ -2125,6 +2201,7 @@ def main(argv: list[str] | None = None) -> int:
                 enable_report=args.enable_report,
             ),
             skip_social=args.skip_social,
+            scope_key=args.scope_key,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -2143,6 +2220,7 @@ def main(argv: list[str] | None = None) -> int:
                 enable_borderline_recovery=args.enable_borderline_recovery,
                 disable_borderline_recovery=args.disable_borderline_recovery,
             ),
+            scope_key=args.scope_key,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -2164,6 +2242,7 @@ def main(argv: list[str] | None = None) -> int:
                 enable_borderline_recovery=args.enable_borderline_recovery,
                 disable_borderline_recovery=args.disable_borderline_recovery,
             ),
+            scope_key=args.scope_key,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -2183,6 +2262,7 @@ def main(argv: list[str] | None = None) -> int:
             write_json=args.output_json if selected_outputs else None,
             write_md=args.output_md if selected_outputs else None,
             simulate_borderline_recovery=args.simulate_borderline_recovery,
+            scope_key=args.scope_key,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

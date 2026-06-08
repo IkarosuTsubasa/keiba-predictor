@@ -194,6 +194,15 @@ def _scope_matches(payload, scope_key):
     if not scope:
         return True
     race_info = dict(payload.get("race_info") or {})
+    payload_scope = _safe_text(payload.get("scope_key")) or _safe_text(race_info.get("scope_key"))
+    payload_source = _safe_text(payload.get("source")) or _safe_text(race_info.get("source"))
+    if payload_scope:
+        if scope == "local":
+            return payload_scope == "local"
+        if scope in ("central_turf", "central_dirt"):
+            return payload_scope == scope
+    if payload_source == "local":
+        return scope == "local"
     surface = _safe_text(race_info.get("surface"))
     course = _safe_text(race_info.get("course"))
     if scope == "central_turf":

@@ -101,13 +101,7 @@ class PredictionRaceLevelAnalysisTests(unittest.TestCase):
         self.assertEqual(len(payload["race_level_analyses"]), len(race_data.horses))
 
         first_score = payload["horse_scores"][0]
-        expected_total = round(
-            first_score["base_total_score"]
-            + first_score["pedigree_adjustment"]["pedigree_adjustment"]
-            + first_score["race_level_adjustment"]["adjustment"]
-            + first_score["pace_adjustment"]["adjustment"],
-            1,
-        )
+        expected_total = round(first_score["score_breakdown"]["total_score_after_recovery"], 1)
         self.assertEqual(first_score["total_score"], expected_total)
 
         markdown = generate_prediction_report(prediction, race_data=race_data)

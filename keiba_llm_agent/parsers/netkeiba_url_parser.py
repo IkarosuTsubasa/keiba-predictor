@@ -3,12 +3,12 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 
-SUPPORTED_HOST = "race.netkeiba.com"
+SUPPORTED_HOSTS = {"race.netkeiba.com", "nar.netkeiba.com"}
 
 
 def extract_race_id(url: str) -> str:
     parsed = urlparse(url)
-    if parsed.hostname != SUPPORTED_HOST:
+    if parsed.hostname not in SUPPORTED_HOSTS:
         raise ValueError("not a supported netkeiba URL")
 
     query = parse_qs(parsed.query)

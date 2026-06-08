@@ -15,6 +15,14 @@ on:
         description: netkeiba shutuba URL
         required: true
         type: string
+      scope_key:
+        description: prediction scope key
+        required: false
+        type: string
+      scoring_profile:
+        description: keiba_llm_agent scoring profile
+        required: false
+        type: string
       callback_url:
         description: Render callback URL
         required: true
@@ -55,6 +63,7 @@ jobs:
             --skip-report \
             --skip-social \
             --llm-provider openai \
+            --scoring-profile "${{ inputs.scoring_profile || 'accuracy_default' }}" \
             > agent_prediction_output.log 2>&1
           status=$?
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"

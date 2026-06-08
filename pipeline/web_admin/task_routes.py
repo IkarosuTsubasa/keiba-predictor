@@ -17,7 +17,7 @@ from fetch_central_result import (
     fetch_html as fetch_official_result_html,
     parse_result_page as parse_official_result_page,
 )
-from race_meta_fetcher import build_shutuba_url, fetch_race_meta
+from race_meta_fetcher import build_shutuba_url, fetch_race_meta, infer_source_from_race_id
 from race_job_store import initialize_job_step_fields as _initialize_race_job_step_fields
 from race_job_store import set_job_step_state as _set_race_job_step_state
 from v5_remote_tasks import create_task as create_remote_task
@@ -338,7 +338,7 @@ def _fetch_official_result_payload_for_job(job):
 
 def _build_agent_result_url(job):
     race_id = str((job or {}).get("race_id", "") or "").strip()
-    scope_key = str((job or {}).get("scope_key", "") or "").strip().lower()
+    scope_key = _agent_prediction_scope_key(job)
     if not race_id:
         raise ValueError("race_id missing")
     if scope_key == "local":
@@ -399,9 +399,21 @@ def _agent_prediction_callback_url(task):
 
 def _agent_prediction_race_url(job):
     race_id = str((job or {}).get("race_id", "") or "").strip()
-    scope_key = str((job or {}).get("scope_key", "") or "").strip().lower()
+    scope_key = _agent_prediction_scope_key(job)
     source = "local" if scope_key == "local" else ""
     return build_shutuba_url(race_id, source=source)
+
+
+def _agent_prediction_scope_key(job):
+    scope_key = str((job or {}).get("scope_key", "") or "").strip().lower()
+    if scope_key:
+        return scope_key
+    source = infer_source_from_race_id(str((job or {}).get("race_id", "") or "").strip())
+    return "local" if source == "local" else ""
+
+
+def _agent_prediction_scoring_profile(job):
+    return "local_accuracy_default" if _agent_prediction_scope_key(job) == "local" else "accuracy_default"
 
 
 def _dispatch_agent_prediction_task(base_dir, task, job):
@@ -416,7 +428,9 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
     ref = str(os.environ.get("GITHUB_ACTIONS_REF", "main") or "").strip() or "main"
     token = str(os.environ.get("GITHUB_ACTIONS_TOKEN", "") or "").strip()
     race_id = str((job or {}).get("race_id", "") or "").strip()
+    scope_key = _agent_prediction_scope_key(job)
     race_url = _agent_prediction_race_url(job)
+    scoring_profile = _agent_prediction_scoring_profile(job)
     if not task_id:
         raise RuntimeError("agent prediction task id missing")
     if not owner or not repo or not workflow or not token:
@@ -439,7 +453,9 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
         "inputs": {
             "task_id": task_id,
             "race_id": race_id,
+            "scope_key": scope_key,
             "race_url": race_url,
+            "scoring_profile": scoring_profile,
             "callback_url": _agent_prediction_callback_url(task),
         },
     }
@@ -495,7 +511,9 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
         "workflow": workflow,
         "ref": ref,
         "race_id": race_id,
+        "scope_key": scope_key,
         "race_url": race_url,
+        "scoring_profile": scoring_profile,
         "callback_url": _agent_prediction_callback_url(task),
         "dispatch_http_status": int(status_code),
     }
@@ -521,15 +539,40 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
         statuses=("queued", "dispatching", "dispatched", "running"),
     )
     if existing_task:
+        existing_task_id = str((existing_task or {}).get("task_id", "") or "").strip()
+        existing_task_status = str((existing_task or {}).get("status", "") or "").strip()
+
+        def _mark_existing_dispatched(row, now_text):
+            row.update(initialize_job_step_fields(row))
+            row["status"] = "processing_agent_prediction"
+            row["current_v5_task_id"] = existing_task_id
+            row["error_message"] = ""
+            row["last_process_output"] = append_job_process_log_entry(
+                row,
+                "agent_prediction_existing_task",
+                0,
+                json.dumps(
+                    {
+                        "task_id": existing_task_id,
+                        "task_status": existing_task_status,
+                        "already_dispatched": True,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            set_job_step_state(row, "predictor", "running", now_text)
+
+        update_race_job(base_dir, target_job_id, _mark_existing_dispatched)
         return {
             "job_id": target_job_id,
             "race_id": str((job or {}).get("race_id", "") or "").strip(),
-            "task_id": str((existing_task or {}).get("task_id", "") or "").strip(),
+            "task_id": existing_task_id,
             "already_dispatched": True,
         }
 
     race_id = str((job or {}).get("race_id", "") or "").strip()
-    scope_key = str((job or {}).get("scope_key", "") or "").strip()
+    scope_key = _agent_prediction_scope_key(job)
+    scoring_profile = _agent_prediction_scoring_profile(job)
     task = create_remote_task(
         base_dir,
         job_id=target_job_id,
@@ -546,6 +589,7 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
             "scheduled_off_time": str((job or {}).get("scheduled_off_time", "") or "").strip(),
             "location": str((job or {}).get("location", "") or "").strip(),
             "race_url": _agent_prediction_race_url(job),
+            "scoring_profile": scoring_profile,
         },
     )
     dispatch_info = _dispatch_agent_prediction_task(base_dir, task, job)

@@ -45,6 +45,8 @@ class RaceInfo(BaseModel):
     distance: int | None = None
     track_condition: str | None = None
     weather: str | None = None
+    source: str | None = None
+    scope_key: str | None = None
 
 
 class RaceData(BaseModel):

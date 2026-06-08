@@ -130,7 +130,8 @@ def enrich_race_data_with_current_odds(race_data: RaceData) -> RaceData:
 def fetch_and_parse_netkeiba_race(url: str, force_refresh: bool = False) -> RaceData:
     race_id, html = fetch_netkeiba_html(url, force_refresh=force_refresh)
     race_data = parse_netkeiba_shutuba_html(html, race_id=race_id)
-    if race_data.horses and all(
+    scope_key = str(race_data.race_info.scope_key or "").strip().lower()
+    if scope_key != "local" and race_data.horses and all(
         horse.odds is None and horse.popularity is None
         for horse in race_data.horses
     ):

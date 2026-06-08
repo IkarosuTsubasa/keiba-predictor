@@ -40,6 +40,18 @@ class NetkeibaRaceParserTests(unittest.TestCase):
         self.assertEqual(race_data.race_info.track_condition, "良")
         self.assertEqual(race_data.race_info.weather, "晴")
 
+    def test_parses_scope_from_central_race_id(self) -> None:
+        race_data = parse_netkeiba_shutuba_html(self.html, race_id="202605180511")
+        self.assertEqual(race_data.race_info.source, "central")
+        self.assertEqual(race_data.race_info.scope_key, "central_turf")
+
+    def test_parses_scope_from_local_race_id_and_course(self) -> None:
+        local_html = self.html.replace("東京", "大井").replace("2026年5月18日", "2026年5月18日")
+        race_data = parse_netkeiba_shutuba_html(local_html, race_id="202644031102")
+        self.assertEqual(race_data.race_info.course, "大井")
+        self.assertEqual(race_data.race_info.source, "local")
+        self.assertEqual(race_data.race_info.scope_key, "local")
+
     def test_parses_horses_array(self) -> None:
         race_data = parse_netkeiba_shutuba_html(self.html, race_id="202605180511")
         self.assertEqual(len(race_data.horses), 2)

@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from keiba_llm_agent.memory.lesson_store import LessonStore
+from keiba_llm_agent.parsers.netkeiba_race_parser import infer_scope_key, infer_source_from_race_id
 from keiba_llm_agent.schemas.prediction import Prediction
 from keiba_llm_agent.schemas.race_data import RaceInfo
 from keiba_llm_agent.schemas.result import ResultData
@@ -13,6 +14,15 @@ from keiba_llm_agent.schemas.review import LessonItem, Review
 
 HASHTAGS = "#いかいもAI競馬 #競馬"
 MAX_POST_LENGTH = 280
+VALID_SCOPE_KEYS = {"central", "central_turf", "central_dirt", "local"}
+SCOPE_LABELS_JA = {
+    "": "全場",
+    "central": "中央",
+    "central_turf": "中央芝",
+    "central_dirt": "中央ダート",
+    "local": "地方",
+    "unknown": "不明",
+}
 
 
 def _load_json(path: Path) -> dict:
@@ -27,6 +37,61 @@ def _format_yen(value: int) -> str:
     return f"{value}円"
 
 
+def _normalize_scope_key(scope_key: str | None) -> str | None:
+    text = str(scope_key or "").strip().lower()
+    if not text or text in {"all", "any"}:
+        return None
+    if text not in VALID_SCOPE_KEYS:
+        raise ValueError(f"invalid scope_key: {scope_key}")
+    return text
+
+
+def _scope_label(scope_key: str | None) -> str:
+    text = str(scope_key or "").strip().lower()
+    return SCOPE_LABELS_JA.get(text, text or SCOPE_LABELS_JA[""])
+
+
+def _prediction_scope_key(prediction: Prediction) -> str | None:
+    race_info = prediction.race_info
+    explicit_scope = str(getattr(race_info, "scope_key", "") or "").strip().lower() if race_info else ""
+    if explicit_scope:
+        return explicit_scope
+
+    explicit_source = str(getattr(race_info, "source", "") or "").strip().lower() if race_info else ""
+    if explicit_source == "local":
+        return "local"
+
+    inferred_scope = infer_scope_key(
+        prediction.race_id,
+        surface=getattr(race_info, "surface", None) if race_info else None,
+        course=getattr(race_info, "course", None) if race_info else None,
+    )
+    if inferred_scope:
+        return inferred_scope
+
+    inferred_source = infer_source_from_race_id(prediction.race_id)
+    if inferred_source == "local":
+        return "local"
+    if explicit_source == "central" or inferred_source == "central":
+        return "central"
+    surface = str(getattr(race_info, "surface", "") or "").strip() if race_info else ""
+    if surface == "芝":
+        return "central_turf"
+    if surface and ("ダ" in surface or "砂" in surface):
+        return "central_dirt"
+    return None
+
+
+def _prediction_matches_scope(prediction: Prediction, scope_key: str | None) -> bool:
+    normalized_scope = _normalize_scope_key(scope_key)
+    if normalized_scope is None:
+        return True
+    prediction_scope = _prediction_scope_key(prediction)
+    if normalized_scope == "central":
+        return prediction_scope in {"central", "central_turf", "central_dirt"}
+    return prediction_scope == normalized_scope
+
+
 def _truncate_post(text: str) -> str:
     if len(text) <= MAX_POST_LENGTH:
         return text
@@ -36,9 +101,11 @@ def _truncate_post(text: str) -> str:
 def _load_predictions_for_date(
     predictions_dir: Path,
     target_date: str,
+    scope_key: str | None = None,
 ) -> tuple[list[Prediction], list[str]]:
     predictions: list[Prediction] = []
     warnings: list[str] = []
+    normalized_scope = _normalize_scope_key(scope_key)
     if not predictions_dir.exists():
         return predictions, warnings
 
@@ -50,7 +117,7 @@ def _load_predictions_for_date(
                 f"prediction skipped because race_info.race_date is missing: race_id={prediction.race_id}"
             )
             continue
-        if race_info.race_date == target_date:
+        if race_info.race_date == target_date and _prediction_matches_scope(prediction, normalized_scope):
             predictions.append(prediction)
     return predictions, warnings
 
@@ -179,8 +246,10 @@ def build_daily_context(
     reviews_dir: Path,
     results_dir: Path,
     lessons_path: Path,
+    scope_key: str | None = None,
 ) -> dict[str, object]:
-    predictions, warnings = _load_predictions_for_date(predictions_dir, target_date)
+    normalized_scope = _normalize_scope_key(scope_key)
+    predictions, warnings = _load_predictions_for_date(predictions_dir, target_date, scope_key=normalized_scope)
     race_rows: list[dict[str, object]] = []
     bet_rows: list[dict[str, object]] = []
     pending_races: list[dict[str, str]] = []
@@ -196,9 +265,12 @@ def build_daily_context(
     main_mark_top3_hits = 0
     marked_top3_total = 0
     payout_warning_count = 0
+    scope_counter: Counter[str] = Counter()
 
     for prediction in predictions:
         race_info: RaceInfo | None = prediction.race_info
+        prediction_scope = _prediction_scope_key(prediction) or "unknown"
+        scope_counter.update([prediction_scope])
         horse_names = _horse_name_by_number(prediction)
         review = _load_optional_review(reviews_dir, prediction.race_id)
         result_data = _load_optional_result(results_dir, prediction.race_id)
@@ -233,6 +305,8 @@ def build_daily_context(
         race_rows.append(
             {
                 "race_id": prediction.race_id,
+                "scope_key": prediction_scope,
+                "scope_label": _scope_label(prediction_scope),
                 "race_name": race_info.race_name if race_info else prediction.race_id,
                 "bet_decision": prediction.strategy.bet_decision if prediction.strategy else "unknown",
                 "confidence": prediction.strategy.confidence if prediction.strategy else "unknown",
@@ -267,6 +341,8 @@ def build_daily_context(
 
     return {
         "date": target_date,
+        "scope_key": normalized_scope,
+        "scope_label": _scope_label(normalized_scope),
         "warnings": warnings,
         "race_rows": race_rows,
         "bet_rows": bet_rows,
@@ -275,6 +351,7 @@ def build_daily_context(
         "bad_points": [item for item, _ in bad_point_counter.most_common(10)],
         "lessons": lessons,
         "metrics": {
+            "scope_counts": dict(scope_counter),
             "target_race_count": len(predictions),
             "predicted_race_count": len(predictions),
             "reviewed_race_count": reviewed_race_count,
@@ -297,6 +374,7 @@ def generate_daily_report(
     reviews_dir: Path,
     results_dir: Path,
     lessons_path: Path,
+    scope_key: str | None = None,
 ) -> tuple[str, dict[str, object]]:
     context = build_daily_context(
         target_date=target_date,
@@ -304,6 +382,7 @@ def generate_daily_report(
         reviews_dir=reviews_dir,
         results_dir=results_dir,
         lessons_path=lessons_path,
+        scope_key=scope_key,
     )
     metrics = context["metrics"]
     race_rows = context["race_rows"]
@@ -311,12 +390,19 @@ def generate_daily_report(
     lessons: list[LessonItem] = context["lessons"]
     warnings: list[str] = context["warnings"]
     pending_races: list[dict[str, str]] = context["pending_races"]
+    scope_counts = dict(metrics.get("scope_counts", {}) or {})
+    scope_breakdown = " / ".join(
+        f"{_scope_label(key)} {value}R"
+        for key, value in sorted(scope_counts.items(), key=lambda item: (_scope_label(item[0]), item[0]))
+    ) or "-"
 
     lines = [
         f"# {target_date} AI競馬 Daily Summary",
         "",
         "## サマリ",
         f"- 日付: {target_date}",
+        f"- 対象スコープ: {context['scope_label']}",
+        f"- スコープ内訳: {scope_breakdown}",
         f"- 対象レース数: {metrics['target_race_count']}",
         f"- 予想済みレース数: {metrics['predicted_race_count']}",
         f"- 回顧済みレース数: {metrics['reviewed_race_count']}",
@@ -330,8 +416,8 @@ def generate_daily_report(
         f"- bet_hit率: {_format_rate(metrics['bet_hit_rate'])}",
         "",
         "## レース別結果",
-        "| race_id | race_name | bet_decision | confidence | ◎ | 結果 | 印内Top3 | bet_hit | stake | return | ROI |",
-        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
+        "| scope | race_id | race_name | bet_decision | confidence | ◎ | 結果 | 印内Top3 | bet_hit | stake | return | ROI |",
+        "| --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
     ]
 
     for row in race_rows:
@@ -347,7 +433,7 @@ def generate_daily_report(
         if row["payout_warning"] and roi_text != "-":
             roi_text = f"{roi_text} (暫定)"
         lines.append(
-            f"| {row['race_id']} | {row['race_name']} | {row['bet_decision']} | {row['confidence']} | "
+            f"| {row['scope_label']} | {row['race_id']} | {row['race_name']} | {row['bet_decision']} | {row['confidence']} | "
             f"{row['main_mark']} | {row['result_text']} | {marked_top3} | {bet_hit} | "
             f"{row['stake']} | {row['return_amount']} | {roi_text} |"
         )
@@ -356,11 +442,12 @@ def generate_daily_report(
         [
             "",
             "## BET一覧",
-            "| race_id | race_name | bet_type | horse_numbers | amount | hit | return_amount |",
-            "| --- | --- | --- | --- | ---: | --- | ---: |",
+            "| scope | race_id | race_name | bet_type | horse_numbers | amount | hit | return_amount |",
+            "| --- | --- | --- | --- | --- | ---: | --- | ---: |",
         ]
     )
     if bet_rows:
+        scope_by_race_id = {str(row["race_id"]): str(row.get("scope_label", "")) for row in race_rows}
         for row in bet_rows:
             hit = "pending"
             if row["hit"] is True:
@@ -370,11 +457,11 @@ def generate_daily_report(
             return_amount = "-" if row["return_amount"] is None else str(row["return_amount"])
             horse_numbers = "-".join(str(number) for number in row["horse_numbers"])
             lines.append(
-                f"| {row['race_id']} | {row['race_name']} | {row['bet_type']} | {horse_numbers} | "
+                f"| {scope_by_race_id.get(str(row['race_id']), '-')} | {row['race_id']} | {row['race_name']} | {row['bet_type']} | {horse_numbers} | "
                 f"{row['amount']} | {hit} | {return_amount} |"
             )
     else:
-        lines.append("| - | - | - | - | 0 | - | 0 |")
+        lines.append("| - | - | - | - | - | 0 | - | 0 |")
 
     lines.extend(["", "## 良かった点"])
     if context["good_points"]:
@@ -423,7 +510,7 @@ def generate_daily_social_post(context: dict[str, object]) -> str:
 
     text = (
         f"{context['date']} AI競馬まとめ\n\n"
-        f"対象: {metrics['target_race_count']}レース\n"
+        f"対象: {context.get('scope_label', '全場')} {metrics['target_race_count']}レース\n"
         f"BET: {metrics['bet_race_count']}レース / 的中: {metrics['hit_bet_count']}\n"
         f"投資: {_format_yen(metrics['total_stake'])}\n"
         f"回収: {_format_yen(metrics['total_return'])}\n"
@@ -439,7 +526,7 @@ def generate_daily_social_post(context: dict[str, object]) -> str:
     shorter_lesson = lesson_text[:24].rstrip() + "…" if len(lesson_text) > 24 else lesson_text
     text = (
         f"{context['date']} AI競馬まとめ\n\n"
-        f"対象{metrics['target_race_count']}R / BET{metrics['bet_race_count']}R / 的中{metrics['hit_bet_count']}R\n"
+        f"{context.get('scope_label', '全場')} 対象{metrics['target_race_count']}R / BET{metrics['bet_race_count']}R / 的中{metrics['hit_bet_count']}R\n"
         f"投資{metrics['total_stake']}円 / 回収{metrics['total_return']}円 / 回収率{metrics['roi'] * 100:.0f}%\n"
         f"◎Top3率{metrics['main_mark_top3_rate'] * 100:.0f}% / 印内Top3率{metrics['marked_top3_rate'] * 100:.0f}%\n"
         f"lesson: {shorter_lesson}\n\n"

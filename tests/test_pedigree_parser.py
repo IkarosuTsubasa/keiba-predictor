@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from keiba_llm_agent import main as main_module
+from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import DB_NETKEIBA_ENCODING
+from keiba_llm_agent.pedigree import pedigree_analyzer
 from keiba_llm_agent.pedigree.pedigree_analyzer import fetch_pedigree_html
 from keiba_llm_agent.pedigree.pedigree_parser import parse_pedigree_info
 
@@ -12,6 +15,20 @@ from keiba_llm_agent.pedigree.pedigree_parser import parse_pedigree_info
 ROOT_DIR = Path(__file__).resolve().parents[1]
 HORSE_FIXTURE_PATH = ROOT_DIR / "tests" / "fixtures" / "netkeiba_horse_sample.html"
 PEDIGREE_FIXTURE_PATH = ROOT_DIR / "tests" / "fixtures" / "netkeiba_pedigree_sample.html"
+
+
+class FakeResponse:
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.apparent_encoding = "windows-1251"
+        self.encoding = None
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    def raise_for_status(self) -> None:
+        return None
 
 
 class PedigreeParserTests(unittest.TestCase):
@@ -46,6 +63,16 @@ class PedigreeParserTests(unittest.TestCase):
         self.assertEqual(result["sire"], "ハーツクライ")
         self.assertEqual(result["dam"], "サンプル母")
         self.assertEqual(result["damsire"], "キングカメハメハ")
+
+    def test_fetch_pedigree_html_forces_db_euc_jp_encoding(self) -> None:
+        response = FakeResponse(PEDIGREE_FIXTURE_PATH.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            pedigree_analyzer, "PEDIGREE_HTML_CACHE_DIR", Path(temp_dir)
+        ), patch("keiba_llm_agent.pedigree.pedigree_analyzer.requests.get", return_value=response):
+            html = fetch_pedigree_html("2021104073", force_refresh=True)
+
+        self.assertIn("ハーツクライ", html)
+        self.assertEqual(response.encoding, DB_NETKEIBA_ENCODING)
 
 
 if __name__ == "__main__":

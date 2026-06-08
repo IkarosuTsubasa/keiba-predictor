@@ -10,6 +10,13 @@ DEFAULT_SCORING_WEIGHTS = {
     "race_level_weight": 1.0,
     "pace_weight": 0.0,
 }
+LOCAL_SCORING_PROFILE = "local_accuracy_default"
+LOCAL_SCORING_MODE = "local_candidate_default"
+LOCAL_SCORING_WEIGHTS = {
+    "pedigree_weight": 0.75,
+    "race_level_weight": 0.1,
+    "pace_weight": 1.0,
+}
 NO_CONDITIONAL_WEIGHT_PROFILE = "none"
 DEFAULT_CONDITIONAL_WEIGHT_PROFILE = "candidate_default_v2"
 DEFAULT_CONDITIONAL_WEIGHT_RULES = {
@@ -50,12 +57,17 @@ SCORING_MODES: dict[str, dict[str, float]] = {
         "pace_weight": 1.0,
     },
     "candidate_default": dict(DEFAULT_SCORING_WEIGHTS),
+    LOCAL_SCORING_MODE: dict(LOCAL_SCORING_WEIGHTS),
 }
 
 SCORING_PROFILES: dict[str, dict[str, object]] = {
     "accuracy_default": {
         "scoring_mode": "candidate_default",
         "borderline_recovery_enabled": True,
+    },
+    LOCAL_SCORING_PROFILE: {
+        "scoring_mode": LOCAL_SCORING_MODE,
+        "borderline_recovery_enabled": False,
     },
     "safe_baseline": {
         "scoring_mode": "base_only",

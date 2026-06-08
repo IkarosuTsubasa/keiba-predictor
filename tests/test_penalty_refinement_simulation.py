@@ -290,7 +290,7 @@ class PenaltyRefinementSimulationTests(unittest.TestCase):
 
     def _write_head_to_head_better(self) -> None:
         scores = self._base_scores()
-        scores.append(_horse_score(7, "H7", 46.3, race_level_adjustment=-0.5, odds=9.0, popularity=4))
+        scores.append(_horse_score(7, "H7", 46.4, race_level_adjustment=-0.5, odds=9.0, popularity=4))
         prediction = _prediction_payload(
             "r1",
             "2026-05-20",
@@ -305,7 +305,7 @@ class PenaltyRefinementSimulationTests(unittest.TestCase):
 
     def _write_head_to_head_worse(self) -> None:
         scores = self._base_scores(10)
-        scores.append(_horse_score(17, "H17", 46.3, race_level_adjustment=-0.5, odds=9.0, popularity=4))
+        scores.append(_horse_score(17, "H17", 46.4, race_level_adjustment=-0.5, odds=9.0, popularity=4))
         prediction = _prediction_payload(
             "r2",
             "2026-05-21",

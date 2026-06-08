@@ -6,6 +6,7 @@ from keiba_llm_agent.config.scoring_config import (
     DEFAULT_CONDITIONAL_WEIGHT_PROFILE,
     DEFAULT_SCORING_MODE,
     DEFAULT_SCORING_WEIGHTS,
+    LOCAL_SCORING_WEIGHTS,
     effective_scoring_weights,
 )
 from keiba_llm_agent.scoring.borderline_recovery import apply_top5_borderline_recovery
@@ -26,6 +27,8 @@ WeightTuningMode = Literal[
     "pedigree_only",
     "candidate_default",
     "candidate_default_recovered",
+    "local_candidate_default",
+    "local_candidate_default_recovered",
     "custom",
 ]
 
@@ -47,6 +50,16 @@ WEIGHT_TUNING_MODE_WEIGHTS: dict[str, tuple[float, float, float]] = {
         DEFAULT_SCORING_WEIGHTS["pedigree_weight"],
         DEFAULT_SCORING_WEIGHTS["race_level_weight"],
         DEFAULT_SCORING_WEIGHTS["pace_weight"],
+    ),
+    "local_candidate_default": (
+        LOCAL_SCORING_WEIGHTS["pedigree_weight"],
+        LOCAL_SCORING_WEIGHTS["race_level_weight"],
+        LOCAL_SCORING_WEIGHTS["pace_weight"],
+    ),
+    "local_candidate_default_recovered": (
+        LOCAL_SCORING_WEIGHTS["pedigree_weight"],
+        LOCAL_SCORING_WEIGHTS["race_level_weight"],
+        LOCAL_SCORING_WEIGHTS["pace_weight"],
     ),
 }
 
@@ -179,6 +192,8 @@ def _prediction_mode_weights(
     mode: WeightTuningMode,
     custom_weights: tuple[float, float, float] | None = None,
 ) -> tuple[float, float, float]:
+    if mode in {"local_candidate_default", "local_candidate_default_recovered"}:
+        return _mode_weights(mode, custom_weights=custom_weights)
     if mode not in {"candidate_default", "candidate_default_recovered"}:
         return _mode_weights(mode, custom_weights=custom_weights)
     base_config = prediction.scoring_config.model_copy(
@@ -274,7 +289,7 @@ def rank_prediction_for_weight_tuning_mode_with_recovery(
         "recovery_cases": [],
         "adjusted_horse_scores": scored_horses,
     }
-    should_apply_recovery = mode == "candidate_default_recovered" or (
+    should_apply_recovery = mode in {"candidate_default_recovered", "local_candidate_default_recovered"} or (
         enable_borderline_recovery and mode != "base_only"
     )
     if should_apply_recovery:

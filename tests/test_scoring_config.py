@@ -38,6 +38,16 @@ class ScoringConfigTests(unittest.TestCase):
         self.assertEqual(profile_config.scoring_config.market_signal_weight, 0.0)
         self.assertFalse(profile_config.borderline_recovery_enabled)
 
+    def test_local_accuracy_default_uses_local_weights(self) -> None:
+        profile_config, _ = resolve_scoring_profile_config("local_accuracy_default")
+        self.assertEqual(profile_config.scoring_profile, "local_accuracy_default")
+        self.assertEqual(profile_config.scoring_config.scoring_mode, "local_candidate_default")
+        self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.75)
+        self.assertEqual(profile_config.scoring_config.race_level_weight, 0.1)
+        self.assertEqual(profile_config.scoring_config.pace_weight, 1.0)
+        self.assertEqual(profile_config.scoring_config.conditional_weight_profile, "none")
+        self.assertFalse(profile_config.borderline_recovery_enabled)
+
     def test_candidate_default_returns_expected_weights(self) -> None:
         config, warnings = resolve_scoring_config("candidate_default")
         self.assertEqual(config.scoring_mode, "candidate_default")
