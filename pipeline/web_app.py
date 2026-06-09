@@ -6291,6 +6291,13 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                     race_id=str(saved.get("race_id", "") or ""),
                     log_output=log_excerpt,
                 )
+                from race_job_runner import _maybe_send_agent_prediction_notification
+
+                _maybe_send_agent_prediction_notification(
+                    BASE_DIR,
+                    job_id,
+                    str(saved.get("race_id", "") or ""),
+                )
             return JSONResponse({"ok": True, "status": "succeeded", "task_id": task_id, "job_id": job_id, **saved})
 
         try:

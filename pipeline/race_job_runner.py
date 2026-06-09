@@ -379,6 +379,62 @@ def _maybe_send_ntfy_share_notification(base_path, job_id, scope_key, run_id):
     return result
 
 
+def _maybe_send_agent_prediction_notification(base_path, job_id, race_id):
+    if not _auto_prediction_notification_enabled():
+        _log_runner_event(
+            "ntfy_notify_skipped",
+            job_id=job_id,
+            run_id=race_id,
+            reason="auto_prediction_notification_disabled",
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "auto_prediction_notification_disabled",
+        }
+
+    from ntfy_notifier import publish_agent_prediction_notifications
+
+    job = get_job(base_path, job_id) or {}
+    if str(job.get("ntfy_notify_status", "") or "").strip().lower() == "notified":
+        if str(job.get("ntfy_notify_run_id", "") or "").strip() == str(race_id or "").strip():
+            _log_runner_event("ntfy_notify_skipped", job_id=job_id, run_id=race_id, reason="already_notified")
+            return None
+    try:
+        result = publish_agent_prediction_notifications(base_path, job_id=job_id, race_id=race_id)
+    except Exception as exc:
+        error_text = str(exc or "").strip()
+        update_job(
+            base_path,
+            job_id,
+            lambda row, now_text: _mark_ntfy_notify_failed(row, now_text, race_id, error_text),
+        )
+        _log_runner_event("ntfy_notify_failed", job_id=job_id, run_id=race_id, error=error_text)
+        return None
+    if result.get("skipped"):
+        _log_runner_event(
+            "ntfy_notify_skipped",
+            job_id=job_id,
+            run_id=race_id,
+            reason=str(result.get("reason", "") or "skipped"),
+        )
+        return result
+    update_job(
+        base_path,
+        job_id,
+        lambda row, now_text: _mark_ntfy_notified(row, now_text, race_id, result.get("engine", "")),
+    )
+    _log_runner_event(
+        "ntfy_notify_sent",
+        job_id=job_id,
+        run_id=race_id,
+        engine=str(result.get("engine", "") or "").strip(),
+        topic=str(result.get("topic", "") or "").strip(),
+        message_id=str(result.get("message_id", "") or "").strip(),
+    )
+    return result
+
+
 def _mark_job_failed(row, now_text, message):
     row.update(initialize_job_step_fields(row))
     error_text = str(message or "")

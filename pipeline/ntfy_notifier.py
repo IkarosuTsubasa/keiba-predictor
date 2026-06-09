@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -12,11 +13,25 @@ from local_env import load_local_env
 BASE_DIR = Path(__file__).resolve().parent
 load_local_env(BASE_DIR, override=False)
 _FCM_APP = None
+HIGH_EVALUATION_NOTIFY_THRESHOLD = 0.62
+AGENT_CONFIDENCE_SCORE = {
+    "high": 0.82,
+    "medium": 0.62,
+    "low": 0.38,
+}
+MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 
 
 def _flag_env(name):
     raw = str(os.environ.get(name, "") or "").strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def ntfy_notify_enabled():
@@ -42,6 +57,20 @@ def fcm_topic():
 
 def preferred_ntfy_engine():
     return str(os.environ.get("PIPELINE_NTFY_ENGINE", "") or "").strip().lower()
+
+
+def high_evaluation_notify_threshold():
+    raw = str(
+        os.environ.get("PIPELINE_AUTO_PREDICTION_NOTIFY_MIN_CONFIDENCE", "")
+        or os.environ.get("PIPELINE_HIGH_EVALUATION_NOTIFY_THRESHOLD", "")
+        or ""
+    ).strip()
+    if not raw:
+        return HIGH_EVALUATION_NOTIFY_THRESHOLD
+    value = _safe_float(raw, HIGH_EVALUATION_NOTIFY_THRESHOLD)
+    if value <= 0:
+        return HIGH_EVALUATION_NOTIFY_THRESHOLD
+    return max(0.0, min(1.0, value))
 
 
 def _fcm_credentials_path():
@@ -93,6 +122,27 @@ def build_x_intent_url(share_text):
     return f"https://twitter.com/intent/tweet?text={quote(str(share_text or ''), safe='')}"
 
 
+def _race_no_text(race_id):
+    match = re.search(r"(\d{2})$", str(race_id or "").strip())
+    if not match:
+        return ""
+    try:
+        number = int(match.group(1))
+    except ValueError:
+        return ""
+    return f"{number}R" if number > 0 else ""
+
+
+def _normalize_horse_no_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(float(text)))
+    except (TypeError, ValueError):
+        return text
+
+
 def _build_public_race_url(run_row):
     row = dict(run_row or {})
     run_id = str(row.get("run_id", "") or "").strip()
@@ -103,6 +153,75 @@ def _build_public_race_url(run_row):
     if race_date:
         return f"{race_url}?date={quote(race_date, safe='')}"
     return race_url
+
+
+def _build_public_agent_race_url(payload, job=None):
+    data = dict(payload or {})
+    row = dict(job or {})
+    race_info = dict(data.get("race_info") or {})
+    race_id = str(data.get("race_id", "") or race_info.get("race_id", "") or row.get("race_id", "") or "").strip()
+    if not race_id:
+        return f"{_public_site_url()}{_public_base_path()}"
+    race_url = f"{_public_site_url()}{_public_base_path()}/race/{quote(race_id, safe='')}"
+    race_date = str(race_info.get("race_date", "") or row.get("race_date", "") or "").strip()
+    if race_date:
+        return f"{race_url}?date={quote(race_date, safe='')}"
+    return race_url
+
+
+def _agent_prediction_path(base_dir, race_id):
+    from web_data.agent_predictions import agent_prediction_path_for_race
+
+    path = agent_prediction_path_for_race(base_dir, race_id)
+    return Path(path) if path else None
+
+
+def _load_agent_prediction_payload(base_dir, race_id):
+    path = _agent_prediction_path(base_dir, race_id)
+    if not path or not path.exists():
+        raise FileNotFoundError(f"agent prediction not found for race_id={race_id}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("agent prediction payload must be object")
+    return payload
+
+
+def _agent_confidence_score(value):
+    text = str(value or "").strip().lower()
+    if text in AGENT_CONFIDENCE_SCORE:
+        return AGENT_CONFIDENCE_SCORE[text]
+    return _safe_float(value, 0.0)
+
+
+def _agent_confidence_label(value):
+    text = str(value or "").strip().lower()
+    return {
+        "high": "高",
+        "medium": "中",
+        "low": "低",
+    }.get(text, str(value or "").strip())
+
+
+def _agent_marks_text(payload):
+    data = dict(payload or {})
+    marks = dict(data.get("marks") or {})
+    parts = []
+    for symbol in MARK_ORDER:
+        horse_no = _normalize_horse_no_text(marks.get(symbol, ""))
+        if horse_no:
+            parts.append(f"{symbol}{horse_no}")
+    return " ".join(parts) or "印なし"
+
+
+def _agent_title_parts(payload, job=None):
+    data = dict(payload or {})
+    row = dict(job or {})
+    race_info = dict(data.get("race_info") or {})
+    race_id = str(data.get("race_id", "") or race_info.get("race_id", "") or row.get("race_id", "") or "").strip()
+    course = str(race_info.get("course", "") or row.get("location", "") or "").strip()
+    race_no = _race_no_text(race_id)
+    race_name = str(race_info.get("race_name", "") or row.get("race_name", "") or row.get("trigger_race", "") or "").strip()
+    return [part for part in (course, race_no, race_name) if part]
 
 
 def _basic_auth_header(username, password):
@@ -119,6 +238,51 @@ def _build_auth_header():
     if username and password:
         return _basic_auth_header(username, password)
     return ""
+
+
+def prediction_notification_evaluation(scope_key, run_id):
+    threshold = high_evaluation_notify_threshold()
+    candidate = _select_share_candidate(scope_key, run_id)
+    confidence_score = _safe_float(candidate.get("confidence_score"), 0.0)
+    should_notify = confidence_score >= threshold
+    return {
+        "should_notify": bool(should_notify),
+        "reason": "high_evaluation" if should_notify else "high_evaluation_not_met",
+        "source_type": "predictor_consensus",
+        "confidence_score": round(float(confidence_score), 6),
+        "threshold": round(float(threshold), 6),
+        "run_id": str(run_id or "").strip(),
+    }
+
+
+def agent_prediction_notification_evaluation(base_dir, race_id, payload=None, job=None):
+    data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
+    strategy = dict(data.get("strategy") or {})
+    decision = str(strategy.get("bet_decision", "") or "").strip().lower()
+    confidence_label = str(strategy.get("confidence", "") or "").strip()
+    confidence_score = _agent_confidence_score(confidence_label)
+    threshold = high_evaluation_notify_threshold()
+
+    if decision == "bet":
+        should_notify = True
+        reason = "high_evaluation_bet_decision"
+    elif decision in ("skip", "no_bet"):
+        should_notify = False
+        reason = "agent_prediction_skip_decision"
+    else:
+        should_notify = confidence_score >= threshold
+        reason = "high_evaluation" if should_notify else "high_evaluation_not_met"
+
+    return {
+        "should_notify": bool(should_notify),
+        "reason": reason,
+        "source_type": "agent_prediction",
+        "bet_decision": str(strategy.get("bet_decision", "") or "").strip(),
+        "confidence": confidence_label,
+        "confidence_score": round(float(confidence_score), 6),
+        "threshold": round(float(threshold), 6),
+        "race_id": str(data.get("race_id", "") or race_id or "").strip(),
+    }
 
 
 def _get_firebase_app():
@@ -215,6 +379,7 @@ def _select_share_candidate(scope_key, run_id):
             return {
                 "marks_text": "印なし",
                 "confidence_text": "",
+                "confidence_score": 0.0,
             }
 
         tally = {}
@@ -304,24 +469,41 @@ def _select_share_candidate(scope_key, run_id):
             marks_text = web_app.report_format_marks_text(marks_map)
             top = top5[0] if top5 else {}
             second = top5[1] if len(top5) > 1 else {}
-            support_ratio = (
+            total_support = sum(float(item.get("score", 0.0) or 0.0) for item in top5)
+            agreement_score = (
                 float(top.get("main_count", 0) or 0) / float(model_count)
                 if model_count > 0 else 0.0
             )
-            top_index = float(top.get("ai_index", 0) or 0.0)
-            second_index = float(second.get("ai_index", 0) or 0.0)
-            margin_ratio = (
-                max(0.0, (top_index - second_index) / top_index)
-                if top_index > 0 else 0.0
+            concentration_score = (
+                float(top.get("score", 0.0) or 0.0) / float(total_support)
+                if total_support > 0 else 0.0
             )
-            confidence_score = max(0.0, min(1.0, 0.55 * support_ratio + 0.45 * margin_ratio))
+            top_score = float(top.get("score", 0.0) or 0.0)
+            second_score = float(second.get("score", 0.0) or 0.0)
+            margin_ratio = (
+                max(0.0, (top_score - second_score) / top_score)
+                if top_score > 0 else 0.32
+            )
+            coverage_score = min(1.0, float(model_count) / 6.0)
+            confidence_score = max(
+                0.12,
+                min(
+                    0.97,
+                    0.42 * agreement_score
+                    + 0.28 * concentration_score
+                    + 0.18 * margin_ratio
+                    + 0.12 * coverage_score,
+                ),
+            )
             return {
                 "marks_text": marks_text,
                 "confidence_text": _confidence_rank_text(confidence_score),
+                "confidence_score": round(float(confidence_score), 6),
             }
         return {
             "marks_text": "印なし",
             "confidence_text": "",
+            "confidence_score": 0.0,
         }
 
     run_row = web_app.resolve_run(run_id, scope_key)
@@ -343,6 +525,7 @@ def _select_share_candidate(scope_key, run_id):
     marks_meta = _build_consensus_marks_text(resolved_scope_key, resolved_run_id, run_row)
     marks_text = str(marks_meta.get("marks_text", "") or "").strip() or "印なし"
     confidence_text = str(marks_meta.get("confidence_text", "") or "").strip()
+    confidence_score = _safe_float(marks_meta.get("confidence_score"), 0.0)
     marks_line = f"{marks_text} ｜自信度 {confidence_text}" if confidence_text else marks_text
     public_url = _build_public_race_url(run_row)
     share_text = "\n".join(
@@ -369,6 +552,7 @@ def _select_share_candidate(scope_key, run_id):
         "run_row": dict(run_row or {}),
         "share_text": share_text,
         "public_url": public_url,
+        "confidence_score": round(float(confidence_score), 6),
     }
 
 
@@ -433,7 +617,7 @@ def build_ntfy_share_notification(scope_key, run_id):
     location = str(run_row.get("location", "") or "").strip()
     race_name = _resolve_notification_race_name(scope_key, run_id, run_row)
     title_parts = [part for part in (location, race_id, race_name) if part]
-    title = " ".join(title_parts) if title_parts else f"预测完成 {run_id}"
+    title = " ".join(title_parts) if title_parts else f"予測完了 {run_id}"
     share_text = str(candidate.get("share_text", "") or "").strip()
     if not share_text:
         raise ValueError(f"share text not available for run_id={run_id}")
@@ -444,6 +628,7 @@ def build_ntfy_share_notification(scope_key, run_id):
         "public_url": str(candidate.get("public_url", "") or "").strip(),
         "workspace_url": build_workspace_url(scope_key, run_id),
         "title": title,
+        "confidence_score": round(_safe_float(candidate.get("confidence_score"), 0.0), 6),
     }
 
 
@@ -484,13 +669,13 @@ def publish_ntfy_share_notification(scope_key, run_id):
         "actions": [
             {
                 "action": "view",
-                "label": "发布到X",
+                "label": "Xへ投稿",
                 "url": notification["intent_url"],
                 "clear": False,
             },
             {
                 "action": "view",
-                "label": "Workspace",
+                "label": "ワークスペース",
                 "url": notification["workspace_url"],
                 "clear": False,
             },
@@ -536,6 +721,181 @@ def publish_ntfy_share_notification(scope_key, run_id):
         "workspace_url": notification["workspace_url"],
         "topic": topic,
         "message_id": str(payload.get("id", "") or "").strip(),
+    }
+
+
+def _load_race_job(base_dir, job_id):
+    target_job_id = str(job_id or "").strip()
+    if not target_job_id:
+        return {}
+    try:
+        from race_job_store import get_job
+
+        return dict(get_job(base_dir, target_job_id) or {})
+    except Exception:
+        return {}
+
+
+def build_ntfy_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
+    data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
+    row = dict(job or _load_race_job(base_dir, job_id) or {})
+    eval_row = dict(evaluation or agent_prediction_notification_evaluation(base_dir, race_id, payload=data, job=row) or {})
+    resolved_race_id = str(data.get("race_id", "") or race_id or row.get("race_id", "") or "").strip()
+    title_parts = _agent_title_parts(data, row)
+    title = " ".join(title_parts) if title_parts else f"予測完了 {resolved_race_id}".strip()
+    header = f"#{' '.join(title_parts)}" if title_parts else (f"#{resolved_race_id}" if resolved_race_id else "")
+    marks_text = _agent_marks_text(data)
+    strategy = dict(data.get("strategy") or {})
+    confidence_text = _agent_confidence_label(strategy.get("confidence", ""))
+    confidence_suffix = f" ｜自信度 {confidence_text}" if confidence_text else ""
+    public_url = _build_public_agent_race_url(data, row)
+    share_text = "\n".join(
+        [
+            header,
+            "",
+            f"{marks_text} ｜判定 高評価{confidence_suffix}",
+            "",
+            "このレースのAI最終評価はこちら👇",
+            public_url,
+            "",
+            "📱AI予想はアプリで最速公開",
+            "今すぐダウンロード👇",
+            "https://x.gd/BDVgd",
+            "",
+            "#いかいもAI競馬 #競馬予想",
+        ]
+    ).strip()
+    return {
+        "engine": "agent_prediction",
+        "share_text": share_text,
+        "intent_url": build_x_intent_url(share_text),
+        "public_url": public_url,
+        "title": title,
+        "race_id": resolved_race_id,
+        "evaluation": eval_row,
+    }
+
+
+def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id=""):
+    if not ntfy_notify_enabled():
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "disabled",
+        }
+
+    topic = ntfy_topic()
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
+
+    payload = _load_agent_prediction_payload(base_dir, race_id)
+    job = _load_race_job(base_dir, job_id)
+    evaluation = agent_prediction_notification_evaluation(base_dir, race_id, payload=payload, job=job)
+    if not evaluation.get("should_notify"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": str(evaluation.get("reason", "") or "high_evaluation_not_met"),
+            "evaluation": evaluation,
+        }
+
+    notification = build_ntfy_agent_prediction_notification(
+        base_dir,
+        job_id=job_id,
+        race_id=race_id,
+        payload=payload,
+        job=job,
+        evaluation=evaluation,
+    )
+    request_payload = {
+        "topic": topic,
+        "message": notification["share_text"],
+        "title": notification["title"],
+        "click": notification["public_url"],
+        "tags": ["horse_racing", "signal_strength"],
+        "actions": [
+            {
+                "action": "view",
+                "label": "Xへ投稿",
+                "url": notification["intent_url"],
+                "clear": False,
+            },
+            {
+                "action": "view",
+                "label": "詳細を見る",
+                "url": notification["public_url"],
+                "clear": False,
+            },
+        ],
+    }
+
+    body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url=f"{ntfy_server_url()}/",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+
+    auth_header = _build_auth_header()
+    if auth_header:
+        request.add_header("Authorization", auth_header)
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ntfy http {exc.code}: {detail or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"ntfy request failed: {exc}") from exc
+
+    response_payload = {}
+    if raw.strip():
+        try:
+            response_payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            response_payload = {}
+
+    return {
+        "ok": True,
+        "engine": notification["engine"],
+        "share_text": notification["share_text"],
+        "intent_url": notification["intent_url"],
+        "public_url": notification["public_url"],
+        "topic": topic,
+        "message_id": str(response_payload.get("id", "") or "").strip(),
+        "evaluation": evaluation,
+    }
+
+
+def publish_agent_prediction_notifications(base_dir, job_id="", race_id=""):
+    try:
+        result = publish_ntfy_agent_prediction_notification(base_dir, job_id=job_id, race_id=race_id)
+    except Exception as exc:
+        raise RuntimeError(f"ntfy: {str(exc or '').strip()}") from exc
+
+    if result.get("ok") and not result.get("skipped"):
+        return {
+            "ok": True,
+            "engine": str(result.get("engine", "") or "").strip(),
+            "topic": str(result.get("topic", "") or "").strip(),
+            "message_id": str(result.get("message_id", "") or "").strip(),
+            "channels": {"ntfy": result},
+            "evaluation": dict(result.get("evaluation") or {}),
+        }
+    return {
+        "ok": False,
+        "skipped": True,
+        "reason": str(result.get("reason", "") or "skipped"),
+        "channels": {"ntfy": result},
+        "evaluation": dict(result.get("evaluation") or {}),
     }
 
 
@@ -585,6 +945,15 @@ def publish_fcm_prediction_notification(scope_key, run_id):
 
 
 def publish_share_notifications(scope_key, run_id):
+    evaluation = prediction_notification_evaluation(scope_key, run_id)
+    if not evaluation.get("should_notify"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": str(evaluation.get("reason", "") or "high_evaluation_not_met"),
+            "evaluation": evaluation,
+        }
+
     channel_results = {}
     errors = []
     engine = ""
