@@ -9613,6 +9613,246 @@ body.home-app-ready .site-footer {
   }
 }
 
+/* Race course grouping */
+.race-grid-table-head {
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--dashboard-line);
+  border-radius: 10px;
+}
+
+.race-course-nav {
+  margin: 0 0 10px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 10px;
+  background: #ffffff;
+  scrollbar-width: none;
+}
+
+.race-course-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.race-course-nav > span {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  color: var(--dashboard-muted);
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.race-course-nav button {
+  min-height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--dashboard-ink);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.race-course-nav button:hover,
+.race-course-nav button:focus-visible {
+  border-color: var(--course-accent, var(--dashboard-ink));
+  background: var(--course-accent-soft, #f8fafc);
+}
+
+.race-course-nav em {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--course-accent, var(--dashboard-ink));
+  color: #ffffff;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.race-course-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.race-course-group {
+  scroll-margin-top: 96px;
+  overflow: hidden;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.race-course-group__header {
+  min-height: 62px;
+  padding: 12px 14px 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--dashboard-line);
+  background:
+    linear-gradient(90deg, var(--course-accent-soft, #f8fafc), #ffffff 72%),
+    #ffffff;
+  box-shadow: inset 4px 0 0 var(--course-accent, var(--dashboard-ink));
+}
+
+.race-course-group__title {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.race-course-group__eyebrow {
+  color: var(--course-accent, var(--dashboard-gold));
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.race-course-group__title strong {
+  color: var(--dashboard-ink);
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.race-course-group__title small {
+  color: var(--dashboard-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.race-course-group__summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.race-course-group__summary span {
+  min-height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(7, 17, 31, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #334155;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.race-grid--course {
+  border: none;
+  border-radius: 0;
+}
+
+.race-grid-empty {
+  min-height: 84px;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--dashboard-muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+@media (max-width: 1280px) {
+  .race-grid-table-head {
+    display: none;
+  }
+
+  .race-course-groups {
+    gap: 14px;
+  }
+
+  .race-course-group {
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .race-course-group__header {
+    margin-bottom: 8px;
+    border: 1px solid var(--dashboard-line);
+    border-radius: 10px;
+  }
+
+  .race-grid--course {
+    gap: 10px;
+    overflow: visible;
+    background: transparent;
+  }
+}
+
+@media (max-width: 760px) {
+  .race-course-nav {
+    align-items: stretch;
+    padding: 4px;
+  }
+
+  .race-course-nav > span {
+    display: none;
+  }
+
+  .race-course-nav button {
+    min-height: 34px;
+  }
+
+  .race-course-group {
+    scroll-margin-top: 214px;
+  }
+
+  .race-course-group__header {
+    min-height: 0;
+    padding: 11px 12px 11px 16px;
+    display: grid;
+  }
+
+  .race-course-group__title {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    column-gap: 8px;
+  }
+
+  .race-course-group__eyebrow {
+    grid-column: 1 / -1;
+  }
+
+  .race-course-group__title strong {
+    font-size: 21px;
+  }
+
+  .race-course-group__title small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .race-course-group__summary {
+    justify-content: flex-start;
+  }
+}
+
 /* Public page dashboard unification */
 .race-detail-page,
 .history-page,
