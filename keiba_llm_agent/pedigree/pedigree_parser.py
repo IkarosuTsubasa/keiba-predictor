@@ -12,6 +12,7 @@ LABEL_MAP = {
     "母": "dam",
     "母父": "damsire",
 }
+ENTITY_KEYS = ("sire", "dam", "damsire", "sire_sire")
 
 
 def _normalize_text(value: str | None) -> str:
@@ -30,6 +31,27 @@ def _text_from_link_or_cell(node: Tag | None) -> str | None:
             return text
     text = _normalize_text(node.get_text(" ", strip=True))
     return text or None
+
+
+def _horse_id_from_href(href: str | None) -> str | None:
+    if not href:
+        return None
+    match = re.search(r"/horse/(?:ped/|result/|[A-Za-z_]+/)?([0-9A-Za-z]+)/?$", href)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _entity_from_link_or_cell(node: Tag | None) -> tuple[str | None, str | None]:
+    if node is None:
+        return None, None
+    link = node.find("a")
+    if link is not None:
+        text = _normalize_text(link.get_text(" ", strip=True))
+        horse_id = _horse_id_from_href(link.get("href"))
+        if text or horse_id:
+            return text or None, horse_id
+    return _text_from_link_or_cell(node), None
 
 
 def _class_tokens(node: Tag) -> list[str]:
@@ -52,8 +74,24 @@ def _find_blood_or_pedigree_table(soup: BeautifulSoup) -> Tag | None:
     return None
 
 
+def _empty_result() -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
+    for key in ENTITY_KEYS:
+        result[key] = None
+        result[f"{key}_id"] = None
+    return result
+
+
+def _set_entity(result: dict[str, str | None], key: str, node: Tag | None) -> None:
+    name, horse_id = _entity_from_link_or_cell(node)
+    if name:
+        result[key] = name
+    if horse_id:
+        result[f"{key}_id"] = horse_id
+
+
 def _parse_from_labeled_table(soup: BeautifulSoup) -> dict[str, str | None]:
-    result = {"sire": None, "dam": None, "damsire": None}
+    result = _empty_result()
     for row in soup.find_all("tr"):
         headers = row.find_all(["th", "td"], recursive=False)
         if len(headers) < 2:
@@ -62,7 +100,7 @@ def _parse_from_labeled_table(soup: BeautifulSoup) -> dict[str, str | None]:
         mapped = LABEL_MAP.get(label)
         if mapped is None:
             continue
-        result[mapped] = _text_from_link_or_cell(headers[1])
+        _set_entity(result, mapped, headers[1])
     return result
 
 
@@ -82,7 +120,7 @@ def extract_pedigree_url(html: str, horse_id: str) -> str | None:
 
 
 def _parse_from_blood_table(soup: BeautifulSoup) -> dict[str, str | None]:
-    result = {"sire": None, "dam": None, "damsire": None}
+    result = _empty_result()
     table = _find_blood_or_pedigree_table(soup)
     if table is None:
         return result
@@ -96,22 +134,38 @@ def _parse_from_blood_table(soup: BeautifulSoup) -> dict[str, str | None]:
                 top_level_cells.append((row_index, cell))
 
     if top_level_cells:
-        result["sire"] = _text_from_link_or_cell(top_level_cells[0][1])
+        sire_row_index, sire_cell = top_level_cells[0]
+        _set_entity(result, "sire", sire_cell)
+        sire_row_cells = rows[sire_row_index].find_all("td", recursive=False)
+        if sire_cell in sire_row_cells:
+            sire_position = sire_row_cells.index(sire_cell)
+            subsequent_cells = sire_row_cells[sire_position + 1 :]
+            sire_sire_cell = next(
+                (
+                    cell
+                    for cell in subsequent_cells
+                    if str(cell.get("rowspan") or "") in {"8", "16"}
+                ),
+                subsequent_cells[0] if subsequent_cells else None,
+            )
+            _set_entity(result, "sire_sire", sire_sire_cell)
     if len(top_level_cells) >= 2:
-        result["dam"] = _text_from_link_or_cell(top_level_cells[1][1])
+        _set_entity(result, "dam", top_level_cells[1][1])
 
-    candidate_links = [
-        _normalize_text(link.get_text(" ", strip=True))
-        for link in table.find_all("a", href=re.compile(r"/horse/"))
-        if _normalize_text(link.get_text(" ", strip=True))
-    ]
-    unique_candidates: list[str] = []
+    candidate_links: list[tuple[str, str | None]] = []
+    for link in table.find_all("a", href=re.compile(r"/horse/")):
+        text = _normalize_text(link.get_text(" ", strip=True))
+        if text:
+            candidate_links.append((text, _horse_id_from_href(link.get("href"))))
+    unique_candidates: list[tuple[str, str | None]] = []
+    seen_names: set[str] = set()
     for item in candidate_links:
-        if item not in unique_candidates:
+        if item[0] not in seen_names:
             unique_candidates.append(item)
+            seen_names.add(item[0])
 
     if result["sire"] is None and unique_candidates:
-        result["sire"] = unique_candidates[0]
+        result["sire"], result["sire_id"] = unique_candidates[0]
 
     if result["damsire"] is None and len(top_level_cells) >= 2:
         dam_row_index, dam_cell = top_level_cells[1]
@@ -127,22 +181,26 @@ def _parse_from_blood_table(soup: BeautifulSoup) -> dict[str, str | None]:
                 ),
                 subsequent_cells[0] if subsequent_cells else None,
             )
-            result["damsire"] = _text_from_link_or_cell(damsire_cell)
+            _set_entity(result, "damsire", damsire_cell)
 
     if len(unique_candidates) >= 3:
         sire_name = result["sire"]
         dam_name = result["dam"]
-        remaining = [item for item in unique_candidates if item not in {sire_name, dam_name}]
+        remaining = [item for item in unique_candidates if item[0] not in {sire_name, dam_name}]
         if result["dam"] is None:
-            result["dam"] = remaining[0] if len(remaining) > 0 else None
+            if remaining:
+                result["dam"], result["dam_id"] = remaining[0]
         if result["damsire"] is None:
-            result["damsire"] = remaining[1] if len(remaining) > 1 else (remaining[0] if remaining else None)
+            if len(remaining) > 1:
+                result["damsire"], result["damsire_id"] = remaining[1]
+            elif remaining:
+                result["damsire"], result["damsire_id"] = remaining[0]
 
     return result
 
 
 def _parse_from_profile_table(soup: BeautifulSoup) -> dict[str, str | None]:
-    result = {"sire": None, "dam": None, "damsire": None}
+    result = _empty_result()
     tables = [table for table in soup.find_all("table") if "db_prof_table" in " ".join(_class_tokens(table))]
     for table in tables:
         parsed = _parse_from_labeled_table(BeautifulSoup(str(table), "html.parser"))
@@ -153,7 +211,7 @@ def _parse_from_profile_table(soup: BeautifulSoup) -> dict[str, str | None]:
 
 
 def _merge_non_null(*sources: dict[str, str | None]) -> dict[str, str | None]:
-    merged = {"sire": None, "dam": None, "damsire": None}
+    merged = _empty_result()
     for key in merged:
         for source in sources:
             value = source.get(key)
@@ -173,6 +231,11 @@ def parse_pedigree_info(html: str, horse_id: str, horse_name: str | None = None)
         horse_id=horse_id,
         horse_name=horse_name,
         sire=parsed["sire"],
+        sire_id=parsed["sire_id"],
         dam=parsed["dam"],
+        dam_id=parsed["dam_id"],
         damsire=parsed["damsire"],
+        damsire_id=parsed["damsire_id"],
+        sire_sire=parsed["sire_sire"],
+        sire_sire_id=parsed["sire_sire_id"],
     )

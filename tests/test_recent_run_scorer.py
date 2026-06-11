@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from keiba_llm_agent.scoring.recent_run_scorer import score_horse_by_recent_runs
-from keiba_llm_agent.schemas.race_data import HorseEntry, RaceInfo, RecentRun
+from keiba_llm_agent.scoring.recent_run_scorer import (
+    has_recent_runs_data,
+    score_horse_by_recent_runs,
+)
+from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
+from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, RecentRun
 
 
 def build_run(
@@ -32,6 +36,26 @@ def build_run(
     )
 
 
+def build_pedigree_analysis(
+    positive_flags: list[str],
+    risk_flags: list[str] | None = None,
+) -> PedigreeAnalysis:
+    return PedigreeAnalysis(
+        horse_no=1,
+        horse_name="A",
+        sire="ルヴァンスレーヴ",
+        dam="サンプル母",
+        damsire="バトルプラン",
+        surface_tendency="ダート",
+        distance_tendency="短距離〜マイル",
+        track_condition_tendency="パワー",
+        pace_tendency="スピード",
+        positive_flags=positive_flags,
+        risk_flags=risk_flags or [],
+        overall_comment="血統面の後押しあり。",
+    )
+
+
 class RecentRunScorerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.race_info = RaceInfo(
@@ -42,11 +66,95 @@ class RecentRunScorerTests(unittest.TestCase):
             distance=1600,
             track_condition="良",
         )
+        self.debut_race_info = RaceInfo(
+            race_id="202630061105",
+            race_name="JRA認定競走フレッシュチャレンジ競走(2歳)",
+            race_date="2026-06-11",
+            course="門別",
+            surface="ダート",
+            distance=1100,
+            track_condition="良",
+            source="local",
+            scope_key="local",
+        )
 
-    def test_empty_recent_runs_sets_risk_to_minus_ten(self) -> None:
+    def test_empty_recent_runs_uses_unraced_baseline(self) -> None:
         horse = HorseEntry(horse_no=1, horse_name="A", jockey="騎手A", recent_runs=[])
         score = score_horse_by_recent_runs(horse, self.race_info)
-        self.assertEqual(score.scores.risk, -10)
+        self.assertEqual(score.scores.risk, -2)
+        self.assertEqual(score.total_score, 6.0)
+        self.assertIn("実戦履歴が不足", score.reason)
+
+    def test_unraced_debut_horse_uses_debut_baseline(self) -> None:
+        horse = HorseEntry(horse_no=1, horse_name="A", jockey="騎手A", recent_runs=[])
+        score = score_horse_by_recent_runs(horse, self.debut_race_info)
+        self.assertEqual(score.scores.risk, -2)
+        self.assertEqual(score.total_score, 6.0)
+        self.assertIn("新馬戦", score.reason)
+
+    def test_runs_without_finish_do_not_create_distance_or_course_fit(self) -> None:
+        horse = HorseEntry(
+            horse_no=2,
+            horse_name="B",
+            jockey="騎手B",
+            recent_runs=[
+                build_run(
+                    "2026-06-11",
+                    "門別",
+                    "ダート",
+                    1100,
+                    None,
+                    None,
+                    "騎手B",
+                )
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.debut_race_info)
+        self.assertEqual(score.scores.distance_fit, 0)
+        self.assertEqual(score.scores.course_fit, 0)
+        self.assertEqual(score.scores.track_condition_fit, 0)
+        self.assertEqual(score.scores.jockey_fit, 0)
+        self.assertEqual(score.total_score, 6.0)
+
+    def test_low_sample_pedigree_priors_raise_fit_scores(self) -> None:
+        horse = HorseEntry(
+            horse_no=3,
+            horse_name="C",
+            jockey="騎手C",
+            recent_runs=[
+                build_run(
+                    "2026-05-20",
+                    "浦和",
+                    "ダート",
+                    1400,
+                    8,
+                    12,
+                    "騎手D",
+                )
+            ],
+        )
+        pedigree = build_pedigree_analysis(
+            ["PEDIGREE_SURFACE_FIT", "PEDIGREE_DISTANCE_FIT", "PEDIGREE_POWER_FIT"]
+        )
+        score = score_horse_by_recent_runs(horse, self.debut_race_info, pedigree_analysis=pedigree)
+        self.assertGreaterEqual(score.scores.distance_fit, 7)
+        self.assertGreaterEqual(score.scores.course_fit, 6)
+        self.assertGreaterEqual(score.scores.track_condition_fit, 6)
+        self.assertEqual(score.scores.risk, -3)
+
+    def test_debut_race_without_recent_runs_still_uses_scoring_path(self) -> None:
+        race_data = RaceData(
+            race_info=self.debut_race_info,
+            horses=[HorseEntry(horse_no=1, horse_name="A", recent_runs=[])],
+        )
+        self.assertTrue(has_recent_runs_data(race_data))
+
+    def test_horse_id_without_recent_runs_still_uses_scoring_path(self) -> None:
+        race_data = RaceData(
+            race_info=self.race_info,
+            horses=[HorseEntry(horse_no=1, horse_id="2024100058", horse_name="A", recent_runs=[])],
+        )
+        self.assertTrue(has_recent_runs_data(race_data))
 
     def test_good_recent_finishes_raise_recent_form(self) -> None:
         horse = HorseEntry(

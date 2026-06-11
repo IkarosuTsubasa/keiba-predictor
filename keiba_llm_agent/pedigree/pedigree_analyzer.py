@@ -13,7 +13,8 @@ from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import (
     get_horse_cache_path,
 )
 from keiba_llm_agent.pedigree.pedigree_knowledge import PEDIGREE_KNOWLEDGE
-from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis, PedigreeInfo
+from keiba_llm_agent.pedigree.pedigree_performance import build_performance_profiles_for_pedigree
+from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis, PedigreeInfo, PedigreePerformanceProfile
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceInfo
 from keiba_llm_agent.pedigree.pedigree_parser import extract_pedigree_url, parse_pedigree_info
 
@@ -146,9 +147,50 @@ def _unknown_analysis(horse_no: int, horse_name: str, pedigree: PedigreeInfo) ->
     )
 
 
-def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int = 0, horse_name: str | None = None) -> PedigreeAnalysis:
+def _merge_performance_tendency(base: str, profiles: list[PedigreePerformanceProfile], attr: str) -> str:
+    values = [base] if base and base != "unknown" else []
+    for profile in profiles:
+        value = getattr(profile, attr, "unknown")
+        if value and value != "unknown" and value not in values:
+            values.append(value)
+    return " / ".join(values) if values else "unknown"
+
+
+def _merge_performance_flags(
+    positive_flags: list[str],
+    risk_flags: list[str],
+    profiles: list[PedigreePerformanceProfile],
+) -> tuple[list[str], list[str]]:
+    for profile in profiles:
+        for flag in getattr(profile, "positive_flags", []):
+            _append_flag(positive_flags, flag)
+        for flag in getattr(profile, "risk_flags", []):
+            _append_flag(risk_flags, flag)
+    if "PEDIGREE_SURFACE_FIT" in positive_flags and "PEDIGREE_SURFACE_UNKNOWN" in risk_flags:
+        risk_flags.remove("PEDIGREE_SURFACE_UNKNOWN")
+    if (
+        {"PEDIGREE_DISTANCE_FIT", "PEDIGREE_STAMINA_FIT"} & set(positive_flags)
+        and "PEDIGREE_DISTANCE_UNKNOWN" in risk_flags
+    ):
+        risk_flags.remove("PEDIGREE_DISTANCE_UNKNOWN")
+    return positive_flags, risk_flags
+
+
+def _effective_recent_result_count(horse: HorseEntry) -> int:
+    return sum(1 for run in horse.recent_runs[:5] if run.finish is not None)
+
+
+def analyze_pedigree(
+    pedigree: PedigreeInfo,
+    race_info: RaceInfo,
+    horse_no: int = 0,
+    horse_name: str | None = None,
+    performance_profiles: list[PedigreePerformanceProfile] | None = None,
+) -> PedigreeAnalysis:
     final_horse_name = horse_name or pedigree.horse_name or "unknown"
-    if not pedigree.sire and not pedigree.damsire:
+    profiles = list(performance_profiles or [])
+    performance_score_hint = round(sum(float(getattr(profile, "score_hint", 0.0)) for profile in profiles), 1)
+    if not pedigree.sire and not pedigree.damsire and not profiles:
         return _unknown_analysis(horse_no, final_horse_name, pedigree)
 
     sire_lookup_name = normalize_pedigree_name(pedigree.sire)
@@ -156,7 +198,7 @@ def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int 
     sire_knowledge = PEDIGREE_KNOWLEDGE.get(sire_lookup_name) if sire_lookup_name else None
     damsire_knowledge = PEDIGREE_KNOWLEDGE.get(damsire_lookup_name) if damsire_lookup_name else None
 
-    if sire_knowledge is None and damsire_knowledge is None:
+    if sire_knowledge is None and damsire_knowledge is None and not profiles:
         return PedigreeAnalysis(
             horse_no=horse_no,
             horse_name=final_horse_name,
@@ -212,6 +254,12 @@ def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int 
     if any(token in traits for token in ("パワー", "重馬場")):
         _append_flag(positive_flags, "PEDIGREE_POWER_FIT")
 
+    positive_flags, risk_flags = _merge_performance_flags(positive_flags, risk_flags, profiles)
+    surface_tendency = _merge_performance_tendency(surface_tendency, profiles, "surface_tendency")
+    distance_tendency = _merge_performance_tendency(distance_tendency, profiles, "distance_tendency")
+    track_tendency = _merge_performance_tendency(track_tendency, profiles, "track_condition_tendency")
+    pace_tendency = _merge_performance_tendency(pace_tendency, profiles, "pace_tendency")
+
     comment_parts: list[str] = []
     if pedigree.sire and sire_knowledge:
         comment_parts.append(f"父{pedigree.sire}は{ sire_surface }・{ sire_distance }向き。")
@@ -230,6 +278,14 @@ def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int 
         comment_parts.append("一方で今回の距離は忙しい可能性があり、対応力は課題。")
     if sire_knowledge is None and damsire_knowledge is not None:
         comment_parts.insert(0, "父系の知識は不足しているが、")
+    if profiles:
+        profile_comments = [
+            str(getattr(profile, "overall_comment", "") or "").strip()
+            for profile in profiles[:2]
+            if str(getattr(profile, "overall_comment", "") or "").strip()
+        ]
+        if profile_comments:
+            comment_parts.append("祖先実績: " + " ".join(profile_comments))
     if not positive_flags and risk_flags:
         comment_parts.append("強調材料は限られ、血統評価は慎重。")
 
@@ -245,6 +301,8 @@ def analyze_pedigree(pedigree: PedigreeInfo, race_info: RaceInfo, horse_no: int 
         pace_tendency=pace_tendency,
         positive_flags=positive_flags,
         risk_flags=risk_flags,
+        performance_profiles=profiles,
+        performance_score_hint=performance_score_hint,
         overall_comment=" ".join(comment_parts[:4]),
     )
 
@@ -283,5 +341,18 @@ def build_pedigree_analyses_for_race(horses: list[HorseEntry], race_info: RaceIn
                     f"failed to fetch or parse pedigree page: horse_id={horse.horse_id}: {exc}",
                     stacklevel=2,
                 )
-        analyses.append(analyze_pedigree(pedigree, race_info, horse_no=horse.horse_no, horse_name=horse.horse_name))
+        performance_profiles = (
+            build_performance_profiles_for_pedigree(pedigree, race_info)
+            if _effective_recent_result_count(horse) < 5
+            else []
+        )
+        analyses.append(
+            analyze_pedigree(
+                pedigree,
+                race_info,
+                horse_no=horse.horse_no,
+                horse_name=horse.horse_name,
+                performance_profiles=performance_profiles,
+            )
+        )
     return analyses

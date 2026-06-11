@@ -302,12 +302,20 @@ def _format_pedigree_analyses(prediction: Prediction) -> list[str]:
             continue
         positive = ", ".join(analysis.positive_flags) if analysis.positive_flags else "なし"
         risks = ", ".join(analysis.risk_flags) if analysis.risk_flags else "なし"
+        performance = "なし"
+        if analysis.performance_profiles:
+            performance = " / ".join(
+                f"{profile.relation}:{profile.horse_name or profile.horse_id}"
+                f"({profile.surface_tendency},{profile.distance_tendency},補正={profile.score_hint:+.1f})"
+                for profile in analysis.performance_profiles[:3]
+            )
         mark = mark_by_horse_no.get(horse_score.horse_no, "")
         lines.extend(
             [
                 f"### {mark} {horse_score.horse_no} {horse_score.horse_name}".strip(),
                 f"- 父: {analysis.sire or 'unknown'}",
                 f"- 母父: {analysis.damsire or 'unknown'}",
+                f"- 祖先実績: {performance}",
                 f"- Positive: {positive}",
                 f"- Risk: {risks}",
                 f"- Comment: {analysis.overall_comment}",

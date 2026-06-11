@@ -17,6 +17,7 @@ from keiba_llm_agent.scoring.analysis_adjustment_integrator import (
 )
 from keiba_llm_agent.scoring.borderline_recovery import apply_top5_borderline_recovery
 from keiba_llm_agent.scoring.pedigree_score_adjuster import calculate_pedigree_adjustment
+from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
 from keiba_llm_agent.schemas.prediction import (
     BorderlineRecoveryConfigSnapshot,
     BorderlineRecoveryResult,
@@ -34,6 +35,23 @@ from keiba_llm_agent.schemas.review import LessonItem
 
 WEIGHTS = [1.5, 1.2, 1.0, 0.8, 0.6]
 MARK_LABELS = ("◎", "○", "▲", "△", "☆")
+DEBUT_RACE_NAME_TOKENS = ("新馬", "メイクデビュー", "フレッシュチャレンジ")
+UNRACED_BASE_SCORE = 8.0
+UNRACED_RISK = -2
+LOW_SAMPLE_PEDIGREE_WEIGHT_BY_RUN_COUNT = {
+    0: 2.0,
+    1: 1.7,
+    2: 1.4,
+    3: 1.15,
+    4: 0.95,
+}
+LOW_SAMPLE_PEDIGREE_PRIOR_BLEND_BY_RUN_COUNT = {
+    0: 1.0,
+    1: 0.75,
+    2: 0.55,
+    3: 0.35,
+    4: 0.2,
+}
 
 
 def clamp_score(value: float, minimum: int = 0, maximum: int = 10) -> int:
@@ -48,6 +66,134 @@ def weighted_average(values: list[float]) -> float:
 
 def get_weight(index: int) -> float:
     return WEIGHTS[index] if index < len(WEIGHTS) else WEIGHTS[-1]
+
+
+def scorable_recent_runs(recent_runs: list[RecentRun]) -> list[RecentRun]:
+    return [run for run in recent_runs[:5] if run.finish is not None]
+
+
+def has_valid_recent_result(recent_runs: list[RecentRun]) -> bool:
+    return bool(scorable_recent_runs(recent_runs))
+
+
+def effective_recent_run_count(horse: HorseEntry) -> int:
+    return len(scorable_recent_runs(horse.recent_runs))
+
+
+def is_low_sample_horse(horse: HorseEntry) -> bool:
+    return effective_recent_run_count(horse) < 5
+
+
+def is_debut_race(race_info: RaceInfo) -> bool:
+    race_name = str(race_info.race_name or "")
+    return any(token in race_name for token in DEBUT_RACE_NAME_TOKENS)
+
+
+def is_unraced_debut_horse(horse: HorseEntry, race_info: RaceInfo) -> bool:
+    return is_debut_race(race_info) and not has_valid_recent_result(horse.recent_runs)
+
+
+def effective_pedigree_weight_for_horse(
+    base_weight: float,
+    horse: HorseEntry,
+    race_info: RaceInfo,
+) -> float:
+    run_count = min(effective_recent_run_count(horse), 5)
+    low_sample_weight = LOW_SAMPLE_PEDIGREE_WEIGHT_BY_RUN_COUNT.get(run_count)
+    if low_sample_weight is None:
+        return base_weight
+    return max(base_weight, low_sample_weight)
+
+
+def _low_sample_prior_blend(run_count: int) -> float:
+    return LOW_SAMPLE_PEDIGREE_PRIOR_BLEND_BY_RUN_COUNT.get(min(run_count, 5), 0.0)
+
+
+def _blend_low_sample_prior(current_score: int, prior_score: int | None, run_count: int) -> int:
+    if prior_score is None:
+        return current_score
+    blend = _low_sample_prior_blend(run_count)
+    if blend <= 0:
+        return current_score
+    blended = clamp_score(current_score * (1.0 - blend) + prior_score * blend)
+    if prior_score >= current_score:
+        return max(current_score, blended)
+    return min(current_score, blended) if run_count <= 2 else current_score
+
+
+def _pedigree_distance_prior_score(pedigree_analysis: PedigreeAnalysis | None) -> int | None:
+    if pedigree_analysis is None:
+        return None
+    positive_flags = set(pedigree_analysis.positive_flags)
+    risk_flags = set(pedigree_analysis.risk_flags)
+    if "PEDIGREE_DISTANCE_RISK" in risk_flags:
+        return 1
+    if "PEDIGREE_STAMINA_FIT" in positive_flags and "PEDIGREE_DISTANCE_FIT" in positive_flags:
+        return 9
+    if "PEDIGREE_STAMINA_FIT" in positive_flags or "PEDIGREE_DISTANCE_FIT" in positive_flags:
+        return 8
+    return None
+
+
+def _pedigree_course_prior_score(
+    pedigree_analysis: PedigreeAnalysis | None,
+    race_info: RaceInfo,
+) -> int | None:
+    if pedigree_analysis is None:
+        return None
+    positive_flags = set(pedigree_analysis.positive_flags)
+    score = 0
+    if "PEDIGREE_SURFACE_FIT" in positive_flags:
+        score = max(score, 8)
+    if race_info.surface == "ダート" and "PEDIGREE_POWER_FIT" in positive_flags:
+        score = max(score, 6)
+    return score or None
+
+
+def _pedigree_track_condition_prior_score(
+    pedigree_analysis: PedigreeAnalysis | None,
+    race_info: RaceInfo,
+) -> int | None:
+    if pedigree_analysis is None:
+        return None
+    positive_flags = set(pedigree_analysis.positive_flags)
+    if "PEDIGREE_TRACK_CONDITION_FIT" in positive_flags:
+        return 8
+    if race_info.surface == "ダート" and "PEDIGREE_POWER_FIT" in positive_flags:
+        return 6
+    if race_info.track_condition and race_info.track_condition != "良" and "PEDIGREE_POWER_FIT" in positive_flags:
+        return 6
+    return None
+
+
+def apply_low_sample_pedigree_priors(
+    *,
+    recent_run_count: int,
+    distance_fit: int,
+    course_fit: int,
+    track_condition_fit: int,
+    pedigree_analysis: PedigreeAnalysis | None,
+    race_info: RaceInfo,
+) -> tuple[int, int, int]:
+    if recent_run_count >= 5 or pedigree_analysis is None:
+        return distance_fit, course_fit, track_condition_fit
+    return (
+        _blend_low_sample_prior(
+            distance_fit,
+            _pedigree_distance_prior_score(pedigree_analysis),
+            recent_run_count,
+        ),
+        _blend_low_sample_prior(
+            course_fit,
+            _pedigree_course_prior_score(pedigree_analysis, race_info),
+            recent_run_count,
+        ),
+        _blend_low_sample_prior(
+            track_condition_fit,
+            _pedigree_track_condition_prior_score(pedigree_analysis, race_info),
+            recent_run_count,
+        ),
+    )
 
 
 def jockey_matches(current_jockey: str | None, past_jockey: str | None) -> bool:
@@ -227,13 +373,27 @@ def calculate_base_total_score(
     )
 
 
+def calculate_unraced_base_total_score(
+    scores: ScoreBreakdown,
+    *,
+    use_market_score_in_ranking: bool = False,
+    market_signal_weight: float = 0.0,
+) -> float:
+    market_component = (
+        scores.odds_value * market_signal_weight
+        if use_market_score_in_ranking and market_signal_weight > 0
+        else 0.0
+    )
+    return round(UNRACED_BASE_SCORE + scores.risk + market_component, 1)
+
+
 def score_risk(
     recent_runs: list[RecentRun],
     recent_form: int,
     distance_fit: int,
 ) -> int:
     if not recent_runs:
-        return -10
+        return UNRACED_RISK
 
     valid_finishes = [run for run in recent_runs[:5] if run.finish is not None and run.field_size is not None]
     if len(valid_finishes) >= 2 and all(run.finish > run.field_size / 2 for run in valid_finishes[:2]):
@@ -321,9 +481,12 @@ def build_reason(
     race_level_adjustment_value: float = 0.0,
     pace_adjustment_value: float = 0.0,
 ) -> str:
-    recent_runs = horse.recent_runs[:5]
+    recent_runs = scorable_recent_runs(horse.recent_runs)
     if not recent_runs:
-        reason = "近走データが不足しており、距離・コース適性の判断材料が限られる。"
+        if is_debut_race(race_info):
+            reason = "新馬戦で実戦履歴がなく、血統面を主な判断材料として扱う。"
+        else:
+            reason = "実戦履歴が不足しており、血統面と適性面を重めに扱う。"
         if pedigree_adjustment_value > 0:
             reason += f" 血統面から+{pedigree_adjustment_value:.1f}補正。"
         elif pedigree_adjustment_value < 0:
@@ -400,13 +563,23 @@ def score_horse_by_recent_runs(
     *,
     use_market_score_in_ranking: bool = False,
     market_signal_weight: float = 0.0,
+    pedigree_analysis: PedigreeAnalysis | None = None,
 ) -> HorseScore:
-    recent_runs = horse.recent_runs[:5]
+    recent_runs = scorable_recent_runs(horse.recent_runs)
+    recent_run_count = len(recent_runs)
     lesson_list = lessons or []
     recent_form = score_recent_form(recent_runs)
     distance_fit = score_distance_fit(recent_runs, race_info.distance)
     course_fit = score_course_fit(recent_runs, race_info.course)
     track_condition_fit = score_track_condition_fit(recent_runs, race_info.track_condition)
+    distance_fit, course_fit, track_condition_fit = apply_low_sample_pedigree_priors(
+        recent_run_count=recent_run_count,
+        distance_fit=distance_fit,
+        course_fit=course_fit,
+        track_condition_fit=track_condition_fit,
+        pedigree_analysis=pedigree_analysis,
+        race_info=race_info,
+    )
     jockey_fit = score_jockey_fit(recent_runs, horse.jockey)
     odds_value = score_odds_value(horse, recent_form)
     risk = score_risk(recent_runs, recent_form, distance_fit)
@@ -421,13 +594,20 @@ def score_horse_by_recent_runs(
         odds_value=odds_value,
         risk=risk,
     )
-    total_score = calculate_base_total_score(
-        scores,
-        distance_weight=distance_weight,
-        course_weight=course_weight,
-        use_market_score_in_ranking=use_market_score_in_ranking,
-        market_signal_weight=market_signal_weight,
-    )
+    if not recent_runs:
+        total_score = calculate_unraced_base_total_score(
+            scores,
+            use_market_score_in_ranking=use_market_score_in_ranking,
+            market_signal_weight=market_signal_weight,
+        )
+    else:
+        total_score = calculate_base_total_score(
+            scores,
+            distance_weight=distance_weight,
+            course_weight=course_weight,
+            use_market_score_in_ranking=use_market_score_in_ranking,
+            market_signal_weight=market_signal_weight,
+        )
     return HorseScore(
         horse_no=horse.horse_no,
         horse_name=horse.horse_name,
@@ -446,6 +626,8 @@ def build_marks(horse_scores: list[HorseScore]) -> dict[str, int]:
 
 def collect_risks(race_data: RaceData, used_lessons: list[LessonItem]) -> list[str]:
     risks: list[str] = []
+    if any(is_low_sample_horse(horse) for horse in race_data.horses):
+        risks.append("有効近走5走未満の馬は血統・距離・馬場適性の先験評価を補強。")
     if any(horse.odds is None or horse.popularity is None for horse in race_data.horses):
         risks.append("一部の馬でoddsまたは人気が欠損している。")
     if any(any(run.course is None for run in horse.recent_runs) for horse in race_data.horses):
@@ -474,7 +656,8 @@ def build_summary(
     if not horse_scores:
         return "有効な近走データが不足しており、summaryはunknownに近い状態。"
     top = horse_scores[0]
-    recent_run_count = len(next((horse.recent_runs for horse in race_data.horses if horse.horse_no == top.horse_no), []))
+    top_horse_runs = next((horse.recent_runs for horse in race_data.horses if horse.horse_no == top.horse_no), [])
+    recent_run_count = len(scorable_recent_runs(top_horse_runs))
     lesson_note = ""
     _, _, lesson_adjustments = get_lesson_weight_adjustment(used_lessons)
     if used_lessons:
@@ -554,6 +737,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
             lessons=lessons,
             use_market_score_in_ranking=scoring_config_snapshot.use_market_score_in_ranking,
             market_signal_weight=scoring_config_snapshot.market_signal_weight,
+            pedigree_analysis=pedigree_analysis_by_horse.get(horse.horse_no),
         )
         for horse in race_data.horses
     ]
@@ -572,12 +756,17 @@ def build_prediction_from_recent_runs_with_scoring_config(
             if pedigree_analysis is not None
             else PedigreeAdjustment(reason="血統補正なし")
         )
+        pedigree_weight = effective_pedigree_weight_for_horse(
+            scoring_config_snapshot.pedigree_weight,
+            horse_entry,
+            race_data.race_info,
+        )
         race_level_adjustment = calculate_race_level_adjustment(race_level_analysis)
         pace_adjustment = calculate_pace_adjustment(pace_analysis, race_pace_projection)
         score_breakdown = build_score_breakdown(
             base_total_score=horse_score.total_score,
             pedigree_adjustment_raw=pedigree_adjustment.pedigree_adjustment,
-            pedigree_weight=scoring_config_snapshot.pedigree_weight,
+            pedigree_weight=pedigree_weight,
             race_level_adjustment_raw=race_level_adjustment.adjustment,
             race_level_weight=scoring_config_snapshot.race_level_weight,
             pace_adjustment_raw=pace_adjustment.adjustment,
@@ -736,4 +925,10 @@ def build_prediction_from_recent_runs_with_scoring_config(
 
 
 def has_recent_runs_data(race_data: RaceData) -> bool:
-    return any(horse.recent_runs for horse in race_data.horses)
+    if not race_data.horses:
+        return False
+    return (
+        is_debut_race(race_data.race_info)
+        or any(has_valid_recent_result(horse.recent_runs) for horse in race_data.horses)
+        or any(bool(horse.horse_id) for horse in race_data.horses)
+    )

@@ -168,7 +168,7 @@ class PredictionScoringModeTests(unittest.TestCase):
         self.assertIn("PEDIGREE_USED", payload["strategy"]["reason_codes"])
         self.assertIn("RACE_LEVEL_USED", payload["strategy"]["reason_codes"])
         self.assertNotIn("PACE_USED", payload["strategy"]["reason_codes"])
-        self.assertIn("血統面から+0.2補正。", second_score["reason"])
+        self.assertIn("血統面から+1.4補正。", second_score["reason"])
         self.assertIn("相手関係面から+1.0補正。", second_score["reason"])
         self.assertNotIn("展開面から+0.0補正", second_score["reason"])
 

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
-from keiba_llm_agent.pedigree.pedigree_analyzer import analyze_pedigree, normalize_pedigree_name
+from keiba_llm_agent.pedigree.pedigree_analyzer import (
+    analyze_pedigree,
+    build_pedigree_analyses_for_race,
+    normalize_pedigree_name,
+)
 from keiba_llm_agent.scoring.pedigree_score_adjuster import calculate_pedigree_adjustment
 from keiba_llm_agent.schemas.pedigree import PedigreeInfo
-from keiba_llm_agent.schemas.race_data import RaceInfo
+from keiba_llm_agent.schemas.race_data import HorseEntry, RaceInfo, RecentRun
 
 
 def _race_info(distance: int) -> RaceInfo:
@@ -100,6 +106,51 @@ class PedigreeAnalyzerTests(unittest.TestCase):
         adjustment = calculate_pedigree_adjustment(analysis, race_info)
         self.assertIn("PEDIGREE_SURFACE_FIT", analysis.positive_flags)
         self.assertGreater(adjustment.pedigree_adjustment, 0.0)
+
+    def test_local_dirt_fresh_sire_gets_surface_and_distance_fit(self) -> None:
+        race_info = _local_dirt_race_info(1100)
+        analysis = analyze_pedigree(
+            PedigreeInfo(
+                horse_id="h7",
+                horse_name="G",
+                sire="ルヴァンスレーヴ",
+                damsire="バトルプラン Battle Plan(米)",
+            ),
+            race_info,
+            horse_no=7,
+            horse_name="G",
+        )
+        adjustment = calculate_pedigree_adjustment(analysis, race_info)
+        self.assertIn("PEDIGREE_SURFACE_FIT", analysis.positive_flags)
+        self.assertIn("PEDIGREE_DISTANCE_FIT", analysis.positive_flags)
+        self.assertGreater(adjustment.pedigree_adjustment, 0.0)
+
+    def test_performance_profile_fetch_is_skipped_for_full_sample_horse(self) -> None:
+        horse = HorseEntry(
+            horse_no=1,
+            horse_id="2024100058",
+            horse_name="A",
+            recent_runs=[
+                RecentRun(date=f"2026-05-{day:02d}", finish=day, field_size=12)
+                for day in range(1, 6)
+            ],
+        )
+        pedigree = PedigreeInfo(
+            horse_id="2024100058",
+            horse_name="A",
+            sire="ルヴァンスレーヴ",
+            sire_id="2015104189",
+        )
+        with (
+            patch("keiba_llm_agent.pedigree.pedigree_analyzer.get_horse_cache_path", return_value=Path("__missing_cache__")),
+            patch("keiba_llm_agent.pedigree.pedigree_analyzer.fetch_horse_html", return_value="<html></html>"),
+            patch("keiba_llm_agent.pedigree.pedigree_analyzer.parse_pedigree_info", return_value=pedigree),
+            patch("keiba_llm_agent.pedigree.pedigree_analyzer.build_performance_profiles_for_pedigree") as build_profiles,
+        ):
+            analyses = build_pedigree_analyses_for_race([horse], _local_dirt_race_info(1100))
+
+        build_profiles.assert_not_called()
+        self.assertEqual(analyses[0].performance_profiles, [])
 
 
 if __name__ == "__main__":

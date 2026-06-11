@@ -36,8 +36,13 @@ class PedigreeParserTests(unittest.TestCase):
         html = PEDIGREE_FIXTURE_PATH.read_text(encoding="utf-8")
         pedigree = parse_pedigree_info(html, horse_id="2021104073", horse_name="サンプルホース")
         self.assertEqual(pedigree.sire, "ハーツクライ")
+        self.assertEqual(pedigree.sire_id, "000a")
         self.assertEqual(pedigree.dam, "サンプル母")
+        self.assertEqual(pedigree.dam_id, "0100")
         self.assertEqual(pedigree.damsire, "キングカメハメハ")
+        self.assertEqual(pedigree.damsire_id, "0200")
+        self.assertEqual(pedigree.sire_sire, "サンデーサイレンス")
+        self.assertEqual(pedigree.sire_sire_id, "000b")
 
     def test_missing_pedigree_does_not_fail(self) -> None:
         pedigree = parse_pedigree_info("<html><body><div>no pedigree</div></body></html>", horse_id="x")

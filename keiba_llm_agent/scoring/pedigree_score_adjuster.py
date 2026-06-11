@@ -11,6 +11,8 @@ BONUS_BY_FLAG = {
     "PEDIGREE_STAMINA_FIT": 0.8,
     "PEDIGREE_POWER_FIT": 0.3,
     "PEDIGREE_TRACK_CONDITION_FIT": 0.5,
+    "PEDIGREE_CLASS_POWER": 0.4,
+    "PEDIGREE_EARLY_MATURITY": 0.4,
 }
 
 PENALTY_BY_FLAG = {
@@ -27,6 +29,11 @@ def calculate_pedigree_adjustment(
 ) -> PedigreeAdjustment:
     bonus = sum(BONUS_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.positive_flags)
     penalty = sum(PENALTY_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.risk_flags)
+    performance_hint = getattr(pedigree_analysis, "performance_score_hint", 0.0)
+    if performance_hint > 0:
+        bonus += min(float(performance_hint), 1.2)
+    elif performance_hint < 0:
+        penalty += min(abs(float(performance_hint)), 0.8)
     adjustment = max(-1.5, min(2.0, round(bonus - penalty, 1)))
 
     parts: list[str] = []
@@ -34,6 +41,10 @@ def calculate_pedigree_adjustment(
         parts.append(f"適性加点{bonus:.1f}")
     if penalty > 0:
         parts.append(f"リスク減点-{penalty:.1f}")
+    if performance_hint > 0:
+        parts.append(f"祖先実績+{performance_hint:.1f}")
+    elif performance_hint < 0:
+        parts.append(f"祖先実績{performance_hint:.1f}")
     if not parts:
         parts.append("血統補正なし")
     if race_info.distance and any(
@@ -48,4 +59,3 @@ def calculate_pedigree_adjustment(
         pedigree_adjustment=adjustment,
         reason=" / ".join(parts),
     )
-

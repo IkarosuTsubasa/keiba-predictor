@@ -186,6 +186,7 @@ def is_valid_result_row(cells: list[Tag], header_index: dict[str, int]) -> bool:
 
 def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> RecentRun:
     date_text = get_cell_text(cells, header_index, ["日付"])
+    race_name_text = get_cell_text(cells, header_index, ["レース名"])
     course_text = get_cell_text(cells, header_index, ["開催"])
     distance_text = get_cell_text(cells, header_index, ["距離"])
     track_condition_text = get_cell_text(cells, header_index, ["馬場"])
@@ -202,6 +203,7 @@ def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> Rece
     return RecentRun(
         race_id=parse_race_id_from_row(cells, header_index),
         date=parse_date(date_text),
+        race_name=normalize_text(race_name_text) or None,
         course=parse_course(course_text),
         surface=surface,
         distance=distance,

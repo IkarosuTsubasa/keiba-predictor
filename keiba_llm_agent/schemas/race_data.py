@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class RecentRun(BaseModel):
     race_id: str | None = None
     date: str | None = None
+    race_name: str | None = None
     course: str | None = None
     surface: str | None = None
     distance: int | None = None
