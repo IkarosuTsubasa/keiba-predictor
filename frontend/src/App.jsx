@@ -271,16 +271,24 @@ function isAppShellSearch(search) {
   }
 }
 
-function navigateWithSearch(nextSearch) {
+function navigatePathWithSearch(pathname, nextSearch) {
   const current = new URLSearchParams(window.location.search.replace(/^\?/, ""));
   const next = new URLSearchParams(String(nextSearch || "").replace(/^\?/, ""));
   if (current.get("app") === "1") {
     next.set("app", "1");
   }
   const query = next.toString();
-  const url = query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
+  const url = query ? `${pathname}?${query}` : pathname;
   window.history.pushState({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function navigateWithSearch(nextSearch) {
+  navigatePathWithSearch(APP_BASE_PATH, nextSearch);
+}
+
+function navigateHistoryWithSearch(nextSearch) {
+  navigatePathWithSearch(`${APP_BASE_PATH}/history`, nextSearch);
 }
 
 function extractRaceDetailId(pathname) {
@@ -764,7 +772,12 @@ export default function App() {
               <FilterBar data={data} search={search} onApply={navigateWithSearch} />
             </section>
           ) : null}
-          <HistoryPage data={data} appShell={isAppShell} />
+          <HistoryPage
+            data={data}
+            appShell={isAppShell}
+            search={search}
+            onApplyFilters={navigateHistoryWithSearch}
+          />
         </div>
       </PublicFrame>
     );

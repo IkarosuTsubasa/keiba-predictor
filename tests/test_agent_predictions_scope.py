@@ -24,6 +24,37 @@ class AgentPredictionsScopeTests(unittest.TestCase):
 
         self.assertTrue(agent_predictions._scope_matches(payload, "local"))
         self.assertFalse(agent_predictions._scope_matches(payload, "central_dirt"))
+        self.assertFalse(agent_predictions._scope_matches(payload, "central"))
+
+    def test_scope_matches_central_group_from_scope_key(self) -> None:
+        dirt_payload = {
+            "race_id": "202601010101",
+            "race_info": {
+                "scope_key": "central_dirt",
+                "course": "東京",
+                "surface": "ダート",
+            },
+        }
+        turf_payload = {
+            "race_id": "202601010102",
+            "race_info": {
+                "scope_key": "central_turf",
+                "course": "中山",
+                "surface": "芝",
+            },
+        }
+        local_payload = {
+            "race_id": "202644031102",
+            "race_info": {
+                "scope_key": "local",
+                "course": "大井",
+                "surface": "ダート",
+            },
+        }
+
+        self.assertTrue(agent_predictions._scope_matches(dirt_payload, "central"))
+        self.assertTrue(agent_predictions._scope_matches(turf_payload, "central"))
+        self.assertFalse(agent_predictions._scope_matches(local_payload, "central"))
 
     def test_strategy_confidence_uses_score_shape_with_same_label(self) -> None:
         close_payload = {

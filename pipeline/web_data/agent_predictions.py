@@ -200,14 +200,32 @@ def _course_sort_value(course):
         return len(COURSE_ORDER)
 
 
+def _normalize_history_scope_key(value):
+    raw = _safe_text(value).lower()
+    raw = raw.replace(" ", "_").replace("-", "_").replace("/", "_")
+    if raw in ("central", "jra", "chuo", "中央"):
+        return "central"
+    if raw in ("central_turf", "central_t", "ct", "1", "t", "turf", "grass", "shiba"):
+        return "central_turf"
+    if raw in ("central_dirt", "central_d", "cd", "2", "d", "dirt", "sand"):
+        return "central_dirt"
+    if raw in ("local", "l", "3", "地方"):
+        return "local"
+    return ""
+
+
 def _scope_matches(payload, scope_key):
-    scope = _safe_text(scope_key)
+    scope = _normalize_history_scope_key(scope_key)
     if not scope:
         return True
     race_info = dict(payload.get("race_info") or {})
-    payload_scope = _safe_text(payload.get("scope_key")) or _safe_text(race_info.get("scope_key"))
+    payload_scope = _normalize_history_scope_key(payload.get("scope_key")) or _normalize_history_scope_key(
+        race_info.get("scope_key")
+    )
     payload_source = _safe_text(payload.get("source")) or _safe_text(race_info.get("source"))
     if payload_scope:
+        if scope == "central":
+            return payload_scope in ("central_turf", "central_dirt")
         if scope == "local":
             return payload_scope == "local"
         if scope in ("central_turf", "central_dirt"):
@@ -216,6 +234,10 @@ def _scope_matches(payload, scope_key):
         return scope == "local"
     surface = _safe_text(race_info.get("surface"))
     course = _safe_text(race_info.get("course"))
+    if scope == "central":
+        if course:
+            return course in COURSE_ORDER
+        return "芝" in surface or "ダ" in surface or "砂" in surface
     if scope == "central_turf":
         return "芝" in surface
     if scope == "central_dirt":
@@ -645,6 +667,7 @@ def build_history_payload(base_dir, target_date="", scope_key=""):
     return {
         "available": bool(all_records),
         "target_date": target.isoformat() if target is not None else "",
+        "scope_key": _normalize_history_scope_key(scope_key),
         "periods": out_periods,
     }
 

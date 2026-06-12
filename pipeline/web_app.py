@@ -5115,10 +5115,18 @@ def sitemap_xml():
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
 @app.get("/api/public/board")
-def public_board_api(date: str = "", scope_key: str = ""):
+def public_board_api(date: str = "", scope_key: str = "", history_scope_key: str = ""):
     payload = build_public_board_payload(date_text=date, scope_key=scope_key)
+    response_payload = _public_board_api_payload(payload)
+    if str(history_scope_key or "").strip():
+        target_date = str(payload.get("target_date", "") or "").strip()
+        response_payload["history"]["agent_prediction"] = agent_predictions.build_history_payload(
+            BASE_DIR,
+            target_date=target_date,
+            scope_key=history_scope_key,
+        )
     return JSONResponse(
-        _public_board_api_payload(payload),
+        response_payload,
         headers=_public_api_headers(),
     )
 

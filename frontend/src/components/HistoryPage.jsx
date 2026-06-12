@@ -12,6 +12,10 @@ function EmptyState({ children }) {
   return <p className="history-empty-note">{children}</p>;
 }
 
+function normalizeHistoryScopeKey(value) {
+  return value === "central" || value === "local" ? value : "";
+}
+
 function OverviewCard({ label, value, note, accent = false }) {
   return (
     <article
@@ -57,10 +61,17 @@ function AgentHistoryTable({ title, eyebrow, columns, rows, rowKey }) {
   );
 }
 
-function AgentPredictionHistory({ data }) {
+function AgentPredictionHistory({ data, search = "", onApplyFilters }) {
   const [periodKey, setPeriodKey] = useState("days_30");
+  const params = new URLSearchParams(String(search || ""));
+  const historyScopeKey = normalizeHistoryScopeKey(params.get("history_scope_key"));
   const agentHistory = data?.history?.agent_prediction || {};
   const periods = agentHistory?.periods || {};
+  const scopeTabs = [
+    { key: "", label: "全体" },
+    { key: "central", label: "中央" },
+    { key: "local", label: "地方" },
+  ];
   const periodTabs = [
     { key: "days_30", label: "月間" },
     { key: "days_365", label: "年間" },
@@ -86,6 +97,18 @@ function AgentPredictionHistory({ data }) {
     { key: "top5_cover_rate_text", label: "上位5頭カバー" },
     { key: "top3_exact_rate_text", label: "上位3頭完全的中" },
   ];
+  const applyHistoryScope = (nextScopeKey) => {
+    if (typeof onApplyFilters !== "function") {
+      return;
+    }
+    const next = new URLSearchParams(String(search || ""));
+    if (nextScopeKey) {
+      next.set("history_scope_key", nextScopeKey);
+    } else {
+      next.delete("history_scope_key");
+    }
+    onApplyFilters(next.toString());
+  };
 
   return (
     <section className="history-page">
@@ -99,6 +122,17 @@ function AgentPredictionHistory({ data }) {
         </div>
 
         <div className="history-hero__controls">
+          <div className="history-period-tabs history-period-tabs--scope" role="tablist" aria-label="開催区分">
+            {scopeTabs.map((item) => (
+              <TabButton
+                key={item.key || "all"}
+                active={historyScopeKey === item.key}
+                onClick={() => applyHistoryScope(item.key)}
+              >
+                {item.label}
+              </TabButton>
+            ))}
+          </div>
           <div className="history-period-tabs" role="tablist" aria-label="履歴期間">
             {periodTabs.map((item) => (
               <TabButton
@@ -167,6 +201,13 @@ function AgentPredictionHistory({ data }) {
   );
 }
 
-export default function HistoryPage({ data, appShell = false }) {
-  return <AgentPredictionHistory data={data} appShell={appShell} />;
+export default function HistoryPage({ data, appShell = false, search = "", onApplyFilters }) {
+  return (
+    <AgentPredictionHistory
+      data={data}
+      appShell={appShell}
+      search={search}
+      onApplyFilters={onApplyFilters}
+    />
+  );
 }
