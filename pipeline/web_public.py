@@ -919,7 +919,7 @@ def _public_share_runtime_html():
     drawText(ctx, payload.mainMark.symbol || "◎", 112, 392, 140);
     ctx.fillStyle = "#f5f1ea";
     setFont(ctx, 900, 158);
-    drawText(ctx, payload.mainMark.horseNo || "-", 270, 405, 180);
+    drawText(ctx, payload.mainMark.horseNo || "-", 270, 405);
 
     fillRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(21, 32, 46, 0.78)");
     strokeRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(202, 184, 145, 0.18)", 1);
