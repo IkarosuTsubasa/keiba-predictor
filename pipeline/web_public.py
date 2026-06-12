@@ -1015,17 +1015,6 @@ def _public_share_runtime_html():
     window.location.href = shareUrl;
   };
 
-  const downloadBlob = (blob) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "ikaimo-ai-keiba-share.png";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
   const isMobileNativeShare = () => {
     if (navigator.userAgentData && navigator.userAgentData.mobile) {
       return true;
@@ -1085,12 +1074,11 @@ def _public_share_runtime_html():
       }
     }
     const copied = await copyImageToClipboard(blob);
-    downloadBlob(blob);
-    showShareToast(
-      copied
-        ? "\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u8cbc\\u308a\\u4ed8\\u3051\\u3067\\u304d\\u307e\\u3059\\u3002"
-        : "\\u753b\\u50cf\\u3092\\u30c0\\u30a6\\u30f3\\u30ed\\u30fc\\u30c9\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u6dfb\\u4ed8\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002",
-    );
+    if (!copied) {
+      showShareToast("\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3067\\u304d\\u307e\\u305b\\u3093\\u3067\\u3057\\u305f\\u3002\\u30d6\\u30e9\\u30a6\\u30b6\\u306e\\u6a29\\u9650\\u3092\\u78ba\\u8a8d\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002");
+      return;
+    }
+    showShareToast("\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u8cbc\\u308a\\u4ed8\\u3051\\u3067\\u304d\\u307e\\u3059\\u3002");
     openTextShare(text);
   };
 
