@@ -635,6 +635,21 @@ def _public_share_runtime_html():
   display: block;
   object-fit: contain;
 }
+.share-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9999;
+  max-width: min(360px, calc(100vw - 36px));
+  padding: 14px 16px;
+  border: 1px solid rgba(199, 166, 109, 0.34);
+  border-radius: 12px;
+  background: rgba(8, 13, 20, 0.94);
+  color: #f5f1ea;
+  font-size: 13px;
+  line-height: 1.55;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+}
 @media (max-width: 760px) {
   .share-title-row {
     align-items: flex-start;
@@ -812,26 +827,19 @@ def _public_share_runtime_html():
       .map((item) => cleanText(item.textContent))
       .filter(Boolean)
       .slice(0, 3);
-    const modelName =
-      cleanText(card?.querySelector(".ai-pick-summary__model")?.textContent) ||
-      cleanText(card?.closest(".model-top-five-board")?.querySelector(".model-top-five-board__tabs .is-active")?.textContent) ||
-      "\\u7dcf\\u5408\\u4e88\\u6e2c";
     const metaBadge = card?.querySelector(".model-meta-badge");
     const metaLabel = cleanText(metaBadge?.querySelector("span")?.textContent);
     const metaValue = cleanText(metaBadge?.querySelector("strong")?.textContent);
     const confidence = cleanText(raceCard?.querySelector(".race-card__metric-cell strong")?.textContent);
     const decision = cleanText(raceCard?.querySelector(".race-card__decision-cell strong")?.textContent);
-    const status = cleanText(header.querySelector(".race-card-header__status")?.textContent);
     return {
       raceTitle: formatRaceTitle(raceTitle),
       subtitle: cleanText(header.querySelector(".race-card-header__subtitle")?.textContent),
       badges,
-      modelName,
       metaLabel,
       metaValue,
       confidence,
       decision,
-      status,
       mainMark,
       supportMarks,
     };
@@ -839,7 +847,7 @@ def _public_share_runtime_html():
 
   const buildShareText = (raceTitle) => {
     const header = formatRaceTitle(raceTitle);
-    return [header, "AI\\u6700\\u7d42\\u8a55\\u4fa1\\u3092\\u753b\\u50cf\\u3067\\u5171\\u6709", "", SHARE_HASHTAG]
+    return [header, "", SHARE_HASHTAG]
       .filter((line) => String(line || "").trim())
       .join("\\n");
   };
@@ -883,8 +891,8 @@ def _public_share_runtime_html():
     setFont(ctx, 700, 19);
     drawText(ctx, "AI\\u6700\\u7d42\\u8a55\\u4fa1", 74, 112, 260);
 
-    let pillX = 820;
-    const topPills = [payload.status, payload.decision].filter(Boolean).slice(0, 2);
+    let pillX = 790;
+    const topPills = ["\\u7121\\u6599\\u516c\\u958b\\u4e2d", payload.decision].filter(Boolean).slice(0, 2);
     topPills.forEach((pill) => {
       const width = drawPill(ctx, pill, pillX, 58, {
         size: 22,
@@ -912,39 +920,38 @@ def _public_share_runtime_html():
     ctx.fillStyle = "#f5f1ea";
     setFont(ctx, 900, 158);
     drawText(ctx, payload.mainMark.horseNo || "-", 270, 405, 180);
-    ctx.fillStyle = "#9ba7b8";
-    setFont(ctx, 700, 24);
-    drawText(ctx, "\\u672c\\u547d\\u30b7\\u30b0\\u30ca\\u30eb", 116, 448, 250);
 
     fillRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(21, 32, 46, 0.78)");
     strokeRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(202, 184, 145, 0.18)", 1);
-    ctx.fillStyle = "#c7a66d";
-    setFont(ctx, 800, 22);
-    drawText(ctx, "\\u63a1\\u7528\\u30e2\\u30c7\\u30eb", 580, 300, 210);
-    ctx.fillStyle = "#f5f1ea";
-    setFont(ctx, 900, 44);
-    drawText(ctx, payload.modelName || "\\u7dcf\\u5408\\u4e88\\u6e2c", 580, 354, 500);
 
     const metricText =
       payload.metaLabel && payload.metaValue && payload.metaLabel !== "\\u6307\\u6a19"
         ? `${payload.metaLabel} ${payload.metaValue}`
         : (payload.metaValue || payload.metaLabel);
-    const infoItems = [
-      ["\\u6307\\u6a19", metricText],
-      ["\\u4fe1\\u983c\\u5ea6", payload.confidence],
-      ["\\u72b6\\u614b", payload.status],
-    ].filter((item) => cleanText(item[1]));
+    drawPill(ctx, "\\u7121\\u6599\\u516c\\u958b\\u4e2d", 580, 280, {
+      size: 22,
+      height: 40,
+      paddingX: 18,
+      fill: "rgba(199, 166, 109, 0.16)",
+      stroke: "rgba(199, 166, 109, 0.38)",
+      color: "#f5e3bd",
+    });
+    ctx.fillStyle = "#f5f1ea";
+    setFont(ctx, 900, 44);
+    drawText(ctx, "\\u672c\\u547d\\u5370\\u30fb\\u4e0a\\u4f4d\\u5370\\u3092\\u516c\\u958b\\u4e2d", 580, 374, 500);
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 800, 25);
+    drawText(ctx, "\\u3044\\u304b\\u3044\\u3082AI\\u7af6\\u99ac\\u3067\\u691c\\u7d22", 580, 410, 500);
+
+    const infoItems = [metricText, payload.confidence ? `\\u4fe1\\u983c\\u5ea6 ${payload.confidence}` : ""]
+      .filter((item) => cleanText(item));
     let infoX = 580;
-    let infoY = 392;
-    infoItems.slice(0, 3).forEach((item) => {
-      fillRoundRect(ctx, infoX, infoY, 164, 58, 14, "rgba(255, 255, 255, 0.045)");
-      ctx.fillStyle = "#9ba7b8";
-      setFont(ctx, 700, 17);
-      drawText(ctx, item[0], infoX + 18, infoY + 23, 126);
+    infoItems.slice(0, 2).forEach((item) => {
+      fillRoundRect(ctx, infoX, 432, 198, 42, 13, "rgba(255, 255, 255, 0.05)");
       ctx.fillStyle = "#f5f1ea";
-      setFont(ctx, 800, 21);
-      drawText(ctx, item[1], infoX + 18, infoY + 48, 126);
-      infoX += 178;
+      setFont(ctx, 800, 22);
+      drawText(ctx, item, infoX + 18, 460, 162);
+      infoX += 214;
     });
 
     fillRoundRect(ctx, 74, 520, 1052, 78, 18, "rgba(199, 166, 109, 0.10)");
@@ -973,7 +980,7 @@ def _public_share_runtime_html():
 
     ctx.fillStyle = "#9ba7b8";
     setFont(ctx, 700, 22);
-    drawText(ctx, "\\u4e88\\u6e2c\\u5370\\u30fb\\u8cb7\\u3044\\u76ee\\u3092\\u6bce\\u65e5\\u66f4\\u65b0", 74, 626, 460);
+    drawText(ctx, "AI\\u6700\\u7d42\\u8a55\\u4fa1\\u3092\\u7121\\u6599\\u516c\\u958b\\u4e2d", 74, 626, 460);
     ctx.fillStyle = "#c7a66d";
     setFont(ctx, 800, 22);
     drawText(ctx, SHARE_HASHTAG, 760, 626, 360);
@@ -1019,10 +1026,55 @@ def _public_share_runtime_html():
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const isMobileNativeShare = () => {
+    if (navigator.userAgentData && navigator.userAgentData.mobile) {
+      return true;
+    }
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  };
+
+  const canNativeShareFile = (file, text) =>
+    isMobileNativeShare() &&
+    Boolean(navigator.share) &&
+    Boolean(navigator.canShare) &&
+    navigator.canShare({ files: [file], text });
+
+  const showShareToast = (message) => {
+    const text = cleanText(message);
+    if (!text) {
+      return;
+    }
+    document.querySelectorAll(".share-toast").forEach((item) => item.remove());
+    const toast = document.createElement("div");
+    toast.className = "share-toast";
+    toast.setAttribute("role", "status");
+    toast.textContent = text;
+    document.body.appendChild(toast);
+    window.setTimeout(() => {
+      toast.remove();
+    }, 5200);
+  };
+
+  const copyImageToClipboard = async (blob) => {
+    if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "image/png": blob,
+        }),
+      ]);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  };
+
   const openShare = async (text, payload) => {
     const blob = await drawShareImage(payload);
     const file = new File([blob], "ikaimo-ai-keiba-share.png", { type: "image/png" });
-    if (navigator.canShare && navigator.canShare({ files: [file], text }) && navigator.share) {
+    if (canNativeShareFile(file, text)) {
       try {
         await navigator.share({ files: [file], text });
         return;
@@ -1032,7 +1084,13 @@ def _public_share_runtime_html():
         }
       }
     }
+    const copied = await copyImageToClipboard(blob);
     downloadBlob(blob);
+    showShareToast(
+      copied
+        ? "\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u8cbc\\u308a\\u4ed8\\u3051\\u3067\\u304d\\u307e\\u3059\\u3002"
+        : "\\u753b\\u50cf\\u3092\\u30c0\\u30a6\\u30f3\\u30ed\\u30fc\\u30c9\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u6dfb\\u4ed8\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002",
+    );
     openTextShare(text);
   };
 
