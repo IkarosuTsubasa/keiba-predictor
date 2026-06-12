@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 from datetime import date, timedelta
@@ -130,6 +131,16 @@ def _safe_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _clamp01(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return max(0.0, min(1.0, number))
 
 
 def _read_json(path):
@@ -295,10 +306,96 @@ def _marks_text(payload):
     return " ".join(parts)
 
 
-def _strategy_confidence(payload):
+def _explicit_confidence_score(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    if number > 1.0 and number <= 100.0:
+        number = number / 100.0
+    if 0.0 <= number <= 1.0:
+        return number
+    return None
+
+
+def _score_shape_metrics(payload):
+    scores = [
+        _safe_float(item.get("total_score"), float("nan"))
+        for item in _ranked_horses(payload)
+        if isinstance(item, dict)
+    ]
+    scores = [score for score in scores if math.isfinite(score)]
+    if len(scores) < 2:
+        return None
+
+    top = scores[0]
+    second = scores[1]
+    third = scores[2] if len(scores) >= 3 else second
+    top5 = scores[:5]
+    top5_range = max(top - top5[-1], 1.0)
+    top_gap_score = _clamp01((top - second) / max(3.0, top5_range * 0.55))
+    top3_gap_score = _clamp01((top - third) / max(5.0, top5_range * 0.85))
+
+    positive_top5 = [max(0.0, score) for score in top5]
+    positive_total = sum(positive_top5)
+    if positive_total > 0:
+        share = positive_top5[0] / positive_total
+        uniform_share = 1.0 / float(len(positive_top5))
+        concentration_score = _clamp01((share - uniform_share) / max(0.01, 1.0 - uniform_share))
+    else:
+        concentration_score = 0.0
+
+    quality_score = _clamp01((top - 18.0) / 22.0)
+    field_score = _clamp01(len(scores) / 12.0)
+    shape_score = _clamp01(
+        0.34 * top_gap_score
+        + 0.28 * top3_gap_score
+        + 0.20 * concentration_score
+        + 0.12 * quality_score
+        + 0.06 * field_score
+    )
+    return {
+        "shape_score": shape_score,
+        "top_gap_score": top_gap_score,
+        "top3_gap_score": top3_gap_score,
+        "concentration_score": concentration_score,
+    }
+
+
+def strategy_confidence_score(payload):
     strategy = dict(payload.get("strategy") or {})
+    explicit = _explicit_confidence_score(strategy.get("confidence_score"))
+    if explicit is None:
+        explicit = _explicit_confidence_score(payload.get("confidence_score"))
+    if explicit is not None:
+        return round(_clamp01(explicit), 6)
+
     confidence = _safe_text(strategy.get("confidence")).lower()
-    return CONFIDENCE_SCORE.get(confidence, 0.5)
+    prior = CONFIDENCE_SCORE.get(confidence, 0.5)
+    metrics = _score_shape_metrics(payload)
+    if not metrics:
+        return round(_clamp01(prior), 6)
+
+    confidence_score = 0.45 * prior + 0.55 * float(metrics.get("shape_score", 0.0) or 0.0)
+    return round(_clamp01(confidence_score), 6)
+
+
+def strategy_agreement_score(payload):
+    metrics = _score_shape_metrics(payload)
+    if metrics:
+        score = (
+            0.55 * float(metrics.get("top_gap_score", 0.0) or 0.0)
+            + 0.30 * float(metrics.get("top3_gap_score", 0.0) or 0.0)
+            + 0.15 * float(metrics.get("concentration_score", 0.0) or 0.0)
+        )
+        return round(_clamp01(score), 6)
+    return strategy_confidence_score(payload)
+
+
+def _strategy_confidence(payload):
+    return strategy_confidence_score(payload)
 
 
 def _distance_label(race_info):
@@ -630,8 +727,8 @@ def _public_race_row(base_dir, payload, include_detail_fields=False):
         "predictor_compare_cards": [_public_card(payload)],
         "top5": _top_horse_items(payload, limit=5),
         "predictor_top5": {"agent": _top_horse_items(payload, limit=5)},
-        "confidence_score": _strategy_confidence(payload),
-        "agreement_score": _strategy_confidence(payload),
+        "confidence_score": strategy_confidence_score(payload),
+        "agreement_score": strategy_agreement_score(payload),
         "condition_predictor_ranking": {},
         "_agent_sort_key": (_course_sort_value(course), _race_no(race_id), race_id),
     }

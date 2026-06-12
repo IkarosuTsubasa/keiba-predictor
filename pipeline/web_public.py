@@ -624,6 +624,11 @@ def _public_share_runtime_html():
   background: #0f172a;
   border-color: rgba(15, 18, 24, 0.28);
 }
+.share-inline-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
 .share-inline-button img {
   width: 15px;
   height: 15px;
@@ -641,16 +646,19 @@ def _public_share_runtime_html():
 </style>
 <script>
 (() => {
-  const SHARE_DETAIL_LABEL = "__SHARE_DETAIL_LABEL__";
-  const SHARE_URL = "__SHARE_URL__";
   const SHARE_HASHTAG = "__SHARE_HASHTAG__";
-  const SHARE_MAX_CHARS = 130;
+  const IMAGE_WIDTH = 1200;
+  const IMAGE_HEIGHT = 675;
+  const FONT_FAMILY = '"Hiragino Sans", "Yu Gothic", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif';
+  const MARK_SYMBOLS = ["◎", "○", "▲", "△", "☆"];
 
-  const parseRaceHeader = (title) => {
+  const cleanText = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+
+  const formatRaceTitle = (title) => {
     const text = String(title || "").trim();
     const matched = text.match(/^(.*?)(\\d+R)$/i);
     if (!matched) {
-      return text ? `#${text}` : "#\\u7af6\\u99acAI";
+      return text || "\\u7af6\\u99acAI";
     }
     let venue = String(matched[1] || "").replace(/\\s+/g, "");
     const raceNo = String(matched[2] || "").trim();
@@ -658,101 +666,329 @@ def _public_share_runtime_html():
       venue += "\\u7af6\\u99ac";
     }
     if (venue) {
-      return `#${venue} ${raceNo}`;
+      return `${venue} ${raceNo}`;
     }
-    return raceNo || "#\\u7af6\\u99acAI";
+    return raceNo || "\\u7af6\\u99acAI";
   };
 
-  const toAbsoluteUrl = (href) => {
-    const text = String(href || "").trim();
-    if (!text) {
-      return SHARE_URL;
-    }
-    try {
-      return new URL(text, window.location.origin).toString();
-    } catch (_error) {
-      return SHARE_URL;
-    }
+  const drawRoundRect = (ctx, x, y, width, height, radius) => {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   };
 
-  const resolveDetailUrl = (card) => {
-    if (window.location.pathname.includes("/race/")) {
-      return window.location.href;
-    }
-    const raceCard = card?.closest(".race-card");
-    const detailHref = raceCard?.querySelector(".race-card__toggle")?.getAttribute("href") || "";
-    return toAbsoluteUrl(detailHref);
+  const fillRoundRect = (ctx, x, y, width, height, radius, fillStyle) => {
+    drawRoundRect(ctx, x, y, width, height, radius);
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
   };
 
-  const replaceShareUrl = (text, detailUrl) => {
-    const source = String(text || "").trim();
-    if (!source) {
-      return "";
-    }
-    const escapedShareUrl = SHARE_URL.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&");
-    const placeholderLinePattern = new RegExp(`(^|\\n)${escapedShareUrl}(?=\\n|$)`, "g");
-    return placeholderLinePattern.test(source)
-      ? source.replace(placeholderLinePattern, (matched, prefix) => `${prefix}${detailUrl}`)
-      : source;
+  const strokeRoundRect = (ctx, x, y, width, height, radius, strokeStyle, lineWidth = 1) => {
+    drawRoundRect(ctx, x, y, width, height, radius);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
   };
 
-  const buildShareText = (raceTitle, card) => {
-    const detailUrl = resolveDetailUrl(card);
-    const presetText = String(card?.dataset?.shareText || "").trim();
-    if (presetText) {
-      return replaceShareUrl(presetText, detailUrl);
+  const setFont = (ctx, weight, size) => {
+    ctx.font = `${weight} ${size}px ${FONT_FAMILY}`;
+  };
+
+  const ellipsize = (ctx, text, maxWidth) => {
+    const source = cleanText(text);
+    if (!source || ctx.measureText(source).width <= maxWidth) {
+      return source;
     }
-    let marksText = "\\u5370\\u306a\\u3057";
+    let out = source;
+    while (out.length > 1 && ctx.measureText(`${out}...`).width > maxWidth) {
+      out = out.slice(0, -1);
+    }
+    return `${out}...`;
+  };
+
+  const drawText = (ctx, text, x, y, maxWidth) => {
+    ctx.fillText(maxWidth ? ellipsize(ctx, text, maxWidth) : cleanText(text), x, y);
+  };
+
+  const drawPill = (ctx, text, x, y, options = {}) => {
+    const label = cleanText(text);
+    if (!label) {
+      return 0;
+    }
+    const size = options.size || 22;
+    const weight = options.weight || 700;
+    const paddingX = options.paddingX || 18;
+    const height = options.height || 44;
+    setFont(ctx, weight, size);
+    const width = Math.ceil(ctx.measureText(label).width + paddingX * 2);
+    fillRoundRect(ctx, x, y, width, height, Math.min(18, height / 2), options.fill || "rgba(199, 166, 109, 0.14)");
+    strokeRoundRect(ctx, x, y, width, height, Math.min(18, height / 2), options.stroke || "rgba(199, 166, 109, 0.34)", 1);
+    ctx.fillStyle = options.color || "#f5f1ea";
+    ctx.textBaseline = "middle";
+    drawText(ctx, label, x + paddingX, y + height / 2 + 1, width - paddingX * 2);
+    ctx.textBaseline = "alphabetic";
+    return width;
+  };
+
+  const parseMarks = (text) => [...String(text || "").matchAll(/([◎○▲△☆])\\s*([0-9]+)/g)]
+    .map((item) => ({
+      symbol: item[1],
+      horseNo: item[2],
+    }))
+    .filter((item) => item.symbol && item.horseNo);
+
+  const uniqueMarks = (marks) => {
+    const seen = new Set();
+    return Array.from(marks || []).filter((item) => {
+      const key = `${item.symbol}-${item.horseNo}`;
+      if (!item.symbol || !item.horseNo || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const collectMarks = (card) => {
+    if (!card) {
+      return [];
+    }
     if (card.matches(".model-card")) {
       const blocks = Array.from(card.querySelectorAll(".model-block"));
-      marksText = blocks[2]?.querySelector("p")?.innerText || "\\u5370\\u306a\\u3057";
-    } else {
-      const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
-      const subMarks = Array.from(card.querySelectorAll(".ai-pick-summary__submark")).map((item) => {
-        const symbol = item.querySelector("em")?.textContent?.trim() || "";
-        const horseNo = item.querySelector("strong")?.textContent?.trim() || "";
-        return symbol && horseNo ? `${symbol}${horseNo}` : "";
-      }).filter(Boolean);
-      const markParts = [];
-      if (mainHorse) {
-        markParts.push(`\\u25ce${mainHorse}`);
-      }
-      markParts.push(...subMarks);
-      if (markParts.length) {
-        marksText = markParts.join(" ");
-      }
+      return uniqueMarks(parseMarks(blocks[2]?.querySelector("p")?.innerText || ""));
     }
-    const header = parseRaceHeader(raceTitle);
-    const tailLines = [SHARE_DETAIL_LABEL, detailUrl, SHARE_HASHTAG];
-    let text = [header, String(marksText || "\\u5370\\u306a\\u3057").trim() || "\\u5370\\u306a\\u3057", "", ...tailLines].join("\\n");
-    if (text.length <= SHARE_MAX_CHARS) {
-      return text;
+    if (card.matches(".model-race-summary")) {
+      return uniqueMarks(Array.from(card.querySelectorAll(".model-race-summary__mark")).map((item) => ({
+        symbol: item.querySelector("em")?.textContent?.trim() || "",
+        horseNo: item.querySelector("strong")?.textContent?.trim() || "",
+      })));
     }
-    const tailLength = ["", ...tailLines].join("\\n").length;
-    const remain = Math.max(1, SHARE_MAX_CHARS - header.length - tailLength - 3);
-    return [header, String(marksText || "\\u5370\\u306a\\u3057").trim().slice(0, remain), "", ...tailLines].join("\\n");
+    const presetMarks = parseMarks(card.dataset?.shareText || "");
+    const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
+    const mainSymbol = card.querySelector(".ai-pick-summary__main span")?.textContent?.trim() || "◎";
+    const marks = [];
+    if (mainHorse && mainHorse !== "-") {
+      marks.push({ symbol: mainSymbol || "◎", horseNo: mainHorse });
+    }
+    marks.push(
+      ...Array.from(card.querySelectorAll(".ai-pick-summary__submark")).map((item) => ({
+        symbol: item.querySelector("em")?.textContent?.trim() || "",
+        horseNo: item.querySelector("strong")?.textContent?.trim() || "",
+      })),
+    );
+    return uniqueMarks(marks.length ? marks : presetMarks);
   };
 
-  const openShare = async (text) => {
-    const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-    const isMobileShare =
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
-      (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) ||
-      ("ontouchstart" in window);
-    if (isMobileShare && navigator.share) {
-      try {
-        await navigator.share({ text });
-        return;
-      } catch (error) {
-        if (error && error.name === "AbortError") {
-          return;
-        }
-      }
+  const formatMark = (mark) => {
+    if (!mark || !mark.symbol || !mark.horseNo) {
+      return "";
     }
-    if (isMobileShare) {
-      window.location.href = shareUrl;
+    return `${mark.symbol} ${mark.horseNo}`;
+  };
+
+  const resolvePayload = (raceTitle, card) => {
+    const raceCard = card?.closest(".race-card") || card?.closest(".race-board") || null;
+    const header = raceCard?.querySelector(".race-card-header") || document;
+    const marks = collectMarks(card);
+    const mainMark =
+      marks.find((item) => item.symbol === "◎") ||
+      marks[0] ||
+      { symbol: "◎", horseNo: "-" };
+    const supportMarks = MARK_SYMBOLS
+      .filter((symbol) => symbol !== mainMark.symbol)
+      .map((symbol) => marks.find((item) => item.symbol === symbol))
+      .filter(Boolean)
+      .slice(0, 4);
+    const badges = Array.from(header.querySelectorAll(".race-card-header__badges span"))
+      .map((item) => cleanText(item.textContent))
+      .filter(Boolean)
+      .slice(0, 3);
+    const modelName =
+      cleanText(card?.querySelector(".ai-pick-summary__model")?.textContent) ||
+      cleanText(card?.closest(".model-top-five-board")?.querySelector(".model-top-five-board__tabs .is-active")?.textContent) ||
+      "\\u7dcf\\u5408\\u4e88\\u6e2c";
+    const metaBadge = card?.querySelector(".model-meta-badge");
+    const metaLabel = cleanText(metaBadge?.querySelector("span")?.textContent);
+    const metaValue = cleanText(metaBadge?.querySelector("strong")?.textContent);
+    const confidence = cleanText(raceCard?.querySelector(".race-card__metric-cell strong")?.textContent);
+    const decision = cleanText(raceCard?.querySelector(".race-card__decision-cell strong")?.textContent);
+    const status = cleanText(header.querySelector(".race-card-header__status")?.textContent);
+    return {
+      raceTitle: formatRaceTitle(raceTitle),
+      subtitle: cleanText(header.querySelector(".race-card-header__subtitle")?.textContent),
+      badges,
+      modelName,
+      metaLabel,
+      metaValue,
+      confidence,
+      decision,
+      status,
+      mainMark,
+      supportMarks,
+    };
+  };
+
+  const buildShareText = (raceTitle) => {
+    const header = formatRaceTitle(raceTitle);
+    return [header, "AI\\u6700\\u7d42\\u8a55\\u4fa1\\u3092\\u753b\\u50cf\\u3067\\u5171\\u6709", "", SHARE_HASHTAG]
+      .filter((line) => String(line || "").trim())
+      .join("\\n");
+  };
+
+  const drawShareImage = (payload) => new Promise((resolve, reject) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = IMAGE_WIDTH;
+    canvas.height = IMAGE_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      reject(new Error("canvas context unavailable"));
       return;
     }
+
+    const bg = ctx.createLinearGradient(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
+    bg.addColorStop(0, "#05080d");
+    bg.addColorStop(0.52, "#091018");
+    bg.addColorStop(1, "#101923");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
+
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = "#c7a66d";
+    ctx.lineWidth = 1;
+    for (let x = 72; x < IMAGE_WIDTH; x += 96) {
+      ctx.beginPath();
+      ctx.moveTo(x, 36);
+      ctx.lineTo(x - 220, IMAGE_HEIGHT - 36);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    fillRoundRect(ctx, 46, 36, IMAGE_WIDTH - 92, IMAGE_HEIGHT - 72, 18, "rgba(16, 25, 37, 0.86)");
+    strokeRoundRect(ctx, 46, 36, IMAGE_WIDTH - 92, IMAGE_HEIGHT - 72, 18, "rgba(202, 184, 145, 0.28)", 2);
+
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 800, 30);
+    drawText(ctx, "\\u3044\\u304b\\u3044\\u3082AI\\u7af6\\u99ac", 74, 80, 320);
+    ctx.fillStyle = "#9ba7b8";
+    setFont(ctx, 700, 19);
+    drawText(ctx, "AI\\u6700\\u7d42\\u8a55\\u4fa1", 74, 112, 260);
+
+    let pillX = 820;
+    const topPills = [payload.status, payload.decision].filter(Boolean).slice(0, 2);
+    topPills.forEach((pill) => {
+      const width = drawPill(ctx, pill, pillX, 58, {
+        size: 22,
+        height: 44,
+        fill: "rgba(107, 211, 155, 0.12)",
+        stroke: "rgba(107, 211, 155, 0.34)",
+        color: "#d7ffe7",
+      });
+      pillX += width + 12;
+    });
+
+    ctx.fillStyle = "#f5f1ea";
+    setFont(ctx, 900, 58);
+    drawText(ctx, payload.raceTitle || "\\u7af6\\u99acAI", 74, 174, 790);
+
+    ctx.fillStyle = "#9ba7b8";
+    setFont(ctx, 700, 24);
+    drawText(ctx, payload.subtitle || payload.badges.join(" / "), 76, 214, 700);
+
+    fillRoundRect(ctx, 74, 248, 438, 236, 18, "rgba(5, 8, 13, 0.58)");
+    strokeRoundRect(ctx, 74, 248, 438, 236, 18, "rgba(199, 166, 109, 0.36)", 2);
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 900, 118);
+    drawText(ctx, payload.mainMark.symbol || "◎", 112, 392, 140);
+    ctx.fillStyle = "#f5f1ea";
+    setFont(ctx, 900, 158);
+    drawText(ctx, payload.mainMark.horseNo || "-", 270, 405, 180);
+    ctx.fillStyle = "#9ba7b8";
+    setFont(ctx, 700, 24);
+    drawText(ctx, "\\u672c\\u547d\\u30b7\\u30b0\\u30ca\\u30eb", 116, 448, 250);
+
+    fillRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(21, 32, 46, 0.78)");
+    strokeRoundRect(ctx, 544, 248, 582, 236, 18, "rgba(202, 184, 145, 0.18)", 1);
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 800, 22);
+    drawText(ctx, "\\u63a1\\u7528\\u30e2\\u30c7\\u30eb", 580, 300, 210);
+    ctx.fillStyle = "#f5f1ea";
+    setFont(ctx, 900, 44);
+    drawText(ctx, payload.modelName || "\\u7dcf\\u5408\\u4e88\\u6e2c", 580, 354, 500);
+
+    const metricText =
+      payload.metaLabel && payload.metaValue && payload.metaLabel !== "\\u6307\\u6a19"
+        ? `${payload.metaLabel} ${payload.metaValue}`
+        : (payload.metaValue || payload.metaLabel);
+    const infoItems = [
+      ["\\u6307\\u6a19", metricText],
+      ["\\u4fe1\\u983c\\u5ea6", payload.confidence],
+      ["\\u72b6\\u614b", payload.status],
+    ].filter((item) => cleanText(item[1]));
+    let infoX = 580;
+    let infoY = 392;
+    infoItems.slice(0, 3).forEach((item) => {
+      fillRoundRect(ctx, infoX, infoY, 164, 58, 14, "rgba(255, 255, 255, 0.045)");
+      ctx.fillStyle = "#9ba7b8";
+      setFont(ctx, 700, 17);
+      drawText(ctx, item[0], infoX + 18, infoY + 23, 126);
+      ctx.fillStyle = "#f5f1ea";
+      setFont(ctx, 800, 21);
+      drawText(ctx, item[1], infoX + 18, infoY + 48, 126);
+      infoX += 178;
+    });
+
+    fillRoundRect(ctx, 74, 520, 1052, 78, 18, "rgba(199, 166, 109, 0.10)");
+    strokeRoundRect(ctx, 74, 520, 1052, 78, 18, "rgba(199, 166, 109, 0.24)", 1);
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 800, 22);
+    drawText(ctx, "\\u4e0a\\u4f4d\\u5370", 106, 568, 120);
+    let markX = 226;
+    const support = payload.supportMarks.length ? payload.supportMarks : [];
+    support.forEach((mark) => {
+      const width = drawPill(ctx, formatMark(mark), markX, 538, {
+        size: 32,
+        height: 46,
+        paddingX: 20,
+        fill: "rgba(245, 241, 234, 0.055)",
+        stroke: "rgba(245, 241, 234, 0.12)",
+        color: "#f5f1ea",
+      });
+      markX += width + 14;
+    });
+    if (!support.length) {
+      ctx.fillStyle = "#f5f1ea";
+      setFont(ctx, 800, 32);
+      drawText(ctx, "\\u5370\\u306a\\u3057", markX, 570, 240);
+    }
+
+    ctx.fillStyle = "#9ba7b8";
+    setFont(ctx, 700, 22);
+    drawText(ctx, "\\u4e88\\u6e2c\\u5370\\u30fb\\u8cb7\\u3044\\u76ee\\u3092\\u6bce\\u65e5\\u66f4\\u65b0", 74, 626, 460);
+    ctx.fillStyle = "#c7a66d";
+    setFont(ctx, 800, 22);
+    drawText(ctx, SHARE_HASHTAG, 760, 626, 360);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("image blob unavailable"));
+      }
+    }, "image/png", 0.94);
+  });
+
+  const openTextShare = (text) => {
+    const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     const width = 720;
     const height = 640;
     const left = Math.max(0, Math.round((window.screen.width - width) / 2));
@@ -770,6 +1006,34 @@ def _public_share_runtime_html():
       return;
     }
     window.location.href = shareUrl;
+  };
+
+  const downloadBlob = (blob) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "ikaimo-ai-keiba-share.png";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const openShare = async (text, payload) => {
+    const blob = await drawShareImage(payload);
+    const file = new File([blob], "ikaimo-ai-keiba-share.png", { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file], text }) && navigator.share) {
+      try {
+        await navigator.share({ files: [file], text });
+        return;
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          return;
+        }
+      }
+    }
+    downloadBlob(blob);
+    openTextShare(text);
   };
 
   const createShareButton = () => {
@@ -837,7 +1101,7 @@ def _public_share_runtime_html():
   };
 
   const findCardsForShare = (root) => {
-    const modernCards = Array.from(root.querySelectorAll(".ai-pick-summary"));
+    const modernCards = Array.from(root.querySelectorAll(".ai-pick-summary, .model-race-summary"));
     if (modernCards.length) {
       return modernCards;
     }
@@ -852,6 +1116,12 @@ def _public_share_runtime_html():
     if (card.matches(".model-card")) {
       const marksText = card.querySelector(".model-block:nth-child(3) p")?.innerText || "";
       return String(marksText).trim() && !String(marksText).includes("印なし");
+    }
+    if (card.matches(".model-race-summary")) {
+      return Array.from(card.querySelectorAll(".model-race-summary__mark strong")).some((item) => {
+        const text = item.textContent?.trim() || "";
+        return text && text !== "-";
+      });
     }
     const mainHorse = card.querySelector(".ai-pick-summary__main strong")?.textContent?.trim() || "";
     const subMarks = Array.from(card.querySelectorAll(".ai-pick-summary__submark")).length;
@@ -913,11 +1183,17 @@ def _public_share_runtime_html():
         return;
       }
       const selected = pickCardForShare(cards);
-      const text = buildShareText(title.textContent || "", selected);
+      const text = buildShareText(title.textContent || "");
       if (!text) {
         return;
       }
-      await openShare(text);
+      const payload = resolvePayload(title.textContent || "", selected);
+      button.disabled = true;
+      try {
+        await openShare(text, payload);
+      } finally {
+        button.disabled = false;
+      }
     };
     button.addEventListener("click", handleShare);
     button.addEventListener("pointerdown", (event) => {
@@ -952,11 +1228,17 @@ def _public_share_runtime_html():
         return;
       }
       const selected = pickCardForShare(cards);
-      const text = buildShareText(title.textContent || "", selected);
+      const text = buildShareText(title.textContent || "");
       if (!text) {
         return;
       }
-      await openShare(text);
+      const payload = resolvePayload(title.textContent || "", selected);
+      button.disabled = true;
+      try {
+        await openShare(text, payload);
+      } finally {
+        button.disabled = false;
+      }
     };
     button.addEventListener("click", handleShare);
     button.addEventListener("pointerdown", (event) => {
@@ -989,12 +1271,7 @@ def _public_share_runtime_html():
 })();
 </script>
 """
-    return (
-        runtime
-        .replace('"__SHARE_DETAIL_LABEL__"', json.dumps(PUBLIC_SHARE_DETAIL_LABEL, ensure_ascii=True))
-        .replace('"__SHARE_URL__"', json.dumps(PUBLIC_SHARE_URL, ensure_ascii=True))
-        .replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
-    )
+    return runtime.replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
 
 
 def inject_public_share_runtime(html_text):

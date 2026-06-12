@@ -25,6 +25,35 @@ class AgentPredictionsScopeTests(unittest.TestCase):
         self.assertTrue(agent_predictions._scope_matches(payload, "local"))
         self.assertFalse(agent_predictions._scope_matches(payload, "central_dirt"))
 
+    def test_strategy_confidence_uses_score_shape_with_same_label(self) -> None:
+        close_payload = {
+            "strategy": {"confidence": "high"},
+            "horse_scores": [
+                {"horse_no": 1, "total_score": 31.0},
+                {"horse_no": 2, "total_score": 30.8},
+                {"horse_no": 3, "total_score": 30.5},
+                {"horse_no": 4, "total_score": 28.0},
+                {"horse_no": 5, "total_score": 27.0},
+            ],
+        }
+        clear_payload = {
+            "strategy": {"confidence": "high"},
+            "horse_scores": [
+                {"horse_no": 1, "total_score": 39.0},
+                {"horse_no": 2, "total_score": 29.0},
+                {"horse_no": 3, "total_score": 27.0},
+                {"horse_no": 4, "total_score": 24.0},
+                {"horse_no": 5, "total_score": 21.0},
+            ],
+        }
+
+        close_score = agent_predictions.strategy_confidence_score(close_payload)
+        clear_score = agent_predictions.strategy_confidence_score(clear_payload)
+
+        self.assertGreater(clear_score, close_score)
+        self.assertNotEqual(close_score, 0.82)
+        self.assertNotEqual(clear_score, 0.82)
+
 
 if __name__ == "__main__":
     unittest.main()

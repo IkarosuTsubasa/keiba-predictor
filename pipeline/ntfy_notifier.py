@@ -193,6 +193,14 @@ def _agent_confidence_score(value):
     return _safe_float(value, 0.0)
 
 
+def _agent_payload_confidence_score(payload, fallback_value=""):
+    try:
+        from web_data.agent_predictions import strategy_confidence_score
+    except ImportError:
+        return _agent_confidence_score(fallback_value)
+    return strategy_confidence_score(dict(payload or {}))
+
+
 def _agent_confidence_label(value):
     text = str(value or "").strip().lower()
     return {
@@ -260,7 +268,7 @@ def agent_prediction_notification_evaluation(base_dir, race_id, payload=None, jo
     strategy = dict(data.get("strategy") or {})
     decision = str(strategy.get("bet_decision", "") or "").strip().lower()
     confidence_label = str(strategy.get("confidence", "") or "").strip()
-    confidence_score = _agent_confidence_score(confidence_label)
+    confidence_score = _agent_payload_confidence_score(data, confidence_label)
     threshold = high_evaluation_notify_threshold()
 
     if decision == "bet":
