@@ -44,6 +44,12 @@ OFFLINE_RESEARCH_FILES = (
     "context_summary.csv",
     "history_races.csv",
 )
+AGENT_HTML_CACHE_RETENTION_DAYS = {
+    "html_cache": 14,
+    "horse_html_cache": 14,
+    "pedigree_html_cache": 14,
+    "result_html_cache": 30,
+}
 REFERENCED_ARTIFACT_STATUSES = {"settled", "failed"}
 ARCHIVABLE_JOB_STATUSES = {"settled", "failed", "deleted"}
 
@@ -146,6 +152,14 @@ def _remove_empty_dir(path: Path, dry_run: bool):
     return not path.exists()
 
 
+def _is_relative_to(path: Path, root: Path):
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _iter_scope_dirs():
     for name in SCOPE_NAMES:
         path = DATA_DIR / name
@@ -183,6 +197,53 @@ def _collect_race_dir_paths(scope_dir: Path):
 def _collect_prompt_input_paths(scope_dir: Path):
     for pattern in PROMPT_INPUT_PATTERNS:
         yield from scope_dir.rglob(pattern)
+
+
+def _cleanup_agent_html_caches(*, dry_run: bool):
+    agent_data_dir = BASE_DIR.parent / "keiba_llm_agent" / "data"
+    if not agent_data_dir.exists() or not agent_data_dir.is_dir():
+        return {
+            "agent_data_dir": str(agent_data_dir),
+            "removed_files": [],
+            "removed_empty_dirs": [],
+            "retention_days": dict(AGENT_HTML_CACHE_RETENTION_DAYS),
+        }
+
+    root = agent_data_dir.resolve()
+    now = datetime.now()
+    removed_files = []
+    removed_empty_dirs = []
+
+    for dir_name, retention_days in AGENT_HTML_CACHE_RETENTION_DAYS.items():
+        cache_dir = (root / dir_name).resolve()
+        if not _is_relative_to(cache_dir, root):
+            continue
+        if not cache_dir.exists() or not cache_dir.is_dir():
+            continue
+        cutoff = now - timedelta(days=max(1, int(retention_days or 14)))
+        for path in cache_dir.rglob("*"):
+            if not path.exists() or not path.is_file():
+                continue
+            if not _is_relative_to(path, cache_dir):
+                continue
+            if not _older_than(path, cutoff):
+                continue
+            if _remove_file(path, dry_run):
+                removed_files.append(str(path))
+
+        dirs = [path for path in cache_dir.rglob("*") if path.is_dir()]
+        for path in sorted(dirs, key=lambda item: len(item.parts), reverse=True):
+            if not _is_relative_to(path, cache_dir):
+                continue
+            if _remove_empty_dir(path, dry_run):
+                removed_empty_dirs.append(str(path))
+
+    return {
+        "agent_data_dir": str(agent_data_dir),
+        "removed_files": removed_files,
+        "removed_empty_dirs": removed_empty_dirs,
+        "retention_days": dict(AGENT_HTML_CACHE_RETENTION_DAYS),
+    }
 
 
 def _job_retention_dt(job):
@@ -462,6 +523,8 @@ def cleanup(
                 _remove_old_files(research_paths, research_cutoff, dry_run)
             )
 
+    agent_html_cache_summary = _cleanup_agent_html_caches(dry_run=dry_run)
+
     summary = {
         "dry_run": bool(dry_run),
         "workspace_hours": int(workspace_hours),
@@ -483,6 +546,7 @@ def cleanup(
         "removed_legacy_race_files": removed_legacy_race_files,
         "removed_prompt_input_files": removed_prompt_input_files,
         "removed_offline_research_files": removed_offline_research_files,
+        "agent_html_caches": agent_html_cache_summary,
     }
     summary["totals"] = {
         "archived_jobs": len(archived_jobs_summary.get("archived_job_ids", [])),
@@ -500,6 +564,8 @@ def cleanup(
         "legacy_race_files": len(removed_legacy_race_files),
         "prompt_input_files": len(removed_prompt_input_files),
         "offline_research_files": len(removed_offline_research_files),
+        "agent_html_cache_files": len(agent_html_cache_summary.get("removed_files", [])),
+        "agent_html_cache_empty_dirs": len(agent_html_cache_summary.get("removed_empty_dirs", [])),
     }
     return summary
 
