@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import AdminLoginPage, { ADMIN_TOKEN_STORAGE_KEY } from "./AdminLoginPage";
 import PageSectionHeader from "./PageSectionHeader";
 
@@ -8,6 +8,8 @@ const TRACK_CONDITION_OPTIONS = [
   { value: "\u91cd", label: "\u91cd" },
   { value: "\u4e0d\u826f", label: "\u4e0d\u826f" },
 ];
+
+const ADMIN_JOBS_AUTO_REFRESH_MS = 15 * 1000;
 
 const LOCATION_CANDIDATES = [
   "札幌",
@@ -961,6 +963,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     error: "",
     data: null,
   });
+  const busyActionRef = useRef("");
+
+  useEffect(() => {
+    busyActionRef.current = busyAction;
+  }, [busyAction]);
 
   useEffect(() => {
     if (!token.trim()) {
@@ -970,8 +977,8 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     }
 
     let alive = true;
-    setState((prev) => ({ ...prev, loading: true, error: "" }));
-    setHealthState((prev) => ({ ...prev, loading: true, error: "" }));
+    setState((prev) => ({ ...prev, loading: !prev.data, error: "" }));
+    setHealthState((prev) => ({ ...prev, loading: !prev.data, error: "" }));
     fetch(`${appBasePath}/api/admin/jobs?show_settled=${showSettled ? "1" : "0"}`, {
       headers: {
         Accept: "application/json",
@@ -997,7 +1004,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
           setToken("");
         }
-        setState({ loading: false, error: error?.message || "管理タスクの読み込みに失敗しました。", data: null });
+        setState((prev) => ({
+          loading: false,
+          error: error?.message || "管理タスクの読み込みに失敗しました。",
+          data: prev.data,
+        }));
       });
 
     fetch(`${appBasePath}/api/admin/agent_health`, {
@@ -1021,13 +1032,28 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
       })
       .catch((error) => {
         if (!alive) return;
-        setHealthState({ loading: false, error: error?.message || "ヘルスチェックの読み込みに失敗しました。", data: null });
+        setHealthState((prev) => ({
+          loading: false,
+          error: error?.message || "ヘルスチェックの読み込みに失敗しました。",
+          data: prev.data,
+        }));
       });
 
     return () => {
       alive = false;
     };
   }, [appBasePath, showSettled, token, reloadTick]);
+
+  useEffect(() => {
+    if (!token.trim()) return undefined;
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      if (busyActionRef.current) return;
+      setReloadTick((value) => value + 1);
+    };
+    const timerId = window.setInterval(tick, ADMIN_JOBS_AUTO_REFRESH_MS);
+    return () => window.clearInterval(timerId);
+  }, [token]);
 
   async function postJson(path, payload) {
     const response = await fetch(`${appBasePath}${path}`, {
