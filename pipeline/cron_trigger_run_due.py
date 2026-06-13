@@ -11,7 +11,7 @@ import urllib.request
 def main():
     trigger_url = str(os.environ.get("RUN_DUE_TRIGGER_URL", "") or "").strip()
     admin_token = str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
-    timeout_s = int(str(os.environ.get("RUN_DUE_TRIGGER_TIMEOUT_SECONDS", "60") or "60").strip() or "60")
+    timeout_s = int(str(os.environ.get("RUN_DUE_TRIGGER_TIMEOUT_SECONDS", "180") or "180").strip() or "180")
     max_attempts = int(str(os.environ.get("RUN_DUE_TRIGGER_RETRY_COUNT", "3") or "3").strip() or "3")
 
     if not trigger_url:

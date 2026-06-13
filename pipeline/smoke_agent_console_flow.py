@@ -43,6 +43,7 @@ def run_due_once(base_dir):
         load_race_jobs=load_jobs,
         update_race_job=update_job,
         compute_race_job_initial_status=compute_initial_status,
+        create_race_job=create_job,
     )
 
 

@@ -43,6 +43,7 @@ LOCAL_VENUE_MAP = {
     "51": "姫路",
     "54": "高知",
     "55": "佐賀",
+    "65": "帯広",
 }
 KNOWN_VENUES = set(CENTRAL_VENUE_MAP.values()) | set(LOCAL_VENUE_MAP.values())
 TRACK_CONDITION_MAP = {

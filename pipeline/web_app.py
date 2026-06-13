@@ -194,6 +194,7 @@ def run_due_jobs_once():
         load_race_jobs=load_race_jobs,
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
+        create_race_job=create_race_job,
         history_source="admin",
     )
 
@@ -5987,6 +5988,7 @@ def admin_jobs_run_due_now_api(request: Request):
         load_race_jobs=load_race_jobs,
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
+        create_race_job=create_race_job,
         history_source="admin",
     )
 
@@ -6074,6 +6076,7 @@ def internal_run_due(request: Request):
         load_race_jobs=load_race_jobs,
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
+        create_race_job=create_race_job,
     )
 
 

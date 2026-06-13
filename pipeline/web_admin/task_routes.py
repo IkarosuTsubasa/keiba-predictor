@@ -17,7 +17,8 @@ from fetch_central_result import (
     fetch_html as fetch_official_result_html,
     parse_result_page as parse_official_result_page,
 )
-from race_meta_fetcher import build_shutuba_url, fetch_race_meta, infer_source_from_race_id
+from race_discovery import discover_races_for_date
+from race_meta_fetcher import build_shutuba_url, fetch_race_meta, infer_source_from_race_id, normalize_race_id
 from race_job_store import initialize_job_step_fields as _initialize_race_job_step_fields
 from race_job_store import set_job_step_state as _set_race_job_step_state
 from v5_remote_tasks import create_task as create_remote_task
@@ -31,6 +32,7 @@ AGENT_RESULT_DELAY_MINUTES = 15
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
 RUN_DUE_HISTORY_FILE = "run_due_history.jsonl"
+RUN_DUE_AUTO_DISCOVERY_STATE_FILE = "run_due_auto_discovery_state.json"
 RUN_DUE_HISTORY_MAX_LINES = 120
 ACTIVE_RUN_DUE_JOB_STATUSES = {
     "queued_morning",
@@ -59,6 +61,10 @@ def _run_due_cleanup_state_path(base_dir):
 
 def _run_due_history_path(base_dir):
     return Path(base_dir) / "data" / "_shared" / RUN_DUE_HISTORY_FILE
+
+
+def _run_due_auto_discovery_state_path(base_dir):
+    return Path(base_dir) / "data" / "_shared" / RUN_DUE_AUTO_DISCOVERY_STATE_FILE
 
 
 def _trim_run_due_history(path):
@@ -266,6 +272,286 @@ def _maybe_run_daily_cleanup(*, base_dir, load_race_jobs):
         "last_cleanup_jst_date": cleanup_record["last_cleanup_jst_date"],
         "totals": cleanup_record["last_cleanup_totals"],
     }
+
+
+def _env_flag(name, default=True):
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+def _env_int(name, default):
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        return int(default)
+
+
+def _load_auto_discovery_state(base_dir):
+    path = _run_due_auto_discovery_state_path(base_dir)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_auto_discovery_state(base_dir, payload):
+    path = _run_due_auto_discovery_state_path(base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(payload or {}), ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _agent_job_date(job):
+    race_date = str((job or {}).get("race_date", "") or "").strip()
+    if race_date:
+        return race_date
+    off_time = str((job or {}).get("scheduled_off_time", "") or "").strip()
+    if len(off_time) >= 10:
+        return off_time[:10]
+    return ""
+
+
+def _is_agent_prediction_row(job):
+    return str((job or {}).get("job_source", "") or "").strip().lower() == "agent_prediction"
+
+
+def _agent_jobs_for_date(load_race_jobs, base_dir, race_date):
+    target_date = str(race_date or "").strip()
+    rows = []
+    for job in list(load_race_jobs(base_dir) or []):
+        if not _is_agent_prediction_row(job):
+            continue
+        if _agent_job_date(job) == target_date:
+            rows.append(dict(job or {}))
+    return rows
+
+
+def _find_existing_agent_job_for_race(jobs, race_id, race_date):
+    race_id_text = normalize_race_id(race_id)
+    target_date = str(race_date or "").strip()
+    for job in list(jobs or []):
+        if not _is_agent_prediction_row(job):
+            continue
+        if normalize_race_id((job or {}).get("race_id", "")) != race_id_text:
+            continue
+        if target_date and _agent_job_date(job) != target_date:
+            continue
+        return dict(job or {})
+    return None
+
+
+def _meta_payload_for_auto_discovered_race(race_id, source, race_date, timeout=30):
+    payload = fetch_race_meta(race_id, source=source, timeout=timeout)
+    race_date_text = str(race_date or "").strip()
+    if race_date_text:
+        scheduled_off_time = str(payload.get("scheduled_off_time", "") or "").strip()
+        if "T" in scheduled_off_time:
+            payload["scheduled_off_time"] = f"{race_date_text}T{scheduled_off_time.split('T', 1)[1]}"
+        payload["race_date"] = race_date_text
+    return payload
+
+
+def _annotate_auto_discovered_job(base_dir, update_race_job, job_id, meta_payload, discovered_row):
+    payload = dict(meta_payload or {})
+    source_row = dict(discovered_row or {})
+
+    def _apply(row, now_text):
+        row["race_number"] = str(payload.get("race_number", "") or "").strip()
+        row["meta_source_url"] = str(payload.get("source_url", "") or source_row.get("shutuba_url", "") or "").strip()
+        row["meta_fetched_at"] = now_text
+        row["meta_error"] = ""
+        row["meta_retry_count"] = str(row.get("meta_retry_count", "0") or "0")
+
+    return update_race_job(base_dir, job_id, _apply)
+
+
+def _maybe_auto_discover_agent_race_jobs(
+    *,
+    base_dir,
+    load_race_jobs,
+    update_race_job,
+    create_race_job=None,
+    now_dt=None,
+):
+    enabled = _env_flag("PIPELINE_AUTO_DISCOVER_RACES_ENABLED", True)
+    now = now_dt or _jst_now()
+    target_date = now.date().isoformat()
+    base_summary = {
+        "enabled": enabled,
+        "attempted": False,
+        "reason": "",
+        "target_date": target_date,
+        "created_count": 0,
+        "discovered_count": 0,
+        "skipped_count": 0,
+        "error_count": 0,
+        "source_counts": {},
+        "created_job_ids": [],
+        "created_jobs": [],
+        "skipped_jobs": [],
+        "errors": [],
+    }
+    if not enabled:
+        base_summary["reason"] = "disabled"
+        return base_summary
+    if create_race_job is None:
+        base_summary["reason"] = "create_race_job_missing"
+        return base_summary
+
+    after_hour = max(0, min(23, _env_int("PIPELINE_AUTO_DISCOVER_AFTER_HOUR_JST", 6)))
+    if now.hour < after_hour:
+        base_summary["reason"] = "before_auto_discovery_hour"
+        return base_summary
+
+    state = _load_auto_discovery_state(base_dir)
+    state_for_date = dict((state.get(target_date) or {}) if isinstance(state.get(target_date), dict) else {})
+    if state_for_date.get("completed"):
+        base_summary["reason"] = "already_attempted"
+        base_summary["discovered_count"] = int(state_for_date.get("discovered_count", 0) or 0)
+        base_summary["source_counts"] = dict(state_for_date.get("source_counts", {}) or {})
+        return base_summary
+
+    existing_today_jobs = _agent_jobs_for_date(load_race_jobs, base_dir, target_date)
+    if existing_today_jobs and not state_for_date:
+        base_summary["reason"] = "agent_jobs_exist"
+        base_summary["skipped_count"] = len(existing_today_jobs)
+        base_summary["skipped_jobs"] = [
+            {
+                "race_id": str(job.get("race_id", "") or "").strip(),
+                "job_id": str(job.get("job_id", "") or "").strip(),
+                "reason": "agent_jobs_exist",
+            }
+            for job in existing_today_jobs[:20]
+        ]
+        return base_summary
+
+    base_summary["attempted"] = True
+    try:
+        discovery = discover_races_for_date(
+            target_date,
+            timeout=max(1, _env_int("PIPELINE_AUTO_DISCOVER_TIMEOUT_SECONDS", 30)),
+        )
+    except Exception as exc:
+        base_summary["reason"] = "discovery_failed"
+        base_summary["error_count"] = 1
+        base_summary["errors"].append({"kind": "discovery", "error": str(exc)})
+        return base_summary
+
+    races = list(discovery.get("races", []) or [])
+    base_summary["discovered_count"] = len(races)
+    base_summary["source_counts"] = dict(discovery.get("source_counts", {}) or {})
+    discovery_errors = list(discovery.get("errors", []) or [])
+    if discovery_errors:
+        base_summary["errors"].extend({"kind": "discovery_source", **dict(item or {})} for item in discovery_errors)
+
+    lead_minutes = max(0, _env_int("PIPELINE_AUTO_DISCOVER_LEAD_MINUTES", 60))
+    notes = str(os.environ.get("PIPELINE_AUTO_DISCOVER_JOB_NOTES", "auto_discovered") or "").strip()
+    current_jobs = list(load_race_jobs(base_dir) or [])
+    created = []
+    skipped = []
+    errors = []
+    for race in races:
+        race_id = normalize_race_id((race or {}).get("race_id", ""))
+        if not race_id:
+            continue
+        existing = _find_existing_agent_job_for_race(current_jobs, race_id, target_date)
+        if existing:
+            skipped.append(
+                {
+                    "race_id": race_id,
+                    "job_id": str(existing.get("job_id", "") or "").strip(),
+                    "reason": "already_exists",
+                }
+            )
+            continue
+        try:
+            source = str((race or {}).get("source", "") or "").strip().lower()
+            meta_payload = _meta_payload_for_auto_discovered_race(
+                race_id,
+                source=source,
+                race_date=target_date,
+                timeout=max(1, _env_int("PIPELINE_AUTO_DISCOVER_META_TIMEOUT_SECONDS", 10)),
+            )
+            job = create_race_job(
+                base_dir,
+                race_id=race_id,
+                scope_key=str(meta_payload.get("scope_key", "") or "").strip(),
+                race_name=str(meta_payload.get("race_name", "") or "").strip(),
+                location=str(meta_payload.get("location", "") or "").strip(),
+                race_date=target_date,
+                scheduled_off_time=str(meta_payload.get("scheduled_off_time", "") or "").strip(),
+                target_surface=str(meta_payload.get("target_surface", "") or "").strip(),
+                target_distance=str(meta_payload.get("target_distance", "") or "").strip(),
+                target_track_condition=str(meta_payload.get("target_track_condition", "") or "").strip() or "良",
+                lead_minutes=lead_minutes,
+                job_source="agent_prediction",
+                notes=notes,
+                artifacts=[],
+            )
+            updated = _annotate_auto_discovered_job(
+                base_dir,
+                update_race_job,
+                str((job or {}).get("job_id", "") or "").strip(),
+                meta_payload,
+                race,
+            )
+            job = updated or job
+            current_jobs.append(dict(job or {}))
+            created.append(
+                {
+                    "race_id": race_id,
+                    "job_id": str((job or {}).get("job_id", "") or "").strip(),
+                    "status": str((job or {}).get("status", "") or "").strip(),
+                    "scope_key": str((job or {}).get("scope_key", "") or "").strip(),
+                    "race_name": str((job or {}).get("race_name", "") or "").strip(),
+                    "scheduled_off_time": str((job or {}).get("scheduled_off_time", "") or "").strip(),
+                }
+            )
+        except Exception as exc:
+            errors.append({"race_id": race_id, "error": str(exc)})
+
+    base_summary["created_count"] = len(created)
+    base_summary["created_job_ids"] = [str(item.get("job_id", "") or "").strip() for item in created]
+    base_summary["created_jobs"] = created
+    base_summary["skipped_count"] = len(skipped)
+    base_summary["skipped_jobs"] = skipped
+    base_summary["errors"].extend({"kind": "create_job", **item} for item in errors)
+    base_summary["error_count"] = len(base_summary["errors"])
+    if created:
+        base_summary["reason"] = "created"
+    elif races:
+        base_summary["reason"] = "no_new_jobs"
+    elif discovery_errors:
+        base_summary["reason"] = "discovery_errors"
+    else:
+        base_summary["reason"] = "no_races"
+
+    state[target_date] = {
+        "completed": not bool(discovery_errors or errors),
+        "attempted_at": datetime.now().isoformat(timespec="seconds"),
+        "discovered_count": len(races),
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "error_count": base_summary["error_count"],
+        "source_counts": base_summary["source_counts"],
+        "reason": base_summary["reason"],
+        "created_race_ids": [str(item.get("race_id", "") or "").strip() for item in created],
+        "skipped_race_ids": [str(item.get("race_id", "") or "").strip() for item in skipped],
+    }
+    _save_auto_discovery_state(base_dir, state)
+    return base_summary
 
 
 def pick_next_process_job_id(*, load_race_jobs):
@@ -879,7 +1165,20 @@ def _log_diagnostic_summary(event, items, *, sample_reasons=None):
 def _compact_run_due_summary(summary):
     row = dict(summary or {})
     cleanup = dict(row.get("cleanup", {}) or {})
+    auto_discovery = dict(row.get("auto_discovery", {}) or {})
     return {
+        "auto_discovery": {
+            "enabled": bool(auto_discovery.get("enabled")),
+            "attempted": bool(auto_discovery.get("attempted")),
+            "created_count": int(auto_discovery.get("created_count", 0) or 0),
+            "discovered_count": int(auto_discovery.get("discovered_count", 0) or 0),
+            "skipped_count": int(auto_discovery.get("skipped_count", 0) or 0),
+            "error_count": int(auto_discovery.get("error_count", 0) or 0),
+            "reason": str(auto_discovery.get("reason", "") or "").strip(),
+            "target_date": str(auto_discovery.get("target_date", "") or "").strip(),
+            "source_counts": dict(auto_discovery.get("source_counts", {}) or {}),
+            "created_job_ids": list(auto_discovery.get("created_job_ids", []) or [])[:8],
+        },
         "autofill_count": int(row.get("autofill_count", 0) or 0),
         "queued_count": int(row.get("queued_count", 0) or 0),
         "processed_count": int(row.get("processed_count", 0) or 0),
@@ -922,8 +1221,33 @@ def run_due_jobs_once(
     load_race_jobs,
     update_race_job,
     compute_race_job_initial_status,
+    create_race_job=None,
     history_source="manual",
 ):
+    auto_discovery_summary = _maybe_auto_discover_agent_race_jobs(
+        base_dir=base_dir,
+        load_race_jobs=load_race_jobs,
+        update_race_job=update_race_job,
+        create_race_job=create_race_job,
+    )
+    if auto_discovery_summary.get("attempted"):
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_auto_discovery",
+                    "target_date": str(auto_discovery_summary.get("target_date", "") or "").strip(),
+                    "reason": str(auto_discovery_summary.get("reason", "") or "").strip(),
+                    "discovered_count": int(auto_discovery_summary.get("discovered_count", 0) or 0),
+                    "created_count": int(auto_discovery_summary.get("created_count", 0) or 0),
+                    "error_count": int(auto_discovery_summary.get("error_count", 0) or 0),
+                    "source_counts": dict(auto_discovery_summary.get("source_counts", {}) or {}),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     autofilled_jobs, autofill_errors = _autofill_waiting_input_info_jobs(
         base_dir=base_dir,
         load_race_jobs=load_race_jobs,
@@ -1330,6 +1654,7 @@ def run_due_jobs_once(
         )
 
     summary = {
+        "auto_discovery": auto_discovery_summary,
         "autofill_count": len(autofilled_jobs),
         "autofilled_jobs": autofilled_jobs,
         "queued_count": len(changed),
@@ -1410,6 +1735,7 @@ def internal_run_due_response(
     load_race_jobs,
     update_race_job,
     compute_race_job_initial_status,
+    create_race_job=None,
     history_source="internal",
 ):
     if not admin_token_valid(token):
@@ -1440,6 +1766,7 @@ def internal_run_due_response(
             load_race_jobs=load_race_jobs,
             update_race_job=update_race_job,
             compute_race_job_initial_status=compute_race_job_initial_status,
+            create_race_job=create_race_job,
             history_source=history_source,
         )
         ok = not bool(list(summary.get("errors", []) or []))
