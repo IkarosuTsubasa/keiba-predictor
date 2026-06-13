@@ -7,7 +7,7 @@
 3. cron 自动补全 race meta，并在发走前 1 小时把任务派发到 GitHub Actions。
 4. GitHub Actions 运行 `keiba_llm_agent`，生成 `data/predictions/{race_id}.json` 后 callback 回 Render。
 5. Render 保存预测，任务进入 `AI予測完了`。
-6. 发走后 30 分钟，Render 直接抓取结果并保存 `data/results/{race_id}.json`。
+6. 发走后 15 分钟，Render 直接抓取结果并保存 `data/results/{race_id}.json`。
 7. public 页面读取预测与结果，`履歴分析` 统计网站预测命中率。
 
 ## 已有 Render 服务
@@ -65,7 +65,7 @@ GitHub workflow dispatch input 由 Render 自动传入：
 3. 登记后任务先进入情報補完待ち或最終予想待ち。
 4. cron 到点后自动进入 `AI予測` dispatch。
 5. GitHub Actions callback 成功后显示 `AI予測完了`。
-6. 发走后 30 分钟，cron 自动进入结果取得并最终变成 `完了`。
+6. 发走后 15 分钟，cron 自动进入结果取得并最终变成 `完了`。
 7. 若失败，可在 Console 使用 `AI予測を再実行` 或 `結果取得を再試行`。
 8. `AI予測ヘルスチェック` 会显示保存文件数、GitHub task、注册比赛状态、`run_due` 最近执行履歴；也可以手动执行 `期限到来を確認` 与 `run_dueを実行`。
 

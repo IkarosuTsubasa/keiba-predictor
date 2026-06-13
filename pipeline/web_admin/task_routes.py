@@ -27,7 +27,7 @@ from web_admin.remote_predictors import append_job_process_log_entry
 
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
 AUTO_SETTLE_DELAY_MINUTES = 20
-AGENT_RESULT_DELAY_MINUTES = 30
+AGENT_RESULT_DELAY_MINUTES = 15
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
 RUN_DUE_HISTORY_FILE = "run_due_history.jsonl"
@@ -782,7 +782,7 @@ def _agent_result_diagnostics(*, base_dir, load_race_jobs, now_dt=None):
             if off_dt is None:
                 reason = "missing_off_time"
             elif current_dt < off_dt + timedelta(minutes=AGENT_RESULT_DELAY_MINUTES):
-                reason = "wait_30min"
+                reason = f"wait_{AGENT_RESULT_DELAY_MINUTES}min"
             elif not race_id:
                 reason = "missing_race_id"
         rows.append(
