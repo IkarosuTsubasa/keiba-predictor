@@ -5,6 +5,8 @@ from collections import Counter
 from keiba_llm_agent.schemas.deep_analysis import HorseDeepAnalysis
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceInfo, RecentRun
 
+RECENT_FORM_RUN_LIMIT = 5
+
 
 def jockey_matches(current_jockey: str | None, past_jockey: str | None) -> bool:
     if not current_jockey or not past_jockey:
@@ -15,7 +17,11 @@ def jockey_matches(current_jockey: str | None, past_jockey: str | None) -> bool:
 
 
 def _valid_runs(horse: HorseEntry) -> list[RecentRun]:
-    return horse.recent_runs[:5]
+    return horse.recent_runs
+
+
+def _recent_runs(horse: HorseEntry) -> list[RecentRun]:
+    return horse.recent_runs[:RECENT_FORM_RUN_LIMIT]
 
 
 def _top3_count(runs: list[RecentRun]) -> int:
@@ -98,6 +104,7 @@ def _append_flag(flags: list[str], flag: str) -> None:
 
 def analyze_horse_deeply(horse: HorseEntry, race_info: RaceInfo) -> HorseDeepAnalysis:
     runs = _valid_runs(horse)
+    recent_runs = _recent_runs(horse)
     positive_flags: list[str] = []
     risk_flags: list[str] = []
 
@@ -117,13 +124,13 @@ def analyze_horse_deeply(horse: HorseEntry, race_info: RaceInfo) -> HorseDeepAna
             overall_comment="近走データ不足のため評価は慎重。強い根拠が乏しく、相手候補までの扱いが妥当。",
         )
 
-    wins = _wins_count(runs)
-    top3 = _top3_count(runs)
-    double_digits = _double_digit_count(runs)
-    best_finish = _best_finish(runs)
-    declining = _is_recent_declining(runs)
-    improving = _is_recent_improving(runs)
-    stable = _is_stable(runs)
+    wins = _wins_count(recent_runs)
+    top3 = _top3_count(recent_runs)
+    double_digits = _double_digit_count(recent_runs)
+    best_finish = _best_finish(recent_runs)
+    declining = _is_recent_declining(recent_runs)
+    improving = _is_recent_improving(recent_runs)
+    stable = _is_stable(recent_runs)
 
     if top3 >= 3:
         _append_flag(positive_flags, "RECENT_FORM_STRONG")
@@ -158,28 +165,41 @@ def analyze_horse_deeply(horse: HorseEntry, race_info: RaceInfo) -> HorseDeepAna
     if not same_distance_runs:
         _append_flag(risk_flags, "DISTANCE_UNKNOWN")
     main_distance_band = _main_distance_band(runs)
-    distance_relation = _distance_relation(race_info.distance, runs[0].distance)
+    latest_run = recent_runs[0] if recent_runs else runs[0]
+    distance_relation = _distance_relation(race_info.distance, latest_run.distance)
     distance_analysis = (
         f"同距離{race_info.distance if race_info.distance is not None else 'unknown'}mでは"
         f"{len(same_distance_runs)}走して{same_distance_top3}回好走。"
         f"{distance_relation}"
     )
     if main_distance_band:
-        distance_analysis += f" 近走は{main_distance_band}で、今回との整合性を確認したい。"
+        distance_analysis += f" 通算は{main_distance_band}で、今回との整合性を確認したい。"
     if not same_distance_runs:
         distance_analysis += " 同距離実績が乏しく未知のリスクが残る。"
 
     same_course_runs = [run for run in runs if race_info.course and run.course == race_info.course]
     same_course_top3 = _top3_count(same_course_runs)
+    same_surface_runs = [run for run in runs if race_info.surface and run.surface == race_info.surface]
+    same_surface_top3 = _top3_count(same_surface_runs)
     if same_course_top3 >= 1:
         _append_flag(positive_flags, "COURSE_FIT")
-    if not same_course_runs:
+    elif same_surface_top3 >= 2:
+        _append_flag(positive_flags, "COURSE_FIT")
+    if not same_course_runs and not same_surface_runs:
         _append_flag(risk_flags, "COURSE_UNKNOWN")
     course_analysis = (
         f"{race_info.course if race_info.course else 'unknown'}では{len(same_course_runs)}走して"
         f"{same_course_top3}回3着以内。"
     )
-    course_analysis += "コース適性は高い。" if same_course_top3 >= 1 else "同コース経験は少なく、適性判断は保留。"
+    if same_course_top3 >= 1:
+        course_analysis += "コース適性は高い。"
+    elif same_surface_top3 >= 1:
+        course_analysis += (
+            f"{race_info.surface if race_info.surface else '同サーフェス'}では"
+            f"{len(same_surface_runs)}走して{same_surface_top3}回3着以内。"
+        )
+    else:
+        course_analysis += "同コース経験は少なく、適性判断は保留。"
 
     same_track_runs = [
         run for run in runs
@@ -197,13 +217,13 @@ def analyze_horse_deeply(horse: HorseEntry, race_info: RaceInfo) -> HorseDeepAna
         f"{len(same_track_runs)}走して{same_track_top3}回3着以内。"
     )
     if dominant_track:
-        track_condition_analysis += f" 近走は{dominant_track}での出走が多い。"
+        track_condition_analysis += f" 通算は{dominant_track}での出走が多い。"
     if not same_track_runs:
         track_condition_analysis += " 今回の馬場での裏付けは弱い。"
 
     same_jockey_runs = [run for run in runs if jockey_matches(horse.jockey, run.jockey)]
     same_jockey_top3 = _top3_count(same_jockey_runs)
-    latest_same_jockey = jockey_matches(horse.jockey, runs[0].jockey)
+    latest_same_jockey = jockey_matches(horse.jockey, latest_run.jockey)
     if same_jockey_top3 >= 2:
         _append_flag(positive_flags, "JOCKEY_CONTINUITY")
     if not latest_same_jockey:

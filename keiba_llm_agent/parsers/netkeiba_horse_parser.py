@@ -220,7 +220,7 @@ def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> Rece
     )
 
 
-def parse_horse_recent_runs(html: str, limit: int | None = 5) -> list[RecentRun]:
+def parse_horse_recent_runs(html: str, limit: int | None = None) -> list[RecentRun]:
     if limit is not None and limit <= 0:
         return []
 

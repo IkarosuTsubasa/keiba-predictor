@@ -73,8 +73,11 @@ def filter_recent_runs_for_target_race(
     target_race_date: str | None,
     target_race_id: str | None,
     horse_id: str | None,
-    limit: int,
+    limit: int | None,
 ):
+    if limit is not None and limit <= 0:
+        return []
+
     if not target_race_date:
         warnings.warn(
             "race_date is missing; recent_runs may contain target race result",
@@ -104,14 +107,14 @@ def filter_recent_runs_for_target_race(
         if run_date >= target_date:
             continue
         filtered.append(recent_run)
-        if len(filtered) >= limit:
+        if limit is not None and len(filtered) >= limit:
             break
     return filtered
 
 
 def enrich_race_data_with_recent_runs(
     race_data: RaceData,
-    limit: int = 5,
+    limit: int | None = None,
     force_refresh: bool = False,
 ) -> RaceData:
     enriched_horses: list[HorseEntry] = []

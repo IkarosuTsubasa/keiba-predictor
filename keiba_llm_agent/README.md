@@ -106,10 +106,10 @@ python keiba_llm_agent/main.py fetch-race --url "https://race.netkeiba.com/race/
 python keiba_llm_agent/main.py fetch-race --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605180511" --force-refresh
 ```
 
-同时抓取每匹马近 3 到 5 走并写入 `recent_runs`：
+同时抓取每匹马全生涯成绩并写入 `recent_runs`：
 
 ```bash
-python keiba_llm_agent/main.py fetch-race --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605180511" --with-recent-runs --recent-run-limit 5
+python keiba_llm_agent/main.py fetch-race --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605180511" --with-recent-runs
 ```
 
 该命令默认优先读取 `keiba_llm_agent/data/html_cache/` 中的缓存。
@@ -136,13 +136,13 @@ python -m keiba_llm_agent.main analyze-url --url "https://race.netkeiba.com/race
 同时抓取每匹马近走后再做 analysis：
 
 ```bash
-python -m keiba_llm_agent.main analyze-url --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605180511" --with-recent-runs --recent-run-limit 5
+python -m keiba_llm_agent.main analyze-url --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605180511" --with-recent-runs
 ```
 
 单独抓取一匹马页面并调试 `recent_runs` 解析：
 
 ```bash
-python keiba_llm_agent/main.py fetch-horse --horse-id 2021104073 --limit 5
+python keiba_llm_agent/main.py fetch-horse --horse-id 2021104073
 ```
 
 单独解析一匹马的父・母・母父：
@@ -471,14 +471,14 @@ python -m keiba_llm_agent.main review-url --url "https://race.netkeiba.com/race/
 - `fetch-race --url`: netkeiba 出马表 URL
 - `fetch-race --force-refresh`: 忽略现有 cache，强制重新下载 HTML
 - `fetch-race --with-recent-runs`: 抓取每匹马近走并写回 race_data
-- `fetch-race --recent-run-limit`: 每匹马抓取近走条数，默认 5
+- `fetch-race --recent-run-limit`: 每匹马抓取近走条数，默认不限制
 - `analyze-url --url`: netkeiba 出马表 URL，直接产出 race_data 与 prediction
 - `analyze-url --force-refresh`: 忽略现有 cache，强制重新下载 HTML
 - `analyze-url --dry-run`: 只保存 race_data，不执行 analysis
 - `analyze-url --with-recent-runs`: analysis 前抓取每匹马近走
-- `analyze-url --recent-run-limit`: 每匹马抓取近走条数，默认 5
+- `analyze-url --recent-run-limit`: 每匹马抓取近走条数，默认不限制
 - `fetch-horse --horse-id`: 单独抓取一匹马的页面
-- `fetch-horse --limit`: recent_runs 返回条数，默认 5
+- `fetch-horse --limit`: recent_runs 返回条数，默认不限制
 - `fetch-horse --force-refresh`: 忽略现有 horse cache，强制重新下载 HTML
 - `parse-pedigree --horse-id`: 单独解析一匹马的父・母・母父
 - `parse-pedigree --horse-name`: 可选传入 horse_name
@@ -503,7 +503,7 @@ python -m keiba_llm_agent.main review-url --url "https://race.netkeiba.com/race/
 - `social-review --output`: 自定义 txt 输出路径
 - `predict-race --url`: 一键抓取 shutuba、补 recent_runs、生成 prediction/report/social
 - `predict-race --force-refresh`: 忽略现有 cache，强制重新下载 HTML
-- `predict-race --recent-run-limit`: 每匹马抓取近走条数，默认 5
+- `predict-race --recent-run-limit`: 每匹马抓取近走条数，默认不限制
 - `predict-race`: 默认不自动生成 report
 - `predict-race --enable-report`: 显式生成 prediction report
 - `predict-race --skip-report`: 跳过 prediction report 生成

@@ -34,6 +34,7 @@ from keiba_llm_agent.schemas.review import LessonItem
 
 
 WEIGHTS = [1.5, 1.2, 1.0, 0.8, 0.6]
+RECENT_FORM_RUN_LIMIT = 5
 MARK_LABELS = ("◎", "○", "▲", "△", "☆")
 DEBUT_RACE_NAME_TOKENS = ("新馬", "メイクデビュー", "フレッシュチャレンジ")
 UNRACED_BASE_SCORE = 8.0
@@ -68,8 +69,16 @@ def get_weight(index: int) -> float:
     return WEIGHTS[index] if index < len(WEIGHTS) else WEIGHTS[-1]
 
 
-def scorable_recent_runs(recent_runs: list[RecentRun]) -> list[RecentRun]:
-    return [run for run in recent_runs[:5] if run.finish is not None]
+def scorable_recent_runs(
+    recent_runs: list[RecentRun],
+    limit: int | None = RECENT_FORM_RUN_LIMIT,
+) -> list[RecentRun]:
+    source_runs = recent_runs if limit is None else recent_runs[:limit]
+    return [run for run in source_runs if run.finish is not None]
+
+
+def scorable_career_runs(recent_runs: list[RecentRun]) -> list[RecentRun]:
+    return scorable_recent_runs(recent_runs, limit=None)
 
 
 def has_valid_recent_result(recent_runs: list[RecentRun]) -> bool:
@@ -77,7 +86,7 @@ def has_valid_recent_result(recent_runs: list[RecentRun]) -> bool:
 
 
 def effective_recent_run_count(horse: HorseEntry) -> int:
-    return len(scorable_recent_runs(horse.recent_runs))
+    return len(scorable_career_runs(horse.recent_runs))
 
 
 def is_low_sample_horse(horse: HorseEntry) -> bool:
@@ -219,109 +228,135 @@ def safe_finish_bucket(run: RecentRun) -> int:
 
 
 def score_recent_form(recent_runs: list[RecentRun]) -> int:
-    weighted_scores = [safe_finish_bucket(run) * get_weight(index) for index, run in enumerate(recent_runs[:5])]
-    weight_total = sum(get_weight(index) for index, run in enumerate(recent_runs[:5]) if run.finish is not None)
+    weighted_scores = [
+        safe_finish_bucket(run) * get_weight(index)
+        for index, run in enumerate(recent_runs[:RECENT_FORM_RUN_LIMIT])
+    ]
+    weight_total = sum(
+        get_weight(index)
+        for index, run in enumerate(recent_runs[:RECENT_FORM_RUN_LIMIT])
+        if run.finish is not None
+    )
     if not weighted_scores or weight_total == 0:
         return 0
     return clamp_score(sum(weighted_scores) / weight_total)
 
 
+def weighted_score_from_runs(scored_runs: list[tuple[int, float]]) -> int:
+    if not scored_runs:
+        return 0
+    weighted_scores = [score * weight for score, weight in scored_runs]
+    weight_total = sum(weight for _, weight in scored_runs)
+    if weight_total == 0:
+        return 0
+    return clamp_score(sum(weighted_scores) / weight_total)
+
+
+def _distance_fit_score(run: RecentRun, race_distance: int) -> int | None:
+    if run.distance is None:
+        return None
+    diff = abs(run.distance - race_distance)
+    if diff == 0:
+        distance_base = 10
+    elif diff <= 200:
+        distance_base = 7
+    elif diff <= 400:
+        distance_base = 4
+    else:
+        return None
+    return clamp_score(distance_base * 0.65 + safe_finish_bucket(run) * 0.35)
+
+
+def _surface_fit_score(run: RecentRun) -> int:
+    return min(8, clamp_score(safe_finish_bucket(run) * 0.8))
+
+
+def _condition_fit_score(run: RecentRun) -> int:
+    if run.finish is not None and run.finish <= 3:
+        return 10
+    if run.finish is not None and run.finish <= 5:
+        return 7
+    return 4
+
+
 def score_distance_fit(recent_runs: list[RecentRun], race_distance: int | None) -> int:
     if race_distance is None:
         return 0
-    weighted_scores: list[float] = []
-    weights: list[float] = []
-    for index, run in enumerate(recent_runs[:5]):
+    has_distance_data = False
+    scored_runs: list[tuple[int, float]] = []
+    for index, run in enumerate(recent_runs):
         if run.distance is None:
             continue
-        diff = abs(run.distance - race_distance)
-        if diff == 0:
-            score = 10
-        elif diff <= 200:
-            score = 7
-        elif diff <= 400:
-            score = 4
-        else:
-            score = 1
-        weight = get_weight(index)
-        weighted_scores.append(score * weight)
-        weights.append(weight)
-    if not weights:
-        return 0
-    return clamp_score(sum(weighted_scores) / sum(weights))
-
-
-def score_course_fit(recent_runs: list[RecentRun], course: str | None) -> int:
-    if not course:
-        return 0
-    weighted_scores: list[float] = []
-    weights: list[float] = []
-    for index, run in enumerate(recent_runs[:5]):
-        if not run.course:
+        has_distance_data = True
+        score = _distance_fit_score(run, race_distance)
+        if score is None:
             continue
-        if run.course == course and run.finish is not None and run.finish <= 3:
-            score = 10
-        elif run.course == course and run.finish is not None and run.finish <= 5:
-            score = 7
-        elif run.course == course:
-            score = 4
-        else:
-            score = 1
-        weight = get_weight(index)
-        weighted_scores.append(score * weight)
-        weights.append(weight)
-    if not weights:
+        scored_runs.append((score, get_weight(index)))
+    if not scored_runs:
+        return 1 if has_distance_data else 0
+    return weighted_score_from_runs(scored_runs)
+
+
+def score_course_fit(
+    recent_runs: list[RecentRun],
+    course: str | None,
+    surface: str | None = None,
+) -> int:
+    if not course and not surface:
         return 0
-    return clamp_score(sum(weighted_scores) / sum(weights))
+    has_condition_data = False
+    same_course_scores: list[tuple[int, float]] = []
+    same_surface_scores: list[tuple[int, float]] = []
+    for index, run in enumerate(recent_runs):
+        if run.course or run.surface:
+            has_condition_data = True
+        if course and run.course == course:
+            same_course_scores.append((_condition_fit_score(run), get_weight(index)))
+            continue
+        if surface and run.surface == surface:
+            same_surface_scores.append((_surface_fit_score(run), get_weight(index)))
+    course_score = weighted_score_from_runs(same_course_scores)
+    surface_score = weighted_score_from_runs(same_surface_scores)
+    if course_score and surface_score:
+        return max(course_score, clamp_score(course_score * 0.7 + surface_score * 0.3))
+    if course_score:
+        return course_score
+    if surface_score:
+        return surface_score
+    return 1 if has_condition_data else 0
 
 
 def score_track_condition_fit(recent_runs: list[RecentRun], track_condition: str | None) -> int:
     if not track_condition:
         return 0
-    weighted_scores: list[float] = []
-    weights: list[float] = []
-    for index, run in enumerate(recent_runs[:5]):
+    has_track_condition_data = False
+    scored_runs: list[tuple[int, float]] = []
+    for index, run in enumerate(recent_runs):
         if not run.track_condition:
             continue
-        if run.track_condition == track_condition and run.finish is not None and run.finish <= 3:
-            score = 10
-        elif run.track_condition == track_condition and run.finish is not None and run.finish <= 5:
-            score = 7
-        elif run.track_condition == track_condition:
-            score = 4
-        else:
-            score = 1
-        weight = get_weight(index)
-        weighted_scores.append(score * weight)
-        weights.append(weight)
-    if not weights:
-        return 0
-    return clamp_score(sum(weighted_scores) / sum(weights))
+        has_track_condition_data = True
+        if run.track_condition == track_condition:
+            scored_runs.append((_condition_fit_score(run), get_weight(index)))
+    if not scored_runs:
+        return 1 if has_track_condition_data else 0
+    return weighted_score_from_runs(scored_runs)
 
 
 def score_jockey_fit(recent_runs: list[RecentRun], jockey: str | None) -> int:
     if not jockey:
         return 0
-    weighted_scores: list[float] = []
-    weights: list[float] = []
-    for index, run in enumerate(recent_runs[:5]):
+    has_jockey_data = False
+    scored_runs: list[tuple[int, float]] = []
+    for index, run in enumerate(recent_runs):
         if not run.jockey:
             continue
+        has_jockey_data = True
         same_jockey = jockey_matches(jockey, run.jockey)
-        if same_jockey and run.finish is not None and run.finish <= 3:
-            score = 10
-        elif same_jockey and run.finish is not None and run.finish <= 5:
-            score = 7
-        elif same_jockey:
-            score = 4
-        else:
-            score = 1
-        weight = get_weight(index)
-        weighted_scores.append(score * weight)
-        weights.append(weight)
-    if not weights:
-        return 0
-    return clamp_score(sum(weighted_scores) / sum(weights))
+        if same_jockey:
+            scored_runs.append((_condition_fit_score(run), get_weight(index)))
+    if not scored_runs:
+        return 1 if has_jockey_data else 0
+    return weighted_score_from_runs(scored_runs)
 
 
 def score_odds_value(horse: HorseEntry, recent_form: int) -> int:
@@ -339,7 +374,7 @@ def score_odds_value(horse: HorseEntry, recent_form: int) -> int:
     has_hole_run = any(
         (run.popularity is not None and run.popularity >= 8 and run.finish is not None and run.finish <= 3)
         or (run.odds is not None and run.odds >= 20 and run.finish is not None and run.finish <= 3)
-        for run in horse.recent_runs[:5]
+        for run in horse.recent_runs
     )
     if has_hole_run:
         return 8
@@ -422,13 +457,14 @@ def get_lesson_weight_adjustment(lessons: list[LessonItem]) -> tuple[float, floa
     return distance_weight, course_weight, adjustments
 
 
-def summarize_run_facts(horse: HorseEntry, race_info: RaceInfo) -> tuple[int, int, int, int]:
-    recent_runs = horse.recent_runs[:5]
+def summarize_run_facts(horse: HorseEntry, race_info: RaceInfo) -> tuple[int, int, int, int, int]:
+    recent_runs = scorable_recent_runs(horse.recent_runs)
+    career_runs = scorable_career_runs(horse.recent_runs)
     wins = sum(1 for run in recent_runs if run.finish == 1)
     top3 = sum(1 for run in recent_runs if run.finish is not None and run.finish <= 3)
     same_distance_top3 = sum(
         1
-        for run in recent_runs
+        for run in career_runs
         if race_info.distance is not None
         and run.distance == race_info.distance
         and run.finish is not None
@@ -436,13 +472,21 @@ def summarize_run_facts(horse: HorseEntry, race_info: RaceInfo) -> tuple[int, in
     )
     same_course_top3 = sum(
         1
-        for run in recent_runs
+        for run in career_runs
         if race_info.course
         and run.course == race_info.course
         and run.finish is not None
         and run.finish <= 3
     )
-    return wins, top3, same_distance_top3, same_course_top3
+    same_surface_top3 = sum(
+        1
+        for run in career_runs
+        if race_info.surface
+        and run.surface == race_info.surface
+        and run.finish is not None
+        and run.finish <= 3
+    )
+    return wins, top3, same_distance_top3, same_course_top3, same_surface_top3
 
 
 def build_distance_phrase(race_info: RaceInfo, same_distance_runs: list[RecentRun], same_distance_top3: int) -> str:
@@ -454,12 +498,25 @@ def build_distance_phrase(race_info: RaceInfo, same_distance_runs: list[RecentRu
     return f"同距離{distance}mでの好走歴はまだなく、距離適性は慎重に判断。"
 
 
-def build_course_phrase(race_info: RaceInfo, same_course_runs: list[RecentRun], same_course_top3: int) -> str:
+def build_course_phrase(
+    race_info: RaceInfo,
+    same_course_runs: list[RecentRun],
+    same_course_top3: int,
+    same_surface_runs: list[RecentRun],
+    same_surface_top3: int,
+) -> str:
     course = race_info.course if race_info.course else "unknown"
+    surface = race_info.surface if race_info.surface else "同サーフェス"
     if not same_course_runs:
+        if same_surface_top3 > 0:
+            return f"{course}の経験は少ないが、{surface}では好走歴{same_surface_top3}回があり、適性を評価。"
+        if same_surface_runs:
+            return f"{course}の経験は少ないが、{surface}での出走歴はあり、適性は慎重に判断。"
         return f"{course}の経験は少なく、コース適性は未知。"
     if same_course_top3 > 0:
         return f"{course}で3着以内{same_course_top3}回があり、コース適性を評価。"
+    if same_surface_top3 > 0:
+        return f"{course}では出走歴があるが、好走歴はまだない。{surface}では好走歴{same_surface_top3}回。"
     return f"{course}では出走歴があるが、好走歴はまだなくコース適性は慎重に判断。"
 
 
@@ -482,7 +539,8 @@ def build_reason(
     pace_adjustment_value: float = 0.0,
 ) -> str:
     recent_runs = scorable_recent_runs(horse.recent_runs)
-    if not recent_runs:
+    career_runs = scorable_career_runs(horse.recent_runs)
+    if not career_runs:
         if is_debut_race(race_info):
             reason = "新馬戦で実戦履歴がなく、血統面を主な判断材料として扱う。"
         else:
@@ -501,25 +559,35 @@ def build_reason(
             reason += f" 展開面で{pace_adjustment_value:.1f}補正。"
         return reason
 
-    wins, top3, same_distance_top3, same_course_top3 = summarize_run_facts(horse, race_info)
+    wins, top3, same_distance_top3, same_course_top3, same_surface_top3 = summarize_run_facts(horse, race_info)
     best_finish = min((run.finish for run in recent_runs if run.finish is not None), default=None)
     same_distance_runs = [
-        run for run in recent_runs
+        run for run in career_runs
         if race_info.distance is not None and run.distance == race_info.distance
     ]
     same_course_runs = [
-        run for run in recent_runs
+        run for run in career_runs
         if race_info.course and run.course == race_info.course
     ]
+    same_surface_runs = [
+        run for run in career_runs
+        if race_info.surface and run.surface == race_info.surface
+    ]
     distance_phrase = build_distance_phrase(race_info, same_distance_runs, same_distance_top3)
-    course_phrase = build_course_phrase(race_info, same_course_runs, same_course_top3)
+    course_phrase = build_course_phrase(
+        race_info,
+        same_course_runs,
+        same_course_top3,
+        same_surface_runs,
+        same_surface_top3,
+    )
     same_jockey_top3 = sum(
         1
-        for run in recent_runs
+        for run in career_runs
         if jockey_matches(horse.jockey, run.jockey) and run.finish is not None and run.finish <= 3
     )
     same_jockey_runs = [
-        run for run in recent_runs if jockey_matches(horse.jockey, run.jockey)
+        run for run in career_runs if jockey_matches(horse.jockey, run.jockey)
     ]
     jockey_phrase = build_jockey_phrase(horse, same_jockey_top3, same_jockey_runs)
     if scores.recent_form >= 7 and scores.distance_fit >= 7:
@@ -566,21 +634,22 @@ def score_horse_by_recent_runs(
     pedigree_analysis: PedigreeAnalysis | None = None,
 ) -> HorseScore:
     recent_runs = scorable_recent_runs(horse.recent_runs)
-    recent_run_count = len(recent_runs)
+    career_runs = scorable_career_runs(horse.recent_runs)
+    career_run_count = len(career_runs)
     lesson_list = lessons or []
     recent_form = score_recent_form(recent_runs)
-    distance_fit = score_distance_fit(recent_runs, race_info.distance)
-    course_fit = score_course_fit(recent_runs, race_info.course)
-    track_condition_fit = score_track_condition_fit(recent_runs, race_info.track_condition)
+    distance_fit = score_distance_fit(career_runs, race_info.distance)
+    course_fit = score_course_fit(career_runs, race_info.course, race_info.surface)
+    track_condition_fit = score_track_condition_fit(career_runs, race_info.track_condition)
     distance_fit, course_fit, track_condition_fit = apply_low_sample_pedigree_priors(
-        recent_run_count=recent_run_count,
+        recent_run_count=career_run_count,
         distance_fit=distance_fit,
         course_fit=course_fit,
         track_condition_fit=track_condition_fit,
         pedigree_analysis=pedigree_analysis,
         race_info=race_info,
     )
-    jockey_fit = score_jockey_fit(recent_runs, horse.jockey)
+    jockey_fit = score_jockey_fit(career_runs, horse.jockey)
     odds_value = score_odds_value(horse, recent_form)
     risk = score_risk(recent_runs, recent_form, distance_fit)
     distance_weight, course_weight, lesson_adjustments = get_lesson_weight_adjustment(lesson_list)
@@ -594,7 +663,7 @@ def score_horse_by_recent_runs(
         odds_value=odds_value,
         risk=risk,
     )
-    if not recent_runs:
+    if not career_runs:
         total_score = calculate_unraced_base_total_score(
             scores,
             use_market_score_in_ranking=use_market_score_in_ranking,
@@ -627,7 +696,7 @@ def build_marks(horse_scores: list[HorseScore]) -> dict[str, int]:
 def collect_risks(race_data: RaceData, used_lessons: list[LessonItem]) -> list[str]:
     risks: list[str] = []
     if any(is_low_sample_horse(horse) for horse in race_data.horses):
-        risks.append("有効近走5走未満の馬は血統・距離・馬場適性の先験評価を補強。")
+        risks.append("有効な実戦履歴5走未満の馬は血統・距離・馬場適性の先験評価を補強。")
     if any(horse.odds is None or horse.popularity is None for horse in race_data.horses):
         risks.append("一部の馬でoddsまたは人気が欠損している。")
     if any(any(run.course is None for run in horse.recent_runs) for horse in race_data.horses):
@@ -657,7 +726,7 @@ def build_summary(
         return "有効な近走データが不足しており、summaryはunknownに近い状態。"
     top = horse_scores[0]
     top_horse_runs = next((horse.recent_runs for horse in race_data.horses if horse.horse_no == top.horse_no), [])
-    recent_run_count = len(scorable_recent_runs(top_horse_runs))
+    career_run_count = len(scorable_career_runs(top_horse_runs))
     lesson_note = ""
     _, _, lesson_adjustments = get_lesson_weight_adjustment(used_lessons)
     if used_lessons:
@@ -677,7 +746,7 @@ def build_summary(
     rank_note = f" {' '.join(rank_notes)}" if rank_notes else ""
     return (
         f"本命は{top.horse_name}。近走安定度と距離・コース適性を重視した。"
-        f"recent_runs使用数={recent_run_count}、lessons使用数={len(used_lessons)}。"
+        f"recent_runs使用数={career_run_count}、lessons使用数={len(used_lessons)}。"
         f"{lesson_note}"
         f"{f' 深掘り所見: {top_deep_comment}' if top_deep_comment else ''}"
         f"{f' 血統所見: {top_pedigree_comment}' if top_pedigree_comment else ''}"

@@ -195,6 +195,27 @@ class RecentRunScorerTests(unittest.TestCase):
         score = score_horse_by_recent_runs(horse, self.race_info)
         self.assertGreaterEqual(score.scores.course_fit, 7)
 
+    def test_career_surface_history_beyond_recent_five_improves_course_fit(self) -> None:
+        horse = HorseEntry(
+            horse_no=30,
+            horse_name="SurfaceCareer",
+            jockey="騎手S",
+            recent_runs=[
+                build_run("2026-04-20", "大井", "ダート", 1600, 10, 16, "騎手S"),
+                build_run("2026-03-20", "船橋", "ダート", 1600, 12, 16, "騎手S"),
+                build_run("2026-02-20", "川崎", "ダート", 1500, 11, 14, "騎手S"),
+                build_run("2026-01-20", "浦和", "ダート", 1400, 9, 12, "騎手S"),
+                build_run("2025-12-20", "大井", "ダート", 1800, 13, 16, "騎手S"),
+                build_run("2025-10-20", "中山", "芝", 1600, 1, 16, "騎手T"),
+                build_run("2025-09-20", "京都", "芝", 1600, 2, 16, "騎手T"),
+                build_run("2025-08-20", "阪神", "芝", 1800, 3, 16, "騎手T"),
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.race_info)
+        self.assertLessEqual(score.scores.recent_form, 2)
+        self.assertGreaterEqual(score.scores.course_fit, 6)
+        self.assertIn("芝では好走歴", score.reason)
+
     def test_same_jockey_improves_jockey_fit(self) -> None:
         horse = HorseEntry(
             horse_no=4,

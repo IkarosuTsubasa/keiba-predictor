@@ -89,6 +89,19 @@ class NetkeibaHorseFetcherTests(unittest.TestCase):
         self.assertEqual(len(enriched.horses[0].recent_runs), 3)
         self.assertEqual(enriched.horses[0].recent_runs[0].course, "阪神")
 
+    def test_enrich_race_data_without_limit_keeps_full_filtered_career(self) -> None:
+        race_data = RaceData(
+            race_info=RaceInfo(race_id="sample_001", race_date="2026-05-17"),
+            horses=[
+                HorseEntry(horse_no=1, horse_id="2021104073", horse_name="サンプルホースA"),
+            ],
+        )
+        with patch.object(netkeiba_horse_fetcher, "fetch_horse_html", return_value=FIXTURE_HTML):
+            enriched = enrich_race_data_with_recent_runs(race_data)
+
+        self.assertGreater(len(enriched.horses[0].recent_runs), 3)
+        self.assertNotIn("2026-05-17", [run.date for run in enriched.horses[0].recent_runs])
+
     def test_single_horse_failure_does_not_interrupt_race(self) -> None:
         race_data = RaceData(
             race_info=RaceInfo(race_id="sample_001", race_date="2026-05-17"),

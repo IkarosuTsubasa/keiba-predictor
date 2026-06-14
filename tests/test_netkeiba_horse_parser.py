@@ -41,6 +41,11 @@ class NetkeibaHorseParserTests(unittest.TestCase):
         recent_runs = parse_horse_recent_runs(self.html, limit=3)
         self.assertEqual(len(recent_runs), 3)
 
+    def test_default_limit_returns_full_result_table(self) -> None:
+        recent_runs = parse_horse_recent_runs(self.html)
+        limited_runs = parse_horse_recent_runs(self.html, limit=5)
+        self.assertGreater(len(recent_runs), len(limited_runs))
+
     def test_returns_empty_list_when_table_missing(self) -> None:
         recent_runs = parse_horse_recent_runs("<html><body>no table</body></html>", limit=5)
         self.assertEqual(recent_runs, [])

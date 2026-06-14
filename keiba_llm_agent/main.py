@@ -400,7 +400,7 @@ def run_fetch_race(
     url: str,
     force_refresh: bool = False,
     with_recent_runs: bool = False,
-    recent_run_limit: int = 5,
+    recent_run_limit: int | None = None,
 ) -> dict[str, str]:
     race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
     if with_recent_runs:
@@ -424,7 +424,7 @@ def run_analyze_url(
     dry_run: bool = False,
     lessons_path: str | Path | None = None,
     with_recent_runs: bool = False,
-    recent_run_limit: int = 5,
+    recent_run_limit: int | None = None,
     llm_provider: str | None = None,
     scoring_profile: str | None = None,
     scoring_mode: str | None = None,
@@ -469,7 +469,7 @@ def run_analyze_url(
     }
 
 
-def run_fetch_horse(horse_id: str, limit: int = 5, force_refresh: bool = False) -> dict[str, object]:
+def run_fetch_horse(horse_id: str, limit: int | None = None, force_refresh: bool = False) -> dict[str, object]:
     html = fetch_horse_html(horse_id, force_refresh=force_refresh)
     recent_runs = parse_horse_recent_runs(html, limit=limit)
     result = {
@@ -675,7 +675,7 @@ def _resolve_skip_report(skip_report: bool = False, enable_report: bool = False)
 def run_predict_race(
     url: str,
     force_refresh: bool = False,
-    recent_run_limit: int = 5,
+    recent_run_limit: int | None = None,
     skip_report: bool = True,
     skip_social: bool = False,
     lessons_path: str | Path = DEFAULT_LESSONS_PATH,
@@ -1466,8 +1466,8 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_race_parser.add_argument(
         "--recent-run-limit",
         type=int,
-        default=5,
-        help="每匹马抓取的近走条数，默认 5",
+        default=None,
+        help="每匹马抓取的近走条数，默认不限制",
     )
 
     analyze_url_parser = subparsers.add_parser("analyze-url", help="从 netkeiba URL 直接生成 prediction.json")
@@ -1490,14 +1490,14 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_url_parser.add_argument(
         "--recent-run-limit",
         type=int,
-        default=5,
-        help="每匹马抓取的近走条数，默认 5",
+        default=None,
+        help="每匹马抓取的近走条数，默认不限制",
     )
     _add_scoring_arguments(analyze_url_parser)
 
     fetch_horse_parser = subparsers.add_parser("fetch-horse", help="抓取单匹马页面并解析 recent_runs")
     fetch_horse_parser.add_argument("--horse-id", required=True, help="netkeiba horse_id")
-    fetch_horse_parser.add_argument("--limit", type=int, default=5, help="抓取的近走条数，默认 5")
+    fetch_horse_parser.add_argument("--limit", type=int, default=None, help="抓取的近走条数，默认不限制")
     fetch_horse_parser.add_argument(
         "--force-refresh",
         action="store_true",
@@ -1561,8 +1561,8 @@ def build_parser() -> argparse.ArgumentParser:
     predict_race_parser.add_argument(
         "--recent-run-limit",
         type=int,
-        default=5,
-        help="每匹马抓取的近走条数，默认 5",
+        default=None,
+        help="每匹马抓取的近走条数，默认不限制",
     )
     predict_race_parser.add_argument(
         "--skip-report",
