@@ -24,6 +24,12 @@ class ScoreBreakdown(BaseModel):
     jockey_fit: int
     odds_value: int
     risk: int = Field(ge=-10, le=0)
+    ability_score: int = 0
+    recent_quality_score: int = 0
+    trend_score: int = 5
+    condition_fit_score: int = 0
+    race_level_score: int = 5
+    pace_jockey_score: int = 0
 
 
 class PedigreeAdjustment(BaseModel):

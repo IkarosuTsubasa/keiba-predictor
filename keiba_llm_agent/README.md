@@ -14,9 +14,10 @@
 当前 analysis 有两种模式：
 - 没有 `recent_runs`：走 Mock/LLM fallback
 - 有 `recent_runs`：优先走 heuristic recent-run scorer
+当前 scorer 已将短期状态与长期能力拆分：`recent_form` 保留为旧字段兼容，但实际表示近3走表现质量；`ability_score` 使用全生涯有效成绩的上位表现与生涯均值混合；距離・コース・馬場适性使用全生涯 recent_runs 统计，避免只看近5走导致中央赛马或条件转换马被低估。
 当前还启用了 `Race Deep Analyzer v1`，会基于现有 `race_data / recent_runs / odds / popularity / jockey` 为每匹马生成更细的结构化分析，用于增强解释性、report 和 social 文案。
-当前还启用了 `Race Level / Opponent Analysis v1`，会基于 `recent_runs` 中的 `race_id / field_size / popularity / finish`，分析本场再战关系与轻量レースレベル，并在第28阶段以轻量补正接入 `total_score`。
-当前还启用了 `Pace / Running Style Analyzer v1`，会基于 `recent_runs` 中可解析的 `通過順 / 上り` 推断脚质和本场展開。取不到时会按 `unknown` 处理，第一版仍是轻量推定，并在第28阶段以小幅补正接入评分。
+当前还启用了 `Race Level / Opponent Analysis v1`，会基于 `recent_runs` 中的 `race_id / field_size / popularity / finish`，分析本场再战关系与轻量レースレベル，并作为基础分项与轻量补正共同接入 `total_score`。
+当前还启用了 `Pace / Running Style Analyzer v1`，会基于 `recent_runs` 中可解析的 `通過順 / 上り` 推断脚质和本场展開。取不到时会按 `unknown` 处理，第一版仍是轻量推定，并作为展开展・騎手分项与小幅补正接入评分。
 当前还启用了 `Pedigree Analyzer v1.1`，会从 netkeiba horse cache / pedigree cache 解析父・母・母父，并基于扩充后的 sire knowledge table 与 damsire 補正生成轻量血統分析。
 当前还启用了 `Pedigree Score Integration v1`，会将血統分析以轻量 bonus / penalty 的方式反映到 `horse_scores.total_score`。该补正最大 `+2.0`、最小 `-1.5`，仍然只是 heuristic 的解释性补正，不是正式学习模型。
 `review-url` 生成的 lessons 会在后续 `analysis / analyze-url` 中按相似条件检索并写入 `prediction.used_lessons`。

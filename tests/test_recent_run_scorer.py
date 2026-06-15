@@ -6,8 +6,10 @@ from keiba_llm_agent.scoring.recent_run_scorer import (
     has_recent_runs_data,
     score_horse_by_recent_runs,
 )
+from keiba_llm_agent.schemas.pace_analysis import HorsePaceAnalysis, RacePaceProjection
 from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, RecentRun
+from keiba_llm_agent.schemas.race_level_analysis import RaceLevelAnalysis
 
 
 def build_run(
@@ -212,9 +214,125 @@ class RecentRunScorerTests(unittest.TestCase):
             ],
         )
         score = score_horse_by_recent_runs(horse, self.race_info)
-        self.assertLessEqual(score.scores.recent_form, 2)
+        self.assertLess(score.scores.recent_quality_score, score.scores.ability_score)
+        self.assertGreaterEqual(score.scores.ability_score, 8)
         self.assertGreaterEqual(score.scores.course_fit, 6)
         self.assertIn("芝では好走歴", score.reason)
+
+    def test_career_ability_is_separated_from_recent_quality(self) -> None:
+        horse = HorseEntry(
+            horse_no=31,
+            horse_name="CareerAbility",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "大井", "ダート", 1600, 10, 16, "騎手A"),
+                build_run("2026-04-20", "船橋", "ダート", 1600, 12, 16, "騎手A"),
+                build_run("2026-03-20", "川崎", "ダート", 1500, 11, 14, "騎手A"),
+                build_run("2025-12-20", "東京", "芝", 1600, 1, 16, "騎手B"),
+                build_run("2025-11-20", "京都", "芝", 1600, 2, 16, "騎手B"),
+                build_run("2025-10-20", "阪神", "芝", 1800, 3, 16, "騎手B"),
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.race_info)
+        self.assertGreaterEqual(score.scores.ability_score, 8)
+        self.assertLessEqual(score.scores.recent_quality_score, 4)
+        self.assertGreater(score.scores.ability_score, score.scores.recent_quality_score)
+
+    def test_trend_score_identifies_improvement(self) -> None:
+        horse = HorseEntry(
+            horse_no=32,
+            horse_name="Improver",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "東京", "芝", 1600, 1, 16, "騎手A"),
+                build_run("2026-04-20", "東京", "芝", 1600, 2, 16, "騎手A"),
+                build_run("2026-03-20", "東京", "芝", 1600, 10, 16, "騎手A"),
+                build_run("2026-02-20", "東京", "芝", 1600, 11, 16, "騎手A"),
+                build_run("2026-01-20", "東京", "芝", 1600, 12, 16, "騎手A"),
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.race_info)
+        self.assertGreaterEqual(score.scores.trend_score, 8)
+        self.assertIn("上昇気配", score.reason)
+
+    def test_trend_score_identifies_decline(self) -> None:
+        horse = HorseEntry(
+            horse_no=33,
+            horse_name="Decliner",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "東京", "芝", 1600, 11, 16, "騎手A"),
+                build_run("2026-04-20", "東京", "芝", 1600, 12, 16, "騎手A"),
+                build_run("2026-03-20", "東京", "芝", 1600, 1, 16, "騎手A"),
+                build_run("2026-02-20", "東京", "芝", 1600, 2, 16, "騎手A"),
+                build_run("2026-01-20", "東京", "芝", 1600, 3, 16, "騎手A"),
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.race_info)
+        self.assertLessEqual(score.scores.trend_score, 2)
+        self.assertIn("下降気味", score.reason)
+
+    def test_condition_fit_score_summarizes_fit_fields(self) -> None:
+        horse = HorseEntry(
+            horse_no=34,
+            horse_name="ConditionFit",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "東京", "芝", 1600, 2, 16, "騎手A", track_condition="良"),
+                build_run("2026-04-20", "東京", "芝", 1600, 3, 16, "騎手A", track_condition="良"),
+            ],
+        )
+        score = score_horse_by_recent_runs(horse, self.race_info)
+        self.assertGreaterEqual(score.scores.condition_fit_score, 8)
+
+    def test_race_level_and_pace_components_are_scored(self) -> None:
+        horse = HorseEntry(
+            horse_no=35,
+            horse_name="ContextHorse",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "東京", "芝", 1600, 2, 16, "騎手A"),
+                build_run("2026-04-20", "東京", "芝", 1600, 3, 16, "騎手A"),
+            ],
+        )
+        race_level = RaceLevelAnalysis(
+            horse_no=35,
+            horse_name="ContextHorse",
+            positive_flags=["HEAD_TO_HEAD_POSITIVE", "UNDERVALUED_GOOD_RUN"],
+            risk_flags=[],
+            head_to_head_summary="近走で本場メンバーとの交差あり。",
+            race_level_summary="人気薄での好走がある。",
+            opponent_context_summary="相手比較では優位。",
+            overall_comment="相手関係では前走比較に強みがある。",
+            adjustment_hint=1.0,
+        )
+        pace = HorsePaceAnalysis(
+            horse_no=35,
+            horse_name="ContextHorse",
+            running_style="先行",
+            early_position_score=8.0,
+            late_position_score=6.0,
+            position_stability="安定",
+            positive_flags=["PACE_FIT", "STALKER_ADVANTAGE", "POSITION_STABLE"],
+            risk_flags=[],
+            overall_comment="展開利が見込める。",
+        )
+        projection = RacePaceProjection(
+            projected_pace="average",
+            front_runner_count=1,
+            stalker_count=4,
+            closer_count=3,
+            pace_comment="平均的な流れを想定。",
+        )
+        score = score_horse_by_recent_runs(
+            horse,
+            self.race_info,
+            race_level_analysis=race_level,
+            pace_analysis=pace,
+            race_pace_projection=projection,
+        )
+        self.assertGreater(score.scores.race_level_score, 5)
+        self.assertGreater(score.scores.pace_jockey_score, 5)
 
     def test_same_jockey_improves_jockey_fit(self) -> None:
         horse = HorseEntry(

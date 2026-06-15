@@ -35,6 +35,13 @@ from keiba_llm_agent.schemas.review import LessonItem
 
 WEIGHTS = [1.5, 1.2, 1.0, 0.8, 0.6]
 RECENT_FORM_RUN_LIMIT = 5
+RECENT_QUALITY_RUN_LIMIT = 3
+ABILITY_SCORE_WEIGHT = 1.45
+RECENT_QUALITY_SCORE_WEIGHT = 0.9
+TREND_SCORE_WEIGHT = 0.4
+CONDITION_FIT_SCORE_WEIGHT = 1.0
+RACE_LEVEL_SCORE_WEIGHT = 0.45
+PACE_JOCKEY_SCORE_WEIGHT = 0.45
 MARK_LABELS = ("◎", "○", "▲", "△", "☆")
 DEBUT_RACE_NAME_TOKENS = ("新馬", "メイクデビュー", "フレッシュチャレンジ")
 UNRACED_BASE_SCORE = 8.0
@@ -227,19 +234,134 @@ def safe_finish_bucket(run: RecentRun) -> int:
     return 1
 
 
-def score_recent_form(recent_runs: list[RecentRun]) -> int:
-    weighted_scores = [
-        safe_finish_bucket(run) * get_weight(index)
-        for index, run in enumerate(recent_runs[:RECENT_FORM_RUN_LIMIT])
-    ]
-    weight_total = sum(
-        get_weight(index)
-        for index, run in enumerate(recent_runs[:RECENT_FORM_RUN_LIMIT])
-        if run.finish is not None
-    )
+def clamp_float(value: float, minimum: float = 0.0, maximum: float = 10.0) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def finish_percentile_score(run: RecentRun) -> float:
+    if run.finish is None:
+        return 0.0
+    if run.field_size and run.field_size > 1:
+        return clamp_float(10.0 * (run.field_size - run.finish) / (run.field_size - 1))
+    return float(safe_finish_bucket(run))
+
+
+def parse_margin_value(value: str | None) -> float | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    symbolic = {
+        "ハナ": 0.05,
+        "アタマ": 0.1,
+        "クビ": 0.2,
+        "大": 3.0,
+        "大差": 4.0,
+    }
+    if text in symbolic:
+        return symbolic[text]
+    cleaned = ""
+    for char in text:
+        if char.isdigit() or char in ".-":
+            cleaned += char
+    if not cleaned:
+        return None
+    try:
+        return abs(float(cleaned))
+    except ValueError:
+        return None
+
+
+def run_condition_mismatch(run: RecentRun, race_info: RaceInfo | None) -> bool:
+    if race_info is None:
+        return False
+    if race_info.surface and run.surface and run.surface != race_info.surface:
+        return True
+    if race_info.distance is not None and run.distance is not None and abs(run.distance - race_info.distance) > 400:
+        return True
+    return False
+
+
+def score_run_performance(run: RecentRun, race_info: RaceInfo | None = None) -> float:
+    if run.finish is None:
+        return 0.0
+
+    score = finish_percentile_score(run) * 0.65 + safe_finish_bucket(run) * 0.35
+
+    if run.field_size is not None and run.field_size >= 14 and run.finish <= 3:
+        score += 0.5
+    if run.popularity is not None:
+        if run.popularity >= 8 and run.finish <= 3:
+            score += 0.8
+        if run.finish < run.popularity and run.popularity - run.finish >= 5:
+            score += 0.4
+        if run.popularity <= 2 and run.field_size is not None and run.finish > run.field_size / 2:
+            score -= 1.0
+    if run.odds is not None and run.odds >= 20 and run.finish <= 3:
+        score += 0.4
+
+    margin = parse_margin_value(run.margin)
+    if margin is not None:
+        if run.finish == 1:
+            score += 0.4
+        elif margin <= 0.3:
+            score += 0.3
+        elif margin >= 1.5 and run.finish > 5:
+            score -= 0.5
+
+    if run_condition_mismatch(run, race_info) and score < 5.0:
+        score += 0.9
+    if (
+        race_info is not None
+        and race_info.distance is not None
+        and run.distance == race_info.distance
+        and score >= 7.0
+    ):
+        score += 0.3
+
+    return round(clamp_float(score), 2)
+
+
+def weighted_score_from_float_runs(scored_runs: list[tuple[float, float]]) -> int:
+    if not scored_runs:
+        return 0
+    weighted_scores = [score * weight for score, weight in scored_runs]
+    weight_total = sum(weight for _, weight in scored_runs)
     if not weighted_scores or weight_total == 0:
         return 0
     return clamp_score(sum(weighted_scores) / weight_total)
+
+
+def score_recent_form(recent_runs: list[RecentRun], race_info: RaceInfo | None = None) -> int:
+    scored_runs = [
+        (score_run_performance(run, race_info), get_weight(index))
+        for index, run in enumerate(recent_runs[:RECENT_QUALITY_RUN_LIMIT])
+        if run.finish is not None
+    ]
+    return weighted_score_from_float_runs(scored_runs)
+
+
+def score_ability(career_runs: list[RecentRun], race_info: RaceInfo) -> int:
+    performances = [score_run_performance(run, race_info) for run in career_runs if run.finish is not None]
+    if not performances:
+        return 0
+    top_count = int(len(performances) * 0.3 + 0.999)
+    if len(performances) >= 2:
+        top_count = max(2, top_count)
+    top_count = min(len(performances), max(1, min(5, top_count)))
+    top_scores = sorted(performances, reverse=True)[:top_count]
+    top_average = sum(top_scores) / len(top_scores)
+    career_average = sum(performances) / len(performances)
+    return clamp_score(top_average * 0.75 + career_average * 0.25)
+
+
+def score_trend(career_runs: list[RecentRun], race_info: RaceInfo) -> int:
+    performances = [score_run_performance(run, race_info) for run in career_runs[:RECENT_FORM_RUN_LIMIT] if run.finish is not None]
+    if len(performances) < 4:
+        return 5
+    recent_average = sum(performances[:2]) / 2
+    previous = performances[2:5]
+    previous_average = sum(previous) / len(previous)
+    return clamp_score(5.0 + (recent_average - previous_average) * 0.8)
 
 
 def weighted_score_from_runs(scored_runs: list[tuple[int, float]]) -> int:
@@ -359,6 +481,88 @@ def score_jockey_fit(recent_runs: list[RecentRun], jockey: str | None) -> int:
     return weighted_score_from_runs(scored_runs)
 
 
+def score_condition_fit_score(
+    distance_fit: int,
+    course_fit: int,
+    track_condition_fit: int,
+    *,
+    distance_weight: float,
+    course_weight: float,
+) -> int:
+    track_weight = 0.75
+    total_weight = distance_weight + course_weight + track_weight
+    if total_weight <= 0:
+        return 0
+    return clamp_score(
+        (
+            distance_fit * distance_weight
+            + course_fit * course_weight
+            + track_condition_fit * track_weight
+        )
+        / total_weight
+    )
+
+
+def score_race_level_component(race_level_analysis: object | None = None) -> int:
+    if race_level_analysis is None:
+        return 5
+    adjustment_hint = float(getattr(race_level_analysis, "adjustment_hint", 0.0) or 0.0)
+    positive_flags = set(getattr(race_level_analysis, "positive_flags", []) or [])
+    risk_flags = set(getattr(race_level_analysis, "risk_flags", []) or [])
+    score = 5.0 + clamp_float(adjustment_hint, -1.5, 1.5) * 2.0
+    if len(positive_flags) >= 2:
+        score += 0.4
+    if len(risk_flags) >= 2:
+        score -= 0.4
+    return clamp_score(score)
+
+
+def score_pace_jockey_component(
+    jockey_fit: int,
+    pace_analysis: object | None = None,
+    race_pace_projection: object | None = None,
+) -> int:
+    jockey_component = jockey_fit if jockey_fit > 0 else 5
+    score = jockey_component * 0.45 + 5.0 * 0.55
+    if pace_analysis is None:
+        return clamp_score(score)
+
+    positive_flags = set(getattr(pace_analysis, "positive_flags", []) or [])
+    risk_flags = set(getattr(pace_analysis, "risk_flags", []) or [])
+    projected_pace = getattr(race_pace_projection, "projected_pace", None)
+    running_style = getattr(pace_analysis, "running_style", "")
+    early_score = float(getattr(pace_analysis, "early_position_score", 0.0) or 0.0)
+    late_score = float(getattr(pace_analysis, "late_position_score", 0.0) or 0.0)
+
+    if "PACE_FIT" in positive_flags:
+        score += 1.0
+    if "POSITION_STABLE" in positive_flags:
+        score += 0.5
+    if "STALKER_ADVANTAGE" in positive_flags:
+        score += 0.5
+    if "FRONT_RUNNING_ADVANTAGE" in positive_flags and projected_pace in {"slow", "average", None}:
+        score += 0.4
+    if "CLOSING_SPEED" in positive_flags and projected_pace in {"fast", "average", None}:
+        score += 0.4
+    if early_score >= 7.0 and projected_pace in {"slow", "average"}:
+        score += 0.3
+    if late_score >= 7.0 and projected_pace in {"fast", "average"}:
+        score += 0.3
+
+    if "PACE_MISMATCH" in risk_flags:
+        score -= 1.0
+    if "POSITION_UNSTABLE" in risk_flags:
+        score -= 0.5
+    if running_style == "追込" and projected_pace == "slow":
+        score -= 0.6
+    if running_style == "逃げ" and projected_pace == "fast":
+        score -= 0.6
+    if "PACE_DATA_INCOMPLETE" in risk_flags and jockey_fit <= 1:
+        score -= 0.4
+
+    return clamp_score(score)
+
+
 def score_odds_value(horse: HorseEntry, recent_form: int) -> int:
     if horse.odds is not None:
         if horse.odds >= 20 and recent_form >= 5:
@@ -396,6 +600,26 @@ def calculate_base_total_score(
         if use_market_score_in_ranking and market_signal_weight > 0
         else 0.0
     )
+    has_component_scores = (
+        scores.ability_score > 0
+        or scores.recent_quality_score > 0
+        or scores.condition_fit_score > 0
+        or scores.pace_jockey_score > 0
+        or scores.trend_score != 5
+        or scores.race_level_score != 5
+    )
+    if has_component_scores:
+        return round(
+            scores.ability_score * ABILITY_SCORE_WEIGHT
+            + scores.recent_quality_score * RECENT_QUALITY_SCORE_WEIGHT
+            + scores.trend_score * TREND_SCORE_WEIGHT
+            + scores.condition_fit_score * CONDITION_FIT_SCORE_WEIGHT
+            + scores.race_level_score * RACE_LEVEL_SCORE_WEIGHT
+            + scores.pace_jockey_score * PACE_JOCKEY_SCORE_WEIGHT
+            + market_component
+            + scores.risk,
+            1,
+        )
     return round(
         scores.recent_form * 1.5
         + scores.distance_fit * distance_weight
@@ -528,6 +752,40 @@ def build_jockey_phrase(horse: HorseEntry, same_jockey_top3: int, same_jockey_ru
     return "同騎手での騎乗経験はあるが、好走実績はまだない。"
 
 
+def build_performance_notes(scores: ScoreBreakdown) -> list[str]:
+    notes: list[str] = []
+    if scores.ability_score >= 8:
+        notes.append("通算上位パフォーマンスは高水準。")
+    elif scores.ability_score and scores.ability_score <= 3:
+        notes.append("通算能力面は強調しづらい。")
+
+    if scores.recent_quality_score >= 8:
+        notes.append("直近内容も強い。")
+    elif scores.recent_quality_score and scores.recent_quality_score <= 3:
+        notes.append("直近内容は割引。")
+
+    if scores.trend_score >= 7:
+        notes.append("近走は上昇気配。")
+    elif scores.trend_score <= 3:
+        notes.append("近走は下降気味。")
+
+    if scores.condition_fit_score >= 8:
+        notes.append("今回条件への適性は高い。")
+    elif scores.condition_fit_score and scores.condition_fit_score <= 3:
+        notes.append("今回条件への適性は慎重に見る。")
+
+    if scores.race_level_score >= 8:
+        notes.append("相手関係・レースレベル面も評価。")
+    elif scores.race_level_score <= 3:
+        notes.append("相手関係・レースレベル面は割引。")
+
+    if scores.pace_jockey_score >= 8:
+        notes.append("展開と騎手面の後押しがある。")
+    elif scores.pace_jockey_score and scores.pace_jockey_score <= 3:
+        notes.append("展開と騎手面は割引。")
+    return notes
+
+
 def build_reason(
     horse: HorseEntry,
     race_info: RaceInfo,
@@ -607,6 +865,9 @@ def build_reason(
         )
     if lesson_adjustments:
         reason += f" 過去lessonに基づき{ '/'.join(lesson_adjustments) }評価を微調整。"
+    performance_notes = build_performance_notes(scores)
+    if performance_notes:
+        reason += " " + " ".join(performance_notes)
     if deep_overall_comment:
         reason += f" 深掘りでは{deep_overall_comment}"
     if pedigree_adjustment_value > 0:
@@ -632,12 +893,19 @@ def score_horse_by_recent_runs(
     use_market_score_in_ranking: bool = False,
     market_signal_weight: float = 0.0,
     pedigree_analysis: PedigreeAnalysis | None = None,
+    race_level_analysis: object | None = None,
+    pace_analysis: object | None = None,
+    race_pace_projection: object | None = None,
 ) -> HorseScore:
     recent_runs = scorable_recent_runs(horse.recent_runs)
     career_runs = scorable_career_runs(horse.recent_runs)
     career_run_count = len(career_runs)
     lesson_list = lessons or []
-    recent_form = score_recent_form(recent_runs)
+    distance_weight, course_weight, lesson_adjustments = get_lesson_weight_adjustment(lesson_list)
+    ability_score = score_ability(career_runs, race_info)
+    recent_quality_score = score_recent_form(recent_runs, race_info)
+    recent_form = recent_quality_score
+    trend_score = score_trend(career_runs, race_info)
     distance_fit = score_distance_fit(career_runs, race_info.distance)
     course_fit = score_course_fit(career_runs, race_info.course, race_info.surface)
     track_condition_fit = score_track_condition_fit(career_runs, race_info.track_condition)
@@ -650,9 +918,17 @@ def score_horse_by_recent_runs(
         race_info=race_info,
     )
     jockey_fit = score_jockey_fit(career_runs, horse.jockey)
-    odds_value = score_odds_value(horse, recent_form)
-    risk = score_risk(recent_runs, recent_form, distance_fit)
-    distance_weight, course_weight, lesson_adjustments = get_lesson_weight_adjustment(lesson_list)
+    condition_fit_score = score_condition_fit_score(
+        distance_fit,
+        course_fit,
+        track_condition_fit,
+        distance_weight=distance_weight,
+        course_weight=course_weight,
+    )
+    race_level_score = score_race_level_component(race_level_analysis)
+    pace_jockey_score = score_pace_jockey_component(jockey_fit, pace_analysis, race_pace_projection)
+    odds_value = score_odds_value(horse, recent_quality_score)
+    risk = score_risk(recent_runs, recent_quality_score, distance_fit)
 
     scores = ScoreBreakdown(
         recent_form=recent_form,
@@ -662,6 +938,12 @@ def score_horse_by_recent_runs(
         jockey_fit=jockey_fit,
         odds_value=odds_value,
         risk=risk,
+        ability_score=ability_score,
+        recent_quality_score=recent_quality_score,
+        trend_score=trend_score,
+        condition_fit_score=condition_fit_score,
+        race_level_score=race_level_score,
+        pace_jockey_score=pace_jockey_score,
     )
     if not career_runs:
         total_score = calculate_unraced_base_total_score(
@@ -745,7 +1027,7 @@ def build_summary(
         rank_notes.append("展開・相手関係補正により一部順位が変動。")
     rank_note = f" {' '.join(rank_notes)}" if rank_notes else ""
     return (
-        f"本命は{top.horse_name}。近走安定度と距離・コース適性を重視した。"
+        f"本命は{top.horse_name}。通算能力・近走内容・条件適性を分離して評価した。"
         f"recent_runs使用数={career_run_count}、lessons使用数={len(used_lessons)}。"
         f"{lesson_note}"
         f"{f' 深掘り所見: {top_deep_comment}' if top_deep_comment else ''}"
@@ -807,6 +1089,9 @@ def build_prediction_from_recent_runs_with_scoring_config(
             use_market_score_in_ranking=scoring_config_snapshot.use_market_score_in_ranking,
             market_signal_weight=scoring_config_snapshot.market_signal_weight,
             pedigree_analysis=pedigree_analysis_by_horse.get(horse.horse_no),
+            race_level_analysis=race_level_analysis_by_horse.get(horse.horse_no),
+            pace_analysis=pace_analysis_by_horse.get(horse.horse_no),
+            race_pace_projection=race_pace_projection,
         )
         for horse in race_data.horses
     ]
