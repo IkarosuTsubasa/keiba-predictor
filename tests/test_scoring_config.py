@@ -43,7 +43,7 @@ class ScoringConfigTests(unittest.TestCase):
         self.assertEqual(profile_config.scoring_profile, "local_accuracy_default")
         self.assertEqual(profile_config.scoring_config.scoring_mode, "local_candidate_default")
         self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.75)
-        self.assertEqual(profile_config.scoring_config.race_level_weight, 0.1)
+        self.assertEqual(profile_config.scoring_config.race_level_weight, 0.5)
         self.assertEqual(profile_config.scoring_config.pace_weight, 1.0)
         self.assertEqual(profile_config.scoring_config.conditional_weight_profile, "none")
         self.assertFalse(profile_config.borderline_recovery_enabled)

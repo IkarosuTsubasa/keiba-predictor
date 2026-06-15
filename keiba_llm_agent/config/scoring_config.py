@@ -14,7 +14,7 @@ LOCAL_SCORING_PROFILE = "local_accuracy_default"
 LOCAL_SCORING_MODE = "local_candidate_default"
 LOCAL_SCORING_WEIGHTS = {
     "pedigree_weight": 0.75,
-    "race_level_weight": 0.1,
+    "race_level_weight": 0.5,
     "pace_weight": 1.0,
 }
 NO_CONDITIONAL_WEIGHT_PROFILE = "none"
