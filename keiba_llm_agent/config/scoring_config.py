@@ -13,14 +13,15 @@ DEFAULT_SCORING_WEIGHTS = {
 LOCAL_SCORING_PROFILE = "local_accuracy_default"
 LOCAL_SCORING_MODE = "local_candidate_default"
 LOCAL_SCORING_WEIGHTS = {
-    "pedigree_weight": 0.75,
+    "pedigree_weight": 0.5,
     "race_level_weight": 0.5,
-    "pace_weight": 1.0,
+    "pace_weight": 1.5,
 }
 NO_CONDITIONAL_WEIGHT_PROFILE = "none"
 DEFAULT_CONDITIONAL_WEIGHT_PROFILE = "candidate_default_v2"
 DEFAULT_CONDITIONAL_WEIGHT_RULES = {
-    "dirt_pedigree_weight": 0.3,
+    "dirt_pedigree_weight": 0.1,
+    "dirt_pace_weight": 0.8,
     "turf_race_level_weight": 1.2,
     "large_field_min_size": 14,
     "large_field_race_level_weight": 1.2,
@@ -190,6 +191,7 @@ def effective_scoring_weights(
 
     if surface == "ダート":
         weights["pedigree_weight"] = float(DEFAULT_CONDITIONAL_WEIGHT_RULES["dirt_pedigree_weight"])
+        weights["pace_weight"] = float(DEFAULT_CONDITIONAL_WEIGHT_RULES["dirt_pace_weight"])
     if surface == "芝" or field_size >= int(DEFAULT_CONDITIONAL_WEIGHT_RULES["large_field_min_size"]):
         weights["race_level_weight"] = float(
             DEFAULT_CONDITIONAL_WEIGHT_RULES[

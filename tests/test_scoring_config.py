@@ -42,9 +42,9 @@ class ScoringConfigTests(unittest.TestCase):
         profile_config, _ = resolve_scoring_profile_config("local_accuracy_default")
         self.assertEqual(profile_config.scoring_profile, "local_accuracy_default")
         self.assertEqual(profile_config.scoring_config.scoring_mode, "local_candidate_default")
-        self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.75)
+        self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.5)
         self.assertEqual(profile_config.scoring_config.race_level_weight, 0.5)
-        self.assertEqual(profile_config.scoring_config.pace_weight, 1.0)
+        self.assertEqual(profile_config.scoring_config.pace_weight, 1.5)
         self.assertEqual(profile_config.scoring_config.conditional_weight_profile, "none")
         self.assertFalse(profile_config.borderline_recovery_enabled)
 
@@ -104,10 +104,13 @@ class ScoringConfigTests(unittest.TestCase):
         large_field_weights = effective_scoring_weights(config, surface="ダート", field_size=14)
         self.assertEqual(turf_weights["pedigree_weight"], 0.2)
         self.assertEqual(turf_weights["race_level_weight"], 1.2)
-        self.assertEqual(dirt_weights["pedigree_weight"], 0.3)
+        self.assertEqual(turf_weights["pace_weight"], 0.0)
+        self.assertEqual(dirt_weights["pedigree_weight"], 0.1)
         self.assertEqual(dirt_weights["race_level_weight"], 1.0)
-        self.assertEqual(large_field_weights["pedigree_weight"], 0.3)
+        self.assertEqual(dirt_weights["pace_weight"], 0.8)
+        self.assertEqual(large_field_weights["pedigree_weight"], 0.1)
         self.assertEqual(large_field_weights["race_level_weight"], 1.2)
+        self.assertEqual(large_field_weights["pace_weight"], 0.8)
 
     def test_effective_weights_do_not_apply_when_profile_is_none(self) -> None:
         config, _ = resolve_scoring_config("custom", pedigree_weight=0.2, race_level_weight=1.0, pace_weight=0.0)

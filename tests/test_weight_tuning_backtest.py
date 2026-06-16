@@ -275,7 +275,7 @@ class WeightTuningBacktestTests(unittest.TestCase):
         self.assertEqual(score_for_weight_tuning_mode(horse, "conservative_full"), 35.9)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_pace"), 36.4)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_race_level"), 36.2)
-        self.assertEqual(score_for_weight_tuning_mode(horse, "local_candidate_default"), 36.1)
+        self.assertEqual(score_for_weight_tuning_mode(horse, "local_candidate_default"), 36.3)
         self.assertEqual(score_for_weight_tuning_mode(horse, "custom", custom_weights=(0.25, 0.5, 1.0)), 35.9)
 
     def test_run_backtest_weights_computes_counts_and_heavy_races(self) -> None:

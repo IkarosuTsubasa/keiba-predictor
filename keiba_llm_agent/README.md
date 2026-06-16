@@ -580,24 +580,24 @@ python -m keiba_llm_agent.main review-url --url "https://race.netkeiba.com/race/
   - base weights: `pedigree_weight = 0.2 / race_level_weight = 1.0 / pace_weight = 0.0`
   - effective weights:
     - 芝: `race_level_weight = 1.2`
-    - ダート: `pedigree_weight = 0.3`
+    - ダート: `pedigree_weight = 0.1 / pace_weight = 0.8`
     - 14頭以上: `race_level_weight = 1.2`
   - `use_market_score_in_ranking = false`
   - `market_signal_weight = 0.0`
 - 理由:
-  - `181 race` condition-weight simulation 里 `dirt_pedigree_0_3_turf_large_race_level_1_2` が小幅改善
+  - Render agent 564レースの留出検証で中央ダートは `pedigree_weight = 0.1 / pace_weight = 0.8` が小幅改善
   - `race_level` 是最稳定的補正源，芝 / 多頭数では少し強める余地
-  - `pace` 出现副作用，因此 default 先设为 `0`
-  - `pedigree` 有解释力，但全局过重会不稳定，因此仅在ダートで `0.3`
+  - `pace` は芝では副作用が出やすいため base は `0` のまま、ダートのみ条件付きで反映
+  - `pedigree` 有解释力，但ダートでは过重会不稳定，因此 `0.1` に抑える
 - `accuracy_default`:
   - `scoring_mode = candidate_default`
   - `borderline_recovery_enabled = true`
   - 当前 v1.0 的 accuracy-oriented 推奨設定
 - `local_accuracy_default`:
   - `scoring_mode = local_candidate_default`
-  - base weights: `pedigree_weight = 0.75 / race_level_weight = 0.1 / pace_weight = 1.0`
+  - base weights: `pedigree_weight = 0.5 / race_level_weight = 0.5 / pace_weight = 1.5`
   - `borderline_recovery_enabled = false`
-  - 2026-06-04〜2026-06-07 の地方96レースでは、旧設定より印内Top3平均とTop5 winner率を優先して改善
+  - Render agent 地方260レースの留出検証で、旧設定より本命勝率と本命Top3率を優先して改善
 - `safe_baseline`:
   - `scoring_mode = base_only`
   - `borderline_recovery_enabled = false`
