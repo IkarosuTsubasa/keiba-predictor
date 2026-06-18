@@ -979,8 +979,6 @@ def collect_risks(race_data: RaceData, used_lessons: list[LessonItem]) -> list[s
     risks: list[str] = []
     if any(is_low_sample_horse(horse) for horse in race_data.horses):
         risks.append("有効な実戦履歴5走未満の馬は血統・距離・馬場適性の先験評価を補強。")
-    if any(horse.odds is None or horse.popularity is None for horse in race_data.horses):
-        risks.append("一部の馬でoddsまたは人気が欠損している。")
     if any(any(run.course is None for run in horse.recent_runs) for horse in race_data.horses):
         risks.append("recent_runsにcourse欠損が含まれている。")
     if any(any(run.race_id is not None and len(run.race_id) < 8 for run in horse.recent_runs) for horse in race_data.horses):

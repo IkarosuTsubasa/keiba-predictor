@@ -115,10 +115,6 @@ def _audit_race_data(race_id: str, race_data: RaceData | None) -> tuple[dict[str
         issues.append(_issue("error", "HORSES_EMPTY", "race_data.horses が空。"))
     if duplicate_horse_nos:
         issues.append(_issue("error", "DUPLICATE_HORSE_NO", f"重複馬番: {duplicate_horse_nos}"))
-    if missing_odds:
-        issues.append(_issue("warning", "ODDS_MISSING", f"odds 欠損: {missing_odds}"))
-    if missing_popularity:
-        issues.append(_issue("warning", "POPULARITY_MISSING", f"popularity 欠損: {missing_popularity}"))
     if empty_recent_runs:
         issues.append(_issue("warning", "RECENT_RUNS_MISSING", f"recent_runs 空: {empty_recent_runs}"))
     if future_leakage:

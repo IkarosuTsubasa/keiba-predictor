@@ -342,8 +342,8 @@ def main():
     place_only_payload["constraints"]["allowed_types"] = ["place"]
     place_only_input = RacePolicyInput(**place_only_payload)
 
-    key_2000 = get_policy_cache_key(input_2000, model="gemini-3.1-flash-lite-preview")
-    key_50000 = get_policy_cache_key(input_50000, model="gemini-3.1-flash-lite-preview")
+    key_2000 = get_policy_cache_key(input_2000, model="gemini-3.1-flash-lite")
+    key_50000 = get_policy_cache_key(input_50000, model="gemini-3.1-flash-lite")
     assert key_2000 != key_50000, "cache key should change when bankroll or race budget changes"
     place_only_prompt_payload = _build_prompt_payload(place_only_input)
     assert all(str(item.get("bet_type", "")) == "place" for item in list(place_only_prompt_payload.get("candidate_tickets", []) or [])), "prompt candidate_tickets should already respect allowed_types"
@@ -379,7 +379,7 @@ def main():
 
     out1 = call_gemini_policy(
         input=input_2000,
-        model="gemini-3.1-flash-lite-preview",
+        model="gemini-3.1-flash-lite",
         timeout_s=5,
         cache_enable=True,
     )
@@ -410,7 +410,7 @@ def main():
 
     out2 = call_gemini_policy(
         input=input_2000,
-        model="gemini-3.1-flash-lite-preview",
+        model="gemini-3.1-flash-lite",
         timeout_s=5,
         cache_enable=True,
     )
@@ -430,7 +430,7 @@ def main():
 
     out3 = call_gemini_policy(
         input=input_50000,
-        model="gemini-3.1-flash-lite-preview",
+        model="gemini-3.1-flash-lite",
         timeout_s=5,
         cache_enable=True,
     )

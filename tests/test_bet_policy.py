@@ -80,17 +80,18 @@ class BetPolicyTests(unittest.TestCase):
         )
         self.assertEqual(strategy.bet_decision, "SKIP")
 
-    def test_all_odds_missing_results_in_skip(self) -> None:
+    def test_all_odds_missing_can_still_rate_by_model_scores(self) -> None:
         race_data = self.build_race_data([None, None, None])
         strategy = evaluate_bet_strategy(
             race_data,
             [build_horse_score(1, 40.0), build_horse_score(2, 37.0), build_horse_score(3, 36.0)],
             {"◎": 1, "○": 2, "▲": 3, "△": 0, "☆": 0},
             [],
-            ["一部の馬でoddsまたは人気が欠損している。"],
+            [],
         )
-        self.assertEqual(strategy.bet_decision, "SKIP")
-        self.assertIn("ODDS_MISSING", strategy.reason_codes)
+        self.assertEqual(strategy.bet_decision, "BET")
+        self.assertIn("MARKET_DATA_UNAVAILABLE", strategy.reason_codes)
+        self.assertIn("市場オッズを使わず", strategy.reason)
 
     def test_high_top_score_and_odds_results_in_bet(self) -> None:
         race_data = self.build_race_data([14.9, 23.3, 49.4])
@@ -132,7 +133,7 @@ class BetPolicyTests(unittest.TestCase):
             [build_horse_score(1, 28.0), build_horse_score(2, 27.0), build_horse_score(3, 26.0)],
             {"◎": 1, "○": 2, "▲": 3, "△": 0, "☆": 0},
             [],
-            ["一部の馬でoddsまたは人気が欠損している。"],
+            [],
         )
         bets = build_bets_from_strategy(strategy, [build_horse_score(1, 28.0), build_horse_score(2, 27.0)])
         self.assertEqual(strategy.bet_decision, "SKIP")

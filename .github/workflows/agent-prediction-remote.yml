@@ -53,8 +53,9 @@ jobs:
         id: run_agent
         shell: bash
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          KEIBA_LLM_PROVIDER: openai
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.1-flash-lite
+          KEIBA_LLM_PROVIDER: gemini
         run: |
           set +e
           python keiba_llm_agent/main.py predict-race \
@@ -62,7 +63,7 @@ jobs:
             --force-refresh \
             --skip-report \
             --skip-social \
-            --llm-provider openai \
+            --llm-provider gemini \
             --scoring-profile "${{ inputs.scoring_profile || 'accuracy_default' }}" \
             > agent_prediction_output.log 2>&1
           status=$?

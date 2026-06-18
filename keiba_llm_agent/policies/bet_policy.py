@@ -78,7 +78,7 @@ def evaluate_bet_strategy(
     if has_current_odds:
         reason_codes.append("ODDS_AVAILABLE")
     else:
-        reason_codes.append("ODDS_MISSING")
+        reason_codes.append("MARKET_DATA_UNAVAILABLE")
 
     if value_present:
         reason_codes.append("VALUE_PRESENT")
@@ -115,7 +115,6 @@ def evaluate_bet_strategy(
     should_skip = (
         top.total_score < 32
         or top_risk <= -7
-        or not has_current_odds
         or _contains_key_risk(risks)
         or (close_top_group and confidence == "low")
     )
@@ -143,7 +142,7 @@ def evaluate_bet_strategy(
     odds_descriptor = (
         f"単勝{top_odds:.1f}倍・人気{top_popularity}。"
         if top_odds is not None and top_popularity is not None
-        else "現行オッズは取得済み。"
+        else "市場オッズを使わず、能力・条件適性を中心に評価。"
     )
     group_descriptor = "上位拮抗のため点数は絞る。" if close_top_group else "軸馬が比較的明確。"
     lesson_descriptor = "過去lessonも参考。" if used_lessons_count else ""

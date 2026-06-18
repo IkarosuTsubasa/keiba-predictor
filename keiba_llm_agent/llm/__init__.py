@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 
 from keiba_llm_agent.config import get_llm_config
+from keiba_llm_agent.llm.gemini_llm_client import GeminiLLMClient
 from keiba_llm_agent.llm.llm_client import BaseLLMClient, extract_json_object
 from keiba_llm_agent.llm.mock_llm_client import MockLLMClient
 from keiba_llm_agent.llm.openai_llm_client import OpenAILLMClient
@@ -13,6 +14,24 @@ def create_llm_client(provider_override: str | None = None) -> BaseLLMClient:
     fallback_client = MockLLMClient()
     if config.provider == "mock":
         return fallback_client
+    if config.provider == "gemini":
+        if not config.gemini_api_key:
+            if config.enable_fallback:
+                warnings.warn("GEMINI_API_KEY is missing; fallback to MockLLMClient", stacklevel=2)
+                return fallback_client
+            raise RuntimeError("GEMINI_API_KEY is required when KEIBA_LLM_PROVIDER=gemini")
+        try:
+            return GeminiLLMClient(
+                api_key=config.gemini_api_key,
+                model=config.gemini_model,
+                fallback_client=fallback_client,
+                enable_fallback=config.enable_fallback,
+            )
+        except RuntimeError as exc:
+            if config.enable_fallback:
+                warnings.warn(f"{exc}; fallback to MockLLMClient", stacklevel=2)
+                return fallback_client
+            raise
     if not config.openai_api_key:
         if config.enable_fallback:
             warnings.warn("OPENAI_API_KEY is missing; fallback to MockLLMClient", stacklevel=2)
@@ -34,6 +53,7 @@ def create_llm_client(provider_override: str | None = None) -> BaseLLMClient:
 
 __all__ = [
     "BaseLLMClient",
+    "GeminiLLMClient",
     "MockLLMClient",
     "OpenAILLMClient",
     "create_llm_client",

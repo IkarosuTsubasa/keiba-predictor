@@ -48,7 +48,7 @@
 
 GitHub Secrets 至少需要：
 
-- `OPENAI_API_KEY`: `keiba_llm_agent` 调用 OpenAI 时使用。
+- `GEMINI_API_KEY`: `keiba_llm_agent` 调用 Gemini 生成公开预测文案时使用。
 - `PIPELINE_CALLBACK_SECRET`: 必须与 Render 的 `PIPELINE_CALLBACK_SECRET` 一致。
 
 GitHub workflow dispatch input 由 Render 自动传入：

@@ -31,7 +31,7 @@ Pipeline order (run by `pipeline/run_pipeline.py`):
   - `pandas`, `numpy`, `scikit-learn`, `lightgbm`
   - `beautifulsoup4`, `selenium`
   - `fastapi`, `uvicorn` (web UI only)
-  - `pydantic`, `google-genai` (Gemini policy layer)
+  - `pydantic`, `google-genai` (Gemini agent / policy layer)
 
 ## Setup
 Install dependencies:
@@ -39,16 +39,18 @@ Install dependencies:
 python -m pip install pandas numpy scikit-learn lightgbm beautifulsoup4 selenium fastapi uvicorn pydantic google-genai
 ```
 
-### Gemini Policy Layer（免费 API）
+### Gemini Agent / Policy Layer（免费 API）
 1. 设置 API Key（Windows PowerShell）：
    `setx GEMINI_API_KEY "your_key_here"`（新终端生效）
-2. 可选离线/CI 模式：
+2. 可选模型：
+   `setx GEMINI_MODEL "gemini-3.1-flash-lite"`（默认就是这个模型）
+3. 可选离线/CI 模式：
    `set GEMINI_POLICY_MOCK=1`（仅用本地 deterministic policy）
-3. 运行带 Gemini policy 的下注计划：
+4. 运行带 Gemini policy 的下注计划：
    Legacy manual-buy command removed from this repository.
-4. 默认缓存目录：
+5. 默认缓存目录：
    `pipeline/data/policy_cache_gemini/`
-5. 运行 smoke：
+6. 运行 smoke：
    `python pipeline/smoke_gemini_policy.py`
 
 ## Usage

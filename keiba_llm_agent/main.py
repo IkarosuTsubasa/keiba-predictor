@@ -813,6 +813,7 @@ def run_llm_check(provider_override: str | None = None) -> dict[str, object]:
     config = get_llm_config(provider_override)
     requested_provider = config.provider
     active_provider = requested_provider
+    requested_model = config.gemini_model if requested_provider == "gemini" else config.openai_model
     status = "OK"
     detail = "ready"
     if requested_provider == "openai" and not config.openai_api_key:
@@ -824,25 +825,38 @@ def run_llm_check(provider_override: str | None = None) -> dict[str, object]:
             return {
                 "provider": requested_provider,
                 "active_provider": requested_provider,
-                "model": config.openai_model,
+                "model": requested_model,
                 "status": "ERROR",
                 "detail": "OPENAI_API_KEY is missing",
             }
-    try:
-        client = create_llm_client(provider_override=provider_override)
-        if requested_provider == "openai" and isinstance(client, MockLLMClient):
+    if requested_provider == "gemini" and not config.gemini_api_key:
+        if config.enable_fallback:
             status = "WARNING"
             active_provider = "mock"
-            detail = "openai package is not installed or OpenAI client init failed; fallback to mock"
+            detail = "GEMINI_API_KEY missing; fallback to mock"
+        else:
+            return {
+                "provider": requested_provider,
+                "active_provider": requested_provider,
+                "model": requested_model,
+                "status": "ERROR",
+                "detail": "GEMINI_API_KEY is missing",
+            }
+    try:
+        client = create_llm_client(provider_override=provider_override)
+        if requested_provider in {"openai", "gemini"} and isinstance(client, MockLLMClient):
+            status = "WARNING"
+            active_provider = "mock"
+            detail = f"{requested_provider} client init failed; fallback to mock"
         response = client.generate_json(
             "Return JSON only.",
             '{"ping":"pong"} を {"ok": true} 形式で返してください',
             schema_name="llm_check",
         )
-        if requested_provider == "openai" and getattr(client, "last_fallback_used", False):
+        if requested_provider in {"openai", "gemini"} and getattr(client, "last_fallback_used", False):
             status = "WARNING"
             active_provider = "mock"
-            detail = "OpenAI request failed during llm-check; fallback to mock"
+            detail = f"{requested_provider} request failed during llm-check; fallback to mock"
         if response.get("ok") is not True:
             status = "WARNING"
             detail = "JSON response parsed but ok!=true"
@@ -852,7 +866,7 @@ def run_llm_check(provider_override: str | None = None) -> dict[str, object]:
     return {
         "provider": requested_provider,
         "active_provider": active_provider,
-        "model": config.openai_model,
+        "model": requested_model,
         "status": status,
         "detail": detail,
     }
@@ -1581,7 +1595,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     predict_race_parser.add_argument(
         "--llm-provider",
-        choices=["mock", "openai"],
+        choices=["mock", "gemini", "openai"],
         help="覆盖环境变量中的 LLM provider",
     )
     _add_scoring_arguments(predict_race_parser)
@@ -1610,7 +1624,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_race_parser.add_argument(
         "--llm-provider",
-        choices=["mock", "openai"],
+        choices=["mock", "gemini", "openai"],
         help="覆盖环境变量中的 LLM provider",
     )
 

@@ -64,17 +64,22 @@ class LLMConfig:
     provider: str = "openai"
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.1-flash-lite"
     enable_fallback: bool = True
 
 
 def get_llm_config(provider_override: str | None = None) -> LLMConfig:
     provider = (provider_override or _get_setting("KEIBA_LLM_PROVIDER", "openai") or "openai").strip().lower()
-    if provider not in {"mock", "openai"}:
+    if provider not in {"mock", "openai", "gemini"}:
         provider = "openai"
     return LLMConfig(
         provider=provider,
         openai_api_key=_get_setting("OPENAI_API_KEY"),
         openai_model=(_get_setting("OPENAI_MODEL", "gpt-5.4-mini") or "gpt-5.4-mini").strip() or "gpt-5.4-mini",
+        gemini_api_key=_get_setting("GEMINI_API_KEY"),
+        gemini_model=(_get_setting("GEMINI_MODEL", "gemini-3.1-flash-lite") or "gemini-3.1-flash-lite").strip()
+        or "gemini-3.1-flash-lite",
         enable_fallback=_parse_bool_env("KEIBA_LLM_ENABLE_FALLBACK", True),
     )
 

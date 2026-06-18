@@ -337,7 +337,7 @@ class MockLLMClient(BaseLLMClient):
             "bet_decision": "SKIP" if not horse_scores else "BET",
             "confidence": "low",
             "participation_level": "none" if not horse_scores else "light",
-            "reason_codes": ["ODDS_MISSING"] if any(horse.get("odds") is None for horse in horses) else ["ODDS_AVAILABLE"],
+            "reason_codes": ["MARKET_DATA_UNAVAILABLE"] if not any(horse.get("odds") is not None for horse in horses) else ["ODDS_AVAILABLE"],
             "reason": "Mock/LLM fallbackのため、軽い参加判断のみを出力。",
         }
         if strategy["bet_decision"] == "SKIP":

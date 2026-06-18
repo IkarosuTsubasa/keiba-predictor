@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 POLICY_CACHE_VERSION = "gemini_policy_v21"
 POLICY_PROMPT_VERSION = "gemini_policy_prompt_v32"
 PROMPT_POLICY_LOCK_VERSION = "gemini_policy_lock_v6"

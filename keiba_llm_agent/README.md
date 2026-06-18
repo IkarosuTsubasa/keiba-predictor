@@ -9,7 +9,7 @@
 5. 生成 `review.json`
 6. 从 `review.json` 抽取 lessons 并追加到 `memory/lessons.json`
 
-当前版本默认使用 `MockLLMClient`，也支持通过 OpenAI API 做 summary / review 文案增强。
+当前版本默认使用真实 LLM provider；支持通过 Gemini API 或 OpenAI API 做 summary / review 文案增强，缺少 key 且 fallback 开启时会回退到 `MockLLMClient`。
 所有 LLM 输出都强制为 JSON；没有提供的数据在 prompt 中要求写成 `unknown`。
 当前 analysis 有两种模式：
 - 没有 `recent_runs`：走 Mock/LLM fallback
@@ -317,13 +317,13 @@ python -m keiba_llm_agent.main llm-check
 使用 OpenAI provider 执行赛前一键流程：
 
 ```bash
-python -m keiba_llm_agent.main predict-race --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605020811" --llm-provider openai
+python -m keiba_llm_agent.main predict-race --url "https://race.netkeiba.com/race/shutuba.html?race_id=202605020811" --llm-provider gemini
 ```
 
 使用 OpenAI provider 执行赛后一键流程：
 
 ```bash
-python -m keiba_llm_agent.main review-race --url "https://race.netkeiba.com/race/result.html?race_id=202605020811" --llm-provider openai
+python -m keiba_llm_agent.main review-race --url "https://race.netkeiba.com/race/result.html?race_id=202605020811" --llm-provider gemini
 ```
 
 默认会保存到：
@@ -352,23 +352,26 @@ keiba_llm_agent/data/social_posts/{date}_daily.txt
 
 环境变量：
 
-- `KEIBA_LLM_PROVIDER=mock|openai`
+- `KEIBA_LLM_PROVIDER=mock|gemini|openai`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `KEIBA_LLM_ENABLE_FALLBACK=true|false`
 
 默认值：
 
-- `KEIBA_LLM_PROVIDER=openai`
+- `KEIBA_LLM_PROVIDER=gemini`
+- `GEMINI_MODEL=gemini-3.1-flash-lite`
 - `OPENAI_MODEL=gpt-5.4-mini`
 - `KEIBA_LLM_ENABLE_FALLBACK=true`
 
 PowerShell 示例：
 
 ```powershell
-$env:KEIBA_LLM_PROVIDER="openai"
-$env:OPENAI_API_KEY="your_api_key"
-$env:OPENAI_MODEL="gpt-5.4-mini"
+$env:KEIBA_LLM_PROVIDER="gemini"
+$env:GEMINI_API_KEY="your_api_key"
+$env:GEMINI_MODEL="gemini-3.1-flash-lite"
 python -m keiba_llm_agent.main llm-check
 ```
 
@@ -518,8 +521,8 @@ python -m keiba_llm_agent.main review-url --url "https://race.netkeiba.com/race/
 - `review-race --enable-report`: 显式生成 review report
 - `review-race --skip-report`: 跳过 review report 生成
 - `review-race --skip-social`: 跳过 review social post 生成
-- `predict-race --llm-provider`: 指定 `mock` 或 `openai`，覆盖环境变量
-- `review-race --llm-provider`: 指定 `mock` 或 `openai`，覆盖环境变量
+- `predict-race --llm-provider`: 指定 `mock`、`gemini` 或 `openai`，覆盖环境变量
+- `review-race --llm-provider`: 指定 `mock`、`gemini` 或 `openai`，覆盖环境变量
 - `result.json`: 现在会尽量保存 `payouts`、完整 `finish_order` 与 `warnings`
 - `review.json`: 当 `bet_hit=true` 但払戻缺失时，会设置 `payout_warning=true` 与 `review_warnings`
 - `simulation_review`: 会优先使用 `finish_order` 判断 `top3 / close / mid / failed`，尽量减少 `unknown`
