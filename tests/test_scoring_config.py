@@ -13,17 +13,17 @@ from keiba_llm_agent.config.scoring_config import (
 
 
 class ScoringConfigTests(unittest.TestCase):
-    def test_accuracy_default_profile_returns_candidate_default_with_recovery(self) -> None:
+    def test_accuracy_default_profile_returns_candidate_default_without_recovery(self) -> None:
         profile_config, warnings = resolve_scoring_profile_config("accuracy_default")
         self.assertEqual(profile_config.scoring_profile, "accuracy_default")
         self.assertEqual(profile_config.scoring_config.scoring_mode, "candidate_default")
         self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.2)
         self.assertEqual(profile_config.scoring_config.race_level_weight, 1.0)
-        self.assertEqual(profile_config.scoring_config.pace_weight, 0.0)
+        self.assertEqual(profile_config.scoring_config.pace_weight, 0.2)
         self.assertEqual(profile_config.scoring_config.conditional_weight_profile, "candidate_default_v2")
         self.assertFalse(profile_config.scoring_config.use_market_score_in_ranking)
         self.assertEqual(profile_config.scoring_config.market_signal_weight, 0.0)
-        self.assertTrue(profile_config.borderline_recovery_enabled)
+        self.assertFalse(profile_config.borderline_recovery_enabled)
         self.assertEqual(warnings, [])
 
     def test_safe_baseline_profile_returns_base_only_without_recovery(self) -> None:
@@ -42,9 +42,9 @@ class ScoringConfigTests(unittest.TestCase):
         profile_config, _ = resolve_scoring_profile_config("local_accuracy_default")
         self.assertEqual(profile_config.scoring_profile, "local_accuracy_default")
         self.assertEqual(profile_config.scoring_config.scoring_mode, "local_candidate_default")
-        self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.5)
-        self.assertEqual(profile_config.scoring_config.race_level_weight, 0.5)
-        self.assertEqual(profile_config.scoring_config.pace_weight, 1.5)
+        self.assertEqual(profile_config.scoring_config.pedigree_weight, 0.2)
+        self.assertEqual(profile_config.scoring_config.race_level_weight, 0.6)
+        self.assertEqual(profile_config.scoring_config.pace_weight, 0.0)
         self.assertEqual(profile_config.scoring_config.conditional_weight_profile, "none")
         self.assertFalse(profile_config.borderline_recovery_enabled)
 
@@ -53,7 +53,7 @@ class ScoringConfigTests(unittest.TestCase):
         self.assertEqual(config.scoring_mode, "candidate_default")
         self.assertEqual(config.pedigree_weight, 0.2)
         self.assertEqual(config.race_level_weight, 1.0)
-        self.assertEqual(config.pace_weight, 0.0)
+        self.assertEqual(config.pace_weight, 0.2)
         self.assertEqual(config.conditional_weight_profile, "candidate_default_v2")
         self.assertFalse(config.use_market_score_in_ranking)
         self.assertEqual(config.market_signal_weight, 0.0)
@@ -104,12 +104,12 @@ class ScoringConfigTests(unittest.TestCase):
         large_field_weights = effective_scoring_weights(config, surface="ダート", field_size=14)
         self.assertEqual(turf_weights["pedigree_weight"], 0.2)
         self.assertEqual(turf_weights["race_level_weight"], 1.2)
-        self.assertEqual(turf_weights["pace_weight"], 0.0)
+        self.assertEqual(turf_weights["pace_weight"], 0.2)
         self.assertEqual(dirt_weights["pedigree_weight"], 0.1)
         self.assertEqual(dirt_weights["race_level_weight"], 1.0)
         self.assertEqual(dirt_weights["pace_weight"], 0.8)
         self.assertEqual(large_field_weights["pedigree_weight"], 0.1)
-        self.assertEqual(large_field_weights["race_level_weight"], 1.2)
+        self.assertEqual(large_field_weights["race_level_weight"], 1.0)
         self.assertEqual(large_field_weights["pace_weight"], 0.8)
 
     def test_effective_weights_do_not_apply_when_profile_is_none(self) -> None:
@@ -134,7 +134,7 @@ class ScoringConfigTests(unittest.TestCase):
         )
         self.assertEqual(profile_config.scoring_profile, DEFAULT_SCORING_PROFILE)
         self.assertEqual(profile_config.scoring_config.scoring_mode, DEFAULT_SCORING_MODE)
-        self.assertTrue(profile_config.borderline_recovery_enabled)
+        self.assertFalse(profile_config.borderline_recovery_enabled)
         self.assertTrue(warnings)
 
     def test_explicit_scoring_mode_overrides_profile_default_mode(self) -> None:

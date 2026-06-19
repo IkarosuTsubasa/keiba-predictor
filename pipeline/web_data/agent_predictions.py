@@ -272,6 +272,7 @@ def _ranked_horses(payload):
 
 def _top_horse_items(payload, limit=5):
     horses = _horse_map(payload)
+    memo_map = _top_horse_memo_map(payload)
     rows = []
     seen = set()
     marks = dict(payload.get("marks") or {})
@@ -282,7 +283,7 @@ def _top_horse_items(payload, limit=5):
         item = dict(horses.get(horse_no) or {})
         if not item:
             continue
-        rows.append(_serialize_top_horse(item, rank=rank, symbol=symbol))
+        rows.append(_serialize_top_horse(item, rank=rank, symbol=symbol, memo_map=memo_map))
         seen.add(horse_no)
 
     if len(rows) < limit:
@@ -290,11 +291,23 @@ def _top_horse_items(payload, limit=5):
             horse_no = _safe_int(item.get("horse_no"), 0)
             if horse_no <= 0 or horse_no in seen:
                 continue
-            rows.append(_serialize_top_horse(item, rank=len(rows) + 1, symbol=""))
+            rows.append(_serialize_top_horse(item, rank=len(rows) + 1, symbol="", memo_map=memo_map))
             seen.add(horse_no)
             if len(rows) >= limit:
                 break
     return rows[:limit]
+
+
+def _top_horse_memo_map(payload):
+    out = {}
+    for item in list(payload.get("top_horse_memos") or []):
+        if not isinstance(item, dict):
+            continue
+        horse_no = _safe_int(item.get("horse_no"), 0)
+        memo = _safe_text(item.get("memo") or item.get("comment") or item.get("reason"))
+        if horse_no > 0 and memo:
+            out[horse_no] = memo
+    return out
 
 
 def _support_score(item):
@@ -302,9 +315,11 @@ def _support_score(item):
     return max(1, min(99, int(round(total_score * 3.0))))
 
 
-def _serialize_top_horse(item, rank=0, symbol=""):
+def _serialize_top_horse(item, rank=0, symbol="", memo_map=None):
+    horse_no = _safe_int(item.get("horse_no"), 0)
+    memos = dict(memo_map or {})
     return {
-        "horse_no": str(_safe_int(item.get("horse_no"), 0) or ""),
+        "horse_no": str(horse_no or ""),
         "horse_name": _safe_text(item.get("horse_name")),
         "pred_rank": int(rank or 0),
         "mark": _safe_text(symbol),
@@ -314,7 +329,7 @@ def _serialize_top_horse(item, rank=0, symbol=""):
         "rank_score_norm": round(max(0.05, 1.0 - max(0, int(rank or 1) - 1) * 0.18), 6),
         "win_odds": round(_safe_float(item.get("odds"), 0.0), 3),
         "popularity": _safe_int(item.get("popularity"), 0),
-        "reason": _safe_text(item.get("reason")),
+        "reason": memos.get(horse_no) or _safe_text(item.get("reason")),
     }
 
 

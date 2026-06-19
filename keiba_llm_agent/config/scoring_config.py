@@ -8,14 +8,14 @@ DEFAULT_SCORING_MODE = "candidate_default"
 DEFAULT_SCORING_WEIGHTS = {
     "pedigree_weight": 0.2,
     "race_level_weight": 1.0,
-    "pace_weight": 0.0,
+    "pace_weight": 0.2,
 }
 LOCAL_SCORING_PROFILE = "local_accuracy_default"
 LOCAL_SCORING_MODE = "local_candidate_default"
 LOCAL_SCORING_WEIGHTS = {
-    "pedigree_weight": 0.5,
-    "race_level_weight": 0.5,
-    "pace_weight": 1.5,
+    "pedigree_weight": 0.2,
+    "race_level_weight": 0.6,
+    "pace_weight": 0.0,
 }
 NO_CONDITIONAL_WEIGHT_PROFILE = "none"
 DEFAULT_CONDITIONAL_WEIGHT_PROFILE = "candidate_default_v2"
@@ -24,7 +24,7 @@ DEFAULT_CONDITIONAL_WEIGHT_RULES = {
     "dirt_pace_weight": 0.8,
     "turf_race_level_weight": 1.2,
     "large_field_min_size": 14,
-    "large_field_race_level_weight": 1.2,
+    "large_field_race_level_weight": 1.0,
 }
 DEFAULT_MARKET_SIGNAL_CONFIG = {
     "use_market_score_in_ranking": False,
@@ -64,7 +64,7 @@ SCORING_MODES: dict[str, dict[str, float]] = {
 SCORING_PROFILES: dict[str, dict[str, object]] = {
     "accuracy_default": {
         "scoring_mode": "candidate_default",
-        "borderline_recovery_enabled": True,
+        "borderline_recovery_enabled": False,
     },
     LOCAL_SCORING_PROFILE: {
         "scoring_mode": LOCAL_SCORING_MODE,
@@ -103,7 +103,7 @@ class ScoringConfig:
 class ScoringProfileConfig:
     scoring_profile: str = DEFAULT_SCORING_PROFILE
     scoring_config: ScoringConfig = ScoringConfig()
-    borderline_recovery_enabled: bool = True
+    borderline_recovery_enabled: bool = False
 
     def model_dump(self) -> dict[str, object]:
         payload = self.scoring_config.model_dump()
@@ -230,7 +230,7 @@ def resolve_scoring_profile_config(
     if borderline_recovery_enabled is not None:
         resolved_recovery_enabled = borderline_recovery_enabled
     elif explicit_scoring_mode:
-        resolved_recovery_enabled = resolved_config.scoring_mode in {"candidate_default", "custom"}
+        resolved_recovery_enabled = False
     else:
         resolved_recovery_enabled = bool(profile_defaults["borderline_recovery_enabled"])
 

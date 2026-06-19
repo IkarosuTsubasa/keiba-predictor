@@ -219,7 +219,7 @@ def _resolve_borderline_recovery_enabled(
         return True
     if disable_borderline_recovery:
         return False
-    return (scoring_mode or "candidate_default") in {"candidate_default", "custom"}
+    return False
 
 
 def _resolve_borderline_recovery_override(

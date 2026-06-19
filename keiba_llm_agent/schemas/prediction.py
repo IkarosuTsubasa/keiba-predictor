@@ -48,8 +48,8 @@ class ScoringConfigSnapshot(BaseModel):
     scoring_mode: str = "candidate_default"
     pedigree_weight: float = 0.2
     race_level_weight: float = 1.0
-    pace_weight: float = 0.0
-    conditional_weight_profile: str = "none"
+    pace_weight: float = 0.2
+    conditional_weight_profile: str = "candidate_default_v2"
     use_market_score_in_ranking: bool = False
     market_signal_weight: float = 0.0
 
@@ -99,7 +99,7 @@ class TotalScoreBreakdown(BaseModel):
     race_level_weight: float = 1.0
     race_level_adjustment_weighted: float = 0.0
     pace_adjustment_raw: float = 0.0
-    pace_weight: float = 0.0
+    pace_weight: float = 0.2
     pace_adjustment_weighted: float = 0.0
     borderline_recovery_bonus: float = 0.0
     total_score: float = 0.0
@@ -137,12 +137,17 @@ class StrategyDecision(BaseModel):
     reason: str
 
 
+class TopHorseMemo(BaseModel):
+    horse_no: int
+    memo: str
+
+
 class Prediction(BaseModel):
     race_id: str
     race_info: RaceInfo | None = None
     scoring_profile: str = "accuracy_default"
     scoring_mode: str = "candidate_default"
-    borderline_recovery_enabled: bool = True
+    borderline_recovery_enabled: bool = False
     scoring_config: ScoringConfigSnapshot = Field(default_factory=ScoringConfigSnapshot)
     market_signal_config: MarketSignalConfigSnapshot = Field(default_factory=MarketSignalConfigSnapshot)
     borderline_recovery_config: BorderlineRecoveryConfigSnapshot = Field(default_factory=BorderlineRecoveryConfigSnapshot)
@@ -152,6 +157,7 @@ class Prediction(BaseModel):
     summary: str
     commentary: str | None = None
     risks: list[str] = Field(default_factory=list)
+    top_horse_memos: list[TopHorseMemo] = Field(default_factory=list)
     used_lessons: list[LessonItem] = Field(default_factory=list)
     deep_analyses: list[HorseDeepAnalysis] = Field(default_factory=list)
     pedigree_analyses: list[PedigreeAnalysis] = Field(default_factory=list)

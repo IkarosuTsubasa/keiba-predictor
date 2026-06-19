@@ -10,10 +10,20 @@ from keiba_llm_agent.schemas.race_data import RaceData
 from keiba_llm_agent.schemas.review import LessonItem, Review
 
 
-PREDICTION_ENHANCEMENT_PROMPT = """あなたは競馬予想文章の補助LLMです。
-返答は必ずJSONのみで、summary / risks / commentary を含めてください。
+PREDICTION_ENHANCEMENT_PROMPT = """あなたは世界水準のプロ馬券師として、公開レース詳細に載せる予想文を仕上げる補助LLMです。
+返答は必ずJSONのみで、summary / risks / commentary / top_horse_memos を含めてください。
 horse_scores / marks / strategy は変更してはいけません。
-summary は短い日本語要約、risks は日本語文字列配列、commentary は補足コメントにしてください。
+summary は本命と相手関係を一言で伝える短い日本語要約にしてください。
+risks は「判断理由」にそのまま表示されるため、馬券判断として意味のある材料だけを2〜3件に絞ってください。
+commentary は公開用の補足コメントにしてください。
+top_horse_memos は上位5頭それぞれについて [{"horse_no": 1, "memo": "..."}] の形式で返してください。
+top_horse_memos の memo は1頭あたり自然な日本語1文。馬の強み、勝負所、嫌う材料を具体的に書き、採点式の説明にしないこと。
+口調は冷静で鋭いプロ馬券師。断定しすぎず、ただし素人向けの説明臭さは避けてください。
+禁止事項:
+- ルールベース、heuristic、機械学習モデル、ML model、内部実装、データ処理、欠損、unknown、fallback などのシステム説明を書かないこと。
+- オッズや人気が入力にない場合、オッズ条件、回収期待値、妙味、市場評価、人気、配当を根拠にしないこと。
+- 「正式な機械学習モデルではない」のような免責文を出さないこと。
+- 提供されていない事実を作らないこと。
 """
 
 REVIEW_ENHANCEMENT_PROMPT = """あなたは競馬回顧文章の補助LLMです。
@@ -72,6 +82,9 @@ class BaseLLMClient(ABC):
             "strategy": prediction.strategy.model_dump() if prediction.strategy else None,
             "summary": prediction.summary,
             "risks": prediction.risks,
+            "market_data_available": any(
+                horse.odds is not None or horse.popularity is not None for horse in race_data.horses
+            ),
             "used_lessons": [lesson.model_dump() for lesson in used_lessons],
         }
         try:

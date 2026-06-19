@@ -102,9 +102,6 @@ def evaluate_bet_strategy(
     ):
         reason_codes.append("PACE_RISK_TOP")
 
-    if any("heuristic scoring" in risk for risk in risks):
-        reason_codes.append("HEURISTIC_MODEL_ONLY")
-
     if top.total_score >= 40 and score_gap_1_3 >= 4 and top_risk >= -3 and top_odds is not None:
         confidence = "high"
     elif top.total_score >= 35 and average_top3_score >= 34 and top_risk >= -5:
@@ -127,7 +124,7 @@ def evaluate_bet_strategy(
             participation_level="none",
             reason_codes=reason_codes,
             reason=(
-                "上位比較で決め手が弱く、リスクまたはオッズ条件も不十分なため見送り。"
+                "上位の能力差が詰まっており、軸を決め切るには決定打が足りないため見送り。"
             ),
         )
 

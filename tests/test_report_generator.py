@@ -263,7 +263,7 @@ class ReportGeneratorTests(unittest.TestCase):
         self.assertIn("odds(参考)", markdown)
         self.assertIn("scoring_profile: accuracy_default", markdown)
         self.assertIn("scoring_mode: candidate_default", markdown)
-        self.assertIn("borderline_recovery_enabled: true", markdown)
+        self.assertIn("borderline_recovery_enabled: false", markdown)
         self.assertIn("| 印 | 馬番 | 馬名 | base | pedigree | raceLv | pace | border_adj | total | odds(参考) | 人気(参考) | reason |", markdown)
         self.assertIn("14.9", markdown)
         self.assertIn("| 4 |", markdown)

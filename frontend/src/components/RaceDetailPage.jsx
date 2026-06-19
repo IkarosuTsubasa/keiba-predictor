@@ -296,8 +296,24 @@ function PanelEmpty({ children }) {
 function cleanPredictionCopy(value) {
   const source = String(value || "").trim();
   if (source === "Mock LLM commentary") return "";
+  const blockedTerms = [
+    "heuristic scoring",
+    "ルールベース評価",
+    "正式なML model",
+    "正式な機械学習モデル",
+    "LLM simulation fallback used",
+    "fallback",
+    "oddsまたは人気が欠損",
+    "データ処理",
+    "内部実装",
+  ];
+  if (blockedTerms.some((term) => source.includes(term))) return "";
   return source
     .trim()
+    .replace(
+      "上位比較で決め手が弱く、リスクまたはオッズ条件も不十分なため見送り。",
+      "上位の能力差が詰まっており、軸を決め切るには決定打が足りないため見送り。",
+    )
     .replace(/^本命は[^。]+。\s*/, "")
     .replace(/近走データ使用数=\d+、参考メモ使用数=\d+。\s*/g, "")
     .replaceAll("買い目", "予測印")
@@ -315,10 +331,6 @@ function cleanPredictionCopy(value) {
     .replace(/近走データ使用数=\d+、参考メモ使用数=\d+。\s*/g, "")
     .replaceAll("lesson", "参考メモ")
     .replaceAll("過去参考メモ参考", "過去参考メモ")
-    .replaceAll("heuristic scoring", "ルールベース評価")
-    .replaceAll("正式なML model", "正式な機械学習モデル")
-    .replaceAll("ML model", "機械学習モデル")
-    .replaceAll("LLM simulation fallback used.", "AIシミュレーション補助を使用。")
     .replaceAll("unknown", "不明")
     .replaceAll("average", "平均ペース");
 }

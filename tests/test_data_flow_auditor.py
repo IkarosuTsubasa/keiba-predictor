@@ -47,7 +47,7 @@ def _horse_score(horse_no: int, horse_name: str, total: float) -> dict:
             "race_level_weight": 1.0,
             "race_level_adjustment_weighted": 0.0,
             "pace_adjustment_raw": 0.0,
-            "pace_weight": 0.0,
+            "pace_weight": 0.2,
             "pace_adjustment_weighted": 0.0,
             "borderline_recovery_bonus": 0.0,
             "total_score": total,
@@ -75,12 +75,12 @@ def _prediction_payload(race_id: str, race_date: str, scores: list[dict]) -> dic
         },
         "scoring_profile": "accuracy_default",
         "scoring_mode": "candidate_default",
-        "borderline_recovery_enabled": True,
+        "borderline_recovery_enabled": False,
         "scoring_config": {
             "scoring_mode": "candidate_default",
             "pedigree_weight": 0.2,
             "race_level_weight": 1.0,
-            "pace_weight": 0.0,
+            "pace_weight": 0.2,
             "use_market_score_in_ranking": False,
             "market_signal_weight": 0.0,
         },
@@ -89,7 +89,7 @@ def _prediction_payload(race_id: str, race_date: str, scores: list[dict]) -> dic
             "market_signal_weight": 0.0,
         },
         "borderline_recovery_config": {
-            "enabled": True,
+            "enabled": False,
             "max_rank": 6,
             "max_score_gap": 1.0,
             "min_net_signal": 2,
@@ -259,6 +259,7 @@ class DataFlowAuditorTests(unittest.TestCase):
         self.assertTrue(audit["readiness"]["backtest_ready"])
         self.assertTrue(audit["readiness"]["roi_reliable"])
         self.assertEqual(audit["data_flow"]["prediction"]["field_sources"]["marks"], "sorted by final total_score")
+        self.assertTrue(audit["data_flow"]["prediction"]["marks_match_current_rule_order"])
 
     def test_future_recent_run_is_flagged_as_leakage(self) -> None:
         self._write_race("r2", "2026-05-21", future_run=True)

@@ -85,6 +85,21 @@ class AgentPredictionsScopeTests(unittest.TestCase):
         self.assertNotEqual(close_score, 0.82)
         self.assertNotEqual(clear_score, 0.82)
 
+    def test_top_horse_items_prefers_public_llm_memo(self) -> None:
+        payload = {
+            "marks": {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
+            "horse_scores": [
+                {"horse_no": 1, "horse_name": "ホースA", "total_score": 40.0, "reason": "raw reason"},
+            ],
+            "top_horse_memos": [
+                {"horse_no": 1, "memo": "勝負所で前を射程に入れられれば崩れにくい。"},
+            ],
+        }
+
+        rows = agent_predictions._top_horse_items(payload, limit=1)
+
+        self.assertEqual(rows[0]["reason"], "勝負所で前を射程に入れられれば崩れにくい。")
+
 
 if __name__ == "__main__":
     unittest.main()

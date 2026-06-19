@@ -12,10 +12,87 @@ from keiba_llm_agent.scoring.recent_run_scorer import (
     build_prediction_from_recent_runs_with_scoring_config,
     has_recent_runs_data,
 )
-from keiba_llm_agent.schemas.prediction import Prediction, ScoringConfigSnapshot
+from keiba_llm_agent.schemas.prediction import Prediction, ScoringConfigSnapshot, TopHorseMemo
 from keiba_llm_agent.schemas.race_data import RaceData
 from keiba_llm_agent.schemas.review import LessonItem
 from keiba_llm_agent.simulation.race_simulator import simulate_race
+
+
+FORBIDDEN_PUBLIC_COPY_TERMS = (
+    "ルールベース",
+    "heuristic",
+    "機械学習モデル",
+    "ML model",
+    "内部実装",
+    "データ処理",
+    "欠損",
+    "unknown",
+    "fallback",
+)
+
+NO_MARKET_COPY_TERMS = (
+    "オッズ",
+    "人気",
+    "回収期待値",
+    "妙味",
+    "市場評価",
+    "配当",
+)
+
+
+def _is_public_prediction_copy_allowed(text: str, *, market_data_available: bool) -> bool:
+    source = str(text or "").strip()
+    if not source:
+        return False
+    lowered = source.lower()
+    if any(term.lower() in lowered for term in FORBIDDEN_PUBLIC_COPY_TERMS):
+        return False
+    if not market_data_available and any(term in source for term in NO_MARKET_COPY_TERMS):
+        return False
+    return True
+
+
+def _sanitize_public_prediction_copy_items(items: list[str], *, market_data_available: bool) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in list(items or []):
+        text = str(item or "").strip()
+        if not _is_public_prediction_copy_allowed(text, market_data_available=market_data_available):
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _sanitize_top_horse_memos(
+    items: object,
+    prediction: Prediction,
+    *,
+    market_data_available: bool,
+) -> list[TopHorseMemo]:
+    if not isinstance(items, list):
+        return []
+    marked_horse_nos = {int(horse_no) for horse_no in prediction.marks.values() if horse_no}
+    allowed_horse_nos = marked_horse_nos or {int(score.horse_no) for score in list(prediction.horse_scores or [])[:5]}
+    out: list[TopHorseMemo] = []
+    seen: set[int] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            horse_no = int(float(item.get("horse_no")))
+        except (TypeError, ValueError):
+            continue
+        if horse_no not in allowed_horse_nos or horse_no in seen:
+            continue
+        memo = str(item.get("memo") or item.get("comment") or item.get("reason") or "").strip()
+        if not _is_public_prediction_copy_allowed(memo, market_data_available=market_data_available):
+            continue
+        out.append(TopHorseMemo(horse_no=horse_no, memo=memo))
+        seen.add(horse_no)
+    return out
 
 
 class RaceAnalysisAgent:
@@ -33,6 +110,8 @@ class RaceAnalysisAgent:
         if summary_text and summary_text not in prediction.summary:
             prediction.summary = f"{prediction.summary} {summary_text}".strip()
         for warning_text in prediction.race_simulation.warnings:
+            if not _is_public_prediction_copy_allowed(warning_text, market_data_available=True):
+                continue
             if warning_text not in prediction.risks:
                 prediction.risks.append(warning_text)
 
@@ -82,16 +161,36 @@ class RaceAnalysisAgent:
                 race_data=race_data,
                 used_lessons=relevant_lessons,
             )
+            market_data_available = any(
+                horse.odds is not None or horse.popularity is not None for horse in race_data.horses
+            )
             if enhancement:
                 summary = enhancement.get("summary")
                 risks = enhancement.get("risks")
                 commentary = enhancement.get("commentary")
-                if isinstance(summary, str) and summary.strip():
+                top_horse_memos = enhancement.get("top_horse_memos")
+                if isinstance(summary, str) and _is_public_prediction_copy_allowed(
+                    summary,
+                    market_data_available=market_data_available,
+                ):
                     prediction.summary = summary
                 if isinstance(risks, list) and all(isinstance(item, str) for item in risks):
-                    prediction.risks = risks
-                if isinstance(commentary, str) and commentary.strip():
+                    prediction.risks = _sanitize_public_prediction_copy_items(
+                        risks,
+                        market_data_available=market_data_available,
+                    )
+                if isinstance(commentary, str) and _is_public_prediction_copy_allowed(
+                    commentary,
+                    market_data_available=market_data_available,
+                ):
                     prediction.commentary = commentary
+                sanitized_memos = _sanitize_top_horse_memos(
+                    top_horse_memos,
+                    prediction,
+                    market_data_available=market_data_available,
+                )
+                if sanitized_memos:
+                    prediction.top_horse_memos = sanitized_memos
             self._attach_simulation_summary(prediction)
             return prediction
 

@@ -970,22 +970,32 @@ def score_horse_by_recent_runs(
 
 def build_marks(horse_scores: list[HorseScore]) -> dict[str, int]:
     marks = {label: 0 for label in MARK_LABELS}
-    for index, score in enumerate(horse_scores[: len(MARK_LABELS)]):
+    ordered_scores = sorted(horse_scores, key=lambda item: (-item.total_score, item.horse_no))
+    for index, score in enumerate(ordered_scores[: len(MARK_LABELS)]):
         marks[MARK_LABELS[index]] = score.horse_no
     return marks
 
 
+def order_horse_scores_by_marks(horse_scores: list[HorseScore], marks: dict[str, int]) -> list[HorseScore]:
+    horse_map = {score.horse_no: score for score in horse_scores}
+    ordered: list[HorseScore] = []
+    seen: set[int] = set()
+    for label in MARK_LABELS:
+        horse_no = marks.get(label, 0)
+        score = horse_map.get(horse_no)
+        if score is None or horse_no in seen:
+            continue
+        ordered.append(score)
+        seen.add(horse_no)
+    ordered.extend(score for score in horse_scores if score.horse_no not in seen)
+    return ordered
+
+
 def collect_risks(race_data: RaceData, used_lessons: list[LessonItem]) -> list[str]:
+    del used_lessons
     risks: list[str] = []
     if any(is_low_sample_horse(horse) for horse in race_data.horses):
-        risks.append("有効な実戦履歴5走未満の馬は血統・距離・馬場適性の先験評価を補強。")
-    if any(any(run.course is None for run in horse.recent_runs) for horse in race_data.horses):
-        risks.append("recent_runsにcourse欠損が含まれている。")
-    if any(any(run.race_id is not None and len(run.race_id) < 8 for run in horse.recent_runs) for horse in race_data.horses):
-        risks.append("recent_runs内に不完全なrace_idが含まれている。")
-    if used_lessons:
-        risks.append("過去lessonは軽量な重み補正としてのみ使用しており、モデル学習ではない。")
-    risks.append("heuristic scoringを使用しており、正式なML modelではない。")
+        risks.append("実戦履歴が浅い馬がいて、未知の上積みや反動を見込む余地がある。")
     return risks
 
 
@@ -994,6 +1004,7 @@ def build_summary(
     horse_scores: list[HorseScore],
     used_lessons: list[LessonItem],
     strategy: StrategyDecision,
+    main_horse_no: int | None = None,
     top_deep_comment: str | None = None,
     top_pedigree_comment: str | None = None,
     top_pedigree_flags: list[str] | None = None,
@@ -1004,7 +1015,7 @@ def build_summary(
 ) -> str:
     if not horse_scores:
         return "有効な近走データが不足しており、summaryはunknownに近い状態。"
-    top = horse_scores[0]
+    top = next((score for score in horse_scores if score.horse_no == main_horse_no), horse_scores[0])
     top_horse_runs = next((horse.recent_runs for horse in race_data.horses if horse.horse_no == top.horse_no), [])
     career_run_count = len(scorable_career_runs(top_horse_runs))
     lesson_note = ""
@@ -1053,7 +1064,7 @@ def build_prediction_from_recent_runs(race_data: RaceData, lessons: list[LessonI
             use_market_score_in_ranking=False,
             market_signal_weight=0.0,
         ),
-        borderline_recovery_enabled=True,
+        borderline_recovery_enabled=False,
     )
 
 
@@ -1183,6 +1194,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
         horse_scores.sort(key=lambda item: (-item.total_score, item.horse_no))
     used_lessons = lessons
     marks = build_marks(horse_scores)
+    marked_horse_scores = order_horse_scores_by_marks(horse_scores, marks)
     risks = collect_risks(race_data, used_lessons)
     if pedigree_rank_changed:
         risks.append("血統補正により一部順位が変動。")
@@ -1190,28 +1202,29 @@ def build_prediction_from_recent_runs_with_scoring_config(
         risks.append("展開・相手関係補正により一部順位が変動。")
     strategy = evaluate_bet_strategy(
         race_data=race_data,
-        horse_scores=horse_scores,
+        horse_scores=marked_horse_scores,
         marks=marks,
         used_lessons=used_lessons,
         risks=risks,
         pace_analyses=pace_analyses,
         scoring_config=scoring_config_snapshot,
     )
-    bets = build_bets_from_strategy(strategy, horse_scores)
+    bets = build_bets_from_strategy(strategy, marked_horse_scores)
     top_deep_comment = None
     top_pedigree_comment = None
     top_pedigree_flags: list[str] | None = None
     top_race_level_comment = None
     race_pace_projection_text = None
+    main_horse_no = marks.get("◎", horse_scores[0].horse_no if horse_scores else 0)
     if horse_scores:
-        top_deep = deep_analysis_by_horse.get(horse_scores[0].horse_no)
+        top_deep = deep_analysis_by_horse.get(main_horse_no)
         if top_deep is not None:
             top_deep_comment = top_deep.overall_comment
-        top_pedigree = pedigree_analysis_by_horse.get(horse_scores[0].horse_no)
+        top_pedigree = pedigree_analysis_by_horse.get(main_horse_no)
         if top_pedigree is not None:
             top_pedigree_comment = top_pedigree.overall_comment
             top_pedigree_flags = top_pedigree.positive_flags
-        top_race_level = race_level_analysis_by_horse.get(horse_scores[0].horse_no)
+        top_race_level = race_level_analysis_by_horse.get(main_horse_no)
         if top_race_level is not None:
             top_race_level_comment = top_race_level.overall_comment
         if race_pace_projection is not None:
@@ -1251,6 +1264,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
             horse_scores,
             used_lessons,
             strategy,
+            main_horse_no=main_horse_no,
             top_deep_comment=top_deep_comment,
             top_pedigree_comment=top_pedigree_comment,
             top_pedigree_flags=top_pedigree_flags,

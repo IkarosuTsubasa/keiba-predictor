@@ -169,7 +169,9 @@ def _audit_prediction(
         horse_no for horse_no in prediction.marks.values()
         if horse_no and horse_no not in score_horse_nos
     ]
-    expected_top5 = [horse.horse_no for horse in sorted(horse_scores, key=lambda item: (-item.total_score, item.horse_no))[:5]]
+    sorted_by_total = sorted(horse_scores, key=lambda item: (-item.total_score, item.horse_no))
+    expected_top5 = [horse.horse_no for horse in sorted_by_total[:5]]
+    expected_top5_by_mark_rule = expected_top5
     actual_marks_top5 = [prediction.marks.get(mark, 0) for mark in ("◎", "○", "▲", "△", "☆")]
     score_breakdown_mismatches: list[dict[str, Any]] = []
     for horse in horse_scores:
@@ -237,8 +239,6 @@ def _audit_prediction(
     market_config = prediction.market_signal_config.model_dump()
     if market_config.get("use_market_score_in_ranking") or market_config.get("market_signal_weight", 0.0) > 0:
         issues.append(_issue("warning", "MARKET_SCORE_ENABLED", "odds/popularity が ranking score に入る設定。現在の期待値は default false。"))
-    if prediction.scoring_profile == "accuracy_default" and not prediction.borderline_recovery_enabled:
-        issues.append(_issue("warning", "ACCURACY_DEFAULT_RECOVERY_DISABLED", "accuracy_default だが borderline_recovery_enabled=false。"))
 
     return (
         {
@@ -253,7 +253,9 @@ def _audit_prediction(
             "horse_scores_count": len(horse_scores),
             "marks": prediction.marks,
             "expected_top5_by_total_score": expected_top5,
+            "expected_top5_by_current_mark_rule": expected_top5_by_mark_rule,
             "marks_match_total_score_order": actual_marks_top5 == expected_top5,
+            "marks_match_current_rule_order": actual_marks_top5 == expected_top5_by_mark_rule,
             "analysis_counts": analysis_counts,
             "score_breakdown_mismatch_count": len(score_breakdown_mismatches),
             "score_breakdown_mismatch_examples": score_breakdown_mismatches[:10],
@@ -590,6 +592,7 @@ def generate_single_audit_markdown(audit: dict[str, Any]) -> str:
             f"- scoring_profile: {prediction.get('scoring_profile', '-')}",
             f"- scoring_mode: {prediction.get('scoring_mode', '-')}",
             f"- market_signal_config: {prediction.get('market_signal_config', '-')}",
+            f"- marks_match_current_rule_order: {str(prediction.get('marks_match_current_rule_order', False)).lower()}",
             f"- marks_match_total_score_order: {str(prediction.get('marks_match_total_score_order', False)).lower()}",
             f"- finish_order_count: {result.get('finish_order_count', '-')}",
             f"- payouts_count: {result.get('payouts_count', '-')}",
