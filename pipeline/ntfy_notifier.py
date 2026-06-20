@@ -784,7 +784,30 @@ def build_ntfy_agent_prediction_notification(base_dir, job_id="", race_id="", pa
     }
 
 
-def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id=""):
+def build_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
+    data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
+    row = dict(job or _load_race_job(base_dir, job_id) or {})
+    eval_row = dict(evaluation or agent_prediction_notification_evaluation(base_dir, race_id, payload=data, job=row) or {})
+    resolved_race_id = str(data.get("race_id", "") or race_id or row.get("race_id", "") or "").strip()
+    title_parts = _agent_title_parts(data, row)
+    title = " ".join(title_parts) if title_parts else f"予測完了 {resolved_race_id}".strip()
+    marks_text = _agent_marks_text(data)
+    strategy = dict(data.get("strategy") or {})
+    confidence_text = _agent_confidence_label(strategy.get("confidence", ""))
+    confidence_suffix = f" ｜自信度 {confidence_text}" if confidence_text else ""
+    body = f"{marks_text} ｜判定 高評価{confidence_suffix}"
+    public_url = _build_public_agent_race_url(data, row)
+    return {
+        "engine": "agent_prediction",
+        "title": title,
+        "body": body,
+        "public_url": public_url,
+        "race_id": resolved_race_id,
+        "evaluation": eval_row,
+    }
+
+
+def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
     if not ntfy_notify_enabled():
         return {
             "ok": False,
@@ -800,24 +823,24 @@ def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id=""):
             "reason": "missing_topic",
         }
 
-    payload = _load_agent_prediction_payload(base_dir, race_id)
-    job = _load_race_job(base_dir, job_id)
-    evaluation = agent_prediction_notification_evaluation(base_dir, race_id, payload=payload, job=job)
-    if not evaluation.get("should_notify"):
+    data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
+    row = dict(job or _load_race_job(base_dir, job_id) or {})
+    eval_row = dict(evaluation or agent_prediction_notification_evaluation(base_dir, race_id, payload=data, job=row) or {})
+    if not eval_row.get("should_notify"):
         return {
             "ok": False,
             "skipped": True,
-            "reason": str(evaluation.get("reason", "") or "high_evaluation_not_met"),
-            "evaluation": evaluation,
+            "reason": str(eval_row.get("reason", "") or "high_evaluation_not_met"),
+            "evaluation": eval_row,
         }
 
     notification = build_ntfy_agent_prediction_notification(
         base_dir,
         job_id=job_id,
         race_id=race_id,
-        payload=payload,
-        job=job,
-        evaluation=evaluation,
+        payload=data,
+        job=row,
+        evaluation=eval_row,
     )
     request_payload = {
         "topic": topic,
@@ -879,31 +902,155 @@ def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id=""):
         "public_url": notification["public_url"],
         "topic": topic,
         "message_id": str(response_payload.get("id", "") or "").strip(),
-        "evaluation": evaluation,
+        "evaluation": eval_row,
     }
 
 
 def publish_agent_prediction_notifications(base_dir, job_id="", race_id=""):
-    try:
-        result = publish_ntfy_agent_prediction_notification(base_dir, job_id=job_id, race_id=race_id)
-    except Exception as exc:
-        raise RuntimeError(f"ntfy: {str(exc or '').strip()}") from exc
+    payload = _load_agent_prediction_payload(base_dir, race_id)
+    job = _load_race_job(base_dir, job_id)
+    evaluation = agent_prediction_notification_evaluation(base_dir, race_id, payload=payload, job=job)
+    if not evaluation.get("should_notify"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": str(evaluation.get("reason", "") or "high_evaluation_not_met"),
+            "evaluation": evaluation,
+        }
 
-    if result.get("ok") and not result.get("skipped"):
+    channel_results = {}
+    errors = []
+    engine = ""
+    sent_any = False
+
+    for channel_name, sender in (
+        ("ntfy", publish_ntfy_agent_prediction_notification),
+        ("fcm", publish_fcm_agent_prediction_notification),
+    ):
+        try:
+            result = sender(
+                base_dir,
+                job_id=job_id,
+                race_id=race_id,
+                payload=payload,
+                job=job,
+                evaluation=evaluation,
+            )
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "skipped": False,
+                "reason": "error",
+                "error": str(exc or "").strip(),
+            }
+            errors.append(f"{channel_name}: {result['error']}")
+        channel_results[channel_name] = result
+        if result.get("ok") and not result.get("skipped"):
+            sent_any = True
+            if not engine:
+                engine = str(result.get("engine", "") or "").strip()
+
+    if sent_any:
+        primary_result = next(
+            (
+                result for result in channel_results.values()
+                if result.get("ok") and not result.get("skipped")
+            ),
+            {},
+        )
         return {
             "ok": True,
-            "engine": str(result.get("engine", "") or "").strip(),
-            "topic": str(result.get("topic", "") or "").strip(),
-            "message_id": str(result.get("message_id", "") or "").strip(),
-            "channels": {"ntfy": result},
-            "evaluation": dict(result.get("evaluation") or {}),
+            "engine": engine,
+            "topic": str(primary_result.get("topic", "") or "").strip(),
+            "message_id": str(primary_result.get("message_id", "") or "").strip(),
+            "channels": channel_results,
+            "evaluation": evaluation,
         }
+
+    if errors:
+        raise RuntimeError("; ".join(error for error in errors if error))
+
+    reasons = [
+        str((channel_results.get(name) or {}).get("reason", "") or "").strip()
+        for name in ("ntfy", "fcm")
+    ]
+    reason = ",".join(part for part in reasons if part) or "skipped"
     return {
         "ok": False,
         "skipped": True,
-        "reason": str(result.get("reason", "") or "skipped"),
-        "channels": {"ntfy": result},
-        "evaluation": dict(result.get("evaluation") or {}),
+        "reason": reason,
+        "channels": channel_results,
+        "evaluation": evaluation,
+    }
+
+
+def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
+    if not fcm_notify_enabled():
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "disabled",
+        }
+
+    topic = fcm_topic()
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
+
+    data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
+    row = dict(job or _load_race_job(base_dir, job_id) or {})
+    eval_row = dict(evaluation or agent_prediction_notification_evaluation(base_dir, race_id, payload=data, job=row) or {})
+    if not eval_row.get("should_notify"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": str(eval_row.get("reason", "") or "high_evaluation_not_met"),
+            "evaluation": eval_row,
+        }
+
+    notification = build_fcm_agent_prediction_notification(
+        base_dir,
+        job_id=job_id,
+        race_id=race_id,
+        payload=data,
+        job=row,
+        evaluation=eval_row,
+    )
+
+    try:
+        from firebase_admin import messaging
+    except ImportError as exc:
+        raise RuntimeError("firebase-admin is not installed") from exc
+
+    app = _get_firebase_app()
+    message = messaging.Message(
+        topic=topic,
+        notification=messaging.Notification(
+            title=notification["title"],
+            body=notification["body"],
+        ),
+        android=messaging.AndroidConfig(
+            priority="high",
+        ),
+        data={
+            "title": notification["title"],
+            "body": notification["body"],
+            "url": notification["public_url"],
+        },
+    )
+    message_id = str(messaging.send(message, app=app) or "").strip()
+    return {
+        "ok": True,
+        "engine": notification["engine"],
+        "title": notification["title"],
+        "body": notification["body"],
+        "topic": topic,
+        "message_id": message_id,
+        "public_url": notification["public_url"],
+        "evaluation": eval_row,
     }
 
 

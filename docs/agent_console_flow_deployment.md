@@ -37,6 +37,11 @@
 - `KEIBA_AGENT_RESULTS_DIR`: 可选，默认写入 `pipeline/data/agent_results`。
 - `PIPELINE_AUTO_PREDICTION_NOTIFY_ENABLED`: 可选，默认关闭。只有设为 `1/true/yes/on` 时，预测完成后才会自动判断是否发送通知。
 - `PIPELINE_AUTO_PREDICTION_NOTIFY_MIN_CONFIDENCE`: 可选，默认 `0.62`。只有达到 public 页面 `高評価` 分界的预测才会发送 ntfy/FCM 通知。agent 预测中 `BET` 会直接视为高評価，`SKIP` 不发送。
+- `PIPELINE_NTFY_NOTIFY_ENABLED`: 使用 ntfy 时设为 `1/true/yes/on`。
+- `PIPELINE_NTFY_TOPIC`: 使用 ntfy 时必填。
+- `PIPELINE_FCM_NOTIFY_ENABLED`: 使用 App 推送时设为 `1/true/yes/on`。
+- `PIPELINE_FCM_TOPIC`: 可选，默认 `keiba-public-updates`，需要与 Android App 订阅 topic 一致。
+- `PIPELINE_FCM_SERVICE_ACCOUNT_JSON` 或 `PIPELINE_FCM_SERVICE_ACCOUNT_FILE`: 使用 App 推送时配置 Firebase Admin 凭证。
 
 如果线上已经配置过 v5 remote predictor，通常只需要确认旧变量仍然存在。预测和结果默认会写入 Render persistent disk，所以不额外配置 `KEIBA_AGENT_PREDICTIONS_DIR` 与 `KEIBA_AGENT_RESULTS_DIR` 也可以。
 

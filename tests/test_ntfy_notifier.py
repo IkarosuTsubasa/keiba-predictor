@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -110,6 +111,88 @@ class NtfyNotifierTests(unittest.TestCase):
         self.assertEqual(result["reason"], "high_evaluation_not_met")
         ntfy_sender.assert_not_called()
         fcm_sender.assert_not_called()
+
+    def test_agent_notifications_can_send_fcm_when_ntfy_is_disabled(self) -> None:
+        race_id = "202606100104"
+        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="medium")
+
+        ntfy_result = {"ok": False, "skipped": True, "reason": "disabled"}
+        fcm_result = {"ok": True, "engine": "agent_prediction", "topic": "keiba-public-updates", "message_id": "m1"}
+        with (
+            patch.dict(os.environ, {"KEIBA_AGENT_PREDICTIONS_DIR": ""}),
+            patch.object(ntfy_notifier, "publish_ntfy_agent_prediction_notification", return_value=ntfy_result),
+            patch.object(ntfy_notifier, "publish_fcm_agent_prediction_notification", return_value=fcm_result),
+        ):
+            result = ntfy_notifier.publish_agent_prediction_notifications(self.base_dir, race_id=race_id)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["engine"], "agent_prediction")
+        self.assertEqual(result["topic"], "keiba-public-updates")
+        self.assertEqual(result["channels"]["ntfy"]["reason"], "disabled")
+        self.assertEqual(result["channels"]["fcm"]["message_id"], "m1")
+
+    def test_agent_notifications_skip_before_channels_when_high_evaluation_not_met(self) -> None:
+        race_id = "202606100105"
+        self._write_agent_prediction(race_id=race_id, bet_decision="SKIP", confidence="high")
+
+        with (
+            patch.dict(os.environ, {"KEIBA_AGENT_PREDICTIONS_DIR": ""}),
+            patch.object(ntfy_notifier, "publish_ntfy_agent_prediction_notification") as ntfy_sender,
+            patch.object(ntfy_notifier, "publish_fcm_agent_prediction_notification") as fcm_sender,
+        ):
+            result = ntfy_notifier.publish_agent_prediction_notifications(self.base_dir, race_id=race_id)
+
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["reason"], "agent_prediction_skip_decision")
+        ntfy_sender.assert_not_called()
+        fcm_sender.assert_not_called()
+
+    def test_fcm_agent_prediction_notification_includes_public_url_data(self) -> None:
+        race_id = "202606100106"
+        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="high")
+        captured = {}
+
+        class FakeMessaging:
+            class Notification:
+                def __init__(self, title="", body=""):
+                    self.title = title
+                    self.body = body
+
+            class AndroidConfig:
+                def __init__(self, priority=""):
+                    self.priority = priority
+
+            class Message:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            @staticmethod
+            def send(message, app=None):
+                captured["message"] = message
+                captured["app"] = app
+                return "fcm-message-1"
+
+        fake_firebase_admin = types.SimpleNamespace(messaging=FakeMessaging)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "KEIBA_AGENT_PREDICTIONS_DIR": "",
+                    "PIPELINE_FCM_NOTIFY_ENABLED": "1",
+                    "PIPELINE_FCM_TOPIC": "keiba-public-updates",
+                },
+            ),
+            patch.dict(sys.modules, {"firebase_admin": fake_firebase_admin}),
+            patch.object(ntfy_notifier, "_get_firebase_app", return_value="fake-app"),
+        ):
+            result = ntfy_notifier.publish_fcm_agent_prediction_notification(self.base_dir, race_id=race_id)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["message_id"], "fcm-message-1")
+        message = captured["message"]
+        self.assertEqual(message.kwargs["topic"], "keiba-public-updates")
+        self.assertIn(f"/race/{race_id}", message.kwargs["data"]["url"])
+        self.assertEqual(captured["app"], "fake-app")
 
 
 if __name__ == "__main__":
