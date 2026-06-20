@@ -18,7 +18,7 @@
 当前还启用了 `Race Deep Analyzer v1`，会基于现有 `race_data / recent_runs / odds / popularity / jockey` 为每匹马生成更细的结构化分析，用于增强解释性、report 和 social 文案。
 当前还启用了 `Race Level / Opponent Analysis v1`，会基于 `recent_runs` 中的 `race_id / field_size / popularity / finish`，分析本场再战关系与轻量レースレベル，并作为基础分项与轻量补正共同接入 `total_score`。
 当前还启用了 `Pace / Running Style Analyzer v1`，会基于 `recent_runs` 中可解析的 `通過順 / 上り` 推断脚质和本场展開。取不到时会按 `unknown` 处理，第一版仍是轻量推定，并作为展开展・騎手分项与小幅补正接入评分。
-当前还启用了 `Pedigree Analyzer v1.1`，会从 netkeiba horse cache / pedigree cache 解析父・母・母父，并基于扩充后的 sire knowledge table 与 damsire 補正生成轻量血統分析。
+当前还启用了 `Pedigree Analyzer v1.2`，会从 netkeiba horse cache / pedigree cache 解析父・母・母父，并基于父・母父自身的実績 profile 生成轻量血統分析。
 当前还启用了 `Pedigree Score Integration v1`，会将血統分析以轻量 bonus / penalty 的方式反映到 `horse_scores.total_score`。该补正最大 `+2.0`、最小 `-1.5`，仍然只是 heuristic 的解释性补正，不是正式学习模型。
 `review-url` 生成的 lessons 会在后续 `analysis / analyze-url` 中按相似条件检索并写入 `prediction.used_lessons`。
 当前 lesson 只做轻量加权与说明，不是模型训练。
@@ -152,11 +152,11 @@ python keiba_llm_agent/main.py fetch-horse --horse-id 2021104073
 python -m keiba_llm_agent.main parse-pedigree --horse-id 2021104073
 ```
 
-Pedigree Analyzer v1.1 说明：
+Pedigree Analyzer v1.2 说明：
 - 从 `horse_html_cache / pedigree_html_cache` 解析父 / 母 / 母父
-- 使用扩充后的内置 sire knowledge table
-- 母父会作为 damsire correction 参与 surface / distance / stamina / power 判断
-- 目前仍不是完整血統数据库，未知血統会按 `unknown` 处理
+- 父・母父的実績 profile 会作为 surface / distance / track condition / class power 的主判断材料
+- 静态 sire knowledge table 已移除；取不到父・母父実績时按 `unknown` 处理
+- 目前仍不是完整血統数据库，兄弟马特性尚未作为正式评分因子
 
 Pedigree Score Integration v1：
 - 血統補正只做轻量参与，不覆盖 `recent_runs` 主评分
@@ -419,10 +419,10 @@ lesson 的 `course / surface / distance / track_condition` 默认来自 `race_da
 - 调教
 - Top3Prob
 
-`Pedigree Analyzer v1` 会：
+`Pedigree Analyzer v1.2` 会：
 - 优先从本地 horse cache / pedigree cache 解析 `父 / 母 / 母父`
 - 必要时从 `https://db.netkeiba.com/horse/ped/{horse_id}/` 做低频、缓存式 fallback
-- 使用内置小型血統知識表做轻量分析
+- 使用父・母父自身的実績 profile 做轻量分析
 
 当前还不是本格的血统数据库，不明血统会按 `unknown` 处理。
 `Race Simulation / LLM Reasoning v1` 会：

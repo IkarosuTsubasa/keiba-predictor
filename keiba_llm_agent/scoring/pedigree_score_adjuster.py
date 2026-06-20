@@ -22,18 +22,49 @@ PENALTY_BY_FLAG = {
     "PEDIGREE_DATA_INCOMPLETE": 0.0,
 }
 
+PERFORMANCE_PROFILE_BONUS_BY_FLAG = {
+    "PEDIGREE_SURFACE_FIT": 0.15,
+    "PEDIGREE_DISTANCE_FIT": 0.20,
+    "PEDIGREE_STAMINA_FIT": 0.20,
+    "PEDIGREE_POWER_FIT": 0.10,
+    "PEDIGREE_TRACK_CONDITION_FIT": 0.15,
+    "PEDIGREE_CLASS_POWER": 0.10,
+    "PEDIGREE_EARLY_MATURITY": 0.10,
+}
+
+PERFORMANCE_PROFILE_PENALTY_BY_FLAG = {
+    "PEDIGREE_DISTANCE_RISK": 0.25,
+}
+
+
+def _unique_profile_flags(pedigree_analysis: PedigreeAnalysis, attr: str) -> list[str]:
+    flags: list[str] = []
+    for profile in getattr(pedigree_analysis, "performance_profiles", []):
+        for flag in getattr(profile, attr, []):
+            if flag not in flags:
+                flags.append(flag)
+    return flags
+
 
 def calculate_pedigree_adjustment(
     pedigree_analysis: PedigreeAnalysis,
     race_info: RaceInfo,
 ) -> PedigreeAdjustment:
-    bonus = sum(BONUS_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.positive_flags)
-    penalty = sum(PENALTY_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.risk_flags)
     performance_hint = getattr(pedigree_analysis, "performance_score_hint", 0.0)
-    if performance_hint > 0:
-        bonus += min(float(performance_hint), 1.2)
-    elif performance_hint < 0:
-        penalty += min(abs(float(performance_hint)), 0.8)
+    if getattr(pedigree_analysis, "performance_profiles", []):
+        profile_positive_flags = _unique_profile_flags(pedigree_analysis, "positive_flags")
+        profile_risk_flags = _unique_profile_flags(pedigree_analysis, "risk_flags")
+        bonus = max(float(performance_hint), 0.0)
+        penalty = max(abs(float(performance_hint)), 0.0) if performance_hint < 0 else 0.0
+        bonus += sum(PERFORMANCE_PROFILE_BONUS_BY_FLAG.get(flag, 0.0) for flag in profile_positive_flags)
+        penalty += sum(PERFORMANCE_PROFILE_PENALTY_BY_FLAG.get(flag, 0.0) for flag in profile_risk_flags)
+    else:
+        bonus = sum(BONUS_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.positive_flags)
+        penalty = sum(PENALTY_BY_FLAG.get(flag, 0.0) for flag in pedigree_analysis.risk_flags)
+        if performance_hint > 0:
+            bonus += min(float(performance_hint), 1.2)
+        elif performance_hint < 0:
+            penalty += min(abs(float(performance_hint)), 0.8)
     adjustment = max(-1.5, min(2.0, round(bonus - penalty, 1)))
 
     parts: list[str] = []

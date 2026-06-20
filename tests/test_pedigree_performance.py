@@ -99,7 +99,7 @@ class PedigreePerformanceTests(unittest.TestCase):
         self.assertGreater(analysis.performance_score_hint, 0.0)
         self.assertGreater(adjustment.pedigree_adjustment, 0.0)
 
-    def test_build_performance_profiles_fetches_sire_damsire_and_sire_sire(self) -> None:
+    def test_build_performance_profiles_fetches_sire_and_damsire_only(self) -> None:
         html = """
         <html><body>
           <table class="db_h_race_results nk_tb_common">
@@ -121,7 +121,7 @@ class PedigreePerformanceTests(unittest.TestCase):
         with patch("keiba_llm_agent.pedigree.pedigree_performance.fetch_horse_html", return_value=html):
             profiles = build_performance_profiles_for_pedigree(pedigree, _race_info())
 
-        self.assertEqual([profile.relation for profile in profiles], ["sire", "damsire", "sire_sire"])
+        self.assertEqual([profile.relation for profile in profiles], ["sire", "damsire"])
 
 
 if __name__ == "__main__":

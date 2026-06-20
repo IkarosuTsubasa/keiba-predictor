@@ -15,7 +15,6 @@ from keiba_llm_agent.schemas.race_data import RaceInfo, RecentRun
 RELATION_WEIGHTS = {
     "sire": 0.55,
     "damsire": 0.30,
-    "sire_sire": 0.15,
 }
 
 
@@ -320,7 +319,6 @@ def build_performance_profiles_for_pedigree(
     candidates = [
         ("sire", pedigree.sire_id, pedigree.sire),
         ("damsire", pedigree.damsire_id, pedigree.damsire),
-        ("sire_sire", pedigree.sire_sire_id, pedigree.sire_sire),
     ]
     profiles: list[PedigreePerformanceProfile] = []
     seen_ids: set[str] = set()
