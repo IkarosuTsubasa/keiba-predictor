@@ -133,7 +133,7 @@ def _marked_scores_for_coverage(
     return marked_scores[:5]
 
 
-def _estimate_marked_top3_coverage_score(
+def _estimate_marked_top3_pair_coverage_score(
     *,
     race_data: RaceData,
     horse_scores: list[HorseScore],
@@ -144,10 +144,10 @@ def _estimate_marked_top3_coverage_score(
 
     scope_key = _race_scope_key(race_data)
     score = {
-        "central_dirt": 0.965,
-        "central_turf": 0.985,
-        "local": 0.977,
-    }.get(scope_key, 0.980)
+        "central_dirt": 0.690,
+        "central_turf": 0.620,
+        "local": 0.750,
+    }.get(scope_key, 0.660)
 
     marked_score_values = [score_item.total_score for score_item in marked_scores]
     average_marked_score = sum(marked_score_values) / len(marked_score_values)
@@ -177,21 +177,28 @@ def _estimate_marked_top3_coverage_score(
             missing_odds_count += 1
 
     if gap_5_to_6 >= 2.0:
-        score += 0.010
+        score += 0.050
     elif gap_5_to_6 >= 1.0:
-        score += 0.005
+        score += 0.025
     elif gap_5_to_6 < 0.5:
-        score -= 0.012
+        score -= 0.035
 
     if marked_spread < 3.0:
         score -= 0.080
     elif marked_spread < 6.0:
-        score -= 0.015
+        score -= 0.030
+    else:
+        score += 0.055 * _normalized_span(marked_spread, 6.0, 8.0)
+
+    score += 0.035 * _normalized_span(highest_marked_score, 35.0, 10.0)
+    score += 0.020 * _normalized_span(average_marked_score, 25.0, 10.0)
 
     if highest_marked_score < 25.0:
         score -= 0.065
-    elif average_marked_score < 25.0:
+    elif highest_marked_score < 30.0:
         score -= 0.025
+    elif average_marked_score < 25.0:
+        score -= 0.020
 
     if lowest_marked_score < 15.0:
         score -= 0.025
@@ -200,25 +207,29 @@ def _estimate_marked_top3_coverage_score(
         score -= 0.080
     elif worst_marked_risk <= -7:
         score -= 0.015
+    elif average_marked_risk > -2.0:
+        score += 0.015
 
     if missing_odds_count >= 4:
-        score -= 0.020
+        score -= 0.040
     elif missing_odds_count >= 3:
-        score -= 0.008
+        score -= 0.015
+    elif 1 <= missing_odds_count <= 2:
+        score += 0.025
 
     if average_marked_score > 40.0 and gap_5_to_6 < 0.5:
-        score -= 0.100
+        score -= 0.070
 
     if len(marked_scores) < 5:
         score -= 0.030 * (5 - len(marked_scores))
 
-    return round(_clamp(score, 0.84, 0.99), 3)
+    return round(_clamp(score, 0.46, 0.90), 3)
 
 
 def _coverage_confidence_label_from_score(confidence_score: float) -> str:
-    if confidence_score >= 0.985:
+    if confidence_score >= 0.85:
         return "high"
-    if confidence_score >= 0.95:
+    if confidence_score >= 0.70:
         return "medium"
     return "low"
 
@@ -322,7 +333,7 @@ def evaluate_bet_strategy(
     )
     axis_strength = _axis_strength_label_from_score(axis_strength_score)
     marked_scores = _marked_scores_for_coverage(horse_scores, marks)
-    confidence_score = _estimate_marked_top3_coverage_score(
+    confidence_score = _estimate_marked_top3_pair_coverage_score(
         race_data=race_data,
         horse_scores=horse_scores,
         marked_scores=marked_scores,

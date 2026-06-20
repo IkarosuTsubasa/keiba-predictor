@@ -133,10 +133,10 @@ class BetPolicyTests(unittest.TestCase):
         )
         self.assertEqual(strategy.bet_decision, "BET")
         self.assertEqual(strategy.confidence, "low")
-        self.assertGreaterEqual(strategy.confidence_score, 0.84)
-        self.assertLess(strategy.confidence_score, 0.95)
+        self.assertGreaterEqual(strategy.confidence_score, 0.46)
+        self.assertLess(strategy.confidence_score, 0.70)
 
-    def test_central_dirt_clear_marks_can_use_medium_coverage_confidence(self) -> None:
+    def test_central_dirt_clear_marks_can_use_high_pair_coverage_confidence(self) -> None:
         race_data = self.build_race_data([4.0, 8.0, 12.0, 16.0, 18.0, 20.0], surface="ダート", scope_key="central_dirt")
         strategy = evaluate_bet_strategy(
             race_data,
@@ -153,9 +153,9 @@ class BetPolicyTests(unittest.TestCase):
             [],
         )
         self.assertEqual(strategy.bet_decision, "BET")
-        self.assertEqual(strategy.confidence, "medium")
-        self.assertGreaterEqual(strategy.confidence_score, 0.95)
-        self.assertLess(strategy.confidence_score, 0.98)
+        self.assertEqual(strategy.confidence, "high")
+        self.assertGreaterEqual(strategy.confidence_score, 0.85)
+        self.assertLessEqual(strategy.confidence_score, 0.90)
 
     def test_central_turf_coverage_confidence_uses_fifth_mark_boundary(self) -> None:
         race_data = self.build_race_data([3.5, 8.0, 12.0, 16.0, 18.0, 20.0], surface="芝", scope_key="central_turf")
@@ -188,8 +188,9 @@ class BetPolicyTests(unittest.TestCase):
             [],
         )
         self.assertEqual(weak_boundary.confidence, "low")
-        self.assertEqual(clear_boundary.confidence, "high")
-        self.assertGreaterEqual(clear_boundary.confidence_score, 0.98)
+        self.assertEqual(clear_boundary.confidence, "medium")
+        self.assertGreaterEqual(clear_boundary.confidence_score, 0.70)
+        self.assertLess(clear_boundary.confidence_score, 0.85)
 
     def test_local_clear_axis_can_still_use_high_confidence(self) -> None:
         race_data = self.build_race_data([4.0, 8.0, 12.0, 16.0, 18.0, 20.0], surface="ダート", scope_key="local", source="local")
@@ -208,7 +209,8 @@ class BetPolicyTests(unittest.TestCase):
             [],
         )
         self.assertEqual(strategy.confidence, "high")
-        self.assertGreaterEqual(strategy.confidence_score, 0.98)
+        self.assertGreaterEqual(strategy.confidence_score, 0.85)
+        self.assertLessEqual(strategy.confidence_score, 0.90)
         self.assertIn("confidence_score", strategy.model_dump())
 
     def test_close_top_group_adds_reason_code(self) -> None:
