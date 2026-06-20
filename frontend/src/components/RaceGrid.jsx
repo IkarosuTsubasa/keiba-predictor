@@ -8,6 +8,9 @@ import React, {
 } from "react";
 import RaceCard from "./RaceCard";
 
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
+
 function displayOrderValue(race) {
   const value = Number(race?.display_order);
   return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
@@ -41,20 +44,23 @@ function isSettledRace(race) {
 
 function isHighEvaluation(race) {
   const decision = String(race?.agent_prediction?.strategy?.bet_decision || "").trim();
-  if (decision === "BET") return true;
 
   const metaValue = String(race?.predictor_compare_cards?.[0]?.metaValue || "").trim();
   const confidence = Number(race?.confidence_score);
-  return metaValue === "high" || confidence >= 0.62;
+  if (Number.isFinite(confidence)) return confidence >= HIGH_CONFIDENCE_THRESHOLD;
+  if (decision === "BET") return true;
+  return metaValue === "high";
 }
 
 function isSkipEvaluation(race) {
   const decision = String(race?.agent_prediction?.strategy?.bet_decision || "").trim();
   if (decision === "SKIP") return true;
+  if (decision === "BET") return false;
 
   const metaValue = String(race?.predictor_compare_cards?.[0]?.metaValue || "").trim();
   const confidence = Number(race?.confidence_score);
-  return metaValue === "low" || (Number.isFinite(confidence) && confidence < 0.45);
+  if (Number.isFinite(confidence)) return confidence < MEDIUM_CONFIDENCE_THRESHOLD;
+  return metaValue === "low";
 }
 
 function filterRaces(races, statusFilter, locationFilter) {

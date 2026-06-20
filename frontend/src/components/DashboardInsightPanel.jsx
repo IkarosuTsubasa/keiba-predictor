@@ -2,15 +2,19 @@ function safeText(value) {
   return String(value || "").trim();
 }
 
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
+
 function resolveDecision(race) {
   const explicitDecision = safeText(race?.agent_prediction?.strategy?.bet_decision);
-  if (explicitDecision === "BET") return { label: "高評価", tone: "bet" };
   if (explicitDecision === "SKIP") return { label: "見送り", tone: "skip" };
 
   const confidence = Number(race?.confidence_score);
-  if (confidence >= 0.62) return { label: "高評価", tone: "bet" };
-  if (confidence >= 0.45) return { label: "要確認", tone: "watch" };
+  if (confidence >= HIGH_CONFIDENCE_THRESHOLD) return { label: "高評価", tone: "bet" };
+  if (explicitDecision === "BET") return { label: "要確認", tone: "watch" };
+  if (confidence >= MEDIUM_CONFIDENCE_THRESHOLD) return { label: "要確認", tone: "watch" };
   if (Number.isFinite(confidence)) return { label: "見送り", tone: "skip" };
+  if (explicitDecision === "BET") return { label: "高評価", tone: "bet" };
   return { label: "確認待ち", tone: "watch" };
 }
 

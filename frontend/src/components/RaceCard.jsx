@@ -8,6 +8,8 @@ const DECISION_LABELS = {
   medium: "要確認",
   low: "見送り",
 };
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
 const MARK_LABELS = ["◎", "○", "▲", "△", "☆"];
 
 function formatConfidence(value) {
@@ -49,14 +51,20 @@ function resolveStatus(race) {
 
 function resolveDecision(race) {
   const explicitDecision = String(race?.agent_prediction?.strategy?.bet_decision || "").trim();
-  if (explicitDecision === "BET") return { label: "高評価", tone: "bet" };
   if (explicitDecision === "SKIP") return { label: "見送り", tone: "skip" };
 
   const metaValue = String(race?.predictor_compare_cards?.[0]?.metaValue || "").trim();
   const confidence = Number(race?.confidence_score);
-  if (metaValue === "high" || confidence >= 0.62) return { label: DECISION_LABELS.high, tone: "bet" };
-  if (metaValue === "medium" || confidence >= 0.45) return { label: DECISION_LABELS.medium, tone: "watch" };
-  if (metaValue === "low" || Number.isFinite(confidence)) return { label: DECISION_LABELS.low, tone: "skip" };
+  if (Number.isFinite(confidence)) {
+    if (confidence >= HIGH_CONFIDENCE_THRESHOLD) return { label: DECISION_LABELS.high, tone: "bet" };
+    if (explicitDecision === "BET") return { label: DECISION_LABELS.medium, tone: "watch" };
+    if (confidence >= MEDIUM_CONFIDENCE_THRESHOLD) return { label: DECISION_LABELS.medium, tone: "watch" };
+    return { label: DECISION_LABELS.low, tone: "skip" };
+  }
+  if (explicitDecision === "BET") return { label: DECISION_LABELS.high, tone: "bet" };
+  if (metaValue === "high") return { label: DECISION_LABELS.high, tone: "bet" };
+  if (metaValue === "medium") return { label: DECISION_LABELS.medium, tone: "watch" };
+  if (metaValue === "low") return { label: DECISION_LABELS.low, tone: "skip" };
   return { label: "確認待ち", tone: "watch" };
 }
 

@@ -2581,13 +2581,13 @@ def _morning_concentration_score(aggregate_rows):
 
 def _morning_confidence_label(score):
     value = float(score or 0.0)
-    if value >= 0.8:
+    if value >= 0.90:
         return "かなり高い"
-    if value >= 0.65:
+    if value >= 0.85:
         return "高い"
-    if value >= 0.45:
+    if value >= 0.70:
         return "中"
-    if value >= 0.25:
+    if value >= 0.55:
         return "やや低い"
     return "低い"
 
