@@ -28,9 +28,9 @@ TRACK_CONDITION_LABELS = {
     "不良": "不良",
 }
 CONFIDENCE_SCORE = {
-    "high": 0.82,
-    "medium": 0.62,
-    "low": 0.38,
+    "high": 0.88,
+    "medium": 0.76,
+    "low": 0.62,
 }
 
 

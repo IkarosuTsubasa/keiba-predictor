@@ -25,7 +25,20 @@ class NtfyNotifierTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _write_agent_prediction(self, *, race_id="202606100101", bet_decision="", confidence="low") -> None:
+    def _write_agent_prediction(
+        self,
+        *,
+        race_id="202606100101",
+        bet_decision="",
+        confidence="low",
+        confidence_score=None,
+    ) -> None:
+        strategy = {
+            "bet_decision": bet_decision,
+            "confidence": confidence,
+        }
+        if confidence_score is not None:
+            strategy["confidence_score"] = confidence_score
         payload = {
             "race_id": race_id,
             "race_info": {
@@ -35,10 +48,7 @@ class NtfyNotifierTests(unittest.TestCase):
                 "race_name": "テストステークス",
             },
             "marks": {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
-            "strategy": {
-                "bet_decision": bet_decision,
-                "confidence": confidence,
-            },
+            "strategy": strategy,
         }
         (self.prediction_dir / f"{race_id}.json").write_text(
             json.dumps(payload, ensure_ascii=False),
@@ -53,7 +63,7 @@ class NtfyNotifierTests(unittest.TestCase):
                 "PIPELINE_HIGH_EVALUATION_NOTIFY_THRESHOLD": "",
             },
         ):
-            self.assertEqual(ntfy_notifier.high_evaluation_notify_threshold(), 0.62)
+            self.assertEqual(ntfy_notifier.high_evaluation_notify_threshold(), 0.85)
 
     def test_agent_bet_decision_is_high_evaluation_even_with_low_confidence(self) -> None:
         race_id = "202606100101"
@@ -75,9 +85,26 @@ class NtfyNotifierTests(unittest.TestCase):
         self.assertFalse(result["should_notify"])
         self.assertEqual(result["reason"], "agent_prediction_skip_decision")
 
-    def test_agent_medium_confidence_reaches_default_high_evaluation_threshold_without_decision(self) -> None:
+    def test_agent_medium_confidence_stays_below_default_high_evaluation_threshold_without_decision(self) -> None:
         race_id = "202606100103"
         self._write_agent_prediction(race_id=race_id, bet_decision="", confidence="medium")
+
+        with patch.dict(
+            os.environ,
+            {
+                "KEIBA_AGENT_PREDICTIONS_DIR": "",
+                "PIPELINE_AUTO_PREDICTION_NOTIFY_MIN_CONFIDENCE": "",
+                "PIPELINE_HIGH_EVALUATION_NOTIFY_THRESHOLD": "",
+            },
+        ):
+            result = ntfy_notifier.agent_prediction_notification_evaluation(self.base_dir, race_id)
+
+        self.assertFalse(result["should_notify"])
+        self.assertEqual(result["reason"], "high_evaluation_not_met")
+
+    def test_agent_high_confidence_reaches_default_high_evaluation_threshold_without_decision(self) -> None:
+        race_id = "202606100107"
+        self._write_agent_prediction(race_id=race_id, bet_decision="", confidence="high")
 
         with patch.dict(
             os.environ,
@@ -92,12 +119,29 @@ class NtfyNotifierTests(unittest.TestCase):
         self.assertTrue(result["should_notify"])
         self.assertEqual(result["reason"], "high_evaluation")
 
+    def test_agent_75_percent_confidence_is_not_default_high_evaluation_without_decision(self) -> None:
+        race_id = "202606100108"
+        self._write_agent_prediction(race_id=race_id, bet_decision="", confidence="medium", confidence_score=0.75)
+
+        with patch.dict(
+            os.environ,
+            {
+                "KEIBA_AGENT_PREDICTIONS_DIR": "",
+                "PIPELINE_AUTO_PREDICTION_NOTIFY_MIN_CONFIDENCE": "",
+                "PIPELINE_HIGH_EVALUATION_NOTIFY_THRESHOLD": "",
+            },
+        ):
+            result = ntfy_notifier.agent_prediction_notification_evaluation(self.base_dir, race_id)
+
+        self.assertFalse(result["should_notify"])
+        self.assertEqual(result["reason"], "high_evaluation_not_met")
+
     def test_share_notifications_skip_before_any_channel_when_high_evaluation_not_met(self) -> None:
         evaluation = {
             "should_notify": False,
             "reason": "high_evaluation_not_met",
-            "confidence_score": 0.44,
-            "threshold": 0.62,
+            "confidence_score": 0.75,
+            "threshold": 0.85,
         }
 
         with (

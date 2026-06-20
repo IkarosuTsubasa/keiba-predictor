@@ -13,11 +13,11 @@ from local_env import load_local_env
 BASE_DIR = Path(__file__).resolve().parent
 load_local_env(BASE_DIR, override=False)
 _FCM_APP = None
-HIGH_EVALUATION_NOTIFY_THRESHOLD = 0.62
+HIGH_EVALUATION_NOTIFY_THRESHOLD = 0.85
 AGENT_CONFIDENCE_SCORE = {
-    "high": 0.82,
-    "medium": 0.62,
-    "low": 0.38,
+    "high": 0.88,
+    "medium": 0.76,
+    "low": 0.62,
 }
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 
