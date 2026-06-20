@@ -45,7 +45,21 @@ class BetPolicyTests(unittest.TestCase):
             source_race_id="source_001",
         )
 
-    def build_race_data(self, odds_list: list[float | None]) -> RaceData:
+    def build_race_data(
+        self,
+        odds_list: list[float | None],
+        *,
+        surface: str | None = None,
+        scope_key: str | None = None,
+        source: str | None = None,
+    ) -> RaceData:
+        race_info = self.race_info.model_copy(
+            update={
+                "surface": surface or self.race_info.surface,
+                "scope_key": scope_key,
+                "source": source,
+            }
+        )
         horses = []
         for index, odds in enumerate(odds_list, start=1):
             horses.append(
@@ -56,18 +70,26 @@ class BetPolicyTests(unittest.TestCase):
                     popularity=index if odds is not None else None,
                 )
             )
-        return RaceData(race_info=self.race_info, horses=horses)
+        return RaceData(race_info=race_info, horses=horses)
 
     def test_low_top_score_results_in_skip(self) -> None:
-        race_data = self.build_race_data([12.0, 14.0, 16.0])
+        race_data = self.build_race_data([12.0, 14.0, 16.0, 18.0, 20.0, 22.0])
         strategy = evaluate_bet_strategy(
             race_data,
-            [build_horse_score(1, 31.0), build_horse_score(2, 30.0), build_horse_score(3, 29.0)],
-            {"◎": 1, "○": 2, "▲": 3, "△": 0, "☆": 0},
+            [
+                build_horse_score(1, 31.0),
+                build_horse_score(2, 30.0),
+                build_horse_score(3, 29.0),
+                build_horse_score(4, 28.0),
+                build_horse_score(5, 27.0),
+                build_horse_score(6, 26.8),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
             [],
             ["heuristic scoringを使用しており、正式なML modelではない。"],
         )
         self.assertEqual(strategy.bet_decision, "SKIP")
+        self.assertGreaterEqual(strategy.confidence_score, 0.0)
 
     def test_high_risk_top_results_in_skip(self) -> None:
         race_data = self.build_race_data([12.0, 14.0, 16.0])
@@ -94,16 +116,100 @@ class BetPolicyTests(unittest.TestCase):
         self.assertIn("市場オッズを使わず", strategy.reason)
 
     def test_high_top_score_and_odds_results_in_bet(self) -> None:
-        race_data = self.build_race_data([14.9, 23.3, 49.4])
+        race_data = self.build_race_data([14.9, 23.3, 49.4, 16.0, 18.0, 20.0])
         strategy = evaluate_bet_strategy(
             race_data,
-            [build_horse_score(1, 42.8), build_horse_score(2, 41.2), build_horse_score(3, 41.2)],
-            {"◎": 1, "○": 2, "▲": 3, "△": 0, "☆": 0},
+            [
+                build_horse_score(1, 42.8),
+                build_horse_score(2, 41.2),
+                build_horse_score(3, 41.2),
+                build_horse_score(4, 39.8),
+                build_horse_score(5, 38.8),
+                build_horse_score(6, 38.7),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
             [self.lesson],
             ["heuristic scoringを使用しており、正式なML modelではない。"],
         )
         self.assertEqual(strategy.bet_decision, "BET")
-        self.assertIn(strategy.confidence, {"medium", "high"})
+        self.assertEqual(strategy.confidence, "low")
+        self.assertGreaterEqual(strategy.confidence_score, 0.84)
+        self.assertLess(strategy.confidence_score, 0.95)
+
+    def test_central_dirt_clear_marks_can_use_medium_coverage_confidence(self) -> None:
+        race_data = self.build_race_data([4.0, 8.0, 12.0, 16.0, 18.0, 20.0], surface="ダート", scope_key="central_dirt")
+        strategy = evaluate_bet_strategy(
+            race_data,
+            [
+                build_horse_score(1, 50.0),
+                build_horse_score(2, 45.0),
+                build_horse_score(3, 39.0),
+                build_horse_score(4, 35.0),
+                build_horse_score(5, 33.0),
+                build_horse_score(6, 25.0),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
+            [],
+            [],
+        )
+        self.assertEqual(strategy.bet_decision, "BET")
+        self.assertEqual(strategy.confidence, "medium")
+        self.assertGreaterEqual(strategy.confidence_score, 0.95)
+        self.assertLess(strategy.confidence_score, 0.98)
+
+    def test_central_turf_coverage_confidence_uses_fifth_mark_boundary(self) -> None:
+        race_data = self.build_race_data([3.5, 8.0, 12.0, 16.0, 18.0, 20.0], surface="芝", scope_key="central_turf")
+        weak_boundary = evaluate_bet_strategy(
+            race_data,
+            [
+                build_horse_score(1, 45.0),
+                build_horse_score(2, 44.0),
+                build_horse_score(3, 43.5),
+                build_horse_score(4, 43.0),
+                build_horse_score(5, 42.5),
+                build_horse_score(6, 42.4),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
+            [],
+            [],
+        )
+        clear_boundary = evaluate_bet_strategy(
+            race_data,
+            [
+                build_horse_score(1, 55.0, risk=-1),
+                build_horse_score(2, 48.0),
+                build_horse_score(3, 42.0),
+                build_horse_score(4, 38.0),
+                build_horse_score(5, 34.0),
+                build_horse_score(6, 28.0),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
+            [],
+            [],
+        )
+        self.assertEqual(weak_boundary.confidence, "low")
+        self.assertEqual(clear_boundary.confidence, "high")
+        self.assertGreaterEqual(clear_boundary.confidence_score, 0.98)
+
+    def test_local_clear_axis_can_still_use_high_confidence(self) -> None:
+        race_data = self.build_race_data([4.0, 8.0, 12.0, 16.0, 18.0, 20.0], surface="ダート", scope_key="local", source="local")
+        strategy = evaluate_bet_strategy(
+            race_data,
+            [
+                build_horse_score(1, 45.0),
+                build_horse_score(2, 40.0),
+                build_horse_score(3, 36.0),
+                build_horse_score(4, 34.0),
+                build_horse_score(5, 32.0),
+                build_horse_score(6, 29.0),
+            ],
+            {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
+            [],
+            [],
+        )
+        self.assertEqual(strategy.confidence, "high")
+        self.assertGreaterEqual(strategy.confidence_score, 0.98)
+        self.assertIn("confidence_score", strategy.model_dump())
 
     def test_close_top_group_adds_reason_code(self) -> None:
         race_data = self.build_race_data([14.9, 23.3, 49.4])

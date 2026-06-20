@@ -16,6 +16,213 @@ def _contains_key_risk(risks: list[str]) -> bool:
     return any("data leakage" in risk or "target race result" in risk for risk in lowered)
 
 
+def _race_scope_key(race_data: RaceData) -> str:
+    race_info = race_data.race_info
+    scope_key = str(race_info.scope_key or "").strip().lower()
+    if scope_key:
+        return scope_key
+    if race_info.source == "local":
+        return "local"
+    if race_info.surface == "ダート":
+        return "central_dirt"
+    if race_info.surface == "芝":
+        return "central_turf"
+    return ""
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _normalized_span(value: float, lower: float, width: float) -> float:
+    if width <= 0:
+        return 0.0
+    return _clamp((value - lower) / width, 0.0, 1.0)
+
+
+MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+
+
+def _estimate_axis_strength_score(
+    *,
+    race_data: RaceData,
+    top_score: float,
+    score_gap_1_2: float,
+    score_gap_1_3: float,
+    average_top3_score: float,
+    top_risk: int,
+    top_odds: float | None,
+    top_popularity: int | None,
+) -> float:
+    scope_key = _race_scope_key(race_data)
+    base_by_scope = {
+        "local": 0.49,
+        "central_dirt": 0.46,
+        "central_turf": 0.42,
+    }
+    score = base_by_scope.get(scope_key, 0.44)
+
+    score += 0.075 * _normalized_span(top_score, 35.0, 10.0)
+    score += 0.075 * _normalized_span(score_gap_1_3, 3.0, 8.0)
+    score += 0.050 * _normalized_span(score_gap_1_2, 1.5, 4.0)
+    score += 0.020 * _normalized_span(average_top3_score, 34.0, 8.0)
+
+    if top_risk >= -1:
+        score += 0.025
+    elif top_risk <= -5:
+        score -= 0.080
+    elif top_risk <= -3:
+        score -= 0.035
+
+    if top_odds is None or top_odds <= 0:
+        score -= 0.030
+    elif top_odds >= 20 or (top_popularity is not None and top_popularity >= 8):
+        score -= 0.060
+    elif top_odds <= 4 and top_popularity is not None and top_popularity <= 2:
+        score += 0.025
+
+    if score_gap_1_2 <= 2.0 or score_gap_1_3 <= 3.0:
+        score -= 0.045
+
+    if scope_key == "central_dirt":
+        score = min(score, 0.58)
+    elif scope_key == "central_turf":
+        cap = 0.72 if score_gap_1_2 >= 4.0 and score_gap_1_3 >= 10.0 else 0.62
+        score = min(score, cap)
+    elif scope_key == "local":
+        score = min(score, 0.74)
+
+    return round(_clamp(score, 0.30, 0.78), 3)
+
+
+def _axis_strength_label_from_score(axis_strength_score: float) -> str:
+    if axis_strength_score >= 0.66:
+        return "high"
+    if axis_strength_score >= 0.50:
+        return "medium"
+    return "low"
+
+
+def _marked_scores_for_coverage(
+    horse_scores: list[HorseScore],
+    marks: dict[str, int],
+) -> list[HorseScore]:
+    score_map = {score.horse_no: score for score in horse_scores}
+    marked_scores: list[HorseScore] = []
+    seen: set[int] = set()
+
+    for symbol in MARK_ORDER:
+        try:
+            horse_no = int(marks.get(symbol) or 0)
+        except (TypeError, ValueError):
+            continue
+        score = score_map.get(horse_no)
+        if score is None or horse_no in seen:
+            continue
+        marked_scores.append(score)
+        seen.add(horse_no)
+
+    for score in horse_scores:
+        if len(marked_scores) >= 5:
+            break
+        if score.horse_no in seen:
+            continue
+        marked_scores.append(score)
+        seen.add(score.horse_no)
+
+    return marked_scores[:5]
+
+
+def _estimate_marked_top3_coverage_score(
+    *,
+    race_data: RaceData,
+    horse_scores: list[HorseScore],
+    marked_scores: list[HorseScore],
+) -> float:
+    if not marked_scores:
+        return 0.0
+
+    scope_key = _race_scope_key(race_data)
+    score = {
+        "central_dirt": 0.965,
+        "central_turf": 0.985,
+        "local": 0.977,
+    }.get(scope_key, 0.980)
+
+    marked_score_values = [score_item.total_score for score_item in marked_scores]
+    average_marked_score = sum(marked_score_values) / len(marked_score_values)
+    lowest_marked_score = min(marked_score_values)
+    highest_marked_score = max(marked_score_values)
+    marked_spread = highest_marked_score - lowest_marked_score
+
+    marked_horse_nos = {score_item.horse_no for score_item in marked_scores}
+    remaining_scores = [
+        score_item.total_score
+        for score_item in horse_scores
+        if score_item.horse_no not in marked_horse_nos
+    ]
+    next_unmarked_score = remaining_scores[0] if remaining_scores else lowest_marked_score
+    gap_5_to_6 = lowest_marked_score - next_unmarked_score
+
+    marked_risks = [score_item.scores.risk for score_item in marked_scores]
+    average_marked_risk = sum(marked_risks) / len(marked_risks)
+    worst_marked_risk = min(marked_risks)
+
+    horse_map = {horse.horse_no: horse for horse in race_data.horses}
+    missing_odds_count = 0
+    for score_item in marked_scores:
+        horse = horse_map.get(score_item.horse_no)
+        odds = horse.odds if horse and horse.odds is not None else score_item.odds
+        if odds is None or odds <= 0:
+            missing_odds_count += 1
+
+    if gap_5_to_6 >= 2.0:
+        score += 0.010
+    elif gap_5_to_6 >= 1.0:
+        score += 0.005
+    elif gap_5_to_6 < 0.5:
+        score -= 0.012
+
+    if marked_spread < 3.0:
+        score -= 0.080
+    elif marked_spread < 6.0:
+        score -= 0.015
+
+    if highest_marked_score < 25.0:
+        score -= 0.065
+    elif average_marked_score < 25.0:
+        score -= 0.025
+
+    if lowest_marked_score < 15.0:
+        score -= 0.025
+
+    if average_marked_risk < -6.0:
+        score -= 0.080
+    elif worst_marked_risk <= -7:
+        score -= 0.015
+
+    if missing_odds_count >= 4:
+        score -= 0.020
+    elif missing_odds_count >= 3:
+        score -= 0.008
+
+    if average_marked_score > 40.0 and gap_5_to_6 < 0.5:
+        score -= 0.100
+
+    if len(marked_scores) < 5:
+        score -= 0.030 * (5 - len(marked_scores))
+
+    return round(_clamp(score, 0.84, 0.99), 3)
+
+
+def _coverage_confidence_label_from_score(confidence_score: float) -> str:
+    if confidence_score >= 0.985:
+        return "high"
+    if confidence_score >= 0.95:
+        return "medium"
+    return "low"
+
+
 def evaluate_bet_strategy(
     race_data: RaceData,
     horse_scores: list[HorseScore],
@@ -29,6 +236,7 @@ def evaluate_bet_strategy(
         return StrategyDecision(
             bet_decision="SKIP",
             confidence="low",
+            confidence_score=0.0,
             participation_level="none",
             reason_codes=["TOP_SCORE_LOW", "SKIP_LOW_CONFIDENCE"],
             reason="評価材料が不足しており、見送り。",
@@ -102,18 +310,30 @@ def evaluate_bet_strategy(
     ):
         reason_codes.append("PACE_RISK_TOP")
 
-    if top.total_score >= 40 and score_gap_1_3 >= 4 and top_risk >= -3 and top_odds is not None:
-        confidence = "high"
-    elif top.total_score >= 35 and average_top3_score >= 34 and top_risk >= -5:
-        confidence = "medium"
-    else:
-        confidence = "low"
+    axis_strength_score = _estimate_axis_strength_score(
+        race_data=race_data,
+        top_score=top.total_score,
+        score_gap_1_2=score_gap_1_2,
+        score_gap_1_3=score_gap_1_3,
+        average_top3_score=average_top3_score,
+        top_risk=top_risk,
+        top_odds=top_odds,
+        top_popularity=top_popularity,
+    )
+    axis_strength = _axis_strength_label_from_score(axis_strength_score)
+    marked_scores = _marked_scores_for_coverage(horse_scores, marks)
+    confidence_score = _estimate_marked_top3_coverage_score(
+        race_data=race_data,
+        horse_scores=horse_scores,
+        marked_scores=marked_scores,
+    )
+    confidence = _coverage_confidence_label_from_score(confidence_score)
 
     should_skip = (
         top.total_score < 32
         or top_risk <= -7
         or _contains_key_risk(risks)
-        or (close_top_group and confidence == "low")
+        or (close_top_group and axis_strength_score < 0.40)
     )
 
     if should_skip:
@@ -121,6 +341,7 @@ def evaluate_bet_strategy(
         return StrategyDecision(
             bet_decision="SKIP",
             confidence=confidence,
+            confidence_score=confidence_score,
             participation_level="none",
             reason_codes=reason_codes,
             reason=(
@@ -128,9 +349,9 @@ def evaluate_bet_strategy(
             ),
         )
 
-    if confidence == "high":
+    if axis_strength == "high":
         participation_level = "strong" if clear_axis else "normal"
-    elif confidence == "medium":
+    elif axis_strength == "medium":
         participation_level = "light" if close_top_group else "normal"
     else:
         participation_level = "light"
@@ -146,6 +367,7 @@ def evaluate_bet_strategy(
     return StrategyDecision(
         bet_decision="BET",
         confidence=confidence,
+        confidence_score=confidence_score,
         participation_level=participation_level,
         reason_codes=reason_codes,
         reason=f"{top_descriptor} {odds_descriptor} {group_descriptor}{lesson_descriptor}".strip(),

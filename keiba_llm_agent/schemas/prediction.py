@@ -132,6 +132,7 @@ class BetSuggestion(BaseModel):
 class StrategyDecision(BaseModel):
     bet_decision: Literal["BET", "SKIP"]
     confidence: Literal["low", "medium", "high"]
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
     participation_level: Literal["none", "light", "normal", "strong"]
     reason_codes: list[str] = Field(default_factory=list)
     reason: str
