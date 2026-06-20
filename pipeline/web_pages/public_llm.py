@@ -99,18 +99,50 @@ def _public_race_id_text(run_row):
 
 
 def _share_hashtag_race_label(run_row):
-    venue = safe_text((run_row or {}).get("location")) or safe_text((run_row or {}).get("trigger_race"))
-    race_no = race_no_text((run_row or {}).get("race_id")) or ""
+    row = dict(run_row or {})
+    location = safe_text(row.get("location"))
+    venue = location or safe_text(row.get("trigger_race"))
+    race_no = race_no_text(row.get("race_id")) or ""
     venue = re.sub(r"\s+", "", venue)
     if venue and not venue.endswith("競馬"):
         venue = f"{venue}競馬"
-    if venue and race_no:
-        return f"#{venue} {race_no}"
+    race_name = _share_race_name_text(row, location=location, venue=venue, race_no=race_no)
     if venue:
-        return f"#{venue}"
+        return " ".join(part for part in (f"#{venue}", race_no, race_name) if part)
+    if race_no and race_name:
+        return f"{race_no} {race_name}"
     if race_no:
         return race_no
+    if race_name:
+        return f"#{race_name}"
     return "#競馬AI"
+
+
+def _share_race_name_text(run_row, *, location, venue, race_no):
+    row = dict(run_row or {})
+    candidates = [safe_text(row.get("race_name"))]
+    trigger_race = safe_text(row.get("trigger_race"))
+    if location and trigger_race:
+        candidates.append(trigger_race)
+    race_name = next((name for name in candidates if name), "")
+    if not race_name:
+        return ""
+
+    compact_name = re.sub(r"\s+", "", race_name)
+    compact_venue = re.sub(r"\s+", "", venue)
+    compact_location = re.sub(r"\s+", "", location)
+    venue_core = compact_venue[:-2] if compact_venue.endswith("競馬") else compact_venue
+    duplicate_labels = {
+        compact_venue,
+        compact_location,
+        venue_core,
+        race_no,
+        f"{compact_venue}{race_no}" if compact_venue and race_no else "",
+        f"{venue_core}{race_no}" if venue_core and race_no else "",
+    }
+    if compact_name in duplicate_labels:
+        return ""
+    return race_name
 
 
 def _share_ticket_lines(ticket_rows, *, to_int_or_none):
@@ -329,6 +361,13 @@ def build_public_board_payload(
         run_id = safe_text(run_row.get("run_id"))
         report_scope_key = report_scope_key_for_row(run_row, scope_norm)
         job_meta = find_job_meta_for_run(report_scope_key, run_id, run_row)
+        share_run_row = dict(run_row or {})
+        job_race_name = safe_text(job_meta.get("race_name"))
+        if job_race_name:
+            share_run_row["race_name"] = job_race_name
+        job_location = safe_text(job_meta.get("location"))
+        if job_location and not safe_text(share_run_row.get("location")):
+            share_run_row["location"] = job_location
         payload_map = {}
         for payload in load_policy_payloads(report_scope_key, run_id, run_row):
             engine = normalize_policy_engine((payload or {}).get("policy_engine", ""))
@@ -397,7 +436,7 @@ def build_public_board_payload(
                     "confidence_text": confidence_text,
                     "confidence_value": confidence_value,
                     "share_text": build_public_share_text(
-                        run_row,
+                        share_run_row,
                         engine,
                         marks_map,
                         ticket_rows,
