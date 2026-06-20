@@ -845,9 +845,14 @@ def _public_share_runtime_html():
     };
   };
 
-  const buildShareText = (raceTitle) => {
+  const buildShareText = (raceTitle, raceName = "") => {
     const header = formatRaceTitle(raceTitle);
-    return [header, "", SHARE_HASHTAG]
+    const subtitle = cleanText(raceName);
+    const fullHeader =
+      subtitle && !cleanText(header).includes(subtitle)
+        ? `${header} ${subtitle}`
+        : header;
+    return [fullHeader, "", SHARE_HASHTAG]
       .filter((line) => String(line || "").trim())
       .join("\\n");
   };
@@ -1274,7 +1279,8 @@ def _public_share_runtime_html():
         return;
       }
       const selected = pickCardForShare(cards);
-      const text = buildShareText(title.textContent || "");
+      const subtitle = header.querySelector(".race-card-header__subtitle")?.textContent || "";
+      const text = buildShareText(title.textContent || "", subtitle);
       if (!text) {
         return;
       }

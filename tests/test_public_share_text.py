@@ -8,6 +8,7 @@ if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
 from web_pages.public_llm import build_public_share_text
+import web_public
 
 
 def _to_int_or_none(value):
@@ -36,6 +37,13 @@ class PublicShareTextTests(unittest.TestCase):
         )
 
         self.assertEqual(text.splitlines()[0], "#東京競馬 11R テストステークス")
+
+    def test_injected_share_button_uses_race_subtitle(self) -> None:
+        runtime = web_public._public_share_runtime_html()
+
+        self.assertIn('const buildShareText = (raceTitle, raceName = "") => {', runtime)
+        self.assertIn('const subtitle = header.querySelector(".race-card-header__subtitle")?.textContent || "";', runtime)
+        self.assertIn('const text = buildShareText(title.textContent || "", subtitle);', runtime)
 
 
 if __name__ == "__main__":
