@@ -41,9 +41,13 @@ class PublicShareTextTests(unittest.TestCase):
     def test_injected_share_button_uses_race_subtitle(self) -> None:
         runtime = web_public._public_share_runtime_html()
 
-        self.assertIn('const buildShareText = (raceTitle, raceName = "") => {', runtime)
-        self.assertIn('const subtitle = header.querySelector(".race-card-header__subtitle")?.textContent || "";', runtime)
-        self.assertIn('const text = buildShareText(title.textContent || "", subtitle);', runtime)
+        self.assertIn('const PUBLIC_API_BASE_PATH = "/keiba/api/public";', runtime)
+        self.assertIn("const buildDetailedShareText = (race, fallbackTitle = \"\", fallbackName = \"\") => {", runtime)
+        self.assertIn("const fetchRaceDetail = async (raceCard) => {", runtime)
+        self.assertIn("const text = await buildShareTextForRace({", runtime)
+        self.assertIn('lines.push("", SHARE_HASHTAG);', runtime)
+        self.assertIn("await navigator.share({ text });", runtime)
+        self.assertNotIn("await drawShareImage(payload)", runtime)
 
 
 if __name__ == "__main__":

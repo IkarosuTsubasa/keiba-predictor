@@ -662,6 +662,7 @@ def _public_share_runtime_html():
 <script>
 (() => {
   const SHARE_HASHTAG = "__SHARE_HASHTAG__";
+  const PUBLIC_API_BASE_PATH = "__PUBLIC_API_BASE_PATH__";
   const IMAGE_WIDTH = 1200;
   const IMAGE_HEIGHT = 675;
   const FONT_FAMILY = '"Hiragino Sans", "Yu Gothic", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif';
@@ -857,6 +858,172 @@ def _public_share_runtime_html():
       .join("\\n");
   };
 
+  const formatShareHeader = (race, raceTitle = "", raceName = "") => {
+    const displayHeader = race?.display_header || {};
+    const title = cleanText(displayHeader.title || race?.race_title || raceTitle);
+    const subtitle = cleanText(displayHeader.subtitle || race?.race_name || raceName);
+    const header = formatRaceTitle(title);
+    const fullHeader =
+      subtitle && !cleanText(header).includes(subtitle)
+        ? `${header} ${subtitle}`
+        : header;
+    const confidence = Number(race?.confidence_score);
+    const confidenceText = Number.isFinite(confidence)
+      ? `信頼度${Math.round(confidence * 100)}%`
+      : "";
+    return `#${[fullHeader, confidenceText].filter(Boolean).join(" ")}`.trim();
+  };
+
+  const formatScoreText = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "";
+    }
+    return number.toFixed(1);
+  };
+
+  const formatMarkRows = (race) => {
+    const prediction = race?.agent_prediction || {};
+    const topHorses = Array.isArray(prediction.top_horses) && prediction.top_horses.length
+      ? prediction.top_horses
+      : (Array.isArray(race?.top5) ? race.top5 : []);
+    return topHorses
+      .filter(Boolean)
+      .slice(0, MARK_SYMBOLS.length)
+      .map((item, index) => {
+        const mark = cleanText(item?.mark || MARK_SYMBOLS[index] || "");
+        const horseNo = cleanText(item?.horse_no || item?.horseNo || "");
+        const horseName = cleanText(item?.horse_name || item?.horseName || "");
+        const score = formatScoreText(item?.total_score ?? item?.score ?? item?.support_score ?? item?.support);
+        const horseText = [horseNo, horseName].filter(Boolean).join(" ");
+        const body = `${mark}${horseText}`.trim();
+        return score ? `${body}評価 ${score}` : body;
+      })
+      .map((line) => cleanText(line))
+      .filter(Boolean);
+  };
+
+  const cleanPredictionCopy = (value, race = null) => {
+    const source = String(value || "").trim();
+    if (!source || source === "Mock LLM commentary") {
+      return "";
+    }
+    const blockedTerms = [
+      "heuristic scoring",
+      "ルールベース評価",
+      "正式なML model",
+      "正式な機械学習モデル",
+      "LLM simulation fallback used",
+      "fallback",
+      "oddsまたは人気が欠損",
+      "データ処理",
+      "内部実装",
+    ];
+    if (blockedTerms.some((term) => source.includes(term))) {
+      return "";
+    }
+    return source
+      .trim()
+      .replace(
+        "上位比較で決め手が弱く、リスクまたはオッズ条件も不十分なため見送り。",
+        "上位の能力差が詰まっており、軸を決め切るには決定打が足りないため見送り。",
+      )
+      .replace(/近走データ使用数=\\d+、参考メモ使用数=\\d+。\\s*/g, "")
+      .replaceAll("買い目", "予測印")
+      .replaceAll("買い判断=BET", "判断=高評価")
+      .replaceAll("判断=BET", "判断=高評価")
+      .replaceAll("買い判断=SKIP", "判断=見送り")
+      .replaceAll("判断=SKIP", "判断=見送り")
+      .replaceAll("買い判断=NO_BET", "判断=見送り")
+      .replaceAll("判断=NO_BET", "判断=見送り")
+      .replaceAll("買い判断=", "判断=")
+      .replaceAll("購入候補", "高評価")
+      .replaceAll("候補なし", "印なし")
+      .replaceAll("SKIP", "見送り")
+      .replaceAll("BET", "高評価")
+      .replaceAll("confidence=", "信頼度=")
+      .replaceAll("信頼度=high", "信頼度=高")
+      .replaceAll("信頼度=medium", "信頼度=中")
+      .replaceAll("信頼度=low", "信頼度=低")
+      .replaceAll("recent_runs使用数", "近走データ使用数")
+      .replaceAll("lessons使用数", "参考メモ使用数")
+      .replace(/近走データ使用数=\\d+、参考メモ使用数=\\d+。\\s*/g, "")
+      .replaceAll("lesson", "参考メモ")
+      .replaceAll("過去参考メモ参考", "過去参考メモ")
+      .replaceAll("unknown", "不明")
+      .replaceAll("average", "平均ペース")
+      .trim();
+  };
+
+  const uniqueReasonLines = (items) => {
+    const seen = new Set();
+    const out = [];
+    for (const item of items || []) {
+      const text = cleanText(item);
+      if (!text || seen.has(text)) {
+        continue;
+      }
+      seen.add(text);
+      out.push(text);
+    }
+    return out;
+  };
+
+  const buildReasonLines = (race) => {
+    const prediction = race?.agent_prediction || {};
+    const strategyReason = cleanPredictionCopy(prediction?.strategy?.reason, race);
+    const horseReasons = Array.isArray(prediction?.top_horses)
+      ? prediction.top_horses
+          .slice(0, 5)
+          .map((item) => cleanPredictionCopy(item?.reason, race))
+          .filter(Boolean)
+      : [];
+    const summary = cleanPredictionCopy(prediction?.summary, race);
+    const summaryParts = summary
+      ? summary
+          .split("。")
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .filter((item) => !item.startsWith("本命は"))
+          .filter((item) => !item.includes("近走データ使用数") && !item.includes("参考メモ使用数"))
+          .map((item) => `${item}。`)
+      : [];
+    const risks = Array.isArray(prediction?.risks)
+      ? prediction.risks.map((item) => cleanPredictionCopy(item, race)).filter(Boolean)
+      : [];
+    const selected = [strategyReason];
+    if (horseReasons[0]) {
+      selected.push(horseReasons[0]);
+    }
+    const middle = uniqueReasonLines([...summaryParts, ...horseReasons.slice(1)]).slice(0, 1);
+    selected.push(...middle);
+    if (risks[0]) {
+      selected.push(risks[0]);
+    }
+    return uniqueReasonLines([
+      ...selected,
+      ...horseReasons.slice(1),
+      ...summaryParts.slice(1),
+      ...risks.slice(1),
+    ]).slice(0, 4);
+  };
+
+  const buildDetailedShareText = (race, fallbackTitle = "", fallbackName = "") => {
+    const header = formatShareHeader(race, fallbackTitle, fallbackName);
+    const markLines = formatMarkRows(race);
+    const reasonLines = buildReasonLines(race);
+    const lines = [header, ...markLines];
+    if (reasonLines.length) {
+      lines.push("", "判断理由", ...reasonLines.map((item) => `・ ${item}`));
+    }
+    lines.push("", SHARE_HASHTAG);
+    return lines
+      .map((line) => String(line || "").trim())
+      .join("\\n")
+      .replace(/\\n{3,}/g, "\\n\\n")
+      .trim();
+  };
+
   const drawShareImage = (payload) => new Promise((resolve, reject) => {
     const canvas = document.createElement("canvas");
     canvas.width = IMAGE_WIDTH;
@@ -999,20 +1166,43 @@ def _public_share_runtime_html():
     }, "image/png", 0.94);
   });
 
-  const openTextShare = (text) => {
-    const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+  const shareWindowFeatures = () => {
     const width = 720;
     const height = 640;
     const left = Math.max(0, Math.round((window.screen.width - width) / 2));
     const top = Math.max(0, Math.round((window.screen.height - height) / 2));
-    const popup = window.open(
-      shareUrl,
-      "ikaimo-share",
-      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-    );
+    return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+  };
+
+  const openPreparedShareWindow = () => {
+    if (isMobileNativeShare() && typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      return null;
+    }
+    const popup = window.open("about:blank", "ikaimo-share", shareWindowFeatures());
     if (popup && !popup.closed) {
       try {
+        popup.document.title = "シェア準備中";
+        popup.document.body.textContent = "シェアを準備中です。";
+      } catch (_error) {
+      }
+    }
+    return popup;
+  };
+
+  const openTextShare = (text, popup = null) => {
+    const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+    if (popup && !popup.closed) {
+      try {
+        popup.location.href = shareUrl;
         popup.focus();
+      } catch (_error) {
+      }
+      return;
+    }
+    const opened = window.open(shareUrl, "ikaimo-share", shareWindowFeatures());
+    if (opened && !opened.closed) {
+      try {
+        opened.focus();
       } catch (_error) {
       }
       return;
@@ -1026,12 +1216,6 @@ def _public_share_runtime_html():
     }
     return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
   };
-
-  const canNativeShareFile = (file, text) =>
-    isMobileNativeShare() &&
-    Boolean(navigator.share) &&
-    Boolean(navigator.canShare) &&
-    navigator.canShare({ files: [file], text });
 
   const showShareToast = (message) => {
     const text = cleanText(message);
@@ -1049,28 +1233,10 @@ def _public_share_runtime_html():
     }, 5200);
   };
 
-  const copyImageToClipboard = async (blob) => {
-    if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) {
-      return false;
-    }
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "image/png": blob,
-        }),
-      ]);
-      return true;
-    } catch (_error) {
-      return false;
-    }
-  };
-
-  const openShare = async (text, payload) => {
-    const blob = await drawShareImage(payload);
-    const file = new File([blob], "ikaimo-ai-keiba-share.png", { type: "image/png" });
-    if (canNativeShareFile(file, text)) {
+  const openShare = async (text, popup = null) => {
+    if (!popup && isMobileNativeShare() && typeof navigator !== "undefined" && typeof navigator.share === "function") {
       try {
-        await navigator.share({ files: [file], text });
+        await navigator.share({ text });
         return;
       } catch (error) {
         if (error && error.name === "AbortError") {
@@ -1078,13 +1244,7 @@ def _public_share_runtime_html():
         }
       }
     }
-    const copied = await copyImageToClipboard(blob);
-    if (!copied) {
-      showShareToast("\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3067\\u304d\\u307e\\u305b\\u3093\\u3067\\u3057\\u305f\\u3002\\u30d6\\u30e9\\u30a6\\u30b6\\u306e\\u6a29\\u9650\\u3092\\u78ba\\u8a8d\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002");
-      return;
-    }
-    showShareToast("\\u753b\\u50cf\\u3092\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002X\\u306e\\u6295\\u7a3f\\u753b\\u9762\\u3067\\u8cbc\\u308a\\u4ed8\\u3051\\u3067\\u304d\\u307e\\u3059\\u3002");
-    openTextShare(text);
+    openTextShare(text, popup);
   };
 
   const createShareButton = () => {
@@ -1210,6 +1370,65 @@ def _public_share_runtime_html():
     return candidates[Math.floor(Math.random() * candidates.length)];
   };
 
+  const raceDetailCache = new Map();
+
+  const resolveRaceDetailRequest = (raceCard) => {
+    const link = raceCard?.querySelector("a[href*='/race/']");
+    if (!link) {
+      return null;
+    }
+    try {
+      const url = new URL(link.getAttribute("href") || link.href || "", window.location.href);
+      const matched = url.pathname.match(/\\/race\\/(.+)$/);
+      if (!matched || !matched[1]) {
+        return null;
+      }
+      const racePath = decodeURIComponent(matched[1]);
+      const search = url.search || window.location.search || "";
+      return {
+        key: `${racePath}${search}`,
+        url: `${PUBLIC_API_BASE_PATH}/races/${encodeURIComponent(racePath)}${search}`,
+      };
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const fetchRaceDetail = async (raceCard) => {
+    const request = resolveRaceDetailRequest(raceCard);
+    if (!request) {
+      return null;
+    }
+    if (raceDetailCache.has(request.key)) {
+      return raceDetailCache.get(request.key);
+    }
+    const response = await fetch(request.url, {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json();
+    const race = payload?.data?.race || null;
+    raceDetailCache.set(request.key, race);
+    return race;
+  };
+
+  const buildShareTextForRace = async ({ raceCard, raceTitle = "", raceName = "" }) => {
+    try {
+      const race = await fetchRaceDetail(raceCard);
+      if (race) {
+        const text = buildDetailedShareText(race, raceTitle, raceName);
+        if (text) {
+          return text;
+        }
+      }
+    } catch (_error) {
+    }
+    return buildShareText(raceTitle, raceName);
+  };
+
   const mountLegacyShareButton = (summary) => {
     if (!summary || summary.dataset.shareMounted === "1") {
       return;
@@ -1233,15 +1452,26 @@ def _public_share_runtime_html():
       if (!cards.length) {
         return;
       }
-      const selected = pickCardForShare(cards);
-      const text = buildShareText(title.textContent || "");
-      if (!text) {
-        return;
-      }
-      const payload = resolvePayload(title.textContent || "", selected);
+      const popup = openPreparedShareWindow();
       button.disabled = true;
       try {
-        await openShare(text, payload);
+        const text = await buildShareTextForRace({
+          raceCard: summary.closest(".race-card"),
+          raceTitle: title.textContent || "",
+          raceName: "",
+        });
+        if (!text) {
+          if (popup && !popup.closed) {
+            popup.close();
+          }
+          return;
+        }
+        await openShare(text, popup);
+      } catch (_error) {
+        if (popup && !popup.closed) {
+          popup.close();
+        }
+        showShareToast("シェアを準備できませんでした。もう一度お試しください。");
       } finally {
         button.disabled = false;
       }
@@ -1278,16 +1508,27 @@ def _public_share_runtime_html():
       if (!cards.length) {
         return;
       }
-      const selected = pickCardForShare(cards);
       const subtitle = header.querySelector(".race-card-header__subtitle")?.textContent || "";
-      const text = buildShareText(title.textContent || "", subtitle);
-      if (!text) {
-        return;
-      }
-      const payload = resolvePayload(title.textContent || "", selected);
+      const popup = openPreparedShareWindow();
       button.disabled = true;
       try {
-        await openShare(text, payload);
+        const text = await buildShareTextForRace({
+          raceCard,
+          raceTitle: title.textContent || "",
+          raceName: subtitle,
+        });
+        if (!text) {
+          if (popup && !popup.closed) {
+            popup.close();
+          }
+          return;
+        }
+        await openShare(text, popup);
+      } catch (_error) {
+        if (popup && !popup.closed) {
+          popup.close();
+        }
+        showShareToast("シェアを準備できませんでした。もう一度お試しください。");
       } finally {
         button.disabled = false;
       }
@@ -1323,7 +1564,11 @@ def _public_share_runtime_html():
 })();
 </script>
 """
-    return runtime.replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
+    return (
+        runtime
+        .replace('"__SHARE_HASHTAG__"', json.dumps(PUBLIC_SHARE_HASHTAG, ensure_ascii=True))
+        .replace('"__PUBLIC_API_BASE_PATH__"', json.dumps(PUBLIC_API_BASE_PATH, ensure_ascii=True))
+    )
 
 
 def inject_public_share_runtime(html_text):
