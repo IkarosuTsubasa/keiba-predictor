@@ -2,18 +2,18 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/menu_races"
-        android:icon="@android:drawable/ic_menu_today"
+        android:icon="@drawable/ic_nav_races"
         android:title="@string/nav_races" />
     <item
         android:id="@+id/menu_history"
-        android:icon="@android:drawable/ic_menu_recent_history"
+        android:icon="@drawable/ic_nav_history"
         android:title="@string/nav_history" />
     <item
         android:id="@+id/menu_reports"
-        android:icon="@android:drawable/ic_menu_agenda"
+        android:icon="@drawable/ic_nav_reports"
         android:title="@string/nav_reports" />
     <item
         android:id="@+id/menu_more"
-        android:icon="@android:drawable/ic_menu_info_details"
+        android:icon="@drawable/ic_nav_more"
         android:title="@string/nav_more" />
 </menu>
