@@ -10563,3 +10563,177 @@ body.home-app-ready .site-footer {
     min-height: 0;
   }
 }
+
+/* Race detail navigation */
+.race-detail-nav-panel {
+  min-height: 56px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: var(--dashboard-shadow);
+}
+
+.race-detail-race-switch {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.race-detail-race-link {
+  min-width: 132px;
+  min-height: 38px;
+  padding: 6px 10px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--dashboard-ink);
+  text-decoration: none;
+}
+
+.race-detail-race-link:hover,
+.race-detail-race-link:focus-visible {
+  border-color: var(--dashboard-ink);
+  background: #ffffff;
+}
+
+.race-detail-race-link span {
+  color: var(--dashboard-muted);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.06em;
+}
+
+.race-detail-race-link strong {
+  min-width: 0;
+  color: var(--dashboard-ink);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-detail-race-link small {
+  display: none;
+}
+
+.race-detail-race-link--disabled {
+  min-width: 92px;
+  background: #f3f5f8;
+  color: var(--dashboard-muted);
+  opacity: 0.66;
+}
+
+.race-detail-race-link--disabled strong {
+  color: var(--dashboard-muted);
+}
+
+.race-detail-course-switch {
+  min-width: 0;
+  padding: 0 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  scrollbar-width: none;
+  flex: 1 1 auto;
+}
+
+.race-detail-course-switch::-webkit-scrollbar {
+  display: none;
+}
+
+.race-detail-course-switch > span {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: var(--dashboard-muted);
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.race-detail-course-switch a {
+  min-height: 36px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--dashboard-ink);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.race-detail-course-switch a:hover,
+.race-detail-course-switch a:focus-visible,
+.race-detail-course-switch a.is-active {
+  border-color: var(--course-accent, var(--dashboard-ink));
+  background: var(--course-accent-soft, #ffffff);
+}
+
+.race-detail-course-switch a.is-active {
+  border-width: 2px;
+  padding: 0 8px;
+  box-shadow: none;
+}
+
+.race-detail-course-switch strong {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.race-detail-course-switch em {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--course-accent, var(--dashboard-ink));
+  color: #ffffff;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+@media (max-width: 760px) {
+  .race-detail-nav-panel {
+    padding: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .race-detail-race-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .race-detail-race-link,
+  .race-detail-race-link--disabled {
+    min-width: 0;
+  }
+
+  .race-detail-course-switch {
+    padding-left: 0;
+  }
+
+  .race-detail-course-switch > span {
+    display: none;
+  }
+}

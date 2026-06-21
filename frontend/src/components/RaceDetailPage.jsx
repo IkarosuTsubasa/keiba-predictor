@@ -4,11 +4,14 @@ import { resolvePublicDecision } from "../lib/confidencePolicy";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
+  buildRaceDetailHref,
   buildPredictorConsensusSummary,
   formatRaceBadges,
+  matchRaceIdentifier,
   parseMarks,
   parseResultEntries,
   pickHorse,
+  raceIdentifier,
 } from "../lib/publicRace";
 
 const MAIN_MARK = MARK_ORDER[0];
@@ -24,14 +27,226 @@ const PREDICTOR_LABELS = {
   v6_kiwami: "極 KIWAMI",
 };
 const PREDICTOR_ORDER = ["main", "v2_opus", "v3_premium", "v4_gemini", "v5_stacking", "v6_kiwami"];
+const COURSE_ACCENTS = [
+  { accent: "#15803d", soft: "#eefdf2" },
+  { accent: "#2563eb", soft: "#eff6ff" },
+  { accent: "#4338ca", soft: "#eef2ff" },
+  { accent: "#b45309", soft: "#fff7ed" },
+  { accent: "#0f766e", soft: "#ecfeff" },
+  { accent: "#be123c", soft: "#fff1f2" },
+];
+const COURSE_ACCENT_BY_LOCATION = {
+  門別: { accent: "#15803d", soft: "#eefdf2" },
+  水沢: { accent: "#2563eb", soft: "#eff6ff" },
+  大井: { accent: "#4338ca", soft: "#eef2ff" },
+  金沢: { accent: "#b45309", soft: "#fff7ed" },
+  東京: { accent: "#1d4ed8", soft: "#eff6ff" },
+  京都: { accent: "#b45309", soft: "#fff7ed" },
+  阪神: { accent: "#7c3aed", soft: "#f5f3ff" },
+  中山: { accent: "#0f766e", soft: "#ecfeff" },
+  中京: { accent: "#be123c", soft: "#fff1f2" },
+  札幌: { accent: "#0369a1", soft: "#f0f9ff" },
+  函館: { accent: "#047857", soft: "#ecfdf5" },
+  新潟: { accent: "#0d9488", soft: "#f0fdfa" },
+  福島: { accent: "#c2410c", soft: "#fff7ed" },
+  小倉: { accent: "#a21caf", soft: "#fdf4ff" },
+};
+
 function buildBackHref(search) {
   const query = String(search || "").replace(/^\?/, "");
   return query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
 }
 
+function displayOrderValue(race) {
+  const value = Number(race?.display_order);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function courseAccent(location, index) {
+  return COURSE_ACCENT_BY_LOCATION[location] || COURSE_ACCENTS[index % COURSE_ACCENTS.length];
+}
+
+function raceLocation(race) {
+  return String(race?.location || "").trim();
+}
+
+function raceTitleText(race) {
+  return String(race?.display_header?.title || race?.race_title || race?.race_id || "").trim();
+}
+
 function extractClockText(value) {
   const matched = String(value || "").trim().match(/(\d{2}:\d{2})/);
   return matched ? matched[1] : "";
+}
+
+function raceClockMinutes(race) {
+  const clockText = extractClockText(race?.scheduled_off_time);
+  if (!clockText) return Number.MAX_SAFE_INTEGER;
+  const [hourText, minuteText] = clockText.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  return Number.isFinite(hour) && Number.isFinite(minute)
+    ? hour * 60 + minute
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function extractRaceNoText(race) {
+  const candidates = [
+    race?.display_header?.title,
+    race?.display_header?.detail_title,
+    race?.race_title,
+    race?.race_id,
+    race?.card_id,
+    race?.run_id,
+  ];
+  for (const value of candidates) {
+    const source = String(value || "").trim();
+    const matched = source.match(/(\d+)\s*R/i);
+    if (matched) {
+      return `${Number(matched[1])}R`;
+    }
+  }
+  const raceId = String(race?.race_id || "").trim();
+  if (/^\d+$/.test(raceId) && raceId.length >= 2) {
+    const raceNo = Number(raceId.slice(-2));
+    if (Number.isFinite(raceNo) && raceNo > 0) {
+      return `${raceNo}R`;
+    }
+  }
+  return "";
+}
+
+function raceNoValue(race) {
+  const matched = extractRaceNoText(race).match(/\d+/);
+  const value = Number(matched?.[0]);
+  return Number.isFinite(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function raceNavigationKey(race) {
+  const id = raceIdentifier(race);
+  if (id) return `id:${id}`;
+  const location = raceLocation(race);
+  const raceNo = extractRaceNoText(race);
+  const clockText = extractClockText(race?.scheduled_off_time);
+  if (location && raceNo) {
+    return `slot:${location}:${raceNo}:${clockText}`;
+  }
+  const title = raceTitleText(race);
+  return title ? `title:${title}` : "";
+}
+
+function isSameRace(left, right) {
+  if (!left || !right) return false;
+  const leftId = raceIdentifier(left);
+  const rightId = raceIdentifier(right);
+  if (leftId && matchRaceIdentifier(right, leftId)) return true;
+  if (rightId && matchRaceIdentifier(left, rightId)) return true;
+  const leftKey = raceNavigationKey(left);
+  return Boolean(leftKey && leftKey === raceNavigationKey(right));
+}
+
+function compareRacesForSequence(left, right) {
+  const leftNo = raceNoValue(left);
+  const rightNo = raceNoValue(right);
+  if (leftNo !== rightNo) return leftNo - rightNo;
+  const leftClock = raceClockMinutes(left);
+  const rightClock = raceClockMinutes(right);
+  if (leftClock !== rightClock) return leftClock - rightClock;
+  const leftOrder = displayOrderValue(left);
+  const rightOrder = displayOrderValue(right);
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  return raceTitleText(left).localeCompare(raceTitleText(right), "ja");
+}
+
+function sortRacesForSequence(races) {
+  return [...(races || [])].sort(compareRacesForSequence);
+}
+
+function sortRacesForCourseTabs(races) {
+  return [...(races || [])].sort((left, right) => {
+    const leftOrder = displayOrderValue(left);
+    const rightOrder = displayOrderValue(right);
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return compareRacesForSequence(left, right);
+  });
+}
+
+function raceNavigationLabel(race) {
+  const raceNo = extractRaceNoText(race);
+  const title = raceTitleText(race);
+  if (raceNo && title && !title.includes(raceNo)) {
+    return `${raceNo} ${title}`;
+  }
+  return title || raceNo || "-";
+}
+
+function raceNavigationMeta(race) {
+  return [
+    extractClockText(race?.scheduled_off_time),
+    race?.distance_label,
+    race?.display_status?.label,
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function buildDetailNavigation(currentRace, races) {
+  if (!currentRace) return null;
+  const sourceRaces = Array.isArray(races) ? races.filter(Boolean) : [];
+  const includesCurrent = sourceRaces.some((item) => isSameRace(item, currentRace));
+  const pool = includesCurrent ? sourceRaces : [currentRace, ...sourceRaces].filter(Boolean);
+  const selectedRace = sourceRaces.find((item) => isSameRace(item, currentRace)) || currentRace;
+  const currentLocation = raceLocation(selectedRace);
+
+  const sameLocationRaces = sortRacesForSequence(
+    pool.filter((item) => raceLocation(item) && raceLocation(item) === currentLocation),
+  );
+  const currentIndex = sameLocationRaces.findIndex((item) => isSameRace(item, selectedRace));
+  const previousRace = currentIndex > 0 ? sameLocationRaces[currentIndex - 1] : null;
+  const nextRace =
+    currentIndex >= 0 && currentIndex < sameLocationRaces.length - 1
+      ? sameLocationRaces[currentIndex + 1]
+      : null;
+
+  const groups = [];
+  const groupIndexByLocation = new Map();
+  for (const item of sortRacesForCourseTabs(pool)) {
+    const location = raceLocation(item);
+    if (!location) continue;
+    let groupIndex = groupIndexByLocation.get(location);
+    if (groupIndex === undefined) {
+      groupIndex = groups.length;
+      groupIndexByLocation.set(location, groupIndex);
+      groups.push({ location, races: [] });
+    }
+    groups[groupIndex].races.push(item);
+  }
+
+  const currentRaceNo = raceNoValue(selectedRace);
+  const courseGroups = groups.map((group, index) => {
+    const sortedGroupRaces = sortRacesForSequence(group.races);
+    const sameNoRace =
+      currentRaceNo !== Number.MAX_SAFE_INTEGER
+        ? sortedGroupRaces.find((item) => raceNoValue(item) === currentRaceNo)
+        : null;
+    const active = group.location === currentLocation;
+    return {
+      location: group.location,
+      accent: courseAccent(group.location, index),
+      count: sortedGroupRaces.length,
+      active,
+      targetRace: active ? selectedRace : sameNoRace || sortedGroupRaces[0] || null,
+    };
+  });
+
+  return {
+    currentRace: selectedRace,
+    previousRace,
+    nextRace,
+    courseGroups,
+    hasNavigation: Boolean(previousRace || nextRace || courseGroups.length > 1),
+  };
 }
 
 function buildFullReleaseText(scheduledOffTime) {
@@ -287,6 +502,74 @@ function DetailAppSummary() {
         />
       </a>
     </article>
+  );
+}
+
+function RaceSequenceLink({ label, emptyLabel, race, search }) {
+  if (!race) {
+    return (
+      <article className="race-detail-race-link race-detail-race-link--disabled">
+        <span>{label}</span>
+        <strong>{emptyLabel}</strong>
+      </article>
+    );
+  }
+
+  const meta = raceNavigationMeta(race);
+  return (
+    <a
+      className="race-detail-race-link"
+      href={buildRaceDetailHref(race, search)}
+      aria-label={`${label}へ移動`}
+    >
+      <span>{label}</span>
+      <strong>{raceNavigationLabel(race)}</strong>
+      {meta ? <small>{meta}</small> : null}
+    </a>
+  );
+}
+
+function RaceDetailNavigation({ navigation, search }) {
+  if (!navigation?.hasNavigation) return null;
+
+  return (
+    <section className="race-detail-nav-panel" aria-label="レース移動">
+      <div className="race-detail-race-switch" aria-label="同じ競馬場の前後R">
+        <RaceSequenceLink
+          label="前R"
+          emptyLabel="前Rなし"
+          race={navigation.previousRace}
+          search={search}
+        />
+        <RaceSequenceLink
+          label="次R"
+          emptyLabel="次Rなし"
+          race={navigation.nextRace}
+          search={search}
+        />
+      </div>
+
+      {navigation.courseGroups.length > 1 ? (
+        <nav className="race-detail-course-switch" aria-label="競馬場切り替え">
+          <span>競馬場</span>
+          {navigation.courseGroups.map((group) => (
+            <a
+              key={group.location}
+              className={group.active ? "is-active" : ""}
+              href={buildRaceDetailHref(group.targetRace, search)}
+              aria-current={group.active ? "page" : undefined}
+              style={{
+                "--course-accent": group.accent.accent,
+                "--course-accent-soft": group.accent.soft,
+              }}
+            >
+              <strong>{group.location}</strong>
+              <em>{group.count}</em>
+            </a>
+          ))}
+        </nav>
+      ) : null}
+    </section>
   );
 }
 
@@ -607,7 +890,7 @@ function PredictorCompareRow({ card }) {
   );
 }
 
-export default function RaceDetailPage({ race, search = "", appShell = false }) {
+export default function RaceDetailPage({ race, races = [], search = "", appShell = false }) {
   const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
     ? race.predictor_compare_cards.filter(Boolean)
     : [];
@@ -655,6 +938,10 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
       : "-";
   const conditionRanking = race?.condition_predictor_ranking || {};
   const hasConditionRanking = Array.isArray(conditionRanking?.cards) && conditionRanking.cards.length > 0;
+  const detailNavigation = useMemo(
+    () => buildDetailNavigation(race, races),
+    [race, races],
+  );
 
   return (
     <section className="race-detail-page">
@@ -687,6 +974,8 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
           <DetailAppSummary />
         </div>
       </div>
+
+      <RaceDetailNavigation navigation={detailNavigation} search={search} />
 
       {agentPrediction ? (
         <AgentMarksPanel

@@ -844,7 +844,12 @@ export default function App() {
         }}
       >
         <div className="public-content-stack">
-          <RaceDetailPage race={selectedRace} search={search} appShell={isAppShell} />
+          <RaceDetailPage
+            race={selectedRace}
+            races={boardRaces}
+            search={search}
+            appShell={isAppShell}
+          />
         </div>
       </PublicFrame>
     );
