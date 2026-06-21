@@ -312,85 +312,81 @@ export default function RaceGrid({ races, appShell = false, onVisibleRacesChange
 
   return (
     <div className="race-grid-section" ref={sectionRef}>
-      {!appShell ? (
-        <>
-          <div className="race-grid-controls">
-            <div className="race-grid-tabs" ref={tabsRef} aria-label="公開状態">
-              <span
-                className="race-grid-tabs__indicator"
-                aria-hidden="true"
-                style={{
-                  width: `${indicator.width}px`,
-                  transform: `translateX(${indicator.left}px)`,
-                  opacity: indicator.opacity,
-                }}
-              />
-              {STATUS_TABS.map((item) => (
-                <button
-                  key={item.key}
-                  ref={(node) => {
-                    if (node) {
-                      buttonRefs.current.set(item.key, node);
-                    } else {
-                      buttonRefs.current.delete(item.key);
-                    }
-                  }}
-                  type="button"
-                  className={statusFilter === item.key ? "is-active" : ""}
-                  onClick={() => changeStatusFilter(item.key)}
-                >
-                  {item.label}
-                </button>
+      <div className="race-grid-controls">
+        <div className="race-grid-tabs" ref={tabsRef} aria-label="公開状態">
+          <span
+            className="race-grid-tabs__indicator"
+            aria-hidden="true"
+            style={{
+              width: `${indicator.width}px`,
+              transform: `translateX(${indicator.left}px)`,
+              opacity: indicator.opacity,
+            }}
+          />
+          {STATUS_TABS.map((item) => (
+            <button
+              key={item.key}
+              ref={(node) => {
+                if (node) {
+                  buttonRefs.current.set(item.key, node);
+                } else {
+                  buttonRefs.current.delete(item.key);
+                }
+              }}
+              type="button"
+              className={statusFilter === item.key ? "is-active" : ""}
+              onClick={() => changeStatusFilter(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {locationTabs.length ? (
+          <label className="race-grid-course-filter">
+            <span>競馬場</span>
+            <select
+              value={locationFilter}
+              onChange={(event) => changeLocationFilter(event.target.value)}
+            >
+              <option value="all">すべての競馬場</option>
+              {locationTabs.map((location) => (
+                <option key={location} value={location}>
+                  {location}
+                </option>
               ))}
-            </div>
+            </select>
+          </label>
+        ) : null}
 
-            {locationTabs.length ? (
-              <label className="race-grid-course-filter">
-                <span>競馬場</span>
-                <select
-                  value={locationFilter}
-                  onChange={(event) => changeLocationFilter(event.target.value)}
-                >
-                  <option value="all">すべての競馬場</option>
-                  {locationTabs.map((location) => (
-                    <option key={location} value={location}>
-                      {location}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+        <span className="race-grid-filter-summary">
+          表示 {filtered.length}レース
+        </span>
+      </div>
 
-            <span className="race-grid-filter-summary">
-              表示 {filtered.length}レース
-            </span>
-          </div>
-
-          {locationFilter === "all" && courseGroups.length > 1 ? (
-            <nav className="race-course-nav" aria-label="競馬場ナビゲーション">
-              <span>競馬場</span>
-              <button type="button" onClick={scrollToSectionTop}>
-                すべて
-                <em>{filtered.length}</em>
-              </button>
-              {courseGroups.map((group) => (
-                <button
-                  key={group.key}
-                  type="button"
-                  className="race-course-nav__item"
-                  onClick={() => scrollToCourse(group.location)}
-                  style={{
-                    "--course-accent": group.accent.accent,
-                    "--course-accent-soft": group.accent.soft,
-                  }}
-                >
-                  {group.location}
-                  <em>{group.summary.total}</em>
-                </button>
-              ))}
-            </nav>
-          ) : null}
-        </>
+      {locationFilter === "all" && courseGroups.length > 1 ? (
+        <nav className="race-course-nav" aria-label="競馬場ナビゲーション">
+          <span>競馬場</span>
+          <button type="button" onClick={scrollToSectionTop}>
+            すべて
+            <em>{filtered.length}</em>
+          </button>
+          {courseGroups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              className="race-course-nav__item"
+              onClick={() => scrollToCourse(group.location)}
+              style={{
+                "--course-accent": group.accent.accent,
+                "--course-accent-soft": group.accent.soft,
+              }}
+            >
+              {group.location}
+              <em>{group.summary.total}</em>
+            </button>
+          ))}
+        </nav>
       ) : null}
 
       <div className={`race-grid__viewport race-grid__viewport--${viewportPhase}`}>

@@ -8,19 +8,19 @@
     android:focusable="true"
     android:foreground="?attr/selectableItemBackground"
     app:cardBackgroundColor="@color/surface_color"
+    app:cardCornerRadius="16dp"
     app:cardElevation="0dp"
-    app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.MediumComponent"
-    app:strokeColor="@color/track_color"
+    app:strokeColor="@color/divider_color"
     app:strokeWidth="1dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:minHeight="84dp"
+        android:minHeight="82dp"
         android:orientation="horizontal"
         android:paddingHorizontal="18dp"
-        android:paddingVertical="16dp">
+        android:paddingVertical="15dp">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -33,7 +33,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
-                android:textSize="18sp"
+                android:textSize="17sp"
                 android:textStyle="bold" />
 
             <TextView

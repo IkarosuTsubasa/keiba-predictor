@@ -36,6 +36,6 @@
     <string name="launch_reload_hint">読み込みに時間がかかっています</string>
     <string name="web_load_error">ページの読み込みに失敗しました。</string>
     <string name="external_open_error">%1$s を開けませんでした。</string>
-    <string name="launch_eyebrow">Loading</string>
+    <string name="launch_eyebrow">読み込み中</string>
     <string name="launch_message">公開ページを読み込んでいます</string>
 </resources>

@@ -9,24 +9,26 @@
     <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/surface_color">
+        android:background="@color/app_chrome"
+        android:elevation="0dp">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/surface_color"
+            android:background="@color/app_chrome"
             android:elevation="0dp"
-            android:minHeight="?attr/actionBarSize"
+            android:minHeight="72dp"
             app:navigationIcon="@android:drawable/ic_media_previous"
+            app:navigationIconTint="@color/text_inverse"
             app:titleCentered="false">
 
             <TextView
                 android:id="@+id/toolbarTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text_primary"
-                android:textSize="20sp"
+                android:textColor="@color/text_inverse"
+                android:textSize="22sp"
                 android:textStyle="bold" />
         </com.google.android.material.appbar.MaterialToolbar>
 

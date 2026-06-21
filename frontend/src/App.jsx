@@ -557,7 +557,7 @@ export default function App() {
     ? resolveSelectedRace(boardRaces, raceDetailId)
     : null;
   const isAgentPredictionBoard = Boolean(data?.agent_mode) || hasAgentPredictionRows(boardRaces);
-  const isAgentPredictionDetail = Boolean(detailData?.agent_mode) || isAgentPredictionRace(selectedRace);
+  const isAgentPredictionDetail = Boolean(data?.agent_mode) || isAgentPredictionRace(selectedRace);
 
   useEffect(() => {
     const shouldHideStaticIntro =
@@ -840,4 +840,3 @@ export default function App() {
     </PublicFrame>
   );
 }
-
