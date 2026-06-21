@@ -21,6 +21,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from confidence_policy import morning_confidence_label
 from fetch_central_result import (
     build_result_url as build_official_result_url,
     fetch_html as fetch_official_result_html,
@@ -2580,16 +2581,7 @@ def _morning_concentration_score(aggregate_rows):
 
 
 def _morning_confidence_label(score):
-    value = float(score or 0.0)
-    if value >= 0.90:
-        return "かなり高い"
-    if value >= 0.85:
-        return "高い"
-    if value >= 0.70:
-        return "中"
-    if value >= 0.55:
-        return "やや低い"
-    return "低い"
+    return morning_confidence_label(score)
 
 
 def _morning_summary_text(agreement_score, concentration_score, stability_score):

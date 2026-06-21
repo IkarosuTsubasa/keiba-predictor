@@ -7,18 +7,17 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import quote
 
+from confidence_policy import (
+    AGENT_CONFIDENCE_FALLBACK_SCORE,
+    confidence_score_from_label,
+    high_evaluation_threshold_from_env,
+)
 from local_env import load_local_env
 
 
 BASE_DIR = Path(__file__).resolve().parent
 load_local_env(BASE_DIR, override=False)
 _FCM_APP = None
-HIGH_EVALUATION_NOTIFY_THRESHOLD = 0.85
-AGENT_CONFIDENCE_SCORE = {
-    "high": 0.88,
-    "medium": 0.76,
-    "low": 0.62,
-}
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 
 
@@ -60,17 +59,7 @@ def preferred_ntfy_engine():
 
 
 def high_evaluation_notify_threshold():
-    raw = str(
-        os.environ.get("PIPELINE_AUTO_PREDICTION_NOTIFY_MIN_CONFIDENCE", "")
-        or os.environ.get("PIPELINE_HIGH_EVALUATION_NOTIFY_THRESHOLD", "")
-        or ""
-    ).strip()
-    if not raw:
-        return HIGH_EVALUATION_NOTIFY_THRESHOLD
-    value = _safe_float(raw, HIGH_EVALUATION_NOTIFY_THRESHOLD)
-    if value <= 0:
-        return HIGH_EVALUATION_NOTIFY_THRESHOLD
-    return max(0.0, min(1.0, value))
+    return high_evaluation_threshold_from_env(os.environ)
 
 
 def _fcm_credentials_path():
@@ -188,9 +177,9 @@ def _load_agent_prediction_payload(base_dir, race_id):
 
 def _agent_confidence_score(value):
     text = str(value or "").strip().lower()
-    if text in AGENT_CONFIDENCE_SCORE:
-        return AGENT_CONFIDENCE_SCORE[text]
-    return _safe_float(value, 0.0)
+    if text in AGENT_CONFIDENCE_FALLBACK_SCORE:
+        return AGENT_CONFIDENCE_FALLBACK_SCORE[text]
+    return confidence_score_from_label(value, 0.0)
 
 
 def _agent_payload_confidence_score(payload, fallback_value=""):
@@ -271,10 +260,7 @@ def agent_prediction_notification_evaluation(base_dir, race_id, payload=None, jo
     confidence_score = _agent_payload_confidence_score(data, confidence_label)
     threshold = high_evaluation_notify_threshold()
 
-    if decision == "bet":
-        should_notify = True
-        reason = "high_evaluation_bet_decision"
-    elif decision in ("skip", "no_bet"):
+    if decision in ("skip", "no_bet"):
         should_notify = False
         reason = "agent_prediction_skip_decision"
     else:

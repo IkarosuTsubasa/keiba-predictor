@@ -1,15 +1,9 @@
 import React from "react";
 import AutoFitLine from "./AutoFitLine";
 import MorningRaceSummary from "./MorningRaceSummary";
+import { resolvePublicDecision } from "../lib/confidencePolicy";
 import { buildRaceDetailHref } from "../lib/publicRace";
 
-const DECISION_LABELS = {
-  high: "高評価",
-  medium: "要確認",
-  low: "見送り",
-};
-const HIGH_CONFIDENCE_THRESHOLD = 0.85;
-const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
 const MARK_LABELS = ["◎", "○", "▲", "△", "☆"];
 
 function formatConfidence(value) {
@@ -47,25 +41,6 @@ function resolveStatus(race) {
     label: String(status.label || "").trim() || "公開中",
     tone: String(status.tone || "").trim() || "open",
   };
-}
-
-function resolveDecision(race) {
-  const explicitDecision = String(race?.agent_prediction?.strategy?.bet_decision || "").trim();
-  if (explicitDecision === "SKIP") return { label: "見送り", tone: "skip" };
-
-  const metaValue = String(race?.predictor_compare_cards?.[0]?.metaValue || "").trim();
-  const confidence = Number(race?.confidence_score);
-  if (Number.isFinite(confidence)) {
-    if (confidence >= HIGH_CONFIDENCE_THRESHOLD) return { label: DECISION_LABELS.high, tone: "bet" };
-    if (explicitDecision === "BET") return { label: DECISION_LABELS.medium, tone: "watch" };
-    if (confidence >= MEDIUM_CONFIDENCE_THRESHOLD) return { label: DECISION_LABELS.medium, tone: "watch" };
-    return { label: DECISION_LABELS.low, tone: "skip" };
-  }
-  if (explicitDecision === "BET") return { label: DECISION_LABELS.high, tone: "bet" };
-  if (metaValue === "high") return { label: DECISION_LABELS.high, tone: "bet" };
-  if (metaValue === "medium") return { label: DECISION_LABELS.medium, tone: "watch" };
-  if (metaValue === "low") return { label: DECISION_LABELS.low, tone: "skip" };
-  return { label: "確認待ち", tone: "watch" };
 }
 
 function mainHorse(race) {
@@ -133,7 +108,7 @@ export default function RaceCard({ race, style = undefined }) {
     race?.display_body?.message || "現在レースデータを反映しています。",
   );
   const detailHref = buildRaceDetailHref(race, window.location.search);
-  const decision = resolveDecision(race);
+  const decision = resolvePublicDecision(race);
   const status = resolveStatus(race);
   const main = mainHorse(race);
   const confidenceText = formatConfidence(race?.confidence_score);

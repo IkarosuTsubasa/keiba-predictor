@@ -65,15 +65,16 @@ class NtfyNotifierTests(unittest.TestCase):
         ):
             self.assertEqual(ntfy_notifier.high_evaluation_notify_threshold(), 0.85)
 
-    def test_agent_bet_decision_is_high_evaluation_even_with_low_confidence(self) -> None:
+    def test_agent_bet_decision_below_threshold_is_not_high_evaluation(self) -> None:
         race_id = "202606100101"
-        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="low")
+        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="medium", confidence_score=0.75)
 
         with patch.dict(os.environ, {"KEIBA_AGENT_PREDICTIONS_DIR": ""}):
             result = ntfy_notifier.agent_prediction_notification_evaluation(self.base_dir, race_id)
 
-        self.assertTrue(result["should_notify"])
-        self.assertEqual(result["reason"], "high_evaluation_bet_decision")
+        self.assertFalse(result["should_notify"])
+        self.assertEqual(result["reason"], "high_evaluation_not_met")
+        self.assertEqual(result["confidence_score"], 0.75)
 
     def test_agent_skip_decision_blocks_high_confidence_notification(self) -> None:
         race_id = "202606100102"
@@ -158,7 +159,7 @@ class NtfyNotifierTests(unittest.TestCase):
 
     def test_agent_notifications_can_send_fcm_when_ntfy_is_disabled(self) -> None:
         race_id = "202606100104"
-        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="medium")
+        self._write_agent_prediction(race_id=race_id, bet_decision="BET", confidence="high")
 
         ntfy_result = {"ok": False, "skipped": True, "reason": "disabled"}
         fcm_result = {"ok": True, "engine": "agent_prediction", "topic": "keiba-public-updates", "message_id": "m1"}

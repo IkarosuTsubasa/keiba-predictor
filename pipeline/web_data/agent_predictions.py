@@ -5,6 +5,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from confidence_policy import AGENT_CONFIDENCE_FALLBACK_SCORE
+
 
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 COURSE_ORDER = (
@@ -27,13 +29,6 @@ TRACK_CONDITION_LABELS = {
     "不": "不良",
     "不良": "不良",
 }
-CONFIDENCE_SCORE = {
-    "high": 0.88,
-    "medium": 0.76,
-    "low": 0.62,
-}
-
-
 def _repo_root(base_dir):
     return Path(base_dir).resolve().parent
 
@@ -410,7 +405,7 @@ def strategy_confidence_score(payload):
         return round(_clamp01(explicit), 6)
 
     confidence = _safe_text(strategy.get("confidence")).lower()
-    prior = CONFIDENCE_SCORE.get(confidence, 0.5)
+    prior = AGENT_CONFIDENCE_FALLBACK_SCORE.get(confidence, 0.5)
     metrics = _score_shape_metrics(payload)
     if not metrics:
         return round(_clamp01(prior), 6)

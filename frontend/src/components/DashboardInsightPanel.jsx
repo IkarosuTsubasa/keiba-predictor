@@ -1,21 +1,7 @@
+import { resolvePublicDecision } from "../lib/confidencePolicy";
+
 function safeText(value) {
   return String(value || "").trim();
-}
-
-const HIGH_CONFIDENCE_THRESHOLD = 0.85;
-const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
-
-function resolveDecision(race) {
-  const explicitDecision = safeText(race?.agent_prediction?.strategy?.bet_decision);
-  if (explicitDecision === "SKIP") return { label: "見送り", tone: "skip" };
-
-  const confidence = Number(race?.confidence_score);
-  if (confidence >= HIGH_CONFIDENCE_THRESHOLD) return { label: "高評価", tone: "bet" };
-  if (explicitDecision === "BET") return { label: "要確認", tone: "watch" };
-  if (confidence >= MEDIUM_CONFIDENCE_THRESHOLD) return { label: "要確認", tone: "watch" };
-  if (Number.isFinite(confidence)) return { label: "見送り", tone: "skip" };
-  if (explicitDecision === "BET") return { label: "高評価", tone: "bet" };
-  return { label: "確認待ち", tone: "watch" };
 }
 
 function MetricCard({ label, value, note = "", accent = false }) {
@@ -34,8 +20,8 @@ export function DashboardInsightPanel({ data, races }) {
   const visibleRaces = (Array.isArray(races) ? races : []).filter(
     (race) => safeText(race?.display_variant) !== "placeholder",
   );
-  const highEvalCount = visibleRaces.filter((race) => resolveDecision(race).tone === "bet").length;
-  const skipCount = visibleRaces.filter((race) => resolveDecision(race).tone === "skip").length;
+  const highEvalCount = visibleRaces.filter((race) => resolvePublicDecision(race).tone === "bet").length;
+  const skipCount = visibleRaces.filter((race) => resolvePublicDecision(race).tone === "skip").length;
   const settledCount = Number(data?.totals?.settled_count || activePeriod?.settled_races || 0);
   const predictedCount = Number(activePeriod?.predicted_races || visibleRaces.length || 0);
 
