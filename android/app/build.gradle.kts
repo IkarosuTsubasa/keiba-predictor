@@ -42,6 +42,14 @@ val fcmTopic =
     providers.gradleProperty("KEIBA_FCM_TOPIC")
         .orElse(localProperty("KEIBA_FCM_TOPIC") ?: "keiba-public-updates")
         .get()
+val fcmCentralTopic =
+    providers.gradleProperty("KEIBA_FCM_CENTRAL_TOPIC")
+        .orElse(localProperty("KEIBA_FCM_CENTRAL_TOPIC") ?: "${fcmTopic}-central")
+        .get()
+val fcmLocalTopic =
+    providers.gradleProperty("KEIBA_FCM_LOCAL_TOPIC")
+        .orElse(localProperty("KEIBA_FCM_LOCAL_TOPIC") ?: "${fcmTopic}-local")
+        .get()
 
 val validateReleaseAdmobConfig =
     tasks.register("validateReleaseAdmobConfig") {
@@ -86,6 +94,8 @@ android {
         buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
         buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
         buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+        buildConfigField("String", "FCM_CENTRAL_TOPIC", "\"$fcmCentralTopic\"")
+        buildConfigField("String", "FCM_LOCAL_TOPIC", "\"$fcmLocalTopic\"")
         buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -99,6 +109,8 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+            buildConfigField("String", "FCM_CENTRAL_TOPIC", "\"$fcmCentralTopic\"")
+            buildConfigField("String", "FCM_LOCAL_TOPIC", "\"$fcmLocalTopic\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "true")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
@@ -109,6 +121,8 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
+            buildConfigField("String", "FCM_CENTRAL_TOPIC", "\"$fcmCentralTopic\"")
+            buildConfigField("String", "FCM_LOCAL_TOPIC", "\"$fcmLocalTopic\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
             manifestPlaceholders["usesCleartextTraffic"] = "false"
             proguardFiles(

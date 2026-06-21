@@ -31,6 +31,14 @@ class KeibaFirebaseMessagingService : FirebaseMessagingService() {
                 ?: message.data["body"]
                 ?: return
 
+        val notificationScope = NotificationPreferences.scopeFromData(message.data)
+        if (!NotificationPreferences.shouldShow(this, notificationScope)) {
+            if (BuildConfig.DEBUG) {
+                Log.i(TAG, "Notification skipped by local preference: $notificationScope")
+            }
+            return
+        }
+
         val rawUrl = message.data["url"]?.trim().orEmpty()
         val webUrl = rawUrl.takeIf { it.isNotBlank() }?.let { AppWeb.normalizeInAppUrl(it, BuildConfig.BASE_WEB_URL) }
         val destination = message.data["destination"]?.trim().orEmpty().ifBlank { null }

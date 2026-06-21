@@ -55,6 +55,39 @@ def fcm_topic():
     return str(os.environ.get("PIPELINE_FCM_TOPIC", "keiba-public-updates") or "").strip().strip("/")
 
 
+def _notification_scope(scope_key):
+    text = str(scope_key or "").strip().lower()
+    if text == "local":
+        return "local"
+    if text.startswith("central"):
+        return "central"
+    return ""
+
+
+def _agent_payload_scope_key(payload, job=None):
+    data = dict(payload or {})
+    row = dict(job or {})
+    race_info = dict(data.get("race_info") or {})
+    return str(
+        data.get("scope_key", "")
+        or race_info.get("scope_key", "")
+        or row.get("scope_key", "")
+        or ""
+    ).strip()
+
+
+def fcm_topic_for_scope(scope_key):
+    base_topic = fcm_topic()
+    if not base_topic:
+        return ""
+    scope = _notification_scope(scope_key)
+    if scope == "central":
+        return str(os.environ.get("PIPELINE_FCM_CENTRAL_TOPIC", "") or "").strip().strip("/") or f"{base_topic}-central"
+    if scope == "local":
+        return str(os.environ.get("PIPELINE_FCM_LOCAL_TOPIC", "") or "").strip().strip("/") or f"{base_topic}-local"
+    return base_topic
+
+
 def preferred_ntfy_engine():
     return str(os.environ.get("PIPELINE_NTFY_ENGINE", "") or "").strip().lower()
 
@@ -631,10 +664,14 @@ def build_fcm_prediction_notification(scope_key, run_id):
     candidate = _select_share_candidate(scope_key, run_id)
     run_row = dict(candidate.get("run_row", {}) or {})
     body = _prediction_complete_text(run_row, run_id)
+    resolved_scope_key = str(scope_key or run_row.get("scope_key", "") or "").strip()
     return {
         "engine": str(candidate.get("engine", "") or "").strip(),
         "title": "🐴予測が完了しました",
         "body": body,
+        "public_url": str(candidate.get("public_url", "") or "").strip(),
+        "scope_key": resolved_scope_key,
+        "notification_scope": _notification_scope(resolved_scope_key),
     }
 
 
@@ -784,12 +821,15 @@ def build_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", pay
     confidence_suffix = f" ｜信頼度 {confidence_text}" if confidence_text else ""
     body = f"{marks_text} ｜判定 高評価{confidence_suffix}"
     public_url = _build_public_agent_race_url(data, row)
+    resolved_scope_key = _agent_payload_scope_key(data, row)
     return {
         "engine": "agent_prediction",
         "title": title,
         "body": body,
         "public_url": public_url,
         "race_id": resolved_race_id,
+        "scope_key": resolved_scope_key,
+        "notification_scope": _notification_scope(resolved_scope_key),
         "evaluation": eval_row,
     }
 
@@ -979,14 +1019,6 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
             "reason": "disabled",
         }
 
-    topic = fcm_topic()
-    if not topic:
-        return {
-            "ok": False,
-            "skipped": True,
-            "reason": "missing_topic",
-        }
-
     data = dict(payload or _load_agent_prediction_payload(base_dir, race_id) or {})
     row = dict(job or _load_race_job(base_dir, job_id) or {})
     eval_row = dict(evaluation or agent_prediction_notification_evaluation(base_dir, race_id, payload=data, job=row) or {})
@@ -1006,6 +1038,13 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
         job=row,
         evaluation=eval_row,
     )
+    topic = fcm_topic_for_scope(notification.get("scope_key", ""))
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
 
     try:
         from firebase_admin import messaging
@@ -1015,10 +1054,6 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
     app = _get_firebase_app()
     message = messaging.Message(
         topic=topic,
-        notification=messaging.Notification(
-            title=notification["title"],
-            body=notification["body"],
-        ),
         android=messaging.AndroidConfig(
             priority="high",
         ),
@@ -1026,6 +1061,8 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
             "title": notification["title"],
             "body": notification["body"],
             "url": notification["public_url"],
+            "scope_key": notification["scope_key"],
+            "notification_scope": notification["notification_scope"],
         },
     )
     message_id = str(messaging.send(message, app=app) or "").strip()
@@ -1037,6 +1074,8 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
         "topic": topic,
         "message_id": message_id,
         "public_url": notification["public_url"],
+        "scope_key": notification["scope_key"],
+        "notification_scope": notification["notification_scope"],
         "evaluation": eval_row,
     }
 
@@ -1049,15 +1088,14 @@ def publish_fcm_prediction_notification(scope_key, run_id):
             "reason": "disabled",
         }
 
-    topic = fcm_topic()
+    notification = build_fcm_prediction_notification(scope_key, run_id)
+    topic = fcm_topic_for_scope(notification.get("scope_key", ""))
     if not topic:
         return {
             "ok": False,
             "skipped": True,
             "reason": "missing_topic",
         }
-
-    notification = build_fcm_prediction_notification(scope_key, run_id)
 
     try:
         from firebase_admin import messaging
@@ -1067,13 +1105,16 @@ def publish_fcm_prediction_notification(scope_key, run_id):
     app = _get_firebase_app()
     message = messaging.Message(
         topic=topic,
-        notification=messaging.Notification(
-            title=notification["title"],
-            body=notification["body"],
-        ),
         android=messaging.AndroidConfig(
             priority="high",
         ),
+        data={
+            "title": notification["title"],
+            "body": notification["body"],
+            "url": notification["public_url"],
+            "scope_key": notification["scope_key"],
+            "notification_scope": notification["notification_scope"],
+        },
     )
     message_id = str(messaging.send(message, app=app) or "").strip()
     return {
@@ -1083,6 +1124,9 @@ def publish_fcm_prediction_notification(scope_key, run_id):
         "body": notification["body"],
         "topic": topic,
         "message_id": message_id,
+        "public_url": notification["public_url"],
+        "scope_key": notification["scope_key"],
+        "notification_scope": notification["notification_scope"],
     }
 
 

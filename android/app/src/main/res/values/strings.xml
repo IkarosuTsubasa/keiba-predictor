@@ -30,6 +30,14 @@
     <string name="ad_badge">広告</string>
     <string name="notification_channel_name">更新通知</string>
     <string name="notification_channel_description">レース更新や日報公開のお知らせを表示します</string>
+    <string name="notification_settings_title">通知設定</string>
+    <string name="notification_settings_description">予測完了と日報更新のお知らせを受け取ります</string>
+    <string name="notification_all_title">通知を受け取る</string>
+    <string name="notification_all_description">アプリからのお知らせを表示します</string>
+    <string name="notification_central_title">中央競馬</string>
+    <string name="notification_central_description">中央開催の予測通知を受け取ります</string>
+    <string name="notification_local_title">地方競馬</string>
+    <string name="notification_local_description">地方開催の予測通知を受け取ります</string>
 
     <string name="retry">再試行</string>
     <string name="launch_reload">再読み込み</string>

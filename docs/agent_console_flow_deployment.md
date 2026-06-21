@@ -40,8 +40,12 @@
 - `PIPELINE_NTFY_NOTIFY_ENABLED`: 使用 ntfy 时设为 `1/true/yes/on`。
 - `PIPELINE_NTFY_TOPIC`: 使用 ntfy 时必填。
 - `PIPELINE_FCM_NOTIFY_ENABLED`: 使用 App 推送时设为 `1/true/yes/on`。
-- `PIPELINE_FCM_TOPIC`: 可选，默认 `keiba-public-updates`，需要与 Android App 订阅 topic 一致。
+- `PIPELINE_FCM_TOPIC`: 可选，默认 `keiba-public-updates`，基础 topic 需要与 Android App 订阅 topic 一致。
+- `PIPELINE_FCM_CENTRAL_TOPIC`: 可选，默认 `${PIPELINE_FCM_TOPIC}-central`，中央通知 topic。
+- `PIPELINE_FCM_LOCAL_TOPIC`: 可选，默认 `${PIPELINE_FCM_TOPIC}-local`，地方通知 topic。
 - `PIPELINE_FCM_SERVICE_ACCOUNT_JSON` 或 `PIPELINE_FCM_SERVICE_ACCOUNT_FILE`: 使用 App 推送时配置 Firebase Admin 凭证。
+
+FCM 发送端使用 data-only message，让 Android App 先按用户的通知设置过滤，再由 App 自己展示通知。
 
 如果线上已经配置过 v5 remote predictor，通常只需要确认旧变量仍然存在。预测和结果默认会写入 Render persistent disk，所以不额外配置 `KEIBA_AGENT_PREDICTIONS_DIR` 与 `KEIBA_AGENT_RESULTS_DIR` 也可以。
 

@@ -84,6 +84,8 @@ Release builds fail on purpose if these AdMob values are missing or still set to
 To override the FCM topic used by the Android client:
 
 - `KEIBA_FCM_TOPIC=your_topic_name`
+- `KEIBA_FCM_CENTRAL_TOPIC=your_central_topic_name` (defaults to `${KEIBA_FCM_TOPIC}-central`)
+- `KEIBA_FCM_LOCAL_TOPIC=your_local_topic_name` (defaults to `${KEIBA_FCM_TOPIC}-local`)
 
 ## FCM
 
@@ -96,10 +98,16 @@ The Android shell already includes the client-side FCM integration:
 
 It is recommended to send a `data` payload with these fields:
 
+Use data-only FCM messages for app-controlled notification display. If a Firebase
+`notification` payload is sent, Android may display it before the app can apply
+the in-app notification settings.
+
 - `title`: notification title
 - `body`: notification body
 - `destination`: top-level destination, one of `races / history / reports / more`
 - `url`: relative in-app path or full URL, for example `/keiba/reports/foo` or `https://...`
+- `scope_key`: `central_dirt`, `central_turf`, `central`, or `local`
+- `notification_scope`: `central` or `local`
 
 Priority:
 

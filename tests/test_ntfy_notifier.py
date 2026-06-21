@@ -32,6 +32,7 @@ class NtfyNotifierTests(unittest.TestCase):
         bet_decision="",
         confidence="low",
         confidence_score=None,
+        scope_key="central_dirt",
     ) -> None:
         strategy = {
             "bet_decision": bet_decision,
@@ -46,6 +47,7 @@ class NtfyNotifierTests(unittest.TestCase):
                 "race_date": "2026-06-10",
                 "course": "東京",
                 "race_name": "テストステークス",
+                "scope_key": scope_key,
             },
             "marks": {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
             "strategy": strategy,
@@ -235,9 +237,65 @@ class NtfyNotifierTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["message_id"], "fcm-message-1")
         message = captured["message"]
-        self.assertEqual(message.kwargs["topic"], "keiba-public-updates")
+        self.assertEqual(message.kwargs["topic"], "keiba-public-updates-central")
+        self.assertNotIn("notification", message.kwargs)
         self.assertIn(f"/race/{race_id}", message.kwargs["data"]["url"])
+        self.assertEqual(message.kwargs["data"]["scope_key"], "central_dirt")
+        self.assertEqual(message.kwargs["data"]["notification_scope"], "central")
         self.assertEqual(captured["app"], "fake-app")
+
+    def test_fcm_agent_prediction_notification_uses_local_topic(self) -> None:
+        race_id = "202654100106"
+        self._write_agent_prediction(
+            race_id=race_id,
+            bet_decision="BET",
+            confidence="high",
+            scope_key="local",
+        )
+        captured = {}
+
+        class FakeMessaging:
+            class Notification:
+                def __init__(self, title="", body=""):
+                    self.title = title
+                    self.body = body
+
+            class AndroidConfig:
+                def __init__(self, priority=""):
+                    self.priority = priority
+
+            class Message:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            @staticmethod
+            def send(message, app=None):
+                captured["message"] = message
+                captured["app"] = app
+                return "fcm-message-local"
+
+        fake_firebase_admin = types.SimpleNamespace(messaging=FakeMessaging)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "KEIBA_AGENT_PREDICTIONS_DIR": "",
+                    "PIPELINE_FCM_NOTIFY_ENABLED": "1",
+                    "PIPELINE_FCM_TOPIC": "keiba-public-updates",
+                },
+            ),
+            patch.dict(sys.modules, {"firebase_admin": fake_firebase_admin}),
+            patch.object(ntfy_notifier, "_get_firebase_app", return_value="fake-app"),
+        ):
+            result = ntfy_notifier.publish_fcm_agent_prediction_notification(self.base_dir, race_id=race_id)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["topic"], "keiba-public-updates-local")
+        message = captured["message"]
+        self.assertEqual(message.kwargs["topic"], "keiba-public-updates-local")
+        self.assertNotIn("notification", message.kwargs)
+        self.assertEqual(message.kwargs["data"]["scope_key"], "local")
+        self.assertEqual(message.kwargs["data"]["notification_scope"], "local")
 
 
 if __name__ == "__main__":

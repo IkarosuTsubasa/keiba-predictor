@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import com.google.android.gms.ads.AdListener
@@ -25,6 +26,12 @@ class MoreActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMoreBinding
     private var nativeAd: NativeAd? = null
     private var suppressBottomNavEvents = false
+    private var suppressNotificationSwitchEvents = false
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            NotificationPermissionHelper.markPrompted(this)
+            NotificationPreferences.syncFcmTopics(this)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +42,7 @@ class MoreActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)
 
+        configureNotificationSettings()
         configureOptions()
         configureBottomNavigation()
         MobileAds.initialize(this)
@@ -64,6 +72,63 @@ class MoreActivity : AppCompatActivity() {
                 )
             }
         }
+    }
+
+    private fun configureNotificationSettings() {
+        renderNotificationSettings()
+
+        binding.notificationAllSwitch.setOnCheckedChangeListener { _, checked ->
+            if (suppressNotificationSwitchEvents) return@setOnCheckedChangeListener
+            NotificationPreferences.setEnabled(this, checked)
+            if (checked && !NotificationPermissionHelper.isGranted(this)) {
+                requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+            renderNotificationSettings()
+            NotificationPreferences.syncFcmTopics(this)
+        }
+
+        binding.notificationCentralSwitch.setOnCheckedChangeListener { _, checked ->
+            if (suppressNotificationSwitchEvents) return@setOnCheckedChangeListener
+            NotificationPreferences.setCentralEnabled(this, checked)
+            renderNotificationSettings()
+            NotificationPreferences.syncFcmTopics(this)
+        }
+
+        binding.notificationLocalSwitch.setOnCheckedChangeListener { _, checked ->
+            if (suppressNotificationSwitchEvents) return@setOnCheckedChangeListener
+            NotificationPreferences.setLocalEnabled(this, checked)
+            renderNotificationSettings()
+            NotificationPreferences.syncFcmTopics(this)
+        }
+
+        binding.notificationAllRow.setOnClickListener {
+            binding.notificationAllSwitch.isChecked = !binding.notificationAllSwitch.isChecked
+        }
+        binding.notificationCentralRow.setOnClickListener {
+            if (binding.notificationCentralSwitch.isEnabled) {
+                binding.notificationCentralSwitch.isChecked = !binding.notificationCentralSwitch.isChecked
+            }
+        }
+        binding.notificationLocalRow.setOnClickListener {
+            if (binding.notificationLocalSwitch.isEnabled) {
+                binding.notificationLocalSwitch.isChecked = !binding.notificationLocalSwitch.isChecked
+            }
+        }
+    }
+
+    private fun renderNotificationSettings() {
+        val enabled = NotificationPreferences.isEnabled(this)
+        suppressNotificationSwitchEvents = true
+        binding.notificationAllSwitch.isChecked = enabled
+        binding.notificationCentralSwitch.isChecked = NotificationPreferences.isCentralEnabled(this)
+        binding.notificationLocalSwitch.isChecked = NotificationPreferences.isLocalEnabled(this)
+        binding.notificationCentralSwitch.isEnabled = enabled
+        binding.notificationLocalSwitch.isEnabled = enabled
+        binding.notificationCentralRow.isEnabled = enabled
+        binding.notificationLocalRow.isEnabled = enabled
+        binding.notificationCentralRow.alpha = if (enabled) 1f else 0.48f
+        binding.notificationLocalRow.alpha = if (enabled) 1f else 0.48f
+        suppressNotificationSwitchEvents = false
     }
 
     private fun configureBottomNavigation() {
