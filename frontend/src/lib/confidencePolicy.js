@@ -3,7 +3,7 @@ export const MEDIUM_CONFIDENCE_THRESHOLD = 0.70;
 
 const DECISION_LABELS = {
   high: "高評価",
-  medium: "要確認",
+  medium: "注目",
   low: "見送り",
   pending: "確認待ち",
 };

@@ -53,7 +53,7 @@ export default function MorningPreviewSection({ data, search = "" }) {
         <div>
           <span className="home-section-eyebrow">AI注目</span>
           <h2>今日のAI注目レース</h2>
-          <p>本命、自信度、上位5頭、AI予測指数をまとめて確認できます。</p>
+          <p>本命、信頼度、上位5頭、AI予測指数をまとめて確認できます。</p>
         </div>
       </div>
 
@@ -68,7 +68,7 @@ export default function MorningPreviewSection({ data, search = "" }) {
               <strong>{featuredRace.main_horse_no || "-"}</strong>
             </div>
             <div>
-              <small>自信度</small>
+              <small>信頼度</small>
               <strong>{formatScore(featuredRace.confidence_score)}</strong>
             </div>
           </div>
@@ -87,7 +87,7 @@ export default function MorningPreviewSection({ data, search = "" }) {
           <article className="morning-preview__ranking-card">
             <div className="morning-preview__subhead">
               <span>ランキング</span>
-              <h3>AI自信度ランキング</h3>
+              <h3>AI信頼度ランキング</h3>
             </div>
             <ol className="morning-preview__ranking">
               {ranking.map((item) => (

@@ -23,18 +23,19 @@ PENALTY_BY_FLAG = {
 }
 
 PERFORMANCE_PROFILE_BONUS_BY_FLAG = {
-    "PEDIGREE_SURFACE_FIT": 0.15,
-    "PEDIGREE_DISTANCE_FIT": 0.20,
-    "PEDIGREE_STAMINA_FIT": 0.20,
-    "PEDIGREE_POWER_FIT": 0.10,
-    "PEDIGREE_TRACK_CONDITION_FIT": 0.15,
-    "PEDIGREE_CLASS_POWER": 0.10,
-    "PEDIGREE_EARLY_MATURITY": 0.10,
+    "PEDIGREE_SURFACE_FIT": 0.08,
+    "PEDIGREE_DISTANCE_FIT": 0.10,
+    "PEDIGREE_STAMINA_FIT": 0.10,
+    "PEDIGREE_POWER_FIT": 0.06,
+    "PEDIGREE_TRACK_CONDITION_FIT": 0.08,
+    "PEDIGREE_CLASS_POWER": 0.05,
+    "PEDIGREE_EARLY_MATURITY": 0.05,
 }
 
 PERFORMANCE_PROFILE_PENALTY_BY_FLAG = {
     "PEDIGREE_DISTANCE_RISK": 0.25,
 }
+PERFORMANCE_PROFILE_HINT_WEIGHT = 0.55
 
 
 def _unique_profile_flags(pedigree_analysis: PedigreeAnalysis, attr: str) -> list[str]:
@@ -54,8 +55,12 @@ def calculate_pedigree_adjustment(
     if getattr(pedigree_analysis, "performance_profiles", []):
         profile_positive_flags = _unique_profile_flags(pedigree_analysis, "positive_flags")
         profile_risk_flags = _unique_profile_flags(pedigree_analysis, "risk_flags")
-        bonus = max(float(performance_hint), 0.0)
-        penalty = max(abs(float(performance_hint)), 0.0) if performance_hint < 0 else 0.0
+        bonus = max(float(performance_hint), 0.0) * PERFORMANCE_PROFILE_HINT_WEIGHT
+        penalty = (
+            max(abs(float(performance_hint)), 0.0) * PERFORMANCE_PROFILE_HINT_WEIGHT
+            if performance_hint < 0
+            else 0.0
+        )
         bonus += sum(PERFORMANCE_PROFILE_BONUS_BY_FLAG.get(flag, 0.0) for flag in profile_positive_flags)
         penalty += sum(PERFORMANCE_PROFILE_PENALTY_BY_FLAG.get(flag, 0.0) for flag in profile_risk_flags)
     else:

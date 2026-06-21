@@ -11,6 +11,7 @@ from confidence_policy import (
     AGENT_CONFIDENCE_FALLBACK_SCORE,
     confidence_score_from_label,
     high_evaluation_threshold_from_env,
+    public_decision_tone,
 )
 from local_env import load_local_env
 
@@ -264,7 +265,7 @@ def agent_prediction_notification_evaluation(base_dir, race_id, payload=None, jo
         should_notify = False
         reason = "agent_prediction_skip_decision"
     else:
-        should_notify = confidence_score >= threshold
+        should_notify = public_decision_tone(decision, confidence_score, high_threshold=threshold) == "bet"
         reason = "high_evaluation" if should_notify else "high_evaluation_not_met"
 
     return {
@@ -520,7 +521,7 @@ def _select_share_candidate(scope_key, run_id):
     marks_text = str(marks_meta.get("marks_text", "") or "").strip() or "印なし"
     confidence_text = str(marks_meta.get("confidence_text", "") or "").strip()
     confidence_score = _safe_float(marks_meta.get("confidence_score"), 0.0)
-    marks_line = f"{marks_text} ｜自信度 {confidence_text}" if confidence_text else marks_text
+    marks_line = f"{marks_text} ｜信頼度 {confidence_text}" if confidence_text else marks_text
     public_url = _build_public_race_url(run_row)
     share_text = "\n".join(
         [
@@ -741,7 +742,7 @@ def build_ntfy_agent_prediction_notification(base_dir, job_id="", race_id="", pa
     marks_text = _agent_marks_text(data)
     strategy = dict(data.get("strategy") or {})
     confidence_text = _agent_confidence_label(strategy.get("confidence", ""))
-    confidence_suffix = f" ｜自信度 {confidence_text}" if confidence_text else ""
+    confidence_suffix = f" ｜信頼度 {confidence_text}" if confidence_text else ""
     public_url = _build_public_agent_race_url(data, row)
     share_text = "\n".join(
         [
@@ -780,7 +781,7 @@ def build_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", pay
     marks_text = _agent_marks_text(data)
     strategy = dict(data.get("strategy") or {})
     confidence_text = _agent_confidence_label(strategy.get("confidence", ""))
-    confidence_suffix = f" ｜自信度 {confidence_text}" if confidence_text else ""
+    confidence_suffix = f" ｜信頼度 {confidence_text}" if confidence_text else ""
     body = f"{marks_text} ｜判定 高評価{confidence_suffix}"
     public_url = _build_public_agent_race_url(data, row)
     return {

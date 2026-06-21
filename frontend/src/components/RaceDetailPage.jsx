@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import AutoFitLine from "./AutoFitLine";
+import { resolvePublicDecision } from "../lib/confidencePolicy";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
@@ -293,7 +294,7 @@ function PanelEmpty({ children }) {
   return <p className="race-detail-empty-note">{children}</p>;
 }
 
-function cleanPredictionCopy(value) {
+function cleanPredictionCopy(value, race = null) {
   const source = String(value || "").trim();
   if (source === "Mock LLM commentary") return "";
   const blockedTerms = [
@@ -308,6 +309,7 @@ function cleanPredictionCopy(value) {
     "内部実装",
   ];
   if (blockedTerms.some((term) => source.includes(term))) return "";
+  const decisionLabel = race ? resolvePublicDecision(race).label : "注目";
   return source
     .trim()
     .replace(
@@ -317,11 +319,17 @@ function cleanPredictionCopy(value) {
     .replace(/^本命は[^。]+。\s*/, "")
     .replace(/近走データ使用数=\d+、参考メモ使用数=\d+。\s*/g, "")
     .replaceAll("買い目", "予測印")
+    .replaceAll("買い判断=BET", `判断=${decisionLabel}`)
+    .replaceAll("判断=BET", `判断=${decisionLabel}`)
+    .replaceAll("買い判断=SKIP", "判断=見送り")
+    .replaceAll("判断=SKIP", "判断=見送り")
+    .replaceAll("買い判断=NO_BET", "判断=見送り")
+    .replaceAll("判断=NO_BET", "判断=見送り")
     .replaceAll("買い判断=", "判断=")
-    .replaceAll("購入候補", "高評価")
+    .replaceAll("購入候補", decisionLabel)
     .replaceAll("候補なし", "印なし")
     .replaceAll("SKIP", "見送り")
-    .replaceAll("BET", "高評価")
+    .replaceAll("BET", decisionLabel)
     .replaceAll("confidence=", "信頼度=")
     .replaceAll("信頼度=high", "信頼度=高")
     .replaceAll("信頼度=medium", "信頼度=中")
@@ -361,11 +369,11 @@ function buildAgentMarkRows(prediction, race = {}) {
     }));
 }
 
-function pickReasonBullets(prediction) {
-  const strategyReason = cleanPredictionCopy(prediction?.strategy?.reason);
-  const summary = cleanPredictionCopy(prediction?.summary);
+function pickReasonBullets(prediction, race = null) {
+  const strategyReason = cleanPredictionCopy(prediction?.strategy?.reason, race);
+  const summary = cleanPredictionCopy(prediction?.summary, race);
   const risks = Array.isArray(prediction?.risks)
-    ? prediction.risks.map(cleanPredictionCopy).filter(Boolean)
+    ? prediction.risks.map((item) => cleanPredictionCopy(item, race)).filter(Boolean)
     : [];
   const bullets = [];
   if (strategyReason) bullets.push(strategyReason);
@@ -386,7 +394,7 @@ function pickReasonBullets(prediction) {
 function AgentMarksPanel({ prediction, race }) {
   if (!prediction) return null;
   const markRows = buildAgentMarkRows(prediction, race);
-  const reasons = pickReasonBullets(prediction);
+  const reasons = pickReasonBullets(prediction, race);
 
   return (
     <section className="race-detail-panel race-detail-panel--marks-overview" id="race-detail-marks">
@@ -675,7 +683,7 @@ export default function RaceDetailPage({ race, search = "", appShell = false }) 
 
         <div className="race-detail-hero__meta">
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
-          <DetailSummary label="自信度" value={detailConfidenceText} />
+          <DetailSummary label="信頼度" value={detailConfidenceText} />
           <DetailAppSummary />
         </div>
       </div>

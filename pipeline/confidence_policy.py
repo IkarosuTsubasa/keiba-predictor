@@ -64,3 +64,34 @@ def morning_confidence_label(score):
     if value >= MORNING_CONFIDENCE_LOW_THRESHOLD:
         return "やや低い"
     return "低い"
+
+
+def public_decision_tone(bet_decision="", confidence_score=None, high_threshold=None, medium_threshold=None):
+    decision = str(bet_decision or "").strip().upper()
+    high_value = HIGH_EVALUATION_THRESHOLD if high_threshold is None else clamp01(high_threshold, HIGH_EVALUATION_THRESHOLD)
+    medium_value = MEDIUM_EVALUATION_THRESHOLD if medium_threshold is None else clamp01(
+        medium_threshold,
+        MEDIUM_EVALUATION_THRESHOLD,
+    )
+    if decision in ("SKIP", "NO_BET"):
+        return "skip"
+    if confidence_score is not None:
+        score = clamp01(confidence_score)
+        if score >= high_value:
+            return "bet"
+        if decision == "BET":
+            return "watch"
+        if score >= medium_value:
+            return "watch"
+        return "skip"
+    if decision == "BET":
+        return "bet"
+    return "watch"
+
+
+def is_high_evaluation(bet_decision="", confidence_score=None):
+    return public_decision_tone(bet_decision, confidence_score) == "bet"
+
+
+def is_skip_evaluation(bet_decision="", confidence_score=None):
+    return public_decision_tone(bet_decision, confidence_score) == "skip"

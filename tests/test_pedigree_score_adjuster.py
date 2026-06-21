@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from keiba_llm_agent.scoring.pedigree_score_adjuster import calculate_pedigree_adjustment
-from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
+from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis, PedigreePerformanceProfile
 from keiba_llm_agent.schemas.race_data import RaceInfo
 
 
@@ -89,7 +89,59 @@ class PedigreeScoreAdjusterTests(unittest.TestCase):
         )
         self.assertGreaterEqual(adjustment.pedigree_adjustment, -1.5)
 
+    def test_performance_profile_adjustment_does_not_saturate_full_cap(self) -> None:
+        analysis = _analysis(
+            [
+                "PEDIGREE_SURFACE_FIT",
+                "PEDIGREE_DISTANCE_FIT",
+                "PEDIGREE_CLASS_POWER",
+                "PEDIGREE_EARLY_MATURITY",
+            ],
+            [],
+        )
+        analysis.performance_profiles = [
+            PedigreePerformanceProfile(
+                relation="sire",
+                horse_id="s1",
+                horse_name="強い父",
+                starts=10,
+                wins=7,
+                top3=9,
+                surface_tendency="芝",
+                distance_tendency="中距離",
+                positive_flags=[
+                    "PEDIGREE_SURFACE_FIT",
+                    "PEDIGREE_DISTANCE_FIT",
+                    "PEDIGREE_CLASS_POWER",
+                    "PEDIGREE_EARLY_MATURITY",
+                ],
+                score_hint=1.2,
+            ),
+            PedigreePerformanceProfile(
+                relation="damsire",
+                horse_id="d1",
+                horse_name="強い母父",
+                starts=8,
+                wins=5,
+                top3=7,
+                surface_tendency="芝",
+                distance_tendency="中距離",
+                positive_flags=[
+                    "PEDIGREE_SURFACE_FIT",
+                    "PEDIGREE_DISTANCE_FIT",
+                    "PEDIGREE_CLASS_POWER",
+                    "PEDIGREE_EARLY_MATURITY",
+                ],
+                score_hint=0.7,
+            ),
+        ]
+        analysis.performance_score_hint = 1.9
+
+        adjustment = calculate_pedigree_adjustment(analysis, _race_info(distance=2000))
+
+        self.assertGreater(adjustment.pedigree_adjustment, 0.0)
+        self.assertLess(adjustment.pedigree_adjustment, 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()
-

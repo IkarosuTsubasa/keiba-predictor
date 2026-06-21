@@ -5,7 +5,7 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from confidence_policy import AGENT_CONFIDENCE_FALLBACK_SCORE
+from confidence_policy import AGENT_CONFIDENCE_FALLBACK_SCORE, public_decision_tone
 
 
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
@@ -543,6 +543,9 @@ def _history_record(base_dir, payload):
     top5_marks = _mark_numbers(payload, limit=5)
     main_horse = top5_marks[0] if top5_marks else 0
     strategy = dict(payload.get("strategy") or {})
+    bet_decision = _safe_text(strategy.get("bet_decision"))
+    confidence_score = strategy_confidence_score(payload)
+    public_tone = public_decision_tone(bet_decision, confidence_score)
     return {
         "race_id": race_id,
         "race_date": race_date,
@@ -554,7 +557,9 @@ def _history_record(base_dir, payload):
         "top5_marks": top5_marks,
         "actual_top3": actual_top3,
         "settled": len(actual_top3) >= 3,
-        "bet_decision": _safe_text(strategy.get("bet_decision")),
+        "bet_decision": bet_decision,
+        "confidence_score": confidence_score,
+        "public_decision_tone": public_tone,
     }
 
 
@@ -569,12 +574,22 @@ def _summarize_history_records(records):
     top3_exact = 0
     bet_count = 0
     skip_count = 0
+    high_evaluation_count = 0
+    watch_evaluation_count = 0
+    skip_evaluation_count = 0
     for item in rows:
         decision = _safe_text(item.get("bet_decision")).upper()
         if decision == "BET":
             bet_count += 1
         if decision == "SKIP":
             skip_count += 1
+        public_tone = _safe_text(item.get("public_decision_tone"))
+        if public_tone == "bet":
+            high_evaluation_count += 1
+        elif public_tone == "skip":
+            skip_evaluation_count += 1
+        else:
+            watch_evaluation_count += 1
     for item in settled:
         actual_top3 = list(item.get("actual_top3") or [])[:3]
         actual_set = set(actual_top3)
@@ -597,6 +612,9 @@ def _summarize_history_records(records):
         "pending_races": max(0, len(rows) - settled_count),
         "bet_races": bet_count,
         "skip_races": skip_count,
+        "high_evaluation_races": high_evaluation_count,
+        "watch_evaluation_races": watch_evaluation_count,
+        "skip_evaluation_races": skip_evaluation_count,
         "main_win_count": main_win,
         "main_top3_count": main_top3,
         "top3_cover_hits": top3_cover_hits,

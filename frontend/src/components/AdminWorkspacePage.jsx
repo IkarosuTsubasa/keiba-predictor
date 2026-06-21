@@ -51,6 +51,21 @@ function MetaRow({ items }) {
   );
 }
 
+function displayBetDecision(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "BET") return "参加";
+  if (normalized === "SKIP" || normalized === "NO_BET") return "見送り";
+  return value || "-";
+}
+
+function displayParticipationLevel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "normal_bet") return "通常";
+  if (normalized === "small_bet") return "軽め";
+  if (normalized === "no_bet") return "見送り";
+  return value || "-";
+}
+
 function notifyMeta(data) {
   const status = String(data?.ntfy_notify_status || "").trim().toLowerCase();
   if (status === "notified") {
@@ -230,7 +245,7 @@ function PolicyCard({ item }) {
         <h3>{item.engine_label || item.engine || "-"}</h3>
         <span>{item.model || "-"}</span>
       </div>
-      <MetaRow items={[`判定 ${item.bet_decision || "-"}`, `参加度 ${item.participation_level || "-"}`]} />
+      <MetaRow items={[`判定 ${displayBetDecision(item.bet_decision)}`, `参加度 ${displayParticipationLevel(item.participation_level)}`]} />
       <div className="admin-workspace-copy">
         <strong>{item.marks_text || "印なし"}</strong>
         <p>{item.ticket_plan_text || "買い目なし"}</p>

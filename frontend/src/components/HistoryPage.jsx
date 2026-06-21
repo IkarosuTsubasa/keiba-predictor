@@ -170,9 +170,9 @@ function AgentPredictionHistory({ data, search = "", onApplyFilters }) {
           note={`結果確定 ${activePeriod?.settled_races || 0}レース`}
         />
         <OverviewCard
-          label="高評価"
-          value={`${activePeriod?.bet_races || 0}レース`}
-          note={`見送り ${activePeriod?.skip_races || 0}レース`}
+          label="判断内訳"
+          value={`高評価 ${activePeriod?.high_evaluation_races ?? activePeriod?.bet_races ?? 0}レース`}
+          note={`注目 ${activePeriod?.watch_evaluation_races ?? 0} / 見送り ${activePeriod?.skip_evaluation_races ?? activePeriod?.skip_races ?? 0}`}
         />
         <OverviewCard
           label="上位3頭完全的中率"

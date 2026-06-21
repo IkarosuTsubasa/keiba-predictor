@@ -21,6 +21,10 @@ export function DashboardInsightPanel({ data, races }) {
     (race) => safeText(race?.display_variant) !== "placeholder",
   );
   const highEvalCount = visibleRaces.filter((race) => resolvePublicDecision(race).tone === "bet").length;
+  const watchCount = visibleRaces.filter((race) => {
+    const decision = resolvePublicDecision(race);
+    return decision.tone === "watch" && decision.label === "注目";
+  }).length;
   const skipCount = visibleRaces.filter((race) => resolvePublicDecision(race).tone === "skip").length;
   const settledCount = Number(data?.totals?.settled_count || activePeriod?.settled_races || 0);
   const predictedCount = Number(activePeriod?.predicted_races || visibleRaces.length || 0);
@@ -68,9 +72,9 @@ export function DashboardInsightPanel({ data, races }) {
           </div>
         </div>
         <ul className="dashboard-risk-list">
-          <li>見送り判断のレースは印と評価理由を確認してください。</li>
-          <li>信頼度が低いレースは結果確認を優先してください。</li>
-          <li>直前オッズの変動に注意してください。</li>
+          <li>見送り判断のレースは無理に追わず、評価理由だけ確認してください。</li>
+          <li>信頼度が低いレースは購入より検証を優先してください。</li>
+          <li>直前オッズと馬場変化に注意してください。</li>
         </ul>
       </section>
 
@@ -82,7 +86,7 @@ export function DashboardInsightPanel({ data, races }) {
           </div>
         </div>
         <p className="dashboard-ai-note">
-          高評価 {highEvalCount}レース、見送り {skipCount}レース。予測印と結果を同じ行で確認できます。
+          高評価 {highEvalCount}レース、注目 {watchCount}レース、見送り {skipCount}レース。高評価以外は直前オッズまで確認してください。
         </p>
       </section>
     </aside>

@@ -34,7 +34,7 @@ export default function MorningRaceSummary({ race }) {
       {!isAgentPrediction ? (
         <div className="ai-pick-summary__head">
           <ModelMetaBadge
-            label="自信度"
+            label="信頼度"
             value={formatConfidence(race?.confidence_score ?? derivedSummary?.confidence_score)}
             tone="subtle"
           />

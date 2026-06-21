@@ -44,6 +44,11 @@ function isHighEvaluation(race) {
   return resolvePublicDecision(race).tone === "bet";
 }
 
+function isWatchEvaluation(race) {
+  const decision = resolvePublicDecision(race);
+  return decision.tone === "watch" && decision.label === "注目";
+}
+
 function isSkipEvaluation(race) {
   return resolvePublicDecision(race).tone === "skip";
 }
@@ -122,6 +127,7 @@ function buildCourseGroups(races) {
       summary: {
         total: group.races.length,
         high: group.races.filter(isHighEvaluation).length,
+        watch: group.races.filter(isWatchEvaluation).length,
         skip: group.races.filter(isSkipEvaluation).length,
         settled: settledCount,
         open: group.races.length - settledCount,
@@ -135,6 +141,7 @@ function CourseGroupHeader({ group }) {
   const chips = [
     `${summary.total}レース`,
     `高評価 ${summary.high}`,
+    `注目 ${summary.watch}`,
     `見送り ${summary.skip}`,
   ];
 
