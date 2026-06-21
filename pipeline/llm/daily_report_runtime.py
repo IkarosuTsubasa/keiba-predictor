@@ -22,7 +22,7 @@ def normalize_report_engine(value: str = "") -> str:
     engine = _policy_runtime.normalize_policy_engine(value)
     if engine in REPORT_ENGINE_LABELS:
         return engine
-    return "deepseek"
+    return "gemini"
 
 
 def resolve_report_model(engine: str, model: str = "") -> str:
@@ -67,9 +67,10 @@ def _report_user_prompt(source_payload: Dict[str, Any]) -> str:
         f"- 出力形式: {json.dumps(schema, ensure_ascii=False)}\n\n"
         "本文で必ず触れる観点:\n"
         "- 当日の総括\n"
-        "- LLM馬券で何が悪く、何が相対的にマシだったか\n"
-        "- 予測モデルの見どころと、サンプル数による留保\n"
-        "- 全期間傾向と照らしたときの位置づけ\n\n"
+        "- Agent AI予測の本命、上位印、見送り判断が結果とどう噛み合ったか\n"
+        "- 高評価、注目、見送りの配分から見える運用上の注意点\n"
+        "- 未確定レースがある場合は、断定せず暫定評価として扱うこと\n"
+        "- 直近30日と全期間傾向に照らした位置づけ\n\n"
         f"入力データ:\n{json.dumps(source_payload, ensure_ascii=False)}"
     )
 
@@ -146,7 +147,150 @@ def _fallback_predictor_bullets(predictor_cards: List[Dict[str, Any]]) -> List[s
     return bullets
 
 
+def _format_rate_note(count_value: Any, denominator_value: Any, label: str) -> str:
+    count = _int_value(count_value)
+    denominator = _int_value(denominator_value)
+    if denominator <= 0:
+        return f"{label}はまだ評価できる確定レースがありません。"
+    return f"{label}は {count}/{denominator} レースでした。"
+
+
+def _race_name_text(item: Dict[str, Any]) -> str:
+    title = _coerce_text(item.get("race_title"), "-")
+    name = _coerce_text(item.get("race_name"))
+    if name and name != title and name not in title:
+        return f"{title} {name}"
+    return title
+
+
+def _build_agent_fallback_document(source_payload: Dict[str, Any], *, fallback_reason: str = "") -> Dict[str, Any]:
+    target_date_label = _coerce_text(source_payload.get("target_date_label"), "対象日")
+    summary = dict(source_payload.get("agent_summary") or {})
+    recent = dict(source_payload.get("recent_30_agent") or {})
+    all_time = dict(source_payload.get("all_time_agent") or {})
+    highlights = dict(source_payload.get("race_highlights") or {})
+    settled_races = [dict(item or {}) for item in list(highlights.get("settled_races") or [])]
+    missed_main = [dict(item or {}) for item in list(highlights.get("missed_main_races") or [])]
+    high_confidence = [dict(item or {}) for item in list(highlights.get("high_confidence_races") or [])]
+
+    predicted = _int_value(summary.get("predicted_races"))
+    settled = _int_value(summary.get("settled_races"))
+    pending = _int_value(summary.get("pending_races"))
+    high_eval = _int_value(summary.get("high_evaluation_races"))
+    watch_eval = _int_value(summary.get("watch_evaluation_races"))
+    skip_eval = _int_value(summary.get("skip_evaluation_races"))
+
+    main_top3_text = _coerce_text(summary.get("main_top3_rate_text"), "-")
+    top5_cover_text = _coerce_text(summary.get("top5_cover_rate_text"), "-")
+    exact_text = _coerce_text(summary.get("top3_exact_rate_text"), "-")
+    recent_main_top3 = _coerce_text(recent.get("main_top3_rate_text"), "-")
+    all_time_main_top3 = _coerce_text(all_time.get("main_top3_rate_text"), "-")
+
+    title = f"{target_date_label} AI予測日報"
+    lead = (
+        f"{target_date_label}のAgent AI予測を、結果確定分と未確定分に分けて振り返ります。"
+    )
+    if settled > 0:
+        article_summary = (
+            f"この日は **本命複勝圏率 {main_top3_text}**、"
+            f"上位5頭カバー {top5_cover_text} という形で、"
+            "軸の置き方と相手候補の広がりを分けて見る一日でした。"
+        )
+    else:
+        article_summary = (
+            "この日は結果確定前のレースが中心で、"
+            "**評価配分と印の置き方** を先に確認する段階です。"
+        )
+
+    overview_paragraphs = [
+        (
+            f"公開したAgent AI予測は {predicted} レース、結果確定は {settled} レース、"
+            f"未確定は {pending} レースでした。"
+        ),
+        (
+            f"判断配分は高評価 {high_eval} レース、注目 {watch_eval} レース、"
+            f"見送り {skip_eval} レースです。高評価の数だけでなく、見送りまで含めた濃淡が当日の運用感を作っています。"
+        ),
+    ]
+    if settled > 0:
+        overview_paragraphs.append(
+            f"確定分では **本命複勝圏率 {main_top3_text}**、"
+            f"上位3頭完全的中率 {exact_text}。単に当たり外れを見るより、"
+            "本命と相手候補のどちらが崩れたかを分けて読む必要があります。"
+        )
+
+    decision_bullets = [
+        f"高評価: {high_eval}レース",
+        f"注目: {watch_eval}レース",
+        f"見送り: {skip_eval}レース",
+    ]
+    if high_confidence:
+        decision_bullets.append(
+            f"高評価上位: {', '.join(_race_name_text(item) for item in high_confidence[:3])}"
+        )
+
+    result_paragraphs = [
+        _format_rate_note(summary.get("main_top3_count"), settled, "本命の複勝圏"),
+        (
+            f"上位5頭カバーは {top5_cover_text} で、"
+            "本命が届かなかったレースでも候補群に結果馬を拾えていたかを見る指標になります。"
+        ),
+    ]
+    if missed_main:
+        result_paragraphs.append(
+            "本命が馬券圏外だったレースは、印の中心を置いた理由と実際の決着のズレを次回確認したいところです。"
+        )
+    result_bullets = []
+    for item in settled_races[:4]:
+        result_bullets.append(
+            f"{_race_name_text(item)}: {_coerce_text(item.get('outcome_text'), '-')}"
+        )
+
+    trend_paragraphs = []
+    if recent:
+        trend_paragraphs.append(
+            f"直近30日では本命複勝圏率 {recent_main_top3}、"
+            f"上位5頭カバー {_coerce_text(recent.get('top5_cover_rate_text'), '-')}。"
+            "単日評価はこの範囲から大きく外れていないかを確認する材料になります。"
+        )
+    if all_time:
+        trend_paragraphs.append(
+            f"全期間では本命複勝圏率 {all_time_main_top3}、"
+            f"上位3頭完全的中率 {_coerce_text(all_time.get('top3_exact_rate_text'), '-')}。"
+            "今日の成績は、長期の癖に対して一時的な振れなのかを見極める必要があります。"
+        )
+    if not trend_paragraphs:
+        trend_paragraphs.append("長期比較に使える履歴はまだ少なく、数日単位での追加検証が必要です。")
+
+    closing_paragraphs = [
+        "今日は一つの数字で良し悪しを決めるより、"
+        "本命、上位候補、見送り判断を別々に点検する方が次につながります。"
+    ]
+    if fallback_reason:
+        closing_paragraphs.append(f"この版はローカル要約で作成しました。理由: {fallback_reason}")
+
+    sections: List[Dict[str, Any]] = [
+        {"heading": "全体総括", "paragraphs": overview_paragraphs, "bullets": []},
+        {"heading": "判断配分", "paragraphs": [], "bullets": decision_bullets},
+        {"heading": "結果確定分の振り返り", "paragraphs": result_paragraphs, "bullets": result_bullets},
+        {"heading": "直近と全期間の位置づけ", "paragraphs": trend_paragraphs, "bullets": []},
+        {"heading": "まとめ", "paragraphs": closing_paragraphs, "bullets": []},
+    ]
+
+    return {
+        "title": title,
+        "lead": lead,
+        "summary": article_summary,
+        "tags": _coerce_list_text(["日報", "AI予測", target_date_label], limit=4),
+        "markdown": _markdown_from_sections(sections),
+        "sections": sections,
+    }
+
+
 def _build_fallback_document(source_payload: Dict[str, Any], *, fallback_reason: str = "") -> Dict[str, Any]:
+    if source_payload.get("agent_summary") or source_payload.get("agent_races"):
+        return _build_agent_fallback_document(source_payload, fallback_reason=fallback_reason)
+
     target_date_label = _coerce_text(source_payload.get("target_date_label"), "対象日")
     totals = dict(source_payload.get("totals") or {})
     best_ticket = dict(source_payload.get("best_ticket") or {})
@@ -409,7 +553,7 @@ def _gemini_report_call(prompt: str, model: str, api_key: str, timeout_s: int) -
 def generate_daily_report_document(
     source_payload: Dict[str, Any],
     *,
-    policy_engine: str = "deepseek",
+    policy_engine: str = "gemini",
     model: str = "",
     timeout_s: int = 90,
 ) -> Dict[str, Any]:

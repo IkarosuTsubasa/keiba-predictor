@@ -21,7 +21,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from confidence_policy import morning_confidence_label
+from confidence_policy import morning_confidence_label, public_decision_tone
 from fetch_central_result import (
     build_result_url as build_official_result_url,
     fetch_html as fetch_official_result_html,
@@ -196,7 +196,18 @@ def run_due_jobs_once():
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
         create_race_job=create_race_job,
+        daily_report_generator=_run_due_daily_report_generator,
         history_source="admin",
+    )
+
+
+def _run_due_daily_report_generator(date_text=""):
+    return generate_and_store_daily_report(
+        date_text=date_text,
+        scope_key="",
+        policy_engine=os.environ.get("RUN_DUE_DAILY_REPORT_ENGINE", "gemini"),
+        model=os.environ.get("RUN_DUE_DAILY_REPORT_MODEL", ""),
+        allow_fallback=False,
     )
 
 
@@ -4027,107 +4038,295 @@ def _find_daily_report_for_date(target_date=""):
     return {}
 
 
-def _daily_report_source_payload(date_text="", scope_key=""):
+def _daily_report_int(value, default=0):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _daily_report_float(value, default=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not math.isfinite(number):
+        return float(default)
+    return number
+
+
+def _daily_report_percent_text(numerator, denominator):
+    denominator_value = _daily_report_int(denominator)
+    if denominator_value <= 0:
+        return "-"
+    return f"{round(float(_daily_report_int(numerator)) / float(denominator_value) * 100.0, 1)}%"
+
+
+def _daily_report_score_text(value):
+    score = max(0.0, min(1.0, _daily_report_float(value)))
+    return f"{round(score * 100.0, 1)}%"
+
+
+def _daily_report_horse_no(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(float(text)))
+    except (TypeError, ValueError):
+        return text
+
+
+def _daily_report_horse_nos(rows, limit=5):
+    out = []
+    for item in list(rows or []):
+        if not isinstance(item, dict):
+            continue
+        horse_no = _daily_report_horse_no(item.get("horse_no"))
+        if not horse_no:
+            continue
+        out.append(horse_no)
+        if len(out) >= max(1, int(limit or 1)):
+            break
+    return out
+
+
+def _daily_report_race_label(row):
+    item = dict(row or {})
+    title = str(item.get("race_title", "") or "").strip() or str(item.get("race_id", "") or "").strip() or "-"
+    name = str(item.get("race_name", "") or "").strip()
+    if name and name != title and name not in title:
+        return f"{title} {name}"
+    return title
+
+
+def _daily_report_decision(row):
+    item = dict(row or {})
+    agent_prediction = dict(item.get("agent_prediction") or {})
+    strategy = dict(agent_prediction.get("strategy") or {})
+    bet_decision = str(strategy.get("bet_decision", "") or "").strip()
+    confidence_score = _daily_report_float(item.get("confidence_score"), 0.0)
+    tone = public_decision_tone(bet_decision, confidence_score)
+    labels = {
+        "bet": "高評価",
+        "watch": "注目",
+        "skip": "見送り",
+    }
+    return {
+        "tone": tone,
+        "label": labels.get(tone, "確認待ち"),
+        "bet_decision": bet_decision,
+    }
+
+
+def _daily_report_actual_top3(row):
+    actual = dict((row or {}).get("actual_result") or {})
+    top3 = []
+    for item in list(actual.get("top3") or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        horse_no = _daily_report_horse_no(item.get("horse_no"))
+        if horse_no:
+            top3.append(horse_no)
+    return top3
+
+
+def _daily_report_agent_race_item(row):
+    item = dict(row or {})
+    top5 = [dict(entry or {}) for entry in list(item.get("top5") or []) if isinstance(entry, dict)]
+    top5_nos = _daily_report_horse_nos(top5, limit=5)
+    top3_mark_nos = top5_nos[:3]
+    main_horse_no = top5_nos[0] if top5_nos else ""
+    actual_top3 = _daily_report_actual_top3(item)
+    actual_set = set(actual_top3)
+    top5_set = set(top5_nos)
+    top3_mark_set = set(top3_mark_nos)
+    settled = len(actual_top3) >= 3
+    main_top3 = bool(settled and main_horse_no and main_horse_no in actual_set)
+    main_win = bool(settled and main_horse_no and actual_top3 and main_horse_no == actual_top3[0])
+    top5_cover_hits = len(actual_set.intersection(top5_set)) if settled else 0
+    top3_cover_hits = len(actual_set.intersection(top3_mark_set)) if settled else 0
+    top3_exact = bool(settled and len(top3_mark_set) == 3 and top3_mark_set == actual_set)
+    display_body = dict(item.get("display_body") or {})
+    decision = _daily_report_decision(item)
+    agent_prediction = dict(item.get("agent_prediction") or {})
+    strategy = dict(agent_prediction.get("strategy") or {})
+    bets = [
+        {
+            "bet_type": str(bet.get("bet_type", "") or "").strip(),
+            "horse_numbers": [_daily_report_horse_no(value) for value in list(bet.get("horse_numbers") or [])],
+            "amount": _daily_report_int(bet.get("amount")),
+            "reason": str(bet.get("reason", "") or "").strip(),
+        }
+        for bet in list(agent_prediction.get("bets") or [])
+        if isinstance(bet, dict)
+    ]
+    outcome_parts = []
+    if settled:
+        outcome_parts.append("本命3着内" if main_top3 else "本命圏外")
+        outcome_parts.append(f"上位5頭 {top5_cover_hits}/3頭")
+        if top3_exact:
+            outcome_parts.append("上位3頭完全的中")
+    else:
+        outcome_parts.append("結果未確定")
+    return {
+        "race_id": str(item.get("race_id", "") or "").strip(),
+        "run_id": str(item.get("run_id", "") or "").strip(),
+        "race_title": str(item.get("race_title", "") or "").strip(),
+        "race_name": str(item.get("race_name", "") or "").strip(),
+        "race_label": _daily_report_race_label(item),
+        "location": str(item.get("location", "") or "").strip(),
+        "distance_label": str(item.get("distance_label", "") or "").strip(),
+        "track_condition": str(item.get("track_condition", "") or "").strip(),
+        "status_label": str(((item.get("display_status") or {}).get("label", "")) or "").strip(),
+        "result_text": str(display_body.get("result_text", "") or "").strip() or "結果未確定",
+        "settled": settled,
+        "actual_top3": actual_top3,
+        "top5_horse_nos": top5_nos,
+        "top3_mark_horse_nos": top3_mark_nos,
+        "main_horse_no": main_horse_no,
+        "main_horse_name": str((top5[0] if top5 else {}).get("horse_name", "") or "").strip(),
+        "main_win": main_win,
+        "main_top3": main_top3,
+        "top3_cover_hits": top3_cover_hits,
+        "top5_cover_hits": top5_cover_hits,
+        "top3_exact": top3_exact,
+        "outcome_text": " / ".join([part for part in outcome_parts if part]),
+        "decision_label": decision["label"],
+        "decision_tone": decision["tone"],
+        "bet_decision": decision["bet_decision"],
+        "confidence_score": round(_daily_report_float(item.get("confidence_score")), 6),
+        "confidence_score_text": _daily_report_score_text(item.get("confidence_score")),
+        "agreement_score": round(_daily_report_float(item.get("agreement_score")), 6),
+        "marks_text": str((item.get("predictor_compare_cards") or [{}])[0].get("marks_text", "") or "").strip()
+        if list(item.get("predictor_compare_cards") or [])
+        else "",
+        "strategy": {
+            "confidence": str(strategy.get("confidence", "") or "").strip(),
+            "participation_level": str(strategy.get("participation_level", "") or "").strip(),
+            "reason": str(strategy.get("reason", "") or "").strip(),
+            "reason_codes": list(strategy.get("reason_codes") or []),
+        },
+        "bets": bets[:6],
+        "top5": [
+            {
+                "mark": str(entry.get("mark", "") or "").strip(),
+                "horse_no": _daily_report_horse_no(entry.get("horse_no")),
+                "horse_name": str(entry.get("horse_name", "") or "").strip(),
+                "support_score": _daily_report_int(entry.get("support_score")),
+                "reason": str(entry.get("reason", "") or "").strip(),
+            }
+            for entry in top5[:5]
+        ],
+    }
+
+
+def _daily_report_agent_summary(agent_races):
+    rows = [dict(item or {}) for item in list(agent_races or [])]
+    settled_rows = [item for item in rows if bool(item.get("settled"))]
+    settled_count = len(settled_rows)
+    top3_denominator = settled_count * 3
+    main_win_count = sum(1 for item in settled_rows if bool(item.get("main_win")))
+    main_top3_count = sum(1 for item in settled_rows if bool(item.get("main_top3")))
+    top3_cover_hits = sum(_daily_report_int(item.get("top3_cover_hits")) for item in settled_rows)
+    top5_cover_hits = sum(_daily_report_int(item.get("top5_cover_hits")) for item in settled_rows)
+    top3_exact_count = sum(1 for item in settled_rows if bool(item.get("top3_exact")))
+    high_count = sum(1 for item in rows if str(item.get("decision_tone", "") or "") == "bet")
+    watch_count = sum(1 for item in rows if str(item.get("decision_tone", "") or "") == "watch")
+    skip_count = sum(1 for item in rows if str(item.get("decision_tone", "") or "") == "skip")
+    return {
+        "predicted_races": len(rows),
+        "settled_races": settled_count,
+        "pending_races": max(0, len(rows) - settled_count),
+        "high_evaluation_races": high_count,
+        "watch_evaluation_races": watch_count,
+        "skip_evaluation_races": skip_count,
+        "main_win_count": main_win_count,
+        "main_top3_count": main_top3_count,
+        "top3_cover_hits": top3_cover_hits,
+        "top5_cover_hits": top5_cover_hits,
+        "top3_exact_count": top3_exact_count,
+        "main_win_rate_text": _daily_report_percent_text(main_win_count, settled_count),
+        "main_top3_rate_text": _daily_report_percent_text(main_top3_count, settled_count),
+        "top3_cover_rate_text": _daily_report_percent_text(top3_cover_hits, top3_denominator),
+        "top5_cover_rate_text": _daily_report_percent_text(top5_cover_hits, top3_denominator),
+        "top3_exact_rate_text": _daily_report_percent_text(top3_exact_count, settled_count),
+    }
+
+
+def _daily_report_agent_period(board, period_key):
+    period = dict(
+        ((((board.get("history", {}) or {}).get("agent_prediction", {}) or {}).get("periods", {}) or {}).get(period_key, {}) or {})
+    )
+    if not period:
+        return {}
+    return {
+        "predicted_races": _daily_report_int(period.get("predicted_races")),
+        "settled_races": _daily_report_int(period.get("settled_races")),
+        "pending_races": _daily_report_int(period.get("pending_races")),
+        "high_evaluation_races": _daily_report_int(period.get("high_evaluation_races")),
+        "watch_evaluation_races": _daily_report_int(period.get("watch_evaluation_races")),
+        "skip_evaluation_races": _daily_report_int(period.get("skip_evaluation_races")),
+        "main_win_count": _daily_report_int(period.get("main_win_count")),
+        "main_top3_count": _daily_report_int(period.get("main_top3_count")),
+        "top5_cover_hits": _daily_report_int(period.get("top5_cover_hits")),
+        "top3_exact_count": _daily_report_int(period.get("top3_exact_count")),
+        "main_win_rate_text": str(period.get("main_win_rate_text", "") or "-").strip() or "-",
+        "main_top3_rate_text": str(period.get("main_top3_rate_text", "") or "-").strip() or "-",
+        "top3_cover_rate_text": str(period.get("top3_cover_rate_text", "") or "-").strip() or "-",
+        "top5_cover_rate_text": str(period.get("top5_cover_rate_text", "") or "-").strip() or "-",
+        "top3_exact_rate_text": str(period.get("top3_exact_rate_text", "") or "-").strip() or "-",
+        "daily_rows": list(period.get("daily_rows", []) or [])[:7],
+        "course_rows": list(period.get("course_rows", []) or [])[:8],
+    }
+
+
+def _daily_report_agent_highlights(agent_races):
+    rows = [dict(item or {}) for item in list(agent_races or [])]
+    settled = [item for item in rows if bool(item.get("settled"))]
+    high_confidence = sorted(
+        rows,
+        key=lambda item: (
+            -_daily_report_float(item.get("confidence_score")),
+            str(item.get("race_label", "") or ""),
+        ),
+    )[:6]
+    missed_main = [item for item in settled if not bool(item.get("main_top3"))][:6]
+    top5_success = sorted(
+        settled,
+        key=lambda item: (
+            -_daily_report_int(item.get("top5_cover_hits")),
+            str(item.get("race_label", "") or ""),
+        ),
+    )[:6]
+    return {
+        "high_confidence_races": high_confidence,
+        "settled_races": settled[:12],
+        "missed_main_races": missed_main,
+        "top5_success_races": top5_success,
+        "pending_races": [item for item in rows if not bool(item.get("settled"))][:8],
+    }
+
+
+def _daily_report_source_payload(date_text="", scope_key="", allow_fallback=True):
     requested_date = _normalize_report_date_text(date_text) or _daily_summary_jst_date_text()
-    board = build_public_board_payload(date_text=requested_date, scope_key=scope_key)
+    board = build_public_board_payload(
+        date_text=requested_date,
+        scope_key=scope_key,
+        include_detail_fields=True,
+    )
     target_date = str(board.get("target_date", "") or "").strip()
     if not target_date:
         raise ValueError("daily report target date not available")
+    if not bool(allow_fallback) and requested_date and target_date != requested_date:
+        raise ValueError(f"対象日のAI予測データがありません: {requested_date}")
 
-    ranked_cards = _daily_summary_ranked_cards(board.get("summary_cards", []))
-    predictor_summary = _public_daily_predictor_summary(target_date=target_date, scope_key=scope_key)
-    predictor_cards = sorted(
-        [dict(item or {}) for item in list((predictor_summary or {}).get("cards", []) or []) if int((item or {}).get("samples", 0) or 0) > 0],
-        key=lambda item: (
-            -(float(item.get("top5_to_top3_hit_rate", 0) or 0.0)),
-            -(float(item.get("top3_hit_rate", 0) or 0.0)),
-            str(item.get("predictor_id", "") or ""),
-        ),
-    )
-    best_ticket = dict(_daily_summary_best_ticket(target_date) or {})
-    if best_ticket:
-        best_ticket["bet_type_label"] = _DAILY_SUMMARY_BET_TYPE_LABELS.get(
-            str(best_ticket.get("bet_type", "") or "").strip().lower(),
-            str(best_ticket.get("bet_type", "") or "").strip() or "的中",
-        )
-        best_ticket["multiplier_text"] = _daily_summary_format_multiplier(best_ticket.get("multiplier"))
-        best_ticket["payout_yen_text"] = report_format_yen_text(best_ticket.get("payout_yen", 0))
-
-    llm_cards = []
-    for item in ranked_cards[:4]:
-        settled_races = int(item.get("settled_races", 0) or item.get("races", 0) or 0)
-        hit_races = int(item.get("hit_races", 0) or 0)
-        llm_cards.append(
-            {
-                "engine": str(item.get("engine", "") or "").strip(),
-                "label": str(item.get("label", "") or item.get("engine", "") or "").strip(),
-                "races": int(item.get("races", 0) or 0),
-                "settled_races": settled_races,
-                "hit_races": hit_races,
-                "hit_races_text": f"{hit_races}/{settled_races}レース" if settled_races > 0 else "-",
-                "profit_yen": int(item.get("profit_yen", 0) or 0),
-                "profit_yen_text": report_format_yen_text(item.get("profit_yen", 0)),
-                "stake_yen": int(item.get("stake_yen", 0) or 0),
-                "stake_yen_text": report_format_yen_text(item.get("stake_yen", 0)),
-                "payout_yen": int(item.get("payout_yen", 0) or 0),
-                "payout_yen_text": report_format_yen_text(item.get("payout_yen", 0)),
-                "roi_text": report_format_percent_text(_daily_summary_roi_value(item)) if _daily_summary_roi_value(item) >= 0 else "-",
-            }
-        )
-
-    predictor_rows = []
-    for item in predictor_cards[:6]:
-        predictor_rows.append(
-            {
-                "predictor_id": str(item.get("predictor_id", "") or "").strip(),
-                "label": str(item.get("label", "") or "").strip(),
-                "samples": int(item.get("samples", 0) or 0),
-                "top1_hit_rate_text": str(item.get("top1_hit_rate_text", "") or "-").strip() or "-",
-                "top3_hit_rate_text": str(item.get("top3_hit_rate_text", "") or "-").strip() or "-",
-                "top5_to_top3_hit_rate_text": str(item.get("top5_to_top3_hit_rate_text", "") or "-").strip() or "-",
-            }
-        )
-
-    condensed_races = []
-    for row in list(board.get("races", []) or []):
-        cards = []
-        for card in list((row or {}).get("cards", []) or [])[:4]:
-            cards.append(
-                {
-                    "label": str(card.get("label", "") or card.get("engine", "") or "").strip(),
-                    "decision_text": str(card.get("decision_text", "") or "").strip(),
-                    "marks_text": str(card.get("marks_text", "") or "").strip(),
-                    "ticket_plan_text": str(card.get("ticket_plan_text", "") or "").strip(),
-                    "result_text": str(card.get("result_text", "") or "").strip(),
-                    "roi_text": str(card.get("roi_text", "") or "").strip(),
-                }
-            )
-        predictor_compare = []
-        for card in list((row or {}).get("predictor_compare_cards", []) or [])[:4]:
-            predictor_compare.append(
-                {
-                    "label": str(card.get("label", "") or "").strip(),
-                    "marks_text": str(card.get("marks_text", "") or "").strip(),
-                }
-            )
-        condensed_races.append(
-            {
-                "race_title": str(row.get("race_title", "") or "").strip(),
-                "status_label": str(((row or {}).get("display_status") or {}).get("label", "") or "").strip(),
-                "actual_text": str(row.get("actual_text", "") or "").strip(),
-                "cards": cards,
-                "predictor_compare_cards": predictor_compare,
-            }
-        )
-        if len(condensed_races) >= 8:
-            break
-
-    all_time_llm = list(
-        ((((board.get("history", {}) or {}).get("llm", {}) or {}).get("periods", {}).get("all_time", {}).get("cards", [])) or [])
-    )
-    all_time_predictor = list(
-        ((((board.get("history", {}) or {}).get("predictor", {}) or {}).get("periods", {}).get("all_time", {}).get("cards", [])) or [])
-    )
+    agent_races = [
+        _daily_report_agent_race_item(row)
+        for row in list(board.get("races", []) or [])
+        if isinstance(row, dict) and str(row.get("source_type", "") or "").strip() == "agent_prediction"
+    ]
+    agent_summary = _daily_report_agent_summary(agent_races)
 
     return {
         "requested_date": requested_date,
@@ -4135,39 +4334,25 @@ def _daily_report_source_payload(date_text="", scope_key=""):
         "target_date_label": str(board.get("target_date_label", "") or "").strip(),
         "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
         "totals": {
-            "race_count": int(((board.get("totals", {}) or {}).get("race_count", 0) or 0)),
-            "settled_count": int(((board.get("totals", {}) or {}).get("settled_count", 0) or 0)),
+            "race_count": _daily_report_int(((board.get("totals", {}) or {}).get("race_count", 0))),
+            "settled_count": _daily_report_int(((board.get("totals", {}) or {}).get("settled_count", 0))),
         },
-        "llm_cards": llm_cards,
-        "best_ticket": best_ticket,
-        "best_engine": str((llm_cards[0] or {}).get("label", "") or "").strip() if llm_cards else "",
-        "predictor_leader": dict((predictor_summary or {}).get("top5to3_leader", {}) or {}),
-        "predictor_cards": predictor_rows,
-        "races": condensed_races,
-        "all_time_llm": [
-            {
-                "label": str(item.get("label", "") or "").strip(),
-                "roi_text": str(item.get("roi_text", "") or "").strip(),
-                "profit_yen_text": report_format_yen_text(item.get("profit_yen", 0)),
-                "runs": int(item.get("runs", 0) or 0),
-            }
-            for item in all_time_llm[:4]
-        ],
-        "all_time_predictor": [
-            {
-                "label": str(item.get("label", "") or "").strip(),
-                "top1_hit_rate_text": str(item.get("top1_hit_rate_text", "") or "-").strip() or "-",
-                "top5_to_top3_hit_rate_text": str(item.get("top5_to_top3_hit_rate_text", "") or "-").strip() or "-",
-                "samples": int(item.get("samples", 0) or 0),
-            }
-            for item in all_time_predictor[:6]
-        ],
+        "data_source": "agent_predictions",
+        "agent_summary": agent_summary,
+        "agent_races": agent_races[:18],
+        "race_highlights": _daily_report_agent_highlights(agent_races),
+        "recent_30_agent": _daily_report_agent_period(board, "days_30"),
+        "all_time_agent": _daily_report_agent_period(board, "all_time"),
     }
 
 
-def generate_and_store_daily_report(date_text="", scope_key="", policy_engine="", model=""):
-    source_payload = _daily_report_source_payload(date_text=date_text, scope_key=scope_key)
-    engine = normalize_daily_report_engine(policy_engine or os.environ.get("DAILY_REPORT_ENGINE", "deepseek"))
+def generate_and_store_daily_report(date_text="", scope_key="", policy_engine="", model="", allow_fallback=True):
+    source_payload = _daily_report_source_payload(
+        date_text=date_text,
+        scope_key=scope_key,
+        allow_fallback=allow_fallback,
+    )
+    engine = normalize_daily_report_engine(policy_engine or os.environ.get("DAILY_REPORT_ENGINE", "gemini"))
     generation = generate_daily_report_document(
         source_payload,
         policy_engine=engine,
@@ -5981,6 +6166,7 @@ def admin_jobs_run_due_now_api(request: Request):
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
         create_race_job=create_race_job,
+        daily_report_generator=_run_due_daily_report_generator,
         history_source="admin",
     )
 
@@ -6069,6 +6255,7 @@ def internal_run_due(request: Request):
         update_race_job=update_race_job,
         compute_race_job_initial_status=compute_race_job_initial_status,
         create_race_job=create_race_job,
+        daily_report_generator=_run_due_daily_report_generator,
     )
 
 

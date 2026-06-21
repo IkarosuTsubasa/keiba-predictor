@@ -268,12 +268,18 @@ function formatRunDueHistoryLine(item) {
   if (!rawExecutedAt && !String(item.source || "").trim()) return "";
   const executedAt = rawExecutedAt || "-";
   const source = runDueSourceLabel(item.source);
+  const report = item.daily_report || {};
+  const reportPart = report.ran
+    ? ` / 日報 保存${report.engine_label ? ` (${report.engine_label})` : ""}`
+    : report.attempted
+      ? ` / 日報 失敗${report.error ? `: ${report.error}` : ""}`
+      : "";
   if (item.skipped) {
     return `${executedAt} / ${source} / スキップ ${item.reason || "-"}`;
   }
   return `${executedAt} / ${source} / AI予測 ${item.agent_dispatched_count || 0}件 / 結果 ${
     item.agent_result_count || 0
-  }件 / エラー ${item.error_count || 0}件`;
+  }件${reportPart} / エラー ${item.error_count || 0}件`;
 }
 
 function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, onScanDue, onRunDue }) {

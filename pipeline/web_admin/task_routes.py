@@ -295,6 +295,50 @@ def _env_int(name, default):
         return int(default)
 
 
+def _maybe_generate_daily_report_after_cleanup(*, cleanup_summary, daily_report_generator):
+    cleanup = dict(cleanup_summary or {})
+    jst_date = str(cleanup.get("jst_date", "") or "").strip()
+    if not bool(cleanup.get("ran")):
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "cleanup_not_ran",
+            "jst_date": jst_date,
+        }
+    if not _env_flag("RUN_DUE_DAILY_REPORT_ENABLED", True):
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "disabled",
+            "jst_date": jst_date,
+        }
+    if daily_report_generator is None:
+        return {
+            "attempted": False,
+            "ran": False,
+            "reason": "generator_not_configured",
+            "jst_date": jst_date,
+        }
+
+    record = daily_report_generator(date_text=jst_date)
+    item = dict(record or {})
+    return {
+        "attempted": True,
+        "ran": True,
+        "reason": "",
+        "jst_date": jst_date,
+        "slug": str(item.get("slug", "") or "").strip(),
+        "title": str(item.get("title", "") or "").strip(),
+        "target_date": str(item.get("target_date", "") or "").strip(),
+        "target_date_label": str(item.get("target_date_label", "") or "").strip(),
+        "engine": str(item.get("engine", "") or "").strip(),
+        "engine_label": str(item.get("engine_label", "") or "").strip(),
+        "mode": str(item.get("mode", "") or "").strip(),
+        "fallback_reason": str(item.get("fallback_reason", "") or "").strip(),
+        "public_url": str(item.get("public_url", "") or "").strip(),
+    }
+
+
 def _load_auto_discovery_state(base_dir):
     path = _run_due_auto_discovery_state_path(base_dir)
     if not path.exists():
@@ -1166,6 +1210,7 @@ def _compact_run_due_summary(summary):
     row = dict(summary or {})
     cleanup = dict(row.get("cleanup", {}) or {})
     auto_discovery = dict(row.get("auto_discovery", {}) or {})
+    daily_report = dict(row.get("daily_report", {}) or {})
     return {
         "auto_discovery": {
             "enabled": bool(auto_discovery.get("enabled")),
@@ -1209,6 +1254,22 @@ def _compact_run_due_summary(summary):
             "active_job_ids": list(cleanup.get("active_job_ids", []) or [])[:8],
             "totals": dict(cleanup.get("totals", {}) or {}),
         },
+        "daily_report": {
+            "attempted": bool(daily_report.get("attempted")),
+            "ran": bool(daily_report.get("ran")),
+            "reason": str(daily_report.get("reason", "") or "").strip(),
+            "jst_date": str(daily_report.get("jst_date", "") or "").strip(),
+            "slug": str(daily_report.get("slug", "") or "").strip(),
+            "title": str(daily_report.get("title", "") or "").strip(),
+            "target_date": str(daily_report.get("target_date", "") or "").strip(),
+            "target_date_label": str(daily_report.get("target_date_label", "") or "").strip(),
+            "engine": str(daily_report.get("engine", "") or "").strip(),
+            "engine_label": str(daily_report.get("engine_label", "") or "").strip(),
+            "mode": str(daily_report.get("mode", "") or "").strip(),
+            "fallback_reason": str(daily_report.get("fallback_reason", "") or "").strip(),
+            "public_url": str(daily_report.get("public_url", "") or "").strip(),
+            "error": str(daily_report.get("error", "") or "").strip(),
+        },
         "errors": list(row.get("errors", []) or [])[:5],
     }
 
@@ -1222,6 +1283,7 @@ def run_due_jobs_once(
     update_race_job,
     compute_race_job_initial_status,
     create_race_job=None,
+    daily_report_generator=None,
     history_source="manual",
 ):
     auto_discovery_summary = _maybe_auto_discover_agent_race_jobs(
@@ -1653,6 +1715,46 @@ def run_due_jobs_once(
             flush=True,
         )
 
+    daily_report_summary = {}
+    try:
+        daily_report_summary = _maybe_generate_daily_report_after_cleanup(
+            cleanup_summary=cleanup_summary,
+            daily_report_generator=daily_report_generator,
+        )
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_daily_report",
+                    "daily_report": daily_report_summary,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    except Exception as exc:
+        daily_report_summary = {
+            "attempted": True,
+            "ran": False,
+            "reason": "daily_report_failed",
+            "jst_date": str(cleanup_summary.get("jst_date", "") or "").strip(),
+            "error": str(exc),
+        }
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_daily_report_error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
     summary = {
         "auto_discovery": auto_discovery_summary,
         "autofill_count": len(autofilled_jobs),
@@ -1681,6 +1783,7 @@ def run_due_jobs_once(
         "auto_settle_attempted": auto_settle_attempted,
         "auto_settle_skipped": auto_settle_skipped,
         "cleanup": cleanup_summary,
+        "daily_report": daily_report_summary,
         "errors": errors,
     }
     safe_append_run_due_history(base_dir, summary, source=history_source)
@@ -1736,6 +1839,7 @@ def internal_run_due_response(
     update_race_job,
     compute_race_job_initial_status,
     create_race_job=None,
+    daily_report_generator=None,
     history_source="internal",
 ):
     if not admin_token_valid(token):
@@ -1767,6 +1871,7 @@ def internal_run_due_response(
             update_race_job=update_race_job,
             compute_race_job_initial_status=compute_race_job_initial_status,
             create_race_job=create_race_job,
+            daily_report_generator=daily_report_generator,
             history_source=history_source,
         )
         ok = not bool(list(summary.get("errors", []) or []))

@@ -7828,6 +7828,7 @@ body {
   --dashboard-green: #198a3e;
   --dashboard-orange: #c96b00;
   --dashboard-gold: #b28a18;
+  --dashboard-gold-text: #735c00;
   --dashboard-bg: #f4f6f9;
   --dashboard-panel: #ffffff;
   --dashboard-row: #fbfcfe;
@@ -7951,8 +7952,8 @@ body {
 .app-header__nav a:hover,
 .app-header__nav a[aria-current="page"] {
   color: #ffffff;
-  background: rgba(11, 61, 145, 0.38);
-  box-shadow: inset 0 -3px 0 #2f7df6;
+  background: rgba(11, 61, 145, 0.28);
+  box-shadow: inset 0 -2px 0 rgba(47, 125, 246, 0.84);
 }
 
 .app-header__next-prediction {
@@ -8016,7 +8017,7 @@ body {
 .public-side-nav__eyebrow,
 .public-side-nav__section-label,
 .public-side-nav__focus-label {
-  color: var(--dashboard-gold);
+  color: var(--dashboard-gold-text);
   font-size: 10px;
   letter-spacing: 0.12em;
 }
@@ -8163,7 +8164,7 @@ body {
 }
 
 .page-section-header__kicker {
-  color: var(--dashboard-gold);
+  color: var(--dashboard-gold-text);
   font-size: 11px;
   letter-spacing: 0.1em;
 }
@@ -8828,9 +8829,9 @@ body {
 
 .app-header__nav a[aria-current="page"] {
   border-color: rgba(59, 130, 246, 0.58);
-  background: linear-gradient(180deg, rgba(11, 61, 145, 0.96), rgba(8, 43, 103, 0.96));
+  background: linear-gradient(180deg, rgba(7, 17, 31, 0.98), rgba(13, 26, 45, 0.98));
   color: #ffffff;
-  box-shadow: inset 0 -2px 0 #2f7df6, 0 8px 18px rgba(11, 61, 145, 0.24);
+  box-shadow: inset 0 -2px 0 rgba(47, 125, 246, 0.86);
 }
 
 .public-side-nav__panel {
@@ -9887,10 +9888,18 @@ body.home-app-ready .site-footer {
 
 .history-hero,
 .daily-reports-hero,
-.daily-report-detail-hero,
-.public-static-page__hero {
+.daily-report-detail-hero {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+}
+
+.public-static-page__hero {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+.public-static-page__hero--with-meta {
+  grid-template-columns: minmax(360px, 1fr) minmax(420px, 520px);
 }
 
 .race-detail-hero__copy,
@@ -9898,6 +9907,7 @@ body.home-app-ready .site-footer {
 .daily-reports-hero__copy,
 .daily-report-detail-hero__copy,
 .public-static-page__hero-copy {
+  min-width: 0;
   display: grid;
   align-content: start;
   gap: 8px;
@@ -9911,7 +9921,7 @@ body.home-app-ready .site-footer {
 .race-detail-panel__eyebrow,
 .history-panel__eyebrow,
 .daily-report-panel__eyebrow {
-  color: var(--dashboard-gold);
+  color: var(--dashboard-gold-text);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.1em;
@@ -9972,6 +9982,11 @@ body.home-app-ready .site-footer {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.public-static-page__hero--with-meta .public-static-page__meta {
+  width: min(520px, 100%);
+  justify-self: end;
 }
 
 .race-detail-summary-card,
@@ -10348,7 +10363,7 @@ body.home-app-ready .site-footer {
 }
 
 .race-detail-conclusion__marks > span {
-  color: var(--dashboard-gold);
+  color: var(--dashboard-gold-text);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.1em;
@@ -10518,7 +10533,7 @@ body.home-app-ready .site-footer {
 }
 
 .race-detail-mark-reasons > strong {
-  color: var(--dashboard-gold);
+  color: var(--dashboard-gold-text);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.1em;

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import AutoFitLine from "./AutoFitLine";
 import { resolvePublicDecision } from "../lib/confidencePolicy";
+import { resolveCourseAccent } from "../lib/courseAccents";
 import {
   APP_BASE_PATH,
   MARK_ORDER,
@@ -27,31 +28,6 @@ const PREDICTOR_LABELS = {
   v6_kiwami: "極 KIWAMI",
 };
 const PREDICTOR_ORDER = ["main", "v2_opus", "v3_premium", "v4_gemini", "v5_stacking", "v6_kiwami"];
-const COURSE_ACCENTS = [
-  { accent: "#15803d", soft: "#eefdf2" },
-  { accent: "#2563eb", soft: "#eff6ff" },
-  { accent: "#4338ca", soft: "#eef2ff" },
-  { accent: "#b45309", soft: "#fff7ed" },
-  { accent: "#0f766e", soft: "#ecfeff" },
-  { accent: "#be123c", soft: "#fff1f2" },
-];
-const COURSE_ACCENT_BY_LOCATION = {
-  門別: { accent: "#15803d", soft: "#eefdf2" },
-  水沢: { accent: "#2563eb", soft: "#eff6ff" },
-  大井: { accent: "#4338ca", soft: "#eef2ff" },
-  金沢: { accent: "#b45309", soft: "#fff7ed" },
-  東京: { accent: "#1d4ed8", soft: "#eff6ff" },
-  京都: { accent: "#b45309", soft: "#fff7ed" },
-  阪神: { accent: "#7c3aed", soft: "#f5f3ff" },
-  中山: { accent: "#0f766e", soft: "#ecfeff" },
-  中京: { accent: "#be123c", soft: "#fff1f2" },
-  札幌: { accent: "#0369a1", soft: "#f0f9ff" },
-  函館: { accent: "#047857", soft: "#ecfdf5" },
-  新潟: { accent: "#0d9488", soft: "#f0fdfa" },
-  福島: { accent: "#c2410c", soft: "#fff7ed" },
-  小倉: { accent: "#a21caf", soft: "#fdf4ff" },
-};
-
 function buildBackHref(search) {
   const query = String(search || "").replace(/^\?/, "");
   return query ? `${APP_BASE_PATH}?${query}` : APP_BASE_PATH;
@@ -60,10 +36,6 @@ function buildBackHref(search) {
 function displayOrderValue(race) {
   const value = Number(race?.display_order);
   return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
-}
-
-function courseAccent(location, index) {
-  return COURSE_ACCENT_BY_LOCATION[location] || COURSE_ACCENTS[index % COURSE_ACCENTS.length];
 }
 
 function raceLocation(race) {
@@ -233,7 +205,7 @@ function buildDetailNavigation(currentRace, races) {
     const active = group.location === currentLocation;
     return {
       location: group.location,
-      accent: courseAccent(group.location, index),
+      accent: resolveCourseAccent(group.location, index),
       count: sortedGroupRaces.length,
       active,
       targetRace: active ? selectedRace : sameNoRace || sortedGroupRaces[0] || null,

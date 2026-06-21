@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import RaceCard from "./RaceCard";
 import { resolvePublicDecision } from "../lib/confidencePolicy";
+import { resolveCourseAccent } from "../lib/courseAccents";
 
 function displayOrderValue(race) {
   const value = Number(race?.display_order);
@@ -72,36 +73,6 @@ const STATUS_TABS = [
   { key: "settled", label: "確定済み" },
 ];
 
-const COURSE_ACCENTS = [
-  { accent: "#15803d", soft: "#eefdf2" },
-  { accent: "#2563eb", soft: "#eff6ff" },
-  { accent: "#4338ca", soft: "#eef2ff" },
-  { accent: "#b45309", soft: "#fff7ed" },
-  { accent: "#0f766e", soft: "#ecfeff" },
-  { accent: "#be123c", soft: "#fff1f2" },
-];
-
-const COURSE_ACCENT_BY_LOCATION = {
-  門別: { accent: "#15803d", soft: "#eefdf2" },
-  水沢: { accent: "#2563eb", soft: "#eff6ff" },
-  大井: { accent: "#4338ca", soft: "#eef2ff" },
-  金沢: { accent: "#b45309", soft: "#fff7ed" },
-  東京: { accent: "#1d4ed8", soft: "#eff6ff" },
-  京都: { accent: "#b45309", soft: "#fff7ed" },
-  阪神: { accent: "#7c3aed", soft: "#f5f3ff" },
-  中山: { accent: "#0f766e", soft: "#ecfeff" },
-  中京: { accent: "#be123c", soft: "#fff1f2" },
-  札幌: { accent: "#0369a1", soft: "#f0f9ff" },
-  函館: { accent: "#047857", soft: "#ecfdf5" },
-  新潟: { accent: "#0d9488", soft: "#f0fdfa" },
-  福島: { accent: "#c2410c", soft: "#fff7ed" },
-  小倉: { accent: "#a21caf", soft: "#fdf4ff" },
-};
-
-function courseAccent(location, index) {
-  return COURSE_ACCENT_BY_LOCATION[location] || COURSE_ACCENTS[index % COURSE_ACCENTS.length];
-}
-
 function buildCourseGroups(races) {
   const groups = [];
   const indexByLocation = new Map();
@@ -123,7 +94,7 @@ function buildCourseGroups(races) {
       ...group,
       key: `${index}-${group.location}`,
       firstRaceTitle: raceTitle(group.races[0]),
-      accent: courseAccent(group.location, index),
+      accent: resolveCourseAccent(group.location, index),
       summary: {
         total: group.races.length,
         high: group.races.filter(isHighEvaluation).length,

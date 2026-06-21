@@ -6,7 +6,14 @@ export default function PublicStaticPage({ page }) {
 
   return (
     <section className="public-static-page">
-      <div className="public-static-page__hero">
+      <div
+        className={[
+          "public-static-page__hero",
+          meta.length ? "public-static-page__hero--with-meta" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
         <div className="public-static-page__hero-copy">
           <span className="public-static-page__eyebrow">{page?.kicker || "ガイド・ポリシー"}</span>
           <h1>{page?.title || ""}</h1>
