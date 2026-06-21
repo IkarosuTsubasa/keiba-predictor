@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
@@ -19,8 +18,6 @@ import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.isVisible
-import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.gms.ads.AdListener
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -31,7 +28,6 @@ import com.google.android.material.snackbar.Snackbar
 import com.ikaimo.keiba.app.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
-    private val logTag = "NativeRaces"
 
     private lateinit var binding: ActivityMainBinding
 
@@ -43,9 +39,6 @@ class MainActivity : AppCompatActivity() {
     private var bannerAdView: AdView? = null
     private var pendingOverrideUrl: String? = null
     private var pendingOverrideTitle: String? = null
-    private var racesLoaded = false
-    private var nativeRaceTargetDate: String = ""
-    private val mobileRaceAdapter = MobileRaceAdapter(::openRaceDetail)
     private val launchReloadRunnable =
         Runnable {
             if (launchOverlayDismissed) return@Runnable
@@ -71,7 +64,6 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         configureSwipeRefresh()
-        configureNativeRaces()
         configureBottomNavigation()
         configureBackHandling()
         MobileAds.initialize(this)
@@ -241,10 +233,6 @@ class MainActivity : AppCompatActivity() {
         cancelLaunchReloadAffordance()
         binding.launchOverlayHint.visibility = View.GONE
         binding.launchOverlayReloadButton.visibility = View.GONE
-        if (isShowingNativeRaces()) {
-            loadNativeRaces(forceRefresh = true)
-            return
-        }
         val currentUrl = binding.webView.url?.takeIf { it.isNotBlank() }
         val overrideUrl = pendingOverrideUrl?.takeIf { it.isNotBlank() }
         when {
@@ -307,14 +295,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun configureNativeRaces() {
-        binding.nativeRaceList.layoutManager = LinearLayoutManager(this)
-        binding.nativeRaceList.adapter = mobileRaceAdapter
-        binding.nativeRaceSwipeRefresh.setOnRefreshListener {
-            loadNativeRaces(forceRefresh = true)
-        }
-    }
-
     private fun configureBottomNavigation() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             if (suppressBottomNavEvents) return@setOnItemSelectedListener true
@@ -348,7 +328,6 @@ class MainActivity : AppCompatActivity() {
             if (suppressBottomNavEvents) return@setOnItemReselectedListener
             when (item.itemId) {
                 R.id.menu_more -> openMoreScreen()
-                R.id.menu_races -> binding.nativeRaceList.scrollToPosition(0)
                 else -> binding.webView.scrollTo(0, 0)
             }
         }
@@ -382,7 +361,6 @@ class MainActivity : AppCompatActivity() {
             if (url.isBlank()) return false
 
             val normalizedUrl = AppWeb.normalizeInAppUrl(url, BuildConfig.BASE_WEB_URL) ?: return false
-            showWebContent()
             pendingOverrideUrl = normalizedUrl
             pendingOverrideTitle =
                 intent.getStringExtra(AppNavigation.EXTRA_WEB_TITLE)?.trim()?.ifBlank { null }
@@ -404,9 +382,7 @@ class MainActivity : AppCompatActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (currentTopLevel == TopLevelTab.RACES && isShowingWebContent()) {
-                        showNativeRacesRoot()
-                    } else if (binding.webView.canGoBack()) {
+                    if (binding.webView.canGoBack()) {
                         binding.webView.goBack()
                     } else {
                         finish()
@@ -422,17 +398,13 @@ class MainActivity : AppCompatActivity() {
 
         if (!resetToRoot) return
 
-        when (tab) {
-            TopLevelTab.RACES -> showNativeRacesRoot()
-            TopLevelTab.HISTORY -> {
-                showWebContent()
-                binding.webView.loadUrl(withAppMarker("${BuildConfig.BASE_WEB_URL}/history"))
+        val targetUrl =
+            when (tab) {
+                TopLevelTab.RACES -> withAppMarker(BuildConfig.BASE_WEB_URL)
+                TopLevelTab.HISTORY -> withAppMarker("${BuildConfig.BASE_WEB_URL}/history")
+                TopLevelTab.REPORTS -> withAppMarker("${BuildConfig.BASE_WEB_URL}/reports")
             }
-            TopLevelTab.REPORTS -> {
-                showWebContent()
-                binding.webView.loadUrl(withAppMarker("${BuildConfig.BASE_WEB_URL}/reports"))
-            }
-        }
+        binding.webView.loadUrl(targetUrl)
     }
 
     private fun syncBottomNavigation(tab: TopLevelTab) {
@@ -462,114 +434,6 @@ class MainActivity : AppCompatActivity() {
             }
         binding.toolbarTitle.text = overrideTitle ?: resolveTitle(uri)
         binding.toolbarSubtitle.text = resolveSubtitle(topLevel)
-    }
-
-    private fun showNativeRacesRoot() {
-        showNativeRaces()
-        pendingOverrideUrl = null
-        pendingOverrideTitle = null
-        binding.progressIndicator.visibility = View.GONE
-        binding.toolbarTitle.text = getString(R.string.title_races)
-        binding.toolbarSubtitle.text = getString(R.string.subtitle_races)
-        if (!racesLoaded) {
-            loadNativeRaces(forceRefresh = false)
-        }
-    }
-
-    private fun showNativeRaces() {
-        binding.nativeRacesContainer.visibility = View.VISIBLE
-        binding.swipeRefresh.visibility = View.GONE
-    }
-
-    private fun showWebContent() {
-        binding.nativeRacesContainer.visibility = View.GONE
-        binding.swipeRefresh.visibility = View.VISIBLE
-    }
-
-    private fun isShowingNativeRaces(): Boolean = binding.nativeRacesContainer.isVisible
-
-    private fun isShowingWebContent(): Boolean = binding.swipeRefresh.isVisible
-
-    private fun loadNativeRaces(forceRefresh: Boolean) {
-        showNativeRaces()
-        if (!racesLoaded || forceRefresh) {
-            scheduleLaunchReloadAffordance()
-        }
-        if (!racesLoaded) {
-            binding.nativeRacesProgress.visibility = View.VISIBLE
-        }
-        binding.nativeRacesEmpty.visibility = View.GONE
-        val token = BuildConfig.MOBILE_API_TOKEN.trim()
-        if (token.isBlank()) {
-            Log.e(logTag, "MOBILE_API_TOKEN is blank")
-            binding.nativeRacesProgress.visibility = View.GONE
-            binding.nativeRaceSwipeRefresh.isRefreshing = false
-            binding.nativeRacesEmpty.visibility = View.VISIBLE
-            dismissLaunchOverlay()
-            showRaceLoadFailure(IllegalStateException("MOBILE_API_TOKEN is blank")).show()
-            return
-        }
-
-        Thread {
-            try {
-                val payload = MobileRacesApi.fetchRaceList(BuildConfig.BASE_WEB_URL, token)
-                runOnUiThread {
-                    racesLoaded = true
-                    nativeRaceTargetDate = payload.targetDate
-                    binding.nativeRacesProgress.visibility = View.GONE
-                    binding.nativeRaceSwipeRefresh.isRefreshing = false
-                    binding.nativeRaceDateLabel.text = payload.targetDateLabel.ifBlank { payload.targetDate }
-                    binding.nativeRaceFallbackNotice.text = payload.fallbackNotice
-                    binding.nativeRaceFallbackNotice.visibility =
-                        if (payload.fallbackNotice.isBlank()) View.GONE else View.VISIBLE
-                    mobileRaceAdapter.submitList(payload.items)
-                    binding.nativeRacesEmpty.visibility = if (payload.items.isEmpty()) View.VISIBLE else View.GONE
-                    dismissLaunchOverlay()
-                }
-            } catch (error: Throwable) {
-                Log.e(
-                    logTag,
-                    "Failed to load native races from ${BuildConfig.BASE_WEB_URL}/api/mobile/v1/races",
-                    error,
-                )
-                runOnUiThread {
-                    binding.nativeRacesProgress.visibility = View.GONE
-                    binding.nativeRaceSwipeRefresh.isRefreshing = false
-                    binding.nativeRaceFallbackNotice.visibility = View.GONE
-                    binding.nativeRacesEmpty.visibility = View.VISIBLE
-                    dismissLaunchOverlay()
-                    showRaceLoadFailure(error).setAction(R.string.retry) {
-                        loadNativeRaces(forceRefresh = true)
-                    }.show()
-                }
-            }
-        }.start()
-    }
-
-    private fun showRaceLoadFailure(error: Throwable): Snackbar {
-        val message =
-            if (BuildConfig.DEBUG) {
-                getString(
-                    R.string.races_load_failed_debug,
-                    getString(R.string.races_load_failed),
-                    error.message ?: error.javaClass.simpleName,
-                )
-            } else {
-                getString(R.string.races_load_failed)
-            }
-        return Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG)
-    }
-
-    private fun openRaceDetail(item: MobileRaceItem) {
-        val runId = item.runId.takeIf { it.isNotBlank() } ?: return
-        startActivity(
-            RaceDetailActivity.createIntent(
-                context = this,
-                runId = runId,
-                targetDate = nativeRaceTargetDate,
-                title = item.raceTitle,
-            ),
-        )
     }
 
     private fun inferTopLevel(uri: Uri): TopLevelTab {

@@ -42,10 +42,6 @@ val fcmTopic =
     providers.gradleProperty("KEIBA_FCM_TOPIC")
         .orElse(localProperty("KEIBA_FCM_TOPIC") ?: "keiba-public-updates")
         .get()
-val mobileApiToken =
-    providers.gradleProperty("KEIBA_MOBILE_API_TOKEN")
-        .orElse(localProperty("KEIBA_MOBILE_API_TOKEN") ?: "")
-        .get()
 
 val validateReleaseAdmobConfig =
     tasks.register("validateReleaseAdmobConfig") {
@@ -82,15 +78,14 @@ android {
         applicationId = "com.ikaimo.keiba.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BASE_WEB_URL", "\"$releaseBaseWebUrl\"")
         buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
         buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
         buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
-        buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
         buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -104,7 +99,6 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
-            buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "true")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
@@ -115,7 +109,6 @@ android {
             buildConfigField("String", "BANNER_AD_UNIT_ID", "\"$bannerAdUnitId\"")
             buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", "\"$nativeMoreAdUnitId\"")
             buildConfigField("String", "FCM_TOPIC", "\"$fcmTopic\"")
-            buildConfigField("String", "MOBILE_API_TOKEN", "\"$mobileApiToken\"")
             buildConfigField("boolean", "ALLOW_INSECURE_WEB_CONTENT", "false")
             manifestPlaceholders["usesCleartextTraffic"] = "false"
             proguardFiles(
@@ -144,7 +137,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.13.0")
-    implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("com.google.android.material:material:1.13.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.2.0")

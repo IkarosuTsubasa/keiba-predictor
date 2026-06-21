@@ -13,8 +13,7 @@
     <string name="title_reports">私の日報</string>
     <string name="title_report_detail">日報詳細</string>
 
-    <string name="subtitle_races">公開レースを表示します</string>
-    <string name="subtitle_race_detail_native">AI予測の詳細を確認できます</string>
+    <string name="subtitle_races">当日公開レースと詳細ページを表示します</string>
     <string name="subtitle_history">期間別の比較と振り返りを確認できます</string>
     <string name="subtitle_reports">保存済みの日報アーカイブを確認できます</string>
     <string name="subtitle_more">サイト利用に関する案内ページを開けます</string>
@@ -39,32 +38,4 @@
     <string name="external_open_error">%1$s を開けませんでした。</string>
     <string name="launch_eyebrow">Loading</string>
     <string name="launch_message">公開ページを読み込んでいます</string>
-    <string name="races_empty">公開中のレースが見つかりませんでした。</string>
-    <string name="races_result_pending">結果はまだ確定していません。</string>
-    <string name="races_summary_empty">公開中の総合予測を準備中です。</string>
-    <string name="races_summary_main_pick">AI本命 ◎%1$s</string>
-    <string name="races_summary_meta">自信度 %1$d%% / 本命一致度 %2$d%%</string>
-    <string name="races_featured_title">今日のAI注目レース</string>
-    <string name="races_featured_top5_label">上位5頭</string>
-    <string name="races_ranking_title">AI自信度ランキング</string>
-    <string name="races_ranking_item">%1$d. %2$s ◎%3$s  %4$d%%</string>
-    <string name="races_load_failed">レース一覧の取得に失敗しました。</string>
-    <string name="races_load_failed_debug">%1$s\n%2$s</string>
-    <string name="race_detail_empty">レース詳細を表示できませんでした。</string>
-    <string name="race_detail_load_failed">レース詳細の取得に失敗しました。</string>
-    <string name="race_detail_load_failed_debug">%1$s\n%2$s</string>
-    <string name="race_detail_status_label">公開状態</string>
-    <string name="race_detail_status_default">公開中</string>
-    <string name="race_detail_confidence_label">自信度</string>
-    <string name="race_detail_agreement_label">本命一致度</string>
-    <string name="race_detail_section_result">レース結果</string>
-    <string name="race_detail_section_index">AI指数</string>
-    <string name="race_detail_section_compare">定量モデル比較</string>
-    <string name="race_detail_section_condition">この条件の定量モデル順位</string>
-    <string name="race_detail_result_pending">結果はまだ確定していません。</string>
-    <string name="race_detail_index_empty">AI指数を計算できるデータがまだありません。</string>
-    <string name="race_detail_compare_empty">定量モデルの比較データはまだありません。</string>
-    <string name="race_detail_compare_placeholder">完全公開準備中</string>
-    <string name="race_detail_condition_empty">この条件に一致する履歴データはまだありません。</string>
-    <string name="race_detail_condition_samples">対象 %1$dレース</string>
 </resources>
