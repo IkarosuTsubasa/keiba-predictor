@@ -18,6 +18,7 @@ SIMULATION_PROMPT = """あなたは競馬の展開シミュレーション補助
 horse_scores、印、strategy、買い目を変更してはいけません。
 与えられた構造化情報だけを使い、事実のない内容を作らないでください。
 情報不足があれば warnings に明記してください。
+reasoning_summary は公開ページにも出るため、展開がどう馬券判断に効くかを1文で書いてください。「シミュレーションでは平均寄り」「平均寄り」のような定型句だけで終えないでください。
 口調は競馬分析師だが、過度に断定しないでください。
 """
 
@@ -95,6 +96,17 @@ def _flag_to_risk_phrase(flags: list[str], running_style: str | None = None) -> 
     if flags:
         return "・".join(flags) + " に注意。"
     return "明確なリスク材料は限定的。"
+
+
+def _build_reasoning_summary(projected_pace: str, style_text: str) -> str:
+    style = style_text if style_text and style_text != "不明" else "上位勢"
+    if projected_pace == "slow":
+        return f"序盤が落ち着くなら、{style}の位置取りと直線での反応を重く見る。"
+    if projected_pace == "fast":
+        return f"前半から流れる想定で、{style}の持続力と早めに脚を使った後の粘りを問う。"
+    if projected_pace == "average":
+        return f"流れが極端に偏らないぶん、{style}の持続力とロスの少なさが明暗を分ける。"
+    return f"展開の読みは絞り切れず、{style}が道中で不利を受けないかを重く見る。"
 
 
 def _build_top_payload(
@@ -277,10 +289,7 @@ def _build_template_simulation(
         if strategy is not None
         else f"展開面は{PACE_LABEL_MAP.get(projected_pace, projected_pace)}想定。"
     )
-    reasoning_summary = (
-        f"シミュレーションでは{PACE_LABEL_MAP.get(projected_pace, projected_pace)}寄り。"
-        f"{style_text}勢の持続力勝負を想定。"
-    )
+    reasoning_summary = _build_reasoning_summary(projected_pace, style_text)
     return RaceSimulation(
         race_id=race_info.race_id,
         projected_pace=projected_pace,

@@ -43,6 +43,79 @@ def _normalized_span(value: float, lower: float, width: float) -> float:
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
 
 
+PUBLIC_STRENGTH_LABELS = (
+    ("recent_form", "近走のまとまり"),
+    ("distance_fit", "距離への対応"),
+    ("course_fit", "コース適性"),
+    ("track_condition_fit", "馬場への対応"),
+    ("jockey_fit", "鞍上面"),
+    ("ability_score", "能力の土台"),
+    ("recent_quality_score", "近走レベル"),
+    ("trend_score", "上昇気配"),
+    ("condition_fit_score", "条件合致"),
+    ("race_level_score", "相手関係"),
+    ("pace_jockey_score", "展開面"),
+)
+
+
+def _join_public_labels(labels: list[str]) -> str:
+    if not labels:
+        return "総合バランス"
+    if len(labels) == 1:
+        return labels[0]
+    return "と".join(labels[:2])
+
+
+def _horse_strength_labels(score_item: HorseScore) -> list[str]:
+    score_values = score_item.scores.model_dump()
+    ranked: list[tuple[int, int, str]] = []
+    for index, (field_name, label) in enumerate(PUBLIC_STRENGTH_LABELS):
+        value = score_values.get(field_name)
+        if not isinstance(value, int):
+            continue
+        threshold = 7 if field_name not in {"ability_score", "condition_fit_score", "pace_jockey_score"} else 2
+        if value >= threshold:
+            ranked.append((value, -index, label))
+    ranked.sort(reverse=True)
+    return [label for _, _, label in ranked[:2]]
+
+
+def _build_public_strategy_reason(
+    *,
+    top: HorseScore,
+    second: HorseScore,
+    third: HorseScore,
+    axis_strength: str,
+    close_top_group: bool,
+    clear_axis: bool,
+    participation_level: str,
+    used_lessons_count: int,
+) -> str:
+    strength_text = _join_public_labels(_horse_strength_labels(top))
+    if clear_axis:
+        lead = f"◎{top.horse_name}は{strength_text}が揃い、上位比較でも軸に置きやすい。"
+    elif close_top_group:
+        lead = (
+            f"◎{top.horse_name}は{strength_text}で一歩前に取るが、"
+            f"{second.horse_name}、{third.horse_name}まで評価差は薄い。"
+        )
+    elif axis_strength == "medium":
+        lead = f"◎{top.horse_name}は{strength_text}を素直に評価し、相手関係でも大きくは崩れない。"
+    else:
+        lead = f"◎{top.horse_name}を最上位に取るが、強調材料は一点突破ではなく{strength_text}の積み上げ。"
+
+    if participation_level == "strong":
+        tail = "相手は上位印を本線に、勝負度を少し上げて組み立てる。"
+    elif participation_level == "normal":
+        tail = "相手候補を広げすぎず、上位印との組み合わせを中心に見る。"
+    else:
+        tail = "勝負を広げず、崩れにくい買い方へ寄せる。"
+
+    if used_lessons_count:
+        tail += " 同条件の振り返りを踏まえても、この並びは崩さない。"
+    return f"{lead}{tail}"
+
+
 def _estimate_axis_strength_score(
     *,
     race_data: RaceData,
@@ -367,21 +440,22 @@ def evaluate_bet_strategy(
     else:
         participation_level = "light"
 
-    top_descriptor = f"本命想定は{top.horse_name}"
-    odds_descriptor = (
-        f"単勝{top_odds:.1f}倍・人気{top_popularity}。"
-        if top_odds is not None and top_popularity is not None
-        else "市場オッズを使わず、能力・条件適性を中心に評価。"
-    )
-    group_descriptor = "上位拮抗のため点数は絞る。" if close_top_group else "軸馬が比較的明確。"
-    lesson_descriptor = "過去lessonも参考。" if used_lessons_count else ""
     return StrategyDecision(
         bet_decision="BET",
         confidence=confidence,
         confidence_score=confidence_score,
         participation_level=participation_level,
         reason_codes=reason_codes,
-        reason=f"{top_descriptor} {odds_descriptor} {group_descriptor}{lesson_descriptor}".strip(),
+        reason=_build_public_strategy_reason(
+            top=top,
+            second=second,
+            third=third,
+            axis_strength=axis_strength,
+            close_top_group=close_top_group,
+            clear_axis=clear_axis,
+            participation_level=participation_level,
+            used_lessons_count=used_lessons_count,
+        ),
     )
 
 

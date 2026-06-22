@@ -212,7 +212,9 @@ class MockLLMClient(BaseLLMClient):
         if schema_name == "llm_check":
             return {"ok": True}
         if schema_name == "prediction_enhancement":
+            strategy_payload = payload.get("strategy") if isinstance(payload.get("strategy"), dict) else {}
             return {
+                "strategy_reason": strategy_payload.get("reason", ""),
                 "summary": payload.get("summary", "Mock summary"),
                 "risks": payload.get("risks", []),
                 "commentary": "Mock LLM commentary",

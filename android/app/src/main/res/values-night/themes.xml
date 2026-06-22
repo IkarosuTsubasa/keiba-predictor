@@ -5,8 +5,6 @@
         <item name="colorPrimaryContainer">@color/accent_soft</item>
         <item name="colorOnPrimary">@android:color/white</item>
         <item name="colorSecondary">@color/accent_color_dark</item>
-        <item name="android:statusBarColor">@color/app_chrome</item>
-        <item name="android:navigationBarColor">@color/surface_color</item>
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.IkaimoKeiba.AlertDialog</item>

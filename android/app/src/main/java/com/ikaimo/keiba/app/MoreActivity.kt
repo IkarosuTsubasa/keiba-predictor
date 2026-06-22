@@ -37,7 +37,7 @@ class MoreActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMoreBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        EdgeToEdgeUi.apply(window, binding.root, binding.toolbar, binding.bottomNav)
+        EdgeToEdgeUi.apply(this, binding.root, binding.toolbar, binding.bottomNav)
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)

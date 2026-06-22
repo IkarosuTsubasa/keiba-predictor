@@ -28,6 +28,11 @@ FORBIDDEN_PUBLIC_COPY_TERMS = (
     "欠損",
     "unknown",
     "fallback",
+    "本命想定は",
+    "市場オッズを使わず",
+    "能力・条件適性を中心に評価",
+    "軸馬が比較的明確",
+    "上位拮抗のため点数は絞る",
 )
 
 NO_MARKET_COPY_TERMS = (
@@ -165,10 +170,20 @@ class RaceAnalysisAgent:
                 horse.odds is not None or horse.popularity is not None for horse in race_data.horses
             )
             if enhancement:
+                strategy_reason = enhancement.get("strategy_reason")
                 summary = enhancement.get("summary")
                 risks = enhancement.get("risks")
                 commentary = enhancement.get("commentary")
                 top_horse_memos = enhancement.get("top_horse_memos")
+                if (
+                    prediction.strategy is not None
+                    and isinstance(strategy_reason, str)
+                    and _is_public_prediction_copy_allowed(
+                        strategy_reason,
+                        market_data_available=market_data_available,
+                    )
+                ):
+                    prediction.strategy.reason = strategy_reason.strip()
                 if isinstance(summary, str) and _is_public_prediction_copy_allowed(
                     summary,
                     market_data_available=market_data_available,

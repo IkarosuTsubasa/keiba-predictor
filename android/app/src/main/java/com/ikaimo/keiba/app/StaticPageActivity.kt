@@ -29,7 +29,7 @@ class StaticPageActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityStaticPageBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        EdgeToEdgeUi.apply(window, binding.root, binding.toolbar)
+        EdgeToEdgeUi.apply(this, binding.root, binding.toolbar, binding.swipeRefresh)
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)

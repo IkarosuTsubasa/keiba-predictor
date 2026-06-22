@@ -80,14 +80,14 @@ tasks.configureEach {
 
 android {
     namespace = "com.ikaimo.keiba.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.ikaimo.keiba.app"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        targetSdk = 37
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BASE_WEB_URL", "\"$releaseBaseWebUrl\"")
@@ -148,17 +148,17 @@ kotlin {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.13.0")
-    implementation("com.google.android.material:material:1.13.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.2.0")
 
-    implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-crashlytics")
 
-    implementation("com.google.android.gms:play-services-ads:25.1.0")
+    implementation("com.google.android.gms:play-services-ads:25.4.0")
 }

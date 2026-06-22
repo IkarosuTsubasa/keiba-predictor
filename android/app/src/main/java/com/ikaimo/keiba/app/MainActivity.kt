@@ -54,7 +54,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        EdgeToEdgeUi.apply(window, binding.root, binding.toolbar, binding.bottomChrome)
+        EdgeToEdgeUi.apply(this, binding.root, binding.toolbar, binding.bottomChrome)
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)

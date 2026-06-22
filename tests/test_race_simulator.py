@@ -256,6 +256,7 @@ class RaceSimulatorTests(unittest.TestCase):
         self.assertGreaterEqual(len(simulation.favorable_horses), 3)
         self.assertIn("ワイド5-6", simulation.betting_scenario)
         self.assertTrue(simulation.reasoning_summary)
+        self.assertNotIn("シミュレーションでは", simulation.reasoning_summary)
         self.assertNotIn("買い目の具体情報は入力に含まれていない", "".join(simulation.warnings))
 
     def test_only_top7_are_sent_to_llm(self) -> None:

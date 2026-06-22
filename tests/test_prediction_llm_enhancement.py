@@ -19,6 +19,7 @@ class _SummaryEnhancingLLM(MockLLMClient):
     def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str | None = None) -> dict:
         if schema_name == "prediction_enhancement":
             return {
+                "strategy_reason": "◎サンプルホースは道中で脚を使わされにくく、相手筆頭との比較でも最後の踏ん張りを評価する。",
                 "summary": "LLM強化summary",
                 "risks": ["LLM強化risk"],
                 "commentary": "LLM commentary",
@@ -41,6 +42,7 @@ class _ForbiddenCopyEnhancingLLM(MockLLMClient):
     def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str | None = None) -> dict:
         if schema_name == "prediction_enhancement":
             return {
+                "strategy_reason": "本命想定はサンプルホース 市場オッズを使わず、能力・条件適性を中心に評価。",
                 "summary": "ルールベース評価を使用。",
                 "risks": [
                     "正式なML modelではない。",
@@ -61,6 +63,10 @@ class PredictionLLMEnhancementTests(unittest.TestCase):
         self.assertIsNotNone(prediction.race_simulation)
         self.assertIn(prediction.race_simulation.reasoning_summary, prediction.summary)
         self.assertEqual(prediction.commentary, "LLM commentary")
+        self.assertEqual(
+            prediction.strategy.reason,
+            "◎サンプルホースは道中で脚を使わされにくく、相手筆頭との比較でも最後の踏ん張りを評価する。",
+        )
         self.assertIn("LLM強化risk", prediction.risks)
         self.assertNotIn("LLM simulation fallback used.", prediction.risks)
         self.assertGreaterEqual(len(prediction.top_horse_memos), 1)
@@ -75,6 +81,7 @@ class PredictionLLMEnhancementTests(unittest.TestCase):
         prediction = agent.run(SAMPLE_RACE_DATA, [])
 
         self.assertNotIn("ルールベース評価を使用。", prediction.summary)
+        self.assertNotIn("市場オッズを使わず", prediction.strategy.reason)
         self.assertEqual(prediction.risks, ["軸馬の決め手はやや薄い。"])
         self.assertIsNone(prediction.commentary)
 

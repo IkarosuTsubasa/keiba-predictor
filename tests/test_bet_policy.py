@@ -113,7 +113,8 @@ class BetPolicyTests(unittest.TestCase):
         )
         self.assertEqual(strategy.bet_decision, "BET")
         self.assertIn("MARKET_DATA_UNAVAILABLE", strategy.reason_codes)
-        self.assertIn("市場オッズを使わず", strategy.reason)
+        self.assertNotIn("市場オッズを使わず", strategy.reason)
+        self.assertIn("◎Horse1", strategy.reason)
 
     def test_high_top_score_and_odds_results_in_bet(self) -> None:
         race_data = self.build_race_data([14.9, 23.3, 49.4, 16.0, 18.0, 20.0])
