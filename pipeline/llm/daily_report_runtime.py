@@ -550,6 +550,21 @@ def _gemini_report_call(prompt: str, model: str, api_key: str, timeout_s: int) -
     return _gemini._extract_response_text(response)
 
 
+def _runtime_fallback_reason(exc: Exception) -> str:
+    text = str(exc or "").strip().lower()
+    if "api_key_invalid" in text or "api key expired" in text or "api key not valid" in text:
+        return "api_key_invalid"
+    if "permission_denied" in text or "permission denied" in text:
+        return "permission_denied"
+    if "quota" in text or "rate limit" in text or "resource_exhausted" in text:
+        return "quota_exceeded"
+    if "model" in text and ("not found" in text or "not supported" in text or "not available" in text):
+        return "model_unavailable"
+    if "invalid_argument" in text:
+        return "invalid_argument"
+    return "runtime_error"
+
+
 def generate_daily_report_document(
     source_payload: Dict[str, Any],
     *,
@@ -613,8 +628,8 @@ def generate_daily_report_document(
                 fallback_reason = "network_error"
             except socket.timeout:
                 fallback_reason = "timeout"
-            except Exception:
-                fallback_reason = "runtime_error"
+            except Exception as exc:
+                fallback_reason = _runtime_fallback_reason(exc)
 
     fallback_document = _build_fallback_document(source_payload, fallback_reason=fallback_reason)
     return {

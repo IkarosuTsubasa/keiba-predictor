@@ -31,6 +31,7 @@ AUTO_SETTLE_DELAY_MINUTES = 20
 AGENT_RESULT_DELAY_MINUTES = 15
 JST_OFFSET = timedelta(hours=9)
 RUN_DUE_CLEANUP_STATE_FILE = "run_due_cleanup_state.json"
+RUN_DUE_DAILY_REPORT_STATE_FILE = "run_due_daily_report_state.json"
 RUN_DUE_HISTORY_FILE = "run_due_history.jsonl"
 RUN_DUE_AUTO_DISCOVERY_STATE_FILE = "run_due_auto_discovery_state.json"
 RUN_DUE_HISTORY_MAX_LINES = 120
@@ -57,6 +58,10 @@ def _run_due_lock_path(base_dir):
 
 def _run_due_cleanup_state_path(base_dir):
     return Path(base_dir) / "data" / "_shared" / RUN_DUE_CLEANUP_STATE_FILE
+
+
+def _run_due_daily_report_state_path(base_dir):
+    return Path(base_dir) / "data" / "_shared" / RUN_DUE_DAILY_REPORT_STATE_FILE
 
 
 def _run_due_history_path(base_dir):
@@ -199,6 +204,23 @@ def _save_run_due_cleanup_state(base_dir, payload):
     state_path.write_text(json.dumps(payload or {}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_run_due_daily_report_state(base_dir):
+    state_path = _run_due_daily_report_state_path(base_dir)
+    if not state_path.exists():
+        return {}
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_run_due_daily_report_state(base_dir, payload):
+    state_path = _run_due_daily_report_state_path(base_dir)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(payload or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _active_run_due_jobs(load_race_jobs, base_dir):
     active_jobs = []
     for job in list(load_race_jobs(base_dir) or []):
@@ -295,10 +317,29 @@ def _env_int(name, default):
         return int(default)
 
 
-def _maybe_generate_daily_report_after_cleanup(*, cleanup_summary, daily_report_generator):
+def _daily_report_state_record(item, *, jst_date):
+    row = dict(item or {})
+    return {
+        "last_report_jst_date": str(jst_date or "").strip(),
+        "last_report_at": datetime.now().isoformat(timespec="seconds"),
+        "slug": str(row.get("slug", "") or "").strip(),
+        "title": str(row.get("title", "") or "").strip(),
+        "target_date": str(row.get("target_date", "") or "").strip(),
+        "target_date_label": str(row.get("target_date_label", "") or "").strip(),
+        "engine": str(row.get("engine", "") or "").strip(),
+        "engine_label": str(row.get("engine_label", "") or "").strip(),
+        "mode": str(row.get("mode", "") or "").strip(),
+        "fallback_reason": str(row.get("fallback_reason", "") or "").strip(),
+        "public_url": str(row.get("public_url", "") or "").strip(),
+    }
+
+
+def _maybe_generate_daily_report_after_cleanup(*, cleanup_summary, daily_report_generator, base_dir=None):
     cleanup = dict(cleanup_summary or {})
     jst_date = str(cleanup.get("jst_date", "") or "").strip()
-    if not bool(cleanup.get("ran")):
+    cleanup_reason = str(cleanup.get("reason", "") or "").strip()
+    cleanup_ready = bool(cleanup.get("ran")) or cleanup_reason == "already_cleaned_today"
+    if not cleanup_ready:
         return {
             "attempted": False,
             "ran": False,
@@ -320,8 +361,30 @@ def _maybe_generate_daily_report_after_cleanup(*, cleanup_summary, daily_report_
             "jst_date": jst_date,
         }
 
+    report_state = {}
+    if base_dir is not None:
+        report_state = _load_run_due_daily_report_state(base_dir)
+        if jst_date and str(report_state.get("last_report_jst_date", "") or "").strip() == jst_date:
+            return {
+                "attempted": False,
+                "ran": False,
+                "reason": "already_reported_today",
+                "jst_date": jst_date,
+                "slug": str(report_state.get("slug", "") or "").strip(),
+                "title": str(report_state.get("title", "") or "").strip(),
+                "target_date": str(report_state.get("target_date", "") or "").strip(),
+                "target_date_label": str(report_state.get("target_date_label", "") or "").strip(),
+                "engine": str(report_state.get("engine", "") or "").strip(),
+                "engine_label": str(report_state.get("engine_label", "") or "").strip(),
+                "mode": str(report_state.get("mode", "") or "").strip(),
+                "fallback_reason": str(report_state.get("fallback_reason", "") or "").strip(),
+                "public_url": str(report_state.get("public_url", "") or "").strip(),
+            }
+
     record = daily_report_generator(date_text=jst_date)
     item = dict(record or {})
+    if base_dir is not None:
+        _save_run_due_daily_report_state(base_dir, _daily_report_state_record(item, jst_date=jst_date))
     return {
         "attempted": True,
         "ran": True,
@@ -638,6 +701,87 @@ def _parse_dt_text(value):
         except ValueError:
             continue
     return None
+
+
+def _task_reference_dt(task):
+    for field_name in ("updated_at", "started_at", "created_at"):
+        parsed = _parse_dt_text((task or {}).get(field_name, ""))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race_job, now_dt=None):
+    stale_minutes = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_STALE_MINUTES", 180))
+    if stale_minutes <= 0:
+        return []
+    current_dt = now_dt or _jst_now()
+    stale_before = current_dt - timedelta(minutes=stale_minutes)
+    expired = []
+    for job in list(load_race_jobs(base_dir) or []):
+        if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
+            continue
+        if str((job or {}).get("status", "") or "").strip().lower() != "processing_agent_prediction":
+            continue
+        job_id = str((job or {}).get("job_id", "") or "").strip()
+        if not job_id:
+            continue
+        task = find_latest_task_for_job(
+            base_dir,
+            job_id,
+            statuses=("queued", "dispatching", "dispatched", "running"),
+        )
+        reference_dt = _task_reference_dt(task) or _parse_dt_text((job or {}).get("updated_at", ""))
+        if reference_dt is None or reference_dt > stale_before:
+            continue
+        task_id = str((task or {}).get("task_id", "") or "").strip()
+        race_id = str((job or {}).get("race_id", "") or "").strip()
+        error_message = f"agent prediction task timed out after {stale_minutes} minutes"
+        if task_id:
+            update_remote_task(
+                base_dir,
+                task_id,
+                lambda row, now_text: row.update(
+                    {
+                        "status": "expired",
+                        "finished_at": now_text,
+                        "error_message": error_message,
+                    }
+                ),
+            )
+
+        def _mark_timeout(row, now_text):
+            row.update(_initialize_race_job_step_fields(row))
+            row["status"] = "failed"
+            row["error_message"] = error_message
+            row["last_process_output"] = append_job_process_log_entry(
+                row,
+                "agent_prediction_timeout",
+                1,
+                json.dumps(
+                    {
+                        "task_id": task_id,
+                        "race_id": race_id,
+                        "stale_minutes": stale_minutes,
+                        "reference_at": reference_dt.isoformat(timespec="seconds"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            _set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
+
+        updated = update_race_job(base_dir, job_id, _mark_timeout)
+        expired.append(
+            {
+                "job_id": job_id,
+                "race_id": race_id,
+                "task_id": task_id,
+                "status": str((updated or {}).get("status", "") or "").strip(),
+                "reference_at": reference_dt.isoformat(timespec="seconds"),
+                "stale_minutes": stale_minutes,
+            }
+        )
+    return expired
 
 
 def _jst_now():
@@ -1230,6 +1374,7 @@ def _compact_run_due_summary(summary):
         "agent_dispatched_count": int(row.get("agent_dispatched_count", 0) or 0),
         "settled_count": int(row.get("settled_count", 0) or 0),
         "agent_result_count": int(row.get("agent_result_count", 0) or 0),
+        "stale_agent_prediction_count": int(row.get("stale_agent_prediction_count", 0) or 0),
         "scan_due_candidate_count": int(row.get("scan_due_candidate_count", 0) or 0),
         "scan_due_reason_counts": _diagnostic_reason_counts(row.get("scan_due_candidates", [])),
         "auto_settle_candidate_count": int(row.get("auto_settle_candidate_count", 0) or 0),
@@ -1242,6 +1387,7 @@ def _compact_run_due_summary(summary):
         "agent_dispatched_job_ids": list(row.get("agent_dispatched_job_ids", []) or [])[:8],
         "settled_job_ids": list(row.get("settled_job_ids", []) or [])[:8],
         "agent_result_job_ids": list(row.get("agent_result_job_ids", []) or [])[:8],
+        "stale_agent_prediction_job_ids": list(row.get("stale_agent_prediction_job_ids", []) or [])[:8],
         "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
         "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
         "cleanup": {
@@ -1325,6 +1471,7 @@ def run_due_jobs_once(
     agent_dispatch_results = []
     settle_results = []
     agent_result_results = []
+    stale_agent_prediction_results = []
     errors = list(autofill_errors or [])
     auto_settle_skipped = []
     auto_settle_attempted = []
@@ -1675,6 +1822,46 @@ def run_due_jobs_once(
             )
             errors.append({"kind": "agent_result_fetch", "job_id": job_id, "error": str(exc)})
 
+    try:
+        stale_agent_prediction_results = _expire_stale_agent_prediction_jobs(
+            base_dir=base_dir,
+            load_race_jobs=load_race_jobs,
+            update_race_job=update_race_job,
+            now_dt=auto_settle_now,
+        )
+        if stale_agent_prediction_results:
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_stale_agent_predictions_expired",
+                        "count": len(stale_agent_prediction_results),
+                        "job_ids": [
+                            str(item.get("job_id", "") or "").strip()
+                            for item in stale_agent_prediction_results[:8]
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    except Exception as exc:
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_stale_agent_prediction_expire_error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        errors.append({"kind": "stale_agent_prediction_expire", "error": str(exc)})
+
     cleanup_summary = {}
     try:
         cleanup_summary = _maybe_run_daily_cleanup(
@@ -1720,6 +1907,7 @@ def run_due_jobs_once(
         daily_report_summary = _maybe_generate_daily_report_after_cleanup(
             cleanup_summary=cleanup_summary,
             daily_report_generator=daily_report_generator,
+            base_dir=base_dir,
         )
         print(
             "[web_app] "
@@ -1776,6 +1964,11 @@ def run_due_jobs_once(
         "agent_result_count": len(agent_result_results),
         "agent_result_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_result_results],
         "agent_result_results": agent_result_results,
+        "stale_agent_prediction_count": len(stale_agent_prediction_results),
+        "stale_agent_prediction_job_ids": [
+            str(item.get("job_id", "") or "").strip() for item in stale_agent_prediction_results
+        ],
+        "stale_agent_prediction_results": stale_agent_prediction_results,
         "auto_settle_candidate_count": len(auto_settle_candidates),
         "auto_settle_candidates": auto_settle_candidates,
         "agent_result_candidate_count": len(agent_result_candidates),
