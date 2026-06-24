@@ -141,6 +141,7 @@ class PredictionBorderlineRecoveryTests(unittest.TestCase):
                 race_data_path=self.race_data_path,
                 output_path=self.prediction_path,
                 lessons_path=self.lessons_path,
+                borderline_recovery_enabled=True,
             )
 
         payload = json.loads(saved_path.read_text(encoding="utf-8"))

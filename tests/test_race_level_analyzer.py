@@ -39,9 +39,11 @@ class RaceLevelAnalyzerTests(unittest.TestCase):
                         "surface": "芝",
                         "distance": 2400,
                         "track_condition": "良",
+                        "race_name": "京都新聞杯(G2)",
                         "finish": 2,
                         "field_size": 16,
                         "jockey": "騎手A",
+                        "margin": "0.4",
                         "odds": 12.3,
                         "popularity": 8,
                     }
@@ -78,10 +80,11 @@ class RaceLevelAnalyzerTests(unittest.TestCase):
         analysis = analyze_race_level_for_horse(horse_a, [horse_a, horse_b], _race_info())
         self.assertIn("HEAD_TO_HEAD_POSITIVE", analysis.positive_flags)
         self.assertIn("LARGE_FIELD_GOOD_RUN", analysis.positive_flags)
-        self.assertIn("UNDERVALUED_GOOD_RUN", analysis.positive_flags)
+        self.assertIn("GRADED_SMALL_MARGIN", analysis.positive_flags)
+        self.assertNotIn("UNDERVALUED_GOOD_RUN", analysis.positive_flags)
         self.assertLessEqual(analysis.adjustment_hint, 1.5)
 
-    def test_head_to_head_negative_and_popular_disappointment(self) -> None:
+    def test_head_to_head_negative_and_recent_level_risk(self) -> None:
         horse_a = HorseEntry.model_validate(
             {
                 "horse_no": 1,
@@ -151,11 +154,10 @@ class RaceLevelAnalyzerTests(unittest.TestCase):
         )
         analysis = analyze_race_level_for_horse(horse_a, [horse_a, horse_b], _race_info())
         self.assertIn("HEAD_TO_HEAD_NEGATIVE", analysis.risk_flags)
-        self.assertIn("POPULAR_DISAPPOINTMENT", analysis.risk_flags)
         self.assertIn("WEAK_RECENT_LEVEL", analysis.risk_flags)
+        self.assertNotIn("POPULAR_DISAPPOINTMENT", analysis.risk_flags)
         self.assertGreaterEqual(analysis.adjustment_hint, -1.5)
 
 
 if __name__ == "__main__":
     unittest.main()
-

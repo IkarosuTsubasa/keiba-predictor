@@ -146,9 +146,9 @@ class AnalysisAdjustmentIntegratorTests(unittest.TestCase):
     def test_default_score_weights_match_current_recommendation(self) -> None:
         self.assertEqual(DEFAULT_PEDIGREE_SCORE_WEIGHT, 0.2)
         self.assertEqual(DEFAULT_RACE_LEVEL_SCORE_WEIGHT, 1.0)
-        self.assertEqual(DEFAULT_PACE_SCORE_WEIGHT, 0.0)
+        self.assertEqual(DEFAULT_PACE_SCORE_WEIGHT, 0.2)
         self.assertEqual(apply_adjustment_weight(0.8, DEFAULT_PEDIGREE_SCORE_WEIGHT), 0.2)
-        self.assertEqual(apply_adjustment_weight(0.6, DEFAULT_PACE_SCORE_WEIGHT), 0.0)
+        self.assertEqual(apply_adjustment_weight(0.6, DEFAULT_PACE_SCORE_WEIGHT), 0.1)
 
 
 if __name__ == "__main__":

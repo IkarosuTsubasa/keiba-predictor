@@ -162,11 +162,11 @@ class PredictionAnalysisAdjustmentTests(unittest.TestCase):
         expected_total = round(first_score["score_breakdown"]["total_score"], 1)
         self.assertEqual(first_score["total_score"], expected_total)
         self.assertEqual(first_score["score_breakdown"]["total_score"], expected_total)
-        self.assertEqual(first_score["score_breakdown"]["pace_adjustment_weighted"], 0.0)
+        self.assertEqual(first_score["score_breakdown"]["pace_adjustment_weighted"], 0.2)
         self.assertEqual(payload["marks"]["◎"], 2)
         self.assertIn("PEDIGREE_USED", payload["strategy"]["reason_codes"])
         self.assertIn("RACE_LEVEL_USED", payload["strategy"]["reason_codes"])
-        self.assertNotIn("PACE_USED", payload["strategy"]["reason_codes"])
+        self.assertIn("PACE_USED", payload["strategy"]["reason_codes"])
 
         race_data = RaceData.from_json_file(self.race_data_path)
         markdown = generate_prediction_report(prediction, race_data=race_data)

@@ -95,7 +95,7 @@ def _prediction_payload(
             "scoring_mode": "candidate_default",
             "pedigree_weight": 0.2,
             "race_level_weight": 1.0,
-            "pace_weight": 0.0,
+            "pace_weight": 0.2,
         },
         "bets": [{"bet_type": "ワイド", "horse_numbers": [1, 2], "amount": 100, "reason": "test"}],
         "summary": "summary",
@@ -130,7 +130,7 @@ class WeightTuningBacktestTests(unittest.TestCase):
             _horse_score(3, 35.0, odds=5.0, popularity=4),
             _horse_score(4, 34.5, odds=7.0, popularity=5),
             _horse_score(5, 34.0, odds=9.5, popularity=6),
-            _horse_score(6, 33.5, race_level=0.4, pace=1.0, odds=8.0, popularity=3),
+            _horse_score(6, 33.3, race_level=0.4, pace=1.0, odds=8.0, popularity=3),
         ]
         race2_scores = [
             _horse_score(1, 36.0),
@@ -275,7 +275,7 @@ class WeightTuningBacktestTests(unittest.TestCase):
         self.assertEqual(score_for_weight_tuning_mode(horse, "conservative_full"), 35.9)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_pace"), 36.4)
         self.assertEqual(score_for_weight_tuning_mode(horse, "no_race_level"), 36.2)
-        self.assertEqual(score_for_weight_tuning_mode(horse, "local_candidate_default"), 36.3)
+        self.assertEqual(score_for_weight_tuning_mode(horse, "local_candidate_default"), 35.5)
         self.assertEqual(score_for_weight_tuning_mode(horse, "custom", custom_weights=(0.25, 0.5, 1.0)), 35.9)
 
     def test_run_backtest_weights_computes_counts_and_heavy_races(self) -> None:
@@ -389,7 +389,7 @@ class WeightTuningBacktestTests(unittest.TestCase):
         )
         self.assertEqual(report["weights"]["pedigree_weight"], 0.25)
         self.assertEqual(report["weights"]["race_level_weight"], 1.0)
-        self.assertEqual(report["weights"]["pace_weight"], 0.0)
+        self.assertEqual(report["weights"]["pace_weight"], 0.2)
         self.assertIn("custom", report["modes"])
 
     def test_recommended_mode_does_not_auto_pick_current_full_when_worse_exists(self) -> None:

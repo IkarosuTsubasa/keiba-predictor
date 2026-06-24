@@ -159,7 +159,7 @@ class PredictionPedigreeScoringTests(unittest.TestCase):
         top_score = payload["horse_scores"][0]
         self.assertEqual(top_score["horse_no"], 1)
         self.assertEqual(top_score["base_total_score"], 6.0)
-        self.assertEqual(top_score["score_breakdown"]["pedigree_weight"], 2.0)
+        self.assertEqual(top_score["score_breakdown"]["pedigree_weight"], 1.6)
         self.assertGreater(top_score["score_breakdown"]["pedigree_adjustment_weighted"], 0.0)
         self.assertGreater(top_score["total_score"], top_score["base_total_score"])
 

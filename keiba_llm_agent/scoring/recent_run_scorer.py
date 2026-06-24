@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from keiba_llm_agent.analysis.race_deep_analyzer import analyze_race_deeply
+from keiba_llm_agent.analysis.race_class import infer_run_race_class_level, infer_target_race_class_level
 from keiba_llm_agent.config.scoring_config import (
     DEFAULT_CONDITIONAL_WEIGHT_PROFILE,
     DEFAULT_SCORING_WEIGHTS,
@@ -36,12 +37,76 @@ from keiba_llm_agent.schemas.review import LessonItem
 WEIGHTS = [1.5, 1.2, 1.0, 0.8, 0.6]
 RECENT_FORM_RUN_LIMIT = 5
 RECENT_QUALITY_RUN_LIMIT = 3
-ABILITY_SCORE_WEIGHT = 1.45
+ABILITY_SCORE_WEIGHT = 1.35
 RECENT_QUALITY_SCORE_WEIGHT = 0.9
 TREND_SCORE_WEIGHT = 0.4
 CONDITION_FIT_SCORE_WEIGHT = 1.0
-RACE_LEVEL_SCORE_WEIGHT = 0.45
-PACE_JOCKEY_SCORE_WEIGHT = 0.45
+RACE_LEVEL_SCORE_WEIGHT = 0.75
+PACE_JOCKEY_SCORE_WEIGHT = 0.55
+CENTRAL_COMPONENT_SCORE_WEIGHTS = {
+    "ability": 1.25,
+    "recent_quality": 0.55,
+    "trend": 0.3,
+    "condition_fit": 0.65,
+    "race_level": 0.95,
+    "pace_jockey": 0.7,
+}
+LOCAL_COMPONENT_SCORE_WEIGHTS = {
+    "ability": 1.1,
+    "recent_quality": 1.05,
+    "trend": 0.5,
+    "condition_fit": 0.65,
+    "race_level": 0.35,
+    "pace_jockey": 0.55,
+}
+CENTRAL_LEGACY_SUPPORT_WEIGHTS = {
+    "distance_fit": 0.3,
+    "course_fit": 0.3,
+    "track_condition_fit": 0.0,
+    "jockey_fit": 0.2,
+}
+LOCAL_LEGACY_SUPPORT_WEIGHTS = {
+    "distance_fit": 0.0,
+    "course_fit": 0.4,
+    "track_condition_fit": 0.3,
+    "jockey_fit": 0.0,
+}
+CENTRAL_ADJUSTMENT_SCORE_SCALE = 1.4
+LOCAL_ADJUSTMENT_SCORE_SCALE = 0.8
+CENTRAL_COMPETITIVE_FIELD_SIZE_RANGE = (13, 15)
+CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_FLAGS = {
+    "HEAD_TO_HEAD_POSITIVE",
+    "LARGE_FIELD_GOOD_RUN",
+    "CLASS_DROP_PLUS",
+}
+CENTRAL_COMPETITIVE_FIELD_CLASS_FLAGS = {
+    "GRADE1_SMALL_MARGIN",
+    "GRADED_SMALL_MARGIN",
+    "OPEN_CLASS_COMPETITIVE",
+}
+CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_SCORE_BONUS = 1.6
+CENTRAL_COMPETITIVE_FIELD_PACE_FLAGS = {
+    "PACE_FIT",
+    "STALKER_ADVANTAGE",
+    "CLOSING_SPEED",
+}
+CENTRAL_COMPETITIVE_FIELD_PACE_SCORE_BONUS = 2.1
+CENTRAL_COMPETITIVE_FIELD_WEAK_RISK_PENALTY = 1
+NON_MARKET_ANCHOR_DEEP_FLAGS = {
+    "RECENT_FORM_STRONG",
+    "RECENT_FORM_STABLE",
+    "DISTANCE_FIT",
+    "COURSE_FIT",
+}
+NON_MARKET_ANCHOR_PEDIGREE_FLAGS = {
+    "PEDIGREE_DISTANCE_FIT",
+    "PEDIGREE_STAMINA_FIT",
+    "PEDIGREE_SURFACE_FIT",
+}
+NON_MARKET_ANCHOR_RACE_LEVEL_FLAGS = (
+    CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_FLAGS
+    | CENTRAL_COMPETITIVE_FIELD_CLASS_FLAGS
+)
 MARK_LABELS = ("◎", "○", "▲", "△", "☆")
 DEBUT_RACE_NAME_TOKENS = ("新馬", "メイクデビュー", "フレッシュチャレンジ")
 UNRACED_BASE_SCORE = 8.0
@@ -59,6 +124,14 @@ LOW_SAMPLE_PEDIGREE_PRIOR_BLEND_BY_RUN_COUNT = {
     2: 0.55,
     3: 0.35,
     4: 0.2,
+}
+TRACK_CONDITION_LEVELS = {
+    "良": 0,
+    "稍": 1,
+    "稍重": 1,
+    "重": 2,
+    "不": 3,
+    "不良": 3,
 }
 
 
@@ -109,6 +182,18 @@ def is_unraced_debut_horse(horse: HorseEntry, race_info: RaceInfo) -> bool:
     return is_debut_race(race_info) and not has_valid_recent_result(horse.recent_runs)
 
 
+def race_scope_kind(race_info: RaceInfo | None) -> str | None:
+    if race_info is None:
+        return None
+    source = str(race_info.source or "").lower()
+    scope_key = str(race_info.scope_key or "").lower()
+    if source == "local" or scope_key == "local" or scope_key.startswith("local_"):
+        return "local"
+    if source == "central" or scope_key == "central" or scope_key.startswith("central_"):
+        return "central"
+    return None
+
+
 def effective_pedigree_weight_for_horse(
     base_weight: float,
     horse: HorseEntry,
@@ -119,6 +204,63 @@ def effective_pedigree_weight_for_horse(
     if low_sample_weight is None:
         return base_weight
     return max(base_weight, low_sample_weight)
+
+
+def component_score_weights_for_race(race_info: RaceInfo | None) -> dict[str, float]:
+    scope = race_scope_kind(race_info)
+    if scope == "central":
+        return CENTRAL_COMPONENT_SCORE_WEIGHTS
+    if scope == "local":
+        return LOCAL_COMPONENT_SCORE_WEIGHTS
+    return {
+        "ability": ABILITY_SCORE_WEIGHT,
+        "recent_quality": RECENT_QUALITY_SCORE_WEIGHT,
+        "trend": TREND_SCORE_WEIGHT,
+        "condition_fit": CONDITION_FIT_SCORE_WEIGHT,
+        "race_level": RACE_LEVEL_SCORE_WEIGHT,
+        "pace_jockey": PACE_JOCKEY_SCORE_WEIGHT,
+    }
+
+
+def legacy_support_bonus_for_race(scores: ScoreBreakdown, race_info: RaceInfo | None) -> float:
+    scope = race_scope_kind(race_info)
+    if scope == "central":
+        weights = CENTRAL_LEGACY_SUPPORT_WEIGHTS
+    elif scope == "local":
+        weights = LOCAL_LEGACY_SUPPORT_WEIGHTS
+    else:
+        return 0.0
+    return (
+        scores.distance_fit * weights["distance_fit"]
+        + scores.course_fit * weights["course_fit"]
+        + scores.track_condition_fit * weights["track_condition_fit"]
+        + scores.jockey_fit * weights["jockey_fit"]
+    )
+
+
+def adjustment_score_scale_for_race(race_info: RaceInfo | None) -> float:
+    scope = race_scope_kind(race_info)
+    if scope == "central":
+        return CENTRAL_ADJUSTMENT_SCORE_SCALE
+    if scope == "local":
+        return LOCAL_ADJUSTMENT_SCORE_SCALE
+    return 1.0
+
+
+def is_central_competitive_field(
+    race_info: RaceInfo | None,
+    field_size: int | None,
+) -> bool:
+    if race_scope_kind(race_info) != "central" or field_size is None:
+        return False
+    minimum, maximum = CENTRAL_COMPETITIVE_FIELD_SIZE_RANGE
+    return minimum <= field_size <= maximum
+
+
+def _analysis_flags(analysis: object | None, field_name: str) -> set[str]:
+    if analysis is None:
+        return set()
+    return set(getattr(analysis, field_name, []) or [])
 
 
 def _low_sample_prior_blend(run_count: int) -> float:
@@ -281,6 +423,47 @@ def run_condition_mismatch(run: RecentRun, race_info: RaceInfo | None) -> bool:
     return False
 
 
+def _grade_adjusted_run_score(
+    score: float,
+    run: RecentRun,
+    race_info: RaceInfo | None,
+    margin: float | None,
+) -> float:
+    run_level = infer_run_race_class_level(run)
+    target_level = infer_target_race_class_level(race_info)
+    if run_level is None or run.finish is None:
+        return score
+
+    class_delta = run_level - target_level if target_level is not None else None
+    if class_delta is not None:
+        if class_delta >= 2.0:
+            score += 0.9
+        elif class_delta >= 1.0:
+            score += 0.5
+        elif class_delta <= -2.0:
+            score -= 0.8
+        elif class_delta <= -1.0:
+            score -= 0.4
+
+    if margin is not None:
+        if run_level >= 7.0 and run.finish <= 14 and margin <= 0.8:
+            score = max(score, 5.8)
+        if run_level >= 9.0 and run.finish <= 12 and margin <= 1.2:
+            score = max(score, 6.8)
+        if run_level >= 8.0 and run.finish <= 10 and margin <= 1.0:
+            score = max(score, 7.0)
+        if run_level >= 7.0 and run.finish <= 8 and margin <= 0.8:
+            score = max(score, 7.0)
+        if run_level >= 7.0 and run.finish <= 5 and margin <= 0.5:
+            score = max(score, 7.7)
+
+    if class_delta is not None and run.finish == 1 and class_delta < 0:
+        score = min(score, 8.1 if abs(class_delta) <= 1.5 else 7.6)
+    elif class_delta is not None and run.finish <= 3 and class_delta <= -1.5:
+        score = min(score, 7.8)
+    return score
+
+
 def score_run_performance(run: RecentRun, race_info: RaceInfo | None = None) -> float:
     if run.finish is None:
         return 0.0
@@ -289,27 +472,18 @@ def score_run_performance(run: RecentRun, race_info: RaceInfo | None = None) -> 
 
     if run.field_size is not None and run.field_size >= 14 and run.finish <= 3:
         score += 0.5
-    if run.popularity is not None:
-        if run.popularity >= 8 and run.finish <= 3:
-            score += 0.8
-        if run.finish < run.popularity and run.popularity - run.finish >= 5:
-            score += 0.4
-        if run.popularity <= 2 and run.field_size is not None and run.finish > run.field_size / 2:
-            score -= 1.0
-    if run.odds is not None and run.odds >= 20 and run.finish <= 3:
-        score += 0.4
 
     margin = parse_margin_value(run.margin)
     if margin is not None:
         if run.finish == 1:
             score += 0.4
         elif margin <= 0.3:
+            score += 0.5
+        elif margin <= 0.8 and run.finish <= 5:
             score += 0.3
         elif margin >= 1.5 and run.finish > 5:
-            score -= 0.5
+            score -= 0.6
 
-    if run_condition_mismatch(run, race_info) and score < 5.0:
-        score += 0.9
     if (
         race_info is not None
         and race_info.distance is not None
@@ -317,6 +491,11 @@ def score_run_performance(run: RecentRun, race_info: RaceInfo | None = None) -> 
         and score >= 7.0
     ):
         score += 0.3
+
+    score = _grade_adjusted_run_score(score, run, race_info, margin)
+
+    if run_condition_mismatch(run, race_info) and score < 5.0:
+        score += 0.9
 
     return round(clamp_float(score), 2)
 
@@ -361,7 +540,10 @@ def score_trend(career_runs: list[RecentRun], race_info: RaceInfo) -> int:
     recent_average = sum(performances[:2]) / 2
     previous = performances[2:5]
     previous_average = sum(previous) / len(previous)
-    return clamp_score(5.0 + (recent_average - previous_average) * 0.8)
+    trend = clamp_score(5.0 + (recent_average - previous_average) * 0.8)
+    if recent_average >= 6.0 and previous_average >= 7.0:
+        trend = max(trend, 4)
+    return trend
 
 
 def weighted_score_from_runs(scored_runs: list[tuple[int, float]]) -> int:
@@ -399,6 +581,36 @@ def _condition_fit_score(run: RecentRun) -> int:
     if run.finish is not None and run.finish <= 5:
         return 7
     return 4
+
+
+def _track_condition_level(value: str | None) -> int | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if "不" in text:
+        return TRACK_CONDITION_LEVELS["不"]
+    if "稍" in text:
+        return TRACK_CONDITION_LEVELS["稍"]
+    if "重" in text:
+        return TRACK_CONDITION_LEVELS["重"]
+    if "良" in text:
+        return TRACK_CONDITION_LEVELS["良"]
+    return TRACK_CONDITION_LEVELS.get(text)
+
+
+def _track_condition_similarity(target: str | None, past: str | None) -> float | None:
+    target_level = _track_condition_level(target)
+    past_level = _track_condition_level(past)
+    if target_level is None or past_level is None:
+        return None
+    diff = abs(target_level - past_level)
+    if diff == 0:
+        return 1.0
+    if diff == 1:
+        return 0.8
+    if diff == 2:
+        return 0.55
+    return 0.35
 
 
 def score_distance_fit(recent_runs: list[RecentRun], race_distance: int | None) -> int:
@@ -457,10 +669,13 @@ def score_track_condition_fit(recent_runs: list[RecentRun], track_condition: str
         if not run.track_condition:
             continue
         has_track_condition_data = True
-        if run.track_condition == track_condition:
-            scored_runs.append((_condition_fit_score(run), get_weight(index)))
+        similarity = _track_condition_similarity(track_condition, run.track_condition)
+        if similarity is None:
+            continue
+        score = clamp_score(_condition_fit_score(run) * similarity + 5.0 * (1.0 - similarity))
+        scored_runs.append((score, get_weight(index)))
     if not scored_runs:
-        return 1 if has_track_condition_data else 0
+        return 5 if has_track_condition_data else 0
     return weighted_score_from_runs(scored_runs)
 
 
@@ -477,7 +692,7 @@ def score_jockey_fit(recent_runs: list[RecentRun], jockey: str | None) -> int:
         if same_jockey:
             scored_runs.append((_condition_fit_score(run), get_weight(index)))
     if not scored_runs:
-        return 1 if has_jockey_data else 0
+        return 5 if has_jockey_data else 0
     return weighted_score_from_runs(scored_runs)
 
 
@@ -503,24 +718,63 @@ def score_condition_fit_score(
     )
 
 
-def score_race_level_component(race_level_analysis: object | None = None) -> int:
+def score_race_level_component(
+    race_level_analysis: object | None = None,
+    *,
+    race_info: RaceInfo | None = None,
+    field_size: int | None = None,
+) -> int:
     if race_level_analysis is None:
         return 5
     adjustment_hint = float(getattr(race_level_analysis, "adjustment_hint", 0.0) or 0.0)
-    positive_flags = set(getattr(race_level_analysis, "positive_flags", []) or [])
-    risk_flags = set(getattr(race_level_analysis, "risk_flags", []) or [])
+    positive_flags = _analysis_flags(race_level_analysis, "positive_flags")
+    risk_flags = _analysis_flags(race_level_analysis, "risk_flags")
     score = 5.0 + clamp_float(adjustment_hint, -1.5, 1.5) * 2.0
     if len(positive_flags) >= 2:
         score += 0.4
     if len(risk_flags) >= 2:
         score -= 0.4
+    if is_central_competitive_field(race_info, field_size):
+        if positive_flags & CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_FLAGS:
+            score += CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_SCORE_BONUS
+        if positive_flags & CENTRAL_COMPETITIVE_FIELD_CLASS_FLAGS:
+            score += 0.7
     return clamp_score(score)
+
+
+def adjust_risk_for_non_market_context(
+    risk: int,
+    *,
+    race_info: RaceInfo | None,
+    field_size: int | None,
+    deep_analysis: object | None = None,
+    pedigree_analysis: PedigreeAnalysis | None = None,
+    race_level_analysis: object | None = None,
+) -> int:
+    if not is_central_competitive_field(race_info, field_size):
+        return risk
+
+    deep_positive = _analysis_flags(deep_analysis, "positive_flags")
+    deep_risk = _analysis_flags(deep_analysis, "risk_flags")
+    pedigree_positive = _analysis_flags(pedigree_analysis, "positive_flags")
+    race_level_positive = _analysis_flags(race_level_analysis, "positive_flags")
+    has_non_market_anchor = bool(
+        (deep_positive & NON_MARKET_ANCHOR_DEEP_FLAGS)
+        or (pedigree_positive & NON_MARKET_ANCHOR_PEDIGREE_FLAGS)
+        or (race_level_positive & NON_MARKET_ANCHOR_RACE_LEVEL_FLAGS)
+    )
+    if "RECENT_FORM_WEAK" in deep_risk and not has_non_market_anchor:
+        risk -= CENTRAL_COMPETITIVE_FIELD_WEAK_RISK_PENALTY
+    return max(-10, min(0, risk))
 
 
 def score_pace_jockey_component(
     jockey_fit: int,
     pace_analysis: object | None = None,
     race_pace_projection: object | None = None,
+    *,
+    race_info: RaceInfo | None = None,
+    field_size: int | None = None,
 ) -> int:
     jockey_component = jockey_fit if jockey_fit > 0 else 5
     score = jockey_component * 0.45 + 5.0 * 0.55
@@ -548,6 +802,12 @@ def score_pace_jockey_component(
         score += 0.3
     if late_score >= 7.0 and projected_pace in {"fast", "average"}:
         score += 0.3
+    if (
+        is_central_competitive_field(race_info, field_size)
+        and positive_flags & CENTRAL_COMPETITIVE_FIELD_PACE_FLAGS
+        and "PACE_MISMATCH" not in risk_flags
+    ):
+        score += CENTRAL_COMPETITIVE_FIELD_PACE_SCORE_BONUS
 
     if "PACE_MISMATCH" in risk_flags:
         score -= 1.0
@@ -592,6 +852,7 @@ def calculate_base_total_score(
     *,
     distance_weight: float,
     course_weight: float,
+    race_info: RaceInfo | None = None,
     use_market_score_in_ranking: bool = False,
     market_signal_weight: float = 0.0,
 ) -> float:
@@ -609,13 +870,16 @@ def calculate_base_total_score(
         or scores.race_level_score != 5
     )
     if has_component_scores:
+        component_weights = component_score_weights_for_race(race_info)
+        legacy_support_bonus = legacy_support_bonus_for_race(scores, race_info)
         return round(
-            scores.ability_score * ABILITY_SCORE_WEIGHT
-            + scores.recent_quality_score * RECENT_QUALITY_SCORE_WEIGHT
-            + scores.trend_score * TREND_SCORE_WEIGHT
-            + scores.condition_fit_score * CONDITION_FIT_SCORE_WEIGHT
-            + scores.race_level_score * RACE_LEVEL_SCORE_WEIGHT
-            + scores.pace_jockey_score * PACE_JOCKEY_SCORE_WEIGHT
+            scores.ability_score * component_weights["ability"]
+            + scores.recent_quality_score * component_weights["recent_quality"]
+            + scores.trend_score * component_weights["trend"]
+            + scores.condition_fit_score * component_weights["condition_fit"]
+            + scores.race_level_score * component_weights["race_level"]
+            + scores.pace_jockey_score * component_weights["pace_jockey"]
+            + legacy_support_bonus
             + market_component
             + scores.risk,
             1,
@@ -656,15 +920,32 @@ def score_risk(
 
     valid_finishes = [run for run in recent_runs[:5] if run.finish is not None and run.field_size is not None]
     if len(valid_finishes) >= 2 and all(run.finish > run.field_size / 2 for run in valid_finishes[:2]):
-        return -7
+        return -5
     if distance_fit <= 3 and recent_form <= 3:
-        return -6
+        return -5
     null_finish_count = sum(1 for run in recent_runs[:5] if run.finish is None)
     if null_finish_count >= 2:
-        return -5
+        return -4
     if recent_form >= 7 and len(valid_finishes) >= 3:
         return -1
+    if recent_form >= 5 and distance_fit >= 7:
+        return -1
     return -3
+
+
+def calculate_carried_weight_adjustment(horse: HorseEntry, horses: list[HorseEntry]) -> float:
+    if horse.carried_weight is None:
+        return 0.0
+    weights = [entry.carried_weight for entry in horses if entry.carried_weight is not None]
+    if len(weights) < 2:
+        return 0.0
+    field_average = sum(weights) / len(weights)
+    diff = field_average - horse.carried_weight
+    factor = 0.35 if diff > 0 else 0.25
+    adjustment = diff * factor
+    if horse.carried_weight <= 53.0 and field_average >= 55.0:
+        adjustment += 0.2
+    return round(max(-1.2, min(1.6, adjustment)), 1)
 
 
 def get_lesson_weight_adjustment(lessons: list[LessonItem]) -> tuple[float, float, list[str]]:
@@ -795,6 +1076,7 @@ def build_reason(
     pedigree_adjustment_value: float = 0.0,
     race_level_adjustment_value: float = 0.0,
     pace_adjustment_value: float = 0.0,
+    carried_weight_adjustment_value: float = 0.0,
 ) -> str:
     recent_runs = scorable_recent_runs(horse.recent_runs)
     career_runs = scorable_career_runs(horse.recent_runs)
@@ -815,6 +1097,10 @@ def build_reason(
             reason += f" 展開面から+{pace_adjustment_value:.1f}補正。"
         elif pace_adjustment_value < 0:
             reason += f" 展開面で{pace_adjustment_value:.1f}補正。"
+        if carried_weight_adjustment_value > 0:
+            reason += f" 斤量面から+{carried_weight_adjustment_value:.1f}補正。"
+        elif carried_weight_adjustment_value < 0:
+            reason += f" 斤量面で{carried_weight_adjustment_value:.1f}補正。"
         return reason
 
     wins, top3, same_distance_top3, same_course_top3, same_surface_top3 = summarize_run_facts(horse, race_info)
@@ -882,6 +1168,10 @@ def build_reason(
         reason += f" 展開面から+{pace_adjustment_value:.1f}補正。"
     elif pace_adjustment_value < 0:
         reason += f" 展開面で{pace_adjustment_value:.1f}補正。"
+    if carried_weight_adjustment_value > 0:
+        reason += f" 斤量面から+{carried_weight_adjustment_value:.1f}補正。"
+    elif carried_weight_adjustment_value < 0:
+        reason += f" 斤量面で{carried_weight_adjustment_value:.1f}補正。"
     return reason
 
 
@@ -892,6 +1182,8 @@ def score_horse_by_recent_runs(
     *,
     use_market_score_in_ranking: bool = False,
     market_signal_weight: float = 0.0,
+    field_size: int | None = None,
+    deep_analysis: object | None = None,
     pedigree_analysis: PedigreeAnalysis | None = None,
     race_level_analysis: object | None = None,
     pace_analysis: object | None = None,
@@ -925,10 +1217,27 @@ def score_horse_by_recent_runs(
         distance_weight=distance_weight,
         course_weight=course_weight,
     )
-    race_level_score = score_race_level_component(race_level_analysis)
-    pace_jockey_score = score_pace_jockey_component(jockey_fit, pace_analysis, race_pace_projection)
+    race_level_score = score_race_level_component(
+        race_level_analysis,
+        race_info=race_info,
+        field_size=field_size,
+    )
+    pace_jockey_score = score_pace_jockey_component(
+        jockey_fit,
+        pace_analysis,
+        race_pace_projection,
+        race_info=race_info,
+        field_size=field_size,
+    )
     odds_value = score_odds_value(horse, recent_quality_score)
-    risk = score_risk(recent_runs, recent_quality_score, distance_fit)
+    risk = adjust_risk_for_non_market_context(
+        score_risk(recent_runs, recent_quality_score, distance_fit),
+        race_info=race_info,
+        field_size=field_size,
+        deep_analysis=deep_analysis,
+        pedigree_analysis=pedigree_analysis,
+        race_level_analysis=race_level_analysis,
+    )
 
     scores = ScoreBreakdown(
         recent_form=recent_form,
@@ -956,6 +1265,7 @@ def score_horse_by_recent_runs(
             scores,
             distance_weight=distance_weight,
             course_weight=course_weight,
+            race_info=race_info,
             use_market_score_in_ranking=use_market_score_in_ranking,
             market_signal_weight=market_signal_weight,
         )
@@ -1097,6 +1407,8 @@ def build_prediction_from_recent_runs_with_scoring_config(
             lessons=lessons,
             use_market_score_in_ranking=scoring_config_snapshot.use_market_score_in_ranking,
             market_signal_weight=scoring_config_snapshot.market_signal_weight,
+            field_size=len(race_data.horses),
+            deep_analysis=deep_analysis_by_horse.get(horse.horse_no),
             pedigree_analysis=pedigree_analysis_by_horse.get(horse.horse_no),
             race_level_analysis=race_level_analysis_by_horse.get(horse.horse_no),
             pace_analysis=pace_analysis_by_horse.get(horse.horse_no),
@@ -1126,14 +1438,20 @@ def build_prediction_from_recent_runs_with_scoring_config(
         )
         race_level_adjustment = calculate_race_level_adjustment(race_level_analysis)
         pace_adjustment = calculate_pace_adjustment(pace_analysis, race_pace_projection)
+        carried_weight_adjustment = calculate_carried_weight_adjustment(horse_entry, race_data.horses)
+        weight_adjusted_base_score = round(horse_score.total_score + carried_weight_adjustment, 1)
+        adjustment_scale = adjustment_score_scale_for_race(race_data.race_info)
+        scaled_pedigree_weight = round(pedigree_weight * adjustment_scale, 3)
+        scaled_race_level_weight = round(scoring_config_snapshot.race_level_weight * adjustment_scale, 3)
+        scaled_pace_weight = round(scoring_config_snapshot.pace_weight * adjustment_scale, 3)
         score_breakdown = build_score_breakdown(
-            base_total_score=horse_score.total_score,
+            base_total_score=weight_adjusted_base_score,
             pedigree_adjustment_raw=pedigree_adjustment.pedigree_adjustment,
-            pedigree_weight=pedigree_weight,
+            pedigree_weight=scaled_pedigree_weight,
             race_level_adjustment_raw=race_level_adjustment.adjustment,
-            race_level_weight=scoring_config_snapshot.race_level_weight,
+            race_level_weight=scaled_race_level_weight,
             pace_adjustment_raw=pace_adjustment.adjustment,
-            pace_weight=scoring_config_snapshot.pace_weight,
+            pace_weight=scaled_pace_weight,
         )
         updated_reason = build_reason(
             horse_entry,
@@ -1144,12 +1462,13 @@ def build_prediction_from_recent_runs_with_scoring_config(
             pedigree_adjustment_value=score_breakdown.pedigree_adjustment_weighted,
             race_level_adjustment_value=score_breakdown.race_level_adjustment_weighted,
             pace_adjustment_value=score_breakdown.pace_adjustment_weighted,
+            carried_weight_adjustment_value=carried_weight_adjustment,
         )
         pedigree_adjusted_scores.append(
             horse_score.model_copy(
                 update={
                     "total_score": round(
-                        horse_score.total_score + score_breakdown.pedigree_adjustment_weighted,
+                        weight_adjusted_base_score + score_breakdown.pedigree_adjustment_weighted,
                         1,
                     )
                 }
@@ -1158,7 +1477,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
         enriched_horse_scores.append(
             horse_score.model_copy(
                 update={
-                    "base_total_score": horse_score.total_score,
+                    "base_total_score": weight_adjusted_base_score,
                     "pedigree_adjustment": pedigree_adjustment,
                     "race_level_adjustment": race_level_adjustment,
                     "pace_adjustment": pace_adjustment,
