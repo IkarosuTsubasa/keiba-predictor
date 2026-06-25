@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from keiba_llm_agent.main import run_analysis
+from keiba_llm_agent.schemas.deep_analysis import HorseDeepAnalysis
 from keiba_llm_agent.schemas.pace_analysis import HorsePaceAnalysis, RacePaceProjection
 from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
 from keiba_llm_agent.schemas.prediction import HorseScore, ScoreBreakdown
@@ -193,6 +194,73 @@ class PredictionScoringModeTests(unittest.TestCase):
         self.assertEqual(payload["scoring_config"]["conditional_weight_profile"], "none")
         self.assertFalse(payload["market_signal_config"]["use_market_score_in_ranking"])
         self.assertEqual(payload["market_signal_config"]["market_signal_weight"], 0.0)
+
+    def test_central_top_choice_refinement_promotes_triple_anchor_candidate(self) -> None:
+        payload = json.loads(self.race_data_path.read_text(encoding="utf-8"))
+        payload["race_info"]["source"] = "central"
+        payload["race_info"]["scope_key"] = "central"
+        self.race_data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        mock_scores = {
+            1: _mock_score(1, "ホースA", 40.0),
+            2: _mock_score(2, "ホースB", 38.5),
+            3: _mock_score(3, "ホースC", 37.8),
+        }
+        mock_deep = [
+            HorseDeepAnalysis(
+                horse_no=1,
+                horse_name="ホースA",
+                positive_flags=[],
+                risk_flags=[],
+                recent_form_summary="標準。",
+                distance_analysis="標準。",
+                course_analysis="標準。",
+                track_condition_analysis="標準。",
+                jockey_analysis="標準。",
+                odds_analysis="市場情報は使わない。",
+                overall_comment="標準評価。",
+            ),
+            HorseDeepAnalysis(
+                horse_no=2,
+                horse_name="ホースB",
+                positive_flags=["RECENT_FORM_STABLE"],
+                risk_flags=[],
+                recent_form_summary="近走は安定。",
+                distance_analysis="標準。",
+                course_analysis="標準。",
+                track_condition_analysis="標準。",
+                jockey_analysis="標準。",
+                odds_analysis="市場情報は使わない。",
+                overall_comment="近走の安定感あり。",
+            ),
+        ]
+        mock_race_levels = [
+            RaceLevelAnalysis(horse_no=1, horse_name="ホースA", positive_flags=[], risk_flags=[], head_to_head_summary="", race_level_summary="", opponent_context_summary="", overall_comment="標準評価。", adjustment_hint=0.0),
+            RaceLevelAnalysis(horse_no=2, horse_name="ホースB", positive_flags=["HEAD_TO_HEAD_POSITIVE"], risk_flags=[], head_to_head_summary="", race_level_summary="", opponent_context_summary="", overall_comment="相手関係では優位。", adjustment_hint=0.3),
+        ]
+        mock_pace_analyses = [
+            HorsePaceAnalysis(horse_no=1, horse_name="ホースA", running_style="差し", position_stability="標準", positive_flags=[], risk_flags=[], overall_comment="標準評価。"),
+            HorsePaceAnalysis(horse_no=2, horse_name="ホースB", running_style="先行", position_stability="安定", positive_flags=["PACE_FIT", "STALKER_ADVANTAGE"], risk_flags=[], overall_comment="展開利が見込める。"),
+        ]
+        mock_projection = RacePaceProjection(projected_pace="average", front_runner_count=1, stalker_count=3, closer_count=2, pace_comment="平均ペース想定。", favorable_styles=["先行", "差し"], risk_styles=[])
+
+        with (
+            patch("keiba_llm_agent.scoring.recent_run_scorer.score_horse_by_recent_runs", side_effect=lambda horse, race_info, lessons=None, **kwargs: mock_scores[horse.horse_no]),
+            patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_race_level_for_race", return_value=mock_race_levels),
+            patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_pace_for_race", return_value=(mock_pace_analyses, mock_projection)),
+            patch("keiba_llm_agent.scoring.recent_run_scorer.build_pedigree_analyses_for_race", return_value=[]),
+            patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_race_deeply", return_value=mock_deep),
+        ):
+            _, saved_path = run_analysis(
+                race_data_path=self.race_data_path,
+                output_path=self.prediction_path,
+                lessons_path=self.lessons_path,
+            )
+
+        result = json.loads(saved_path.read_text(encoding="utf-8"))
+        self.assertEqual(result["marks"]["◎"], 2)
+        refined_score = next(item for item in result["horse_scores"] if item["horse_no"] == 2)
+        self.assertGreater(refined_score["score_breakdown"]["top_choice_refinement_bonus"], 0)
+        self.assertIn("中央場の本命補正", refined_score["reason"])
 
 
 if __name__ == "__main__":

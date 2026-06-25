@@ -117,6 +117,8 @@ def build_score_breakdown(
         pace_weight=pace_weight,
         pace_adjustment_weighted=pace_adjustment_weighted,
         borderline_recovery_bonus=0.0,
+        top_choice_refinement_bonus=0.0,
         total_score=total_score,
         total_score_after_recovery=total_score,
+        total_score_after_refinement=total_score,
     )

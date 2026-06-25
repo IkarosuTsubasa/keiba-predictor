@@ -573,6 +573,67 @@ class RecentRunScorerTests(unittest.TestCase):
         )
         self.assertEqual(competitive_field_score.scores.risk, normal_field_score.scores.risk - 1)
 
+    def test_local_midfield_context_boosts_non_market_anchor(self) -> None:
+        race_info = RaceInfo(
+            race_id="202646030811",
+            race_name="地方一般戦",
+            race_date="2026-06-21",
+            course="大井",
+            surface="ダート",
+            distance=1600,
+            track_condition="良",
+            source="local",
+            scope_key="local",
+        )
+        horse = HorseEntry(
+            horse_no=39,
+            horse_name="LocalMidfieldAnchor",
+            jockey="騎手A",
+            recent_runs=[
+                build_run("2026-05-20", "大井", "ダート", 1600, 3, 14, "騎手A"),
+                build_run("2026-04-20", "大井", "ダート", 1600, 4, 13, "騎手A"),
+            ],
+        )
+        deep_analysis = HorseDeepAnalysis(
+            horse_no=39,
+            horse_name="LocalMidfieldAnchor",
+            positive_flags=["RECENT_FORM_STABLE", "DISTANCE_FIT"],
+            risk_flags=[],
+            recent_form_summary="近走は安定。",
+            distance_analysis="距離適性あり。",
+            course_analysis="コース適性は標準。",
+            track_condition_analysis="馬場適性は標準。",
+            jockey_analysis="騎手面は標準。",
+            odds_analysis="市場情報は使わない。",
+            overall_comment="近走と距離面に根拠あり。",
+        )
+        pace_analysis = HorsePaceAnalysis(
+            horse_no=39,
+            horse_name="LocalMidfieldAnchor",
+            running_style="先行",
+            early_position_score=7.0,
+            late_position_score=5.0,
+            position_stability="安定",
+            positive_flags=["PACE_FIT", "POSITION_STABLE"],
+            risk_flags=[],
+            overall_comment="展開利が見込める。",
+        )
+        normal_field_score = score_horse_by_recent_runs(
+            horse,
+            race_info,
+            field_size=12,
+            deep_analysis=deep_analysis,
+            pace_analysis=pace_analysis,
+        )
+        midfield_score = score_horse_by_recent_runs(
+            horse,
+            race_info,
+            field_size=14,
+            deep_analysis=deep_analysis,
+            pace_analysis=pace_analysis,
+        )
+        self.assertGreater(midfield_score.scores.pace_jockey_score, normal_field_score.scores.pace_jockey_score)
+
     def test_same_jockey_improves_jockey_fit(self) -> None:
         horse = HorseEntry(
             horse_no=4,

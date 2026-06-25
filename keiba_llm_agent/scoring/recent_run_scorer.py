@@ -92,6 +92,12 @@ CENTRAL_COMPETITIVE_FIELD_PACE_FLAGS = {
 }
 CENTRAL_COMPETITIVE_FIELD_PACE_SCORE_BONUS = 2.1
 CENTRAL_COMPETITIVE_FIELD_WEAK_RISK_PENALTY = 1
+LOCAL_MIDFIELD_FIELD_SIZE_RANGE = (13, 15)
+LOCAL_MIDFIELD_PACE_SCORE_BONUS = 3
+TOP_CHOICE_REFINEMENT_MAX_RANK = 3
+TOP_CHOICE_REFINEMENT_MAX_SCORE_GAP = 0.8
+TOP_CHOICE_REFINEMENT_MIN_SIGNAL_DELTA = 2.0
+TOP_CHOICE_REFINEMENT_SCORE_MARGIN = 0.1
 NON_MARKET_ANCHOR_DEEP_FLAGS = {
     "RECENT_FORM_STRONG",
     "RECENT_FORM_STABLE",
@@ -107,6 +113,20 @@ NON_MARKET_ANCHOR_RACE_LEVEL_FLAGS = (
     CENTRAL_COMPETITIVE_FIELD_RACE_LEVEL_FLAGS
     | CENTRAL_COMPETITIVE_FIELD_CLASS_FLAGS
 )
+NON_MARKET_RECENT_ANCHOR_FLAGS = {
+    "RECENT_FORM_STRONG",
+    "RECENT_FORM_STABLE",
+}
+NON_MARKET_CONDITION_ANCHOR_FLAGS = {
+    "DISTANCE_FIT",
+    "COURSE_FIT",
+}
+NON_MARKET_UNKNOWN_RISK_FLAGS = {
+    "DISTANCE_UNKNOWN",
+    "COURSE_UNKNOWN",
+    "TRACK_CONDITION_UNKNOWN",
+    "DATA_INCOMPLETE",
+}
 MARK_LABELS = ("◎", "○", "▲", "△", "☆")
 DEBUT_RACE_NAME_TOKENS = ("新馬", "メイクデビュー", "フレッシュチャレンジ")
 UNRACED_BASE_SCORE = 8.0
@@ -257,10 +277,110 @@ def is_central_competitive_field(
     return minimum <= field_size <= maximum
 
 
+def is_local_midfield_context(
+    race_info: RaceInfo | None,
+    field_size: int | None,
+) -> bool:
+    if race_scope_kind(race_info) != "local" or field_size is None:
+        return False
+    minimum, maximum = LOCAL_MIDFIELD_FIELD_SIZE_RANGE
+    return minimum <= field_size <= maximum
+
+
 def _analysis_flags(analysis: object | None, field_name: str) -> set[str]:
     if analysis is None:
         return set()
     return set(getattr(analysis, field_name, []) or [])
+
+
+def _non_market_signal_profile(
+    *,
+    deep_analysis: object | None = None,
+    pedigree_analysis: PedigreeAnalysis | None = None,
+    race_level_analysis: object | None = None,
+    pace_analysis: object | None = None,
+) -> dict[str, float | int | bool]:
+    deep_positive = _analysis_flags(deep_analysis, "positive_flags")
+    deep_risk = _analysis_flags(deep_analysis, "risk_flags")
+    pedigree_positive = _analysis_flags(pedigree_analysis, "positive_flags")
+    pedigree_risk = _analysis_flags(pedigree_analysis, "risk_flags")
+    race_level_positive = _analysis_flags(race_level_analysis, "positive_flags")
+    race_level_risk = _analysis_flags(race_level_analysis, "risk_flags")
+    pace_positive = _analysis_flags(pace_analysis, "positive_flags")
+    pace_risk = _analysis_flags(pace_analysis, "risk_flags")
+
+    recent_anchor = bool(deep_positive & NON_MARKET_RECENT_ANCHOR_FLAGS)
+    condition_anchor = bool(deep_positive & NON_MARKET_CONDITION_ANCHOR_FLAGS)
+    pedigree_anchor = bool(pedigree_positive & NON_MARKET_ANCHOR_PEDIGREE_FLAGS)
+    race_level_anchor = bool(race_level_positive & NON_MARKET_ANCHOR_RACE_LEVEL_FLAGS)
+    pace_mismatch = "PACE_MISMATCH" in pace_risk
+    pace_anchor = bool(pace_positive & CENTRAL_COMPETITIVE_FIELD_PACE_FLAGS) and not pace_mismatch
+    recent_weak = "RECENT_FORM_WEAK" in deep_risk
+    head_to_head_negative = "HEAD_TO_HEAD_NEGATIVE" in race_level_risk
+    unknown_count = len(
+        (deep_risk | pedigree_risk | race_level_risk | pace_risk)
+        & NON_MARKET_UNKNOWN_RISK_FLAGS
+    )
+    anchor_count = sum(
+        (
+            recent_anchor,
+            condition_anchor,
+            pedigree_anchor,
+            race_level_anchor,
+            pace_anchor,
+        )
+    )
+    strength = (
+        (2.0 if recent_anchor else 0.0)
+        + (1.0 if condition_anchor else 0.0)
+        + (1.0 if pedigree_anchor else 0.0)
+        + (2.0 if race_level_anchor else 0.0)
+        + (1.5 if pace_anchor else 0.0)
+        - (2.0 if recent_weak else 0.0)
+        - (1.5 if head_to_head_negative else 0.0)
+        - (1.0 if pace_mismatch else 0.0)
+        - (0.5 * unknown_count)
+    )
+    return {
+        "recent_anchor": recent_anchor,
+        "condition_anchor": condition_anchor,
+        "pedigree_anchor": pedigree_anchor,
+        "race_level_anchor": race_level_anchor,
+        "pace_anchor": pace_anchor,
+        "recent_weak": recent_weak,
+        "head_to_head_negative": head_to_head_negative,
+        "pace_mismatch": pace_mismatch,
+        "anchor_count": anchor_count,
+        "strength": strength,
+        "triple_anchor": (
+            recent_anchor
+            and race_level_anchor
+            and pace_anchor
+            and not recent_weak
+            and not head_to_head_negative
+            and not pace_mismatch
+        ),
+    }
+
+
+def has_local_midfield_context_anchor(
+    *,
+    deep_analysis: object | None = None,
+    race_level_analysis: object | None = None,
+    pace_analysis: object | None = None,
+) -> bool:
+    signal = _non_market_signal_profile(
+        deep_analysis=deep_analysis,
+        race_level_analysis=race_level_analysis,
+        pace_analysis=pace_analysis,
+    )
+    if signal["recent_weak"]:
+        return False
+    return bool(
+        signal["race_level_anchor"]
+        or signal["pace_anchor"]
+        or (signal["recent_anchor"] and signal["condition_anchor"])
+    )
 
 
 def _low_sample_prior_blend(run_count: int) -> float:
@@ -775,6 +895,8 @@ def score_pace_jockey_component(
     *,
     race_info: RaceInfo | None = None,
     field_size: int | None = None,
+    deep_analysis: object | None = None,
+    race_level_analysis: object | None = None,
 ) -> int:
     jockey_component = jockey_fit if jockey_fit > 0 else 5
     score = jockey_component * 0.45 + 5.0 * 0.55
@@ -808,6 +930,15 @@ def score_pace_jockey_component(
         and "PACE_MISMATCH" not in risk_flags
     ):
         score += CENTRAL_COMPETITIVE_FIELD_PACE_SCORE_BONUS
+    if (
+        is_local_midfield_context(race_info, field_size)
+        and has_local_midfield_context_anchor(
+            deep_analysis=deep_analysis,
+            race_level_analysis=race_level_analysis,
+            pace_analysis=pace_analysis,
+        )
+    ):
+        score += LOCAL_MIDFIELD_PACE_SCORE_BONUS
 
     if "PACE_MISMATCH" in risk_flags:
         score -= 1.0
@@ -1175,6 +1306,93 @@ def build_reason(
     return reason
 
 
+def apply_central_top_choice_refinement(
+    horse_scores: list[HorseScore],
+    deep_analyses: list[object],
+    pedigree_analyses: list[PedigreeAnalysis],
+    race_level_analyses: list[object],
+    pace_analyses: list[object],
+    race_info: RaceInfo,
+) -> dict[str, object]:
+    if race_scope_kind(race_info) != "central" or len(horse_scores) < 2:
+        return {
+            "refinement_applied": False,
+            "adjusted_horse_scores": horse_scores,
+            "refined_horse_no": None,
+        }
+
+    ordered_scores = sorted(horse_scores, key=lambda item: (-item.total_score, item.horse_no))
+    top_score = ordered_scores[0]
+    deep_by_horse = {analysis.horse_no: analysis for analysis in deep_analyses}
+    pedigree_by_horse = {analysis.horse_no: analysis for analysis in pedigree_analyses}
+    race_level_by_horse = {analysis.horse_no: analysis for analysis in race_level_analyses}
+    pace_by_horse = {analysis.horse_no: analysis for analysis in pace_analyses}
+
+    top_signal = _non_market_signal_profile(
+        deep_analysis=deep_by_horse.get(top_score.horse_no),
+        pedigree_analysis=pedigree_by_horse.get(top_score.horse_no),
+        race_level_analysis=race_level_by_horse.get(top_score.horse_no),
+        pace_analysis=pace_by_horse.get(top_score.horse_no),
+    )
+    best_candidate: HorseScore | None = None
+    best_key: tuple[float, float, int] | None = None
+    for rank, candidate in enumerate(ordered_scores[1:TOP_CHOICE_REFINEMENT_MAX_RANK], start=2):
+        score_gap = round(top_score.total_score - candidate.total_score, 4)
+        if score_gap < 0 or score_gap > TOP_CHOICE_REFINEMENT_MAX_SCORE_GAP:
+            continue
+        candidate_signal = _non_market_signal_profile(
+            deep_analysis=deep_by_horse.get(candidate.horse_no),
+            pedigree_analysis=pedigree_by_horse.get(candidate.horse_no),
+            race_level_analysis=race_level_by_horse.get(candidate.horse_no),
+            pace_analysis=pace_by_horse.get(candidate.horse_no),
+        )
+        if not candidate_signal["triple_anchor"] or top_signal["triple_anchor"]:
+            continue
+        signal_delta = float(candidate_signal["strength"]) - float(top_signal["strength"])
+        if signal_delta < TOP_CHOICE_REFINEMENT_MIN_SIGNAL_DELTA:
+            continue
+        candidate_key = (signal_delta, -score_gap, -rank)
+        if best_key is None or candidate_key > best_key:
+            best_key = candidate_key
+            best_candidate = candidate
+
+    if best_candidate is None:
+        return {
+            "refinement_applied": False,
+            "adjusted_horse_scores": horse_scores,
+            "refined_horse_no": None,
+        }
+
+    refined_total_score = round(top_score.total_score + TOP_CHOICE_REFINEMENT_SCORE_MARGIN, 1)
+    refinement_bonus = round(refined_total_score - best_candidate.total_score, 1)
+    refined_breakdown = best_candidate.score_breakdown.model_copy(
+        update={
+            "top_choice_refinement_bonus": refinement_bonus,
+            "total_score": refined_total_score,
+            "total_score_after_refinement": refined_total_score,
+        }
+    )
+    refined_candidate = best_candidate.model_copy(
+        update={
+            "total_score": refined_total_score,
+            "score_breakdown": refined_breakdown,
+            "reason": (
+                best_candidate.reason
+                + " 中央場の本命補正として近走・相手関係・展開の三点根拠を加味。"
+            ),
+        }
+    )
+    adjusted_scores = [
+        refined_candidate if score.horse_no == refined_candidate.horse_no else score
+        for score in horse_scores
+    ]
+    return {
+        "refinement_applied": True,
+        "adjusted_horse_scores": adjusted_scores,
+        "refined_horse_no": refined_candidate.horse_no,
+    }
+
+
 def score_horse_by_recent_runs(
     horse: HorseEntry,
     race_info: RaceInfo,
@@ -1228,6 +1446,8 @@ def score_horse_by_recent_runs(
         race_pace_projection,
         race_info=race_info,
         field_size=field_size,
+        deep_analysis=deep_analysis,
+        race_level_analysis=race_level_analysis,
     )
     odds_value = score_odds_value(horse, recent_quality_score)
     risk = adjust_risk_for_non_market_context(
@@ -1511,6 +1731,17 @@ def build_prediction_from_recent_runs_with_scoring_config(
     if borderline_recovery_result_payload["recovery_applied"]:
         horse_scores = borderline_recovery_result_payload["adjusted_horse_scores"]
         horse_scores.sort(key=lambda item: (-item.total_score, item.horse_no))
+    top_choice_refinement_result_payload = apply_central_top_choice_refinement(
+        horse_scores,
+        deep_analyses,
+        pedigree_analyses,
+        race_level_analyses,
+        pace_analyses,
+        race_data.race_info,
+    )
+    if top_choice_refinement_result_payload["refinement_applied"]:
+        horse_scores = top_choice_refinement_result_payload["adjusted_horse_scores"]
+        horse_scores.sort(key=lambda item: (-item.total_score, item.horse_no))
     used_lessons = lessons
     marks = build_marks(horse_scores)
     marked_horse_scores = order_horse_scores_by_marks(horse_scores, marks)
@@ -1519,6 +1750,8 @@ def build_prediction_from_recent_runs_with_scoring_config(
         risks.append("血統補正により一部順位が変動。")
     if analysis_rank_changed:
         risks.append("展開・相手関係補正により一部順位が変動。")
+    if top_choice_refinement_result_payload["refinement_applied"]:
+        risks.append("中央場の本命補正により◎候補を微調整。")
     strategy = evaluate_bet_strategy(
         race_data=race_data,
         horse_scores=marked_horse_scores,

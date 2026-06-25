@@ -102,8 +102,10 @@ class TotalScoreBreakdown(BaseModel):
     pace_weight: float = 0.2
     pace_adjustment_weighted: float = 0.0
     borderline_recovery_bonus: float = 0.0
+    top_choice_refinement_bonus: float = 0.0
     total_score: float = 0.0
     total_score_after_recovery: float = 0.0
+    total_score_after_refinement: float = 0.0
 
 
 class HorseScore(BaseModel):
