@@ -82,7 +82,7 @@ export function DashboardInsightPanel({ data, races }) {
         <div className="dashboard-insight-card__head">
           <div>
             <span>本日の傾向メモ</span>
-            <strong>AIメモ</strong>
+            <strong>予測メモ</strong>
           </div>
         </div>
         <p className="dashboard-ai-note">

@@ -39,7 +39,7 @@ function ReportCard({ item, featured = false, appShell = false }) {
       <h2>{item?.title || "-"}</h2>
       <p>{item?.lead || item?.summary || "日報の要約はまだありません。"}</p>
       <div className="daily-report-card__meta">
-        <span>{item?.mode === "fallback" ? "ローカル要約" : "LLM生成"}</span>
+        <span>{item?.mode === "fallback" ? "ローカル要約" : "自動生成"}</span>
       </div>
       <a href={href}>続きを読む</a>
     </article>
@@ -120,7 +120,7 @@ export default function DailyReportsPage({ appBasePath = "/keiba", appShell = fa
           <span className="daily-reports-hero__eyebrow">私の日報</span>
           <h1>日報アーカイブ</h1>
           <p>
-            対象日の AI モデル成績、予測モデルの命中傾向、回収率の振り返りコメントを
+            対象日の予測成績、命中傾向、回収率の振り返りコメントを
             記事形式で確認できます。
           </p>
         </div>

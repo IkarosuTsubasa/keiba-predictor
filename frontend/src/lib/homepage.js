@@ -199,23 +199,23 @@ function buildAnalysisTags(stats) {
 
 function buildRecommendationReason(stats, leadRaceMeta, leaderLabel) {
   if (stats.agreementRatio >= 0.75) {
-    return `${leaderLabel}を含む複数モデルの視点が近く、読み筋の起点として確認しやすいレースです。`;
+    return `${leaderLabel}を含む複数の見立てが近く、読み筋の起点として確認しやすいレースです。`;
   }
   if (stats.uniqueMainCount >= 3 || stats.noBetCount >= 2) {
-    return "本命候補が割れやすく、定量モデルごとの判断差を比較する価値が高いレースです。";
+    return "本命候補が割れやすく、評価ごとの判断差を比較する価値が高いレースです。";
   }
   if (stats.topCount >= 2) {
     return "軸候補の重なりが見えやすく、上位候補の差だけを落ち着いて比較しやすいレースです。";
   }
-  return `${leadRaceMeta}の条件で判断材料が揃っており、定量モデルの差を読み始める基点に向いています。`;
+  return `${leadRaceMeta}の条件で判断材料が揃っており、評価の差を読み始める基点に向いています。`;
 }
 
 function buildLeadText(data, targetDateContext) {
   const leadRace = data?.hero?.lead_race || null;
   const raceTitle = safeText(leadRace?.race_title) || `${targetDateContext.targetDateLabel}の注目レース`;
   const raceCount = toNumber(data?.totals?.race_count, 0);
-  const leaderLabel = safeText(data?.hero?.leader?.label) || "主軸モデル";
-  return `${raceTitle}を起点に、対象日の${raceCount}レースを比較できます。${leaderLabel}を含む各定量モデルの判断差を、同じ導線で確認できます。`;
+  const leaderLabel = safeText(data?.hero?.leader?.label) || "主軸評価";
+  return `${raceTitle}を起点に、対象日の${raceCount}レースを比較できます。${leaderLabel}を含む各評価の判断差を、同じ導線で確認できます。`;
 }
 
 export function buildHomeHeroSummary(data, search = "") {
@@ -227,7 +227,7 @@ export function buildHomeHeroSummary(data, search = "") {
   const leadRaceHref = buildRaceHref(leadRace, search);
   const leadRaceMeta = buildBadgeText(leadRace, targetDateContext.targetDateLabel);
   const leadRaceStats = buildAgreementStats(leadRace);
-  const leaderLabel = safeText(data?.hero?.leader?.label) || "主軸モデル";
+  const leaderLabel = safeText(data?.hero?.leader?.label) || "主軸評価";
   const settledCount = toNumber(data?.totals?.settled_count, 0);
 
   return {
@@ -313,23 +313,23 @@ export function buildEditorialGuide(data, search = "") {
   const solidStats = buildAgreementStats(solidRace);
 
   const featuredSummary = featuredStats.topHorse
-    ? `◎${featuredStats.topHorse}を軸候補として見やすい一戦です。${buildBadgeText(featuredRace)}の条件で、定量モデルの差を先に確認できます。`
+    ? `◎${featuredStats.topHorse}を軸候補として見やすい一戦です。${buildBadgeText(featuredRace)}の条件で、評価の差を先に確認できます。`
     : `最初の導入として確認しやすいレースです。${buildBadgeText(featuredRace)}の条件と上位候補の組み立てを先に把握できます。`;
 
   const divergenceSummary =
     divergenceStats.uniqueMainCount > 1
-      ? `本命候補が${divergenceStats.uniqueMainCount}通りに割れており、定量モデルの見立て差が出やすいレースです。`
+      ? `本命候補が${divergenceStats.uniqueMainCount}通りに割れており、見立て差が出やすいレースです。`
       : "本命は近い一方で、上位候補の並び順に差が出やすいレースです。";
 
   const solidSummary = solidStats.topHorse
-    ? `◎${solidStats.topHorse}に${solidStats.topCount}モデルが重なっており、軸向きの比較をしやすいレースです。`
+    ? `◎${solidStats.topHorse}に${solidStats.topCount}件の評価が重なっており、軸向きの比較をしやすいレースです。`
     : "上位評価が比較的まとまっており、無理なく読み筋を追いやすいレースです。";
 
   const featuredTitle = safeText(featuredRace?.race_title) || `${targetDateContext.targetDateLabel}の注目レース`;
   const raceCount = toNumber(data?.totals?.race_count, races.length);
   const intro = targetDateContext.isToday
-    ? `本日は${featuredTitle}を含む${raceCount}レースを確認できます。モデル評価が揃いやすいレースと、見解が割れやすいレースを並べて見ることで、各定量モデルの特徴とリスク判断の差が掴みやすくなります。`
-    : `${targetDateContext.targetDateLabel}は${featuredTitle}を含む${raceCount}レースを確認できます。定量モデルの軸がどこでズレるかを読み取る入口として使えます。`;
+    ? `本日は${featuredTitle}を含む${raceCount}レースを確認できます。評価が揃いやすいレースと、見解が割れやすいレースを並べて見ることで、特徴とリスク判断の差が掴みやすくなります。`
+    : `${targetDateContext.targetDateLabel}は${featuredTitle}を含む${raceCount}レースを確認できます。軸がどこでズレるかを読み取る入口として使えます。`;
 
   return {
     ...targetDateContext,

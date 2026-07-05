@@ -115,9 +115,9 @@ function AgentPredictionHistory({ data, search = "", onApplyFilters }) {
       <div className="history-hero">
         <div className="history-hero__copy">
           <span className="history-hero__eyebrow">履歴分析</span>
-          <h1>AI予測の命中率分析</h1>
+          <h1>予測の命中率分析</h1>
           <p>
-            公開したAI予測を結果と照合し、{activePeriodLabel}・年間・累計で本命精度と上位候補のカバー率を確認できます。
+            公開した予測を結果と照合し、{activePeriodLabel}・年間・累計で本命精度と上位候補のカバー率を確認できます。
           </p>
         </div>
 

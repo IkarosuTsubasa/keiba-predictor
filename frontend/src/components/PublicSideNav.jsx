@@ -107,11 +107,11 @@ export default function PublicSideNav({
     mode === "detail"
       ? "このレースの予測印、上位馬評価、判断理由、結果を一つの流れで確認できます。"
       : mode === "history"
-        ? "過去日付のAI予測と結果をレース単位で確認できます。"
+        ? "過去日付の予測と結果をレース単位で確認できます。"
         : mode === "reports"
           ? "保存済みの日報を一覧で確認し、対象日ごとの振り返りを読み返せます。"
         : mode === "reportDetail"
-            ? "AI予測、結果、振り返りを記事形式で確認できます。"
+            ? "予測、結果、振り返りを記事形式で確認できます。"
         : mode === "static"
           ? "サイトの考え方と利用上の案内をまとめています。"
           : "対象日の公開レースを場別に確認し、気になるレースの予測印へ進めます。";
@@ -121,7 +121,7 @@ export default function PublicSideNav({
       <div className="public-side-nav__panel">
         <div className="public-side-nav__brand">
           <span className="public-side-nav__eyebrow">メニュー</span>
-          <strong className="public-side-nav__title">いかいもAI競馬</strong>
+          <strong className="public-side-nav__title">いかいも競馬</strong>
         </div>
 
         {shouldShowTargetFilter ? (

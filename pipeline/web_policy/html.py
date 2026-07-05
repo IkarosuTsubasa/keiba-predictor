@@ -163,12 +163,12 @@ def build_policy_html(payload, *, to_float):
     model = str(payload.get("policy_model", "") or payload.get("gemini_model", "") or "")
     policy_engine = str(payload.get("policy_engine", "") or "")
     engine_label_map = {
-        "gemini": "Gemini",
-        "deepseek": "DeepSeek",
-        "openai": "ChatGPT",
-        "grok": "xAI Grok",
+        "gemini": "予測エンジン1",
+        "deepseek": "予測エンジン2",
+        "openai": "予測エンジン3",
+        "grok": "予測エンジン4",
     }
-    panel_title = engine_label_map.get(policy_engine, policy_engine or "LLM")
+    panel_title = engine_label_map.get(policy_engine, "予測エンジン")
     header_tags = []
     if model:
         header_tags.append(f'<span class="policy-meta-tag">{html.escape(model)}</span>')

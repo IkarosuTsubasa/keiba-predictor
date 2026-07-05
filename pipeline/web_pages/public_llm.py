@@ -115,7 +115,7 @@ def _share_hashtag_race_label(run_row):
         return race_no
     if race_name:
         return f"#{race_name}"
-    return "#競馬AI"
+    return "#競馬"
 
 
 def _share_race_name_text(run_row, *, location, venue, race_no):
@@ -623,7 +623,7 @@ def build_public_llm_page(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LLM Public Board</title>
+  <title>公開予測ボード</title>
   <style>
     body {{
       margin: 0;
@@ -688,7 +688,7 @@ def build_public_llm_page(
 <body>
   <main class="page">
     <section class="hero">
-      <div class="eyebrow">Legacy Public LLM Page</div>
+      <div class="eyebrow">公開予測ページ</div>
       <h1>{html.escape(target_date_label)}</h1>
       <p>レース数 {int(totals.get('race_count', 0) or 0)} / 損益 {html.escape(public_yen_text(totals.get('profit_yen', 0)))}</p>
       <p>投資 {html.escape(public_yen_text(totals.get('stake_yen', 0)))} / 払戻 {html.escape(public_yen_text(totals.get('payout_yen', 0)))} / 回収率 {html.escape(safe_text(totals.get('roi_text')) or '-')}</p>

@@ -904,7 +904,7 @@ export default function App() {
                 subtitle={
                   isAgentPredictionBoard
                     ? "各レースの予測印、上位馬メモ、判断理由、結果をレースごとに確認できます。"
-                    : "各レースのAI予測、上位馬メモ、判断理由、結果をレースごとに確認できます。"
+                    : "各レースの予測印、上位馬メモ、判断理由、結果をレースごとに確認できます。"
                 }
                 actions={
                   data?.daily_report?.public_url

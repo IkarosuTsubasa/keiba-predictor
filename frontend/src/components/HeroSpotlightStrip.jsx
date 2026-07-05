@@ -37,7 +37,7 @@ export default function HeroSpotlightStrip({ data }) {
   return (
     <section
       className={`hero-spotlight-strip${items.length === 1 ? " hero-spotlight-strip--single" : ""}`}
-      aria-label={`${targetDateContext.targetDateLabel}の定量モデル注目指標`}
+      aria-label={`${targetDateContext.targetDateLabel}の注目指標`}
     >
       {items.map((item) => (
         <article

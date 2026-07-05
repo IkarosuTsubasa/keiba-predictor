@@ -17,10 +17,10 @@ function ErrorState({ title = "", details = [] }) {
 
 function buildReportShareText({ title = "", url = "" }) {
   return [
-    "いかいもAI競馬",
+    "いかいも競馬",
     String(title || "").trim() || "私の日報",
     String(url || "").trim(),
-    "#競馬 #AI競馬",
+    "#競馬 #予測",
   ]
     .filter(Boolean)
     .join("\n");
@@ -257,7 +257,7 @@ export default function DailyReportDetailPage({ slug = "", appBasePath = "/keiba
   useEffect(() => {
     const title = String(state.item?.title || "").trim();
     if (title) {
-      document.title = `${title} | いかいもAI競馬`;
+      document.title = `${title} | いかいも競馬`;
     }
   }, [state.item]);
 

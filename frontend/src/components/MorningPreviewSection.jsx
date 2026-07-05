@@ -13,14 +13,14 @@ function formatScore(value) {
 
 function TopFiveIndexList({ items = [] }) {
   if (!items.length) {
-    return <p className="morning-preview__top5-empty">AI予測指数を準備中です。</p>;
+    return <p className="morning-preview__top5-empty">予測指数を準備中です。</p>;
   }
   return (
     <div className="morning-preview__index-list">
       <div className="morning-preview__index-head">
         <span>馬番</span>
         <span>馬名</span>
-        <span>AI指数</span>
+        <span>予測指数</span>
       </div>
       {items.slice(0, 6).map((item, index) => (
         <article key={`${item.horse_no}-${index}`} className="morning-preview__index-item">
@@ -51,9 +51,9 @@ export default function MorningPreviewSection({ data, search = "" }) {
     <section className="morning-preview" id="home-morning-preview">
       <div className="morning-preview__head">
         <div>
-          <span className="home-section-eyebrow">AI注目</span>
-          <h2>今日のAI注目レース</h2>
-          <p>本命、信頼度、上位5頭、AI予測指数をまとめて確認できます。</p>
+          <span className="home-section-eyebrow">注目</span>
+          <h2>今日の注目レース</h2>
+          <p>本命、信頼度、上位5頭、予測指数をまとめて確認できます。</p>
         </div>
       </div>
 
@@ -64,7 +64,7 @@ export default function MorningPreviewSection({ data, search = "" }) {
           </div>
           <div className="morning-preview__featured-main">
             <div>
-              <small>AI本命</small>
+              <small>本命</small>
               <strong>{featuredRace.main_horse_no || "-"}</strong>
             </div>
             <div>
@@ -87,7 +87,7 @@ export default function MorningPreviewSection({ data, search = "" }) {
           <article className="morning-preview__ranking-card">
             <div className="morning-preview__subhead">
               <span>ランキング</span>
-              <h3>AI信頼度ランキング</h3>
+              <h3>信頼度ランキング</h3>
             </div>
             <ol className="morning-preview__ranking">
               {ranking.map((item) => (

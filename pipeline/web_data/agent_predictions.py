@@ -841,7 +841,7 @@ def _agent_prediction_detail(payload):
 def _public_card(payload):
     return {
         "predictor_id": "agent",
-        "label": "AI予測",
+        "label": "予測",
         "marks_text": _marks_text(payload),
         "top_horses": _top_horse_items(payload, limit=len(MARK_ORDER)),
         "metaLabel": "判定",
@@ -859,7 +859,7 @@ def _public_race_row(base_dir, payload, include_detail_fields=False):
     row = {
         "source_type": "agent_prediction",
         "scope_key": "",
-        "scope_label": "AI予測",
+        "scope_label": "予測",
         "race_id": race_id,
         "race_title": race_title,
         "race_name": _safe_text(race_info.get("race_name")),

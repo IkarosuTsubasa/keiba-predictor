@@ -232,7 +232,7 @@ def build_llm_battle_bundle(
             <article class="battle-card">
               <div class="battle-card-head">
                 <div>
-                  <div class="eyebrow">LLM Battle</div>
+                  <div class="eyebrow">予測比較</div>
                   <h3>{html.escape(card['label'])}</h3>
                 </div>
                 <div class="battle-meta-row">{tag_html}</div>
@@ -285,7 +285,7 @@ def build_llm_battle_bundle(
         f'<section class="battle-overview-card"><span class="battle-band-label">難易度</span><strong>{html.escape(difficulty)}</strong></section>'
         f'<section class="battle-overview-card"><span class="battle-band-label">一致度</span><strong>{html.escape(str(agreement.get("label", "中")))}</strong></section>'
         "</div>"
-        '<p class="helper-text">各AIの印、買い目、結果一致を比較できます。</p>'
+        '<p class="helper-text">各予測の印、買い目、結果一致を比較できます。</p>'
         f'<div class="battle-grid">{"".join(card_html)}</div>'
         "</section>"
     )

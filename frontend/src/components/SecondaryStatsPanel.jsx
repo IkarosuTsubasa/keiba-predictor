@@ -66,11 +66,11 @@ export default function SecondaryStatsPanel({ data }) {
   const rows = buildRows(predictorCards);
 
   return (
-    <section className="secondary-stats-panel" aria-label="定量モデル指標">
+    <section className="secondary-stats-panel" aria-label="評価指標">
       <div className="secondary-stats-panel__intro">
-        <span className="home-section-eyebrow">定量モデル指標</span>
-        <h2>6モデルの成績比較</h2>
-        <p>回収率ではなく、まずは本命精度と上位候補のカバー率から定量モデルの強さを確認できます。</p>
+        <span className="home-section-eyebrow">評価指標</span>
+        <h2>6件の成績比較</h2>
+        <p>回収率ではなく、まずは本命精度と上位候補のカバー率から評価の傾向を確認できます。</p>
       </div>
       <div className="secondary-stats-panel__compact">
         {rows.map((row) => (

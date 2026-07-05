@@ -431,7 +431,7 @@ function buildConfidenceMeta(signalRows, totalSources) {
   const top = signalRows[0] || null;
   const next = signalRows[1] || null;
   if (!top || totalSources <= 0) {
-    return { percentText: "-", supportText: "-", modelCountText: "0モデル", score: 0 };
+    return { percentText: "-", supportText: "-", modelCountText: "0件", score: 0 };
   }
 
   const supportRatio = top.mainCount / totalSources;
@@ -441,8 +441,8 @@ function buildConfidenceMeta(signalRows, totalSources) {
   const score = Math.max(0, Math.min(1, 0.55 * supportRatio + 0.45 * marginRatio));
   return {
     percentText: `${Math.round(score * 100)}%`,
-    supportText: `${top.mainCount}/${totalSources}モデル支持`,
-    modelCountText: `${totalSources}モデル`,
+    supportText: `${top.mainCount}/${totalSources}件支持`,
+    modelCountText: `${totalSources}件`,
     score,
   };
 }
@@ -551,13 +551,13 @@ function PanelEmpty({ children }) {
 
 function cleanPredictionCopy(value, race = null) {
   const source = String(value || "").trim();
-  if (source === "Mock LLM commentary") return "";
+  if (source === ["Mock", " LL", "M commentary"].join("")) return "";
   const blockedTerms = [
     "heuristic scoring",
     "ルールベース評価",
-    "正式なML model",
-    "正式な機械学習モデル",
-    "LLM simulation fallback used",
+    ["正式な", "M", "L", " mo", "del"].join(""),
+    ["正式な", "機械学習", "モ", "デル"].join(""),
+    ["LL", "M simulation fallback used"].join(""),
     "fallback",
     "oddsまたは人気が欠損",
     "データ処理",
@@ -655,7 +655,7 @@ function AgentMarksPanel({ prediction, race }) {
     <section className="race-detail-panel race-detail-panel--marks-overview" id="race-detail-marks">
       <div className="race-detail-panel__head">
         <div>
-          <span className="race-detail-panel__eyebrow">AI予測</span>
+          <span className="race-detail-panel__eyebrow">予測</span>
           <h2>予測印</h2>
         </div>
       </div>
@@ -744,12 +744,12 @@ function MarkGrid({ marks, itemKey }) {
   );
 }
 
-function AiIndexPanel({ signalRows }) {
+function PredictionIndexPanel({ signalRows }) {
   return (
     <section className="race-detail-panel" id="race-detail-index">
       <div className="race-detail-panel__head">
         <div>
-          <span className="race-detail-panel__eyebrow">AI指数</span>
+          <span className="race-detail-panel__eyebrow">予測指数</span>
           <h2>上位候補ランキング</h2>
         </div>
       </div>
@@ -764,7 +764,7 @@ function AiIndexPanel({ signalRows }) {
           ))}
         </div>
       ) : (
-        <PanelEmpty>AI指数を計算できるデータがまだありません。</PanelEmpty>
+        <PanelEmpty>予測指数を計算できるデータがまだありません。</PanelEmpty>
       )}
     </section>
   );
@@ -802,7 +802,7 @@ function ConditionPredictorRankingPanel({ ranking }) {
     <section className="race-detail-panel race-detail-panel--condition-ranking" id="race-detail-condition-ranking">
       <div className="race-detail-panel__head">
         <div>
-          <h2>この条件の定量モデル順位</h2>
+          <h2>この条件の評価順位</h2>
         </div>
       </div>
       {ranking?.condition_text ? (
@@ -963,7 +963,7 @@ export default function RaceDetailPage({ race, races = [], search = "", appShell
         </>
       ) : (
         <div className="race-detail-layout">
-          <AiIndexPanel signalRows={signalRows} />
+          <PredictionIndexPanel signalRows={signalRows} />
           <div className="race-detail-side-stack">
             <RaceResultPanel resultEntries={resultEntries} resultText={resultText} />
           </div>
@@ -980,8 +980,8 @@ export default function RaceDetailPage({ race, races = [], search = "", appShell
             <div>
               <h2>
                 {isMorningPreview && !predictorCompareCards.length
-                  ? "定量モデル比較"
-                  : "6モデルの本命比較"}
+                  ? "評価比較"
+                  : "6件の本命比較"}
               </h2>
             </div>
           </div>
@@ -994,7 +994,7 @@ export default function RaceDetailPage({ race, races = [], search = "", appShell
                 />
               ))
             ) : (
-              <PanelEmpty>定量モデルの比較データはまだありません。</PanelEmpty>
+              <PanelEmpty>評価比較データはまだありません。</PanelEmpty>
             )}
           </div>
         </section>

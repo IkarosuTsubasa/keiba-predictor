@@ -943,7 +943,7 @@ def build_policy_input_payload(
         allowed_types.append("trio")
     allowed_types = [bet_type for bet_type in allowed_types if bet_type in core_bet_types]
     if not allowed_types:
-        return None, "No usable odds were found for LLM buy."
+        return None, "No usable odds were found for policy buy."
     candidates, candidate_lookup, horse_map = build_policy_candidates(
         predictions,
         wide_odds_map,

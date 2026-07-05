@@ -277,7 +277,7 @@ function formatRunDueHistoryLine(item) {
   if (item.skipped) {
     return `${executedAt} / ${source} / スキップ ${item.reason || "-"}`;
   }
-  return `${executedAt} / ${source} / AI予測 ${item.agent_dispatched_count || 0}件 / 結果 ${
+  return `${executedAt} / ${source} / 予測 ${item.agent_dispatched_count || 0}件 / 結果 ${
     item.agent_result_count || 0
   }件${reportPart} / エラー ${item.error_count || 0}件`;
 }
@@ -289,7 +289,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
       <section className="admin-health-panel">
         <div className="admin-health-panel__head">
           <div>
-            <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+            <span className="admin-tool-panel__eyebrow">予測ヘルスチェック</span>
             <h2>状態を読み込んでいます</h2>
           </div>
           <div className="admin-health-panel__actions">
@@ -306,7 +306,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
       <section className="admin-health-panel admin-health-panel--danger">
         <div className="admin-health-panel__head">
           <div>
-            <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+            <span className="admin-tool-panel__eyebrow">予測ヘルスチェック</span>
             <h2>取得に失敗しました</h2>
             <p>{error}</p>
           </div>
@@ -335,7 +335,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
   const missingEnvKeys = Array.isArray(env.missing_required) ? env.missing_required : [];
 
   const cards = [
-    { label: "AI予測ファイル", value: files.prediction_count || 0, tone: files.prediction_count ? "good" : "danger" },
+    { label: "予測ファイル", value: files.prediction_count || 0, tone: files.prediction_count ? "good" : "danger" },
     { label: "結果ファイル", value: files.result_count || 0, tone: files.result_count ? "good" : "neutral" },
     { label: "登録レース", value: jobs.total || 0, tone: jobs.total ? "active" : "neutral" },
     { label: "処理中", value: jobs.processing || 0, tone: jobs.processing ? "active" : "neutral" },
@@ -347,7 +347,7 @@ function AgentHealthPanel({ health, loading, error, busyAction = "", onRefresh, 
     <section className={`admin-health-panel${health.ok ? "" : " admin-health-panel--danger"}`}>
       <div className="admin-health-panel__head">
         <div>
-          <span className="admin-tool-panel__eyebrow">AI予測ヘルスチェック</span>
+          <span className="admin-tool-panel__eyebrow">予測ヘルスチェック</span>
           <h2>Consoleから自動化の状態を確認できます</h2>
           <p>ファイル保存、GitHub Actions、run_due、登録レースの状態をまとめて表示します。</p>
         </div>
@@ -833,11 +833,11 @@ function OpsPanel({ busy, onReset }) {
   return (
     <article className="admin-tool-panel admin-tool-panel--compact">
       <div className="admin-tool-panel__body">
-        <h3>LLM状態リセット</h3>
+        <h3>方針状態リセット</h3>
         <p>復旧や調査でのみ使う低頻度のメンテナンス操作です。</p>
         <div className="admin-toolbar">
           <button type="button" disabled={busy} onClick={onReset}>
-            {busy ? "リセット中..." : "LLM状態をリセット"}
+            {busy ? "リセット中..." : "方針状態をリセット"}
           </button>
         </div>
       </div>
@@ -876,7 +876,7 @@ function JobCard({ job, onAction, busyAction }) {
       </div>
 
       <div className="admin-job-card__meta">
-        <span>種別 {isAgentJob ? "AI予測" : "CSV"}</span>
+        <span>種別 {isAgentJob ? "予測" : "CSV"}</span>
         <span>日付 {job.race_date || "-"}</span>
         <span>発走 {job.scheduled_off_time || "-"}</span>
         <span>実行ID {job.current_run_id || "-"}</span>
@@ -928,11 +928,11 @@ function JobCard({ job, onAction, busyAction }) {
           {busy ? "再計算中..." : "スケジュール再計算"}
         </button>
         <button type="button" disabled={busy} onClick={() => onAction("process_now", job)}>
-          {isAgentJob ? (busy ? "実行中..." : "今すぐAI予測") : busy ? "処理中..." : "今すぐ実行"}
+          {isAgentJob ? (busy ? "実行中..." : "今すぐ予測") : busy ? "処理中..." : "今すぐ実行"}
         </button>
         {canRetryAgentPrediction ? (
           <button type="button" disabled={busy} onClick={() => onAction("retry_agent_prediction", job)}>
-            AI予測を再実行
+            予測を再実行
           </button>
         ) : null}
         {canRetryAgentResult ? (
@@ -1135,7 +1135,7 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         fetch_info: `タスク ${jobId} の情報を取得しました。`,
         reset_schedule: `タスク ${jobId} のスケジュールを再計算しました。`,
         process_now: `タスク ${jobId} の処理を開始しました。`,
-        retry_agent_prediction: `タスク ${jobId} のAI予測を再実行キューに戻しました。`,
+        retry_agent_prediction: `タスク ${jobId} の予測を再実行キューに戻しました。`,
         retry_agent_result: `タスク ${jobId} の結果取得を再試行キューに戻しました。`,
         delete: `タスク ${jobId} を削除しました。`,
         edit: `タスク ${jobId} を更新しました。`,
@@ -1158,10 +1158,10 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         setFlashMessage(`期限到来タスクを ${data.queued_count || 0} 件キューに追加しました。`);
       } else if (kind === "run_due_now") {
         setFlashMessage(
-          `期限到来タスクを処理しました。AI予測 ${data.agent_dispatched_count || 0} 件、結果 ${data.agent_result_count || 0} 件、実行 ${data.processed_count || 0} 件、精算 ${data.settled_count || 0} 件。`,
+          `期限到来タスクを処理しました。予測 ${data.agent_dispatched_count || 0} 件、結果 ${data.agent_result_count || 0} 件、実行 ${data.processed_count || 0} 件、精算 ${data.settled_count || 0} 件。`,
         );
       } else if (kind === "topup_today_all_llm") {
-        setFlashMessage(`全LLMの当日資金に ${data.amount_yen || 0} 円を追加しました。`);
+        setFlashMessage(`全エンジンの当日資金に ${data.amount_yen || 0} 円を追加しました。`);
       } else if (kind === "daily_summary_share") {
         const intentUrl = String(data?.intent_url || "").trim();
         if (intentUrl) {
@@ -1188,12 +1188,12 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         }
         setCreateFormResetTick((value) => value + 1);
       } else if (kind === "create_agent_races") {
-        setFlashMessage(`AI予測タスクを ${data.created_count || 0} 件登録しました。重複 ${data.skipped_count || 0} 件。`);
+        setFlashMessage(`予測タスクを ${data.created_count || 0} 件登録しました。重複 ${data.skipped_count || 0} 件。`);
         setCreateFormResetTick((value) => value + 1);
       } else if (kind === "import_archive") {
         setFlashMessage(`アーカイブを取り込みました。書き込み ${data.written || 0} 件、スキップ ${data.skipped || 0} 件。`);
       } else if (kind === "reset_llm_state") {
-        setFlashMessage(data.output_text || "LLM状態のリセットが完了しました。");
+        setFlashMessage(data.output_text || "方針状態のリセットが完了しました。");
       }
       setReloadTick((value) => value + 1);
     } catch (error) {
@@ -1259,14 +1259,14 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
             <OpsPanel busy={busyAction === "reset_llm_state"} onReset={() => runToolbarAction("reset_llm_state", () => postJson("/api/admin/ops/reset_llm_state", {}))} />
             <div className="admin-tool-panel__body">
               <span className="admin-tool-panel__eyebrow">旧補助操作</span>
-              <p>必要な場合のみ、旧LLM系の補助処理を手動で実行します。</p>
+              <p>必要な場合のみ、旧エンジン系の補助処理を手動で実行します。</p>
               <div className="admin-toolbar admin-toolbar--compact">
                 <button
                   type="button"
                   disabled={busyAction === "topup_today_all_llm"}
                   onClick={() => runToolbarAction("topup_today_all_llm", () => postJson("/api/admin/jobs/topup_today_all_llm", {}))}
                 >
-                  {busyAction === "topup_today_all_llm" ? "反映中..." : "全LLM追加入金"}
+                  {busyAction === "topup_today_all_llm" ? "反映中..." : "全エンジン追加入金"}
                 </button>
                 <button
                   type="button"

@@ -93,7 +93,7 @@ export default function ModelTopFiveBoard({ data, races }) {
 
   return (
     <section className="model-top-five-board">
-      <div className="model-top-five-board__tabs" role="tablist" aria-label="モデル切替">
+      <div className="model-top-five-board__tabs" role="tablist" aria-label="評価切替">
         {modelRows.map((item) => (
           <button
             key={item.predictorId}

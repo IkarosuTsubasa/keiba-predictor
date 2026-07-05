@@ -12,9 +12,9 @@ export default function SiteFooter() {
     <footer className="site-footer">
       <div className="site-footer__inner">
         <div className="site-footer__brand">
-          <strong className="site-footer__title">いかいもAI競馬</strong>
+          <strong className="site-footer__title">いかいも競馬</strong>
           <p className="site-footer__note">
-            各レースのAI予測、予測印、上位馬メモ、結果を確認できる競馬分析サイトです。
+            各レースの予測印、上位馬メモ、結果を確認できる競馬分析サイトです。
           </p>
         </div>
 

@@ -93,13 +93,13 @@ function PredictorOverviewCard({ overview }) {
   if (!overview) return null;
   const meta = overview.meta || {};
   const summaryRows = (overview.summaries || []).map((item) => ({
-    モデル: item.predictor_label || item.predictor_id || "-",
+    予測: item.predictor_label || item.predictor_id || "-",
     本命馬番: item.top_choice_horse_no || "-",
     本命馬名: item.top_choice_horse_name || "-",
     複勝圏確率: item.top_choice_top3_prob_model ?? "",
   }));
   const profileRows = (overview.profiles || []).map((item) => ({
-    モデル: item.predictor_label || item.predictor_id || "-",
+    予測: item.predictor_label || item.predictor_id || "-",
     利用可否: item.available ? "あり" : "なし",
   }));
   const performanceRows = overview.performance?.current_scope_history || [];
@@ -107,7 +107,7 @@ function PredictorOverviewCard({ overview }) {
   return (
     <article className="admin-workspace-card">
       <div className="admin-workspace-card__head">
-        <h3>予測モデル概要</h3>
+        <h3>予測概要</h3>
         <span>{overview.current_context?.scope_label_ja || overview.current_context?.scope_key || "-"}</span>
       </div>
       <MetaRow
@@ -311,20 +311,20 @@ function WorkspaceOps({ busyKey, onAction }) {
     <section className="admin-tool-grid">
       <article className="admin-tool-panel">
         <div className="admin-tool-panel__body">
-          <h3>単体LLM実行</h3>
+          <h3>単体エンジン実行</h3>
           <p>選択したエンジンだけで買い目生成を実行します。</p>
           <div className="admin-toolbar">
             <button type="button" disabled={busyKey === "llm_gemini"} onClick={() => onAction("llm_gemini")}>
-              {busyKey === "llm_gemini" ? "実行中..." : "Gemini"}
+              {busyKey === "llm_gemini" ? "実行中..." : "予測1"}
             </button>
             <button type="button" disabled={busyKey === "llm_deepseek"} onClick={() => onAction("llm_deepseek")}>
-              {busyKey === "llm_deepseek" ? "実行中..." : "DeepSeek"}
+              {busyKey === "llm_deepseek" ? "実行中..." : "予測2"}
             </button>
             <button type="button" disabled={busyKey === "llm_openai"} onClick={() => onAction("llm_openai")}>
-              {busyKey === "llm_openai" ? "実行中..." : "OpenAI"}
+              {busyKey === "llm_openai" ? "実行中..." : "予測3"}
             </button>
             <button type="button" disabled={busyKey === "llm_grok"} onClick={() => onAction("llm_grok")}>
-              {busyKey === "llm_grok" ? "実行中..." : "Grok"}
+              {busyKey === "llm_grok" ? "実行中..." : "予測4"}
             </button>
           </div>
         </div>
@@ -333,13 +333,13 @@ function WorkspaceOps({ busyKey, onAction }) {
       <article className="admin-tool-panel">
         <div className="admin-tool-panel__body">
           <h3>一括操作</h3>
-          <p>全LLMの実行や当日資金の補充をまとめて行います。</p>
+          <p>全エンジンの実行や当日資金の補充をまとめて行います。</p>
           <div className="admin-toolbar">
             <button type="button" disabled={busyKey === "llm_all"} onClick={() => onAction("llm_all")}>
-              {busyKey === "llm_all" ? "実行中..." : "全LLM実行"}
+              {busyKey === "llm_all" ? "実行中..." : "全エンジン実行"}
             </button>
             <button type="button" disabled={busyKey === "topup"} onClick={() => onAction("topup")}>
-              {busyKey === "topup" ? "反映中..." : "全LLM追加入金"}
+              {busyKey === "topup" ? "反映中..." : "全エンジン追加入金"}
             </button>
             <button type="button" disabled={busyKey === "fetch_result_and_settle"} onClick={() => onAction("fetch_result_and_settle")}>
               {busyKey === "fetch_result_and_settle" ? "精算中..." : "結果取得と精算"}
@@ -522,7 +522,7 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
         <PageSectionHeader
           kicker="管理ワークスペース"
           title="実行ワークスペース"
-          subtitle="予測モデル、LLM方針、資金サマリーを確認し、実行単位の操作をまとめて行えます。"
+          subtitle="予測概要、方針、資金サマリーを確認し、実行単位の操作をまとめて行えます。"
           meta={summaryMeta}
         />
 
@@ -580,7 +580,7 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
           <section className="public-screen-state__panel">
             <span className="public-screen-state__eyebrow">読み込み中</span>
             <h1>ワークスペースを読み込んでいます</h1>
-            <p>選択中の実行に対応する予測モデル、方針、資金データを取得しています。</p>
+            <p>選択中の実行に対応する予測、方針、資金データを取得しています。</p>
           </section>
         ) : null}
 
@@ -600,7 +600,7 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
                 </strong>
               </article>
               <article className="admin-summary-card admin-summary-card--good">
-                <span>予測モデル</span>
+                <span>予測</span>
                 <strong>{predictorCards.length}</strong>
               </article>
               <article className="admin-summary-card admin-summary-card--active">
@@ -622,7 +622,7 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
                 <RunMetricsCard data={state.data} />
               </div>
               <div className="admin-workspace-column">
-                <h2 className="admin-workspace-section-title">LLM資金状況</h2>
+                <h2 className="admin-workspace-section-title">資金状況</h2>
                 <OddsSnapshotCard data={oddsSnapshots} />
                 {portfolioSummaries.length ? (
                   portfolioSummaries.map((item) => <PortfolioCard key={item.engine} item={item} />)
@@ -643,11 +643,11 @@ export default function AdminWorkspacePage({ appBasePath = "/keiba" }) {
 
             <section className="admin-workspace-grid">
               <div className="admin-workspace-column">
-                <h2 className="admin-workspace-section-title">予測モデル</h2>
+                <h2 className="admin-workspace-section-title">予測</h2>
                 {predictorCards.length ? predictorCards.map((item) => <PredictorCard key={item.predictor_id} item={item} />) : <section className="notice-strip">予測データはありません。</section>}
               </div>
               <div className="admin-workspace-column">
-                <h2 className="admin-workspace-section-title">LLM方針</h2>
+                <h2 className="admin-workspace-section-title">方針</h2>
                 {policyCards.length ? policyCards.map((item) => <PolicyCard key={item.engine} item={item} />) : <section className="notice-strip">方針データはありません。</section>}
               </div>
             </section>

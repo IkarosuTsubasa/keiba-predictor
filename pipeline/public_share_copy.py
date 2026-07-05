@@ -12,5 +12,5 @@ Important:
 
 PUBLIC_SHARE_URL = "https://www.ikaimo-ai.com/keiba"
 PUBLIC_SHARE_DETAIL_LABEL = "詳細はこちら"
-PUBLIC_SHARE_HASHTAG = "#いかいもAI競馬 #競馬"
+PUBLIC_SHARE_HASHTAG = "#いかいも競馬 #競馬"
 PUBLIC_SHARE_MAX_CHARS = 140

@@ -7,10 +7,10 @@ from web_helpers import normalize_race_id, to_int_or_none
 
 LLM_BATTLE_ORDER = ("openai", "gemini", "deepseek", "grok")
 LLM_BATTLE_LABELS = {
-    "openai": "ChatGPT",
-    "gemini": "Gemini",
-    "deepseek": "DeepSeek",
-    "grok": "Grok",
+    "openai": "予測1",
+    "gemini": "予測2",
+    "deepseek": "予測3",
+    "grok": "予測4",
 }
 LLM_NOTE_LABELS = dict(LLM_BATTLE_LABELS)
 LLM_BATTLE_SHORT_LABELS = {
@@ -227,7 +227,7 @@ def build_battle_title(run_row):
     race_label = format_race_label(run_row)
     date_label = format_jp_date_text(run_row)
     race_name = safe_text((run_row or {}).get("trigger_race"))
-    parts = ["4つのAI競馬対決"]
+    parts = ["4つの予測比較"]
     if date_label or race_label:
         detail = " ".join(part for part in [date_label, race_label] if part)
         if race_name:

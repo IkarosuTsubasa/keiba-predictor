@@ -52,11 +52,11 @@ export default function AppHeader({
               <img
                 className="app-header__logo"
                 src="/keiba/site-icon.png"
-                alt="いかいもAI競馬"
+                alt="いかいも競馬"
               />
               <div className="app-header__brand-copy">
                 <span className="app-header__tag">競馬分析サイト</span>
-                <strong className="app-header__title">いかいもAI競馬</strong>
+                <strong className="app-header__title">いかいも競馬</strong>
               </div>
             </a>
           </div>
