@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
+
 from keiba_llm_agent.schemas.pace_analysis import HorsePaceAnalysis
 from keiba_llm_agent.schemas.prediction import (
     BetSuggestion,
@@ -41,6 +43,127 @@ def _normalized_span(value: float, lower: float, width: float) -> float:
 
 
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+
+
+@dataclass(frozen=True)
+class CoverageConfidenceConfig:
+    base: float
+    floor: float
+    ceiling: float
+    medium_threshold: float
+    high_threshold: float
+    gap_bonus_strong: float
+    gap_bonus_mild: float
+    weak_boundary_penalty: float
+    flat_spread_penalty: float
+    tight_spread_penalty: float
+    spread_bonus: float
+    top_quality_weight: float
+    average_quality_weight: float
+    very_weak_top_penalty: float
+    weak_top_penalty: float
+    weak_average_penalty: float
+    very_low_mark_penalty: float
+    average_risk_penalty: float
+    worst_risk_penalty: float
+    clean_risk_bonus: float
+    missing_odds_many_penalty: float
+    missing_odds_some_penalty: float
+    partial_odds_bonus: float
+    crowded_high_score_penalty: float
+    missing_mark_penalty: float
+
+
+COVERAGE_CONFIDENCE_DEFAULT_CONFIG = CoverageConfidenceConfig(
+    base=0.660,
+    floor=0.46,
+    ceiling=0.90,
+    medium_threshold=0.70,
+    high_threshold=0.85,
+    gap_bonus_strong=0.050,
+    gap_bonus_mild=0.025,
+    weak_boundary_penalty=0.035,
+    flat_spread_penalty=0.080,
+    tight_spread_penalty=0.030,
+    spread_bonus=0.055,
+    top_quality_weight=0.035,
+    average_quality_weight=0.020,
+    very_weak_top_penalty=0.065,
+    weak_top_penalty=0.025,
+    weak_average_penalty=0.020,
+    very_low_mark_penalty=0.025,
+    average_risk_penalty=0.080,
+    worst_risk_penalty=0.015,
+    clean_risk_bonus=0.015,
+    missing_odds_many_penalty=0.040,
+    missing_odds_some_penalty=0.015,
+    partial_odds_bonus=0.025,
+    crowded_high_score_penalty=0.070,
+    missing_mark_penalty=0.030,
+)
+
+
+COVERAGE_CONFIDENCE_CONFIG_BY_SCOPE = {
+    "local": replace(COVERAGE_CONFIDENCE_DEFAULT_CONFIG, base=0.750),
+    "central_dirt": CoverageConfidenceConfig(
+        base=0.680,
+        floor=0.44,
+        ceiling=0.88,
+        medium_threshold=0.68,
+        high_threshold=0.85,
+        gap_bonus_strong=0.060,
+        gap_bonus_mild=0.030,
+        weak_boundary_penalty=0.045,
+        flat_spread_penalty=0.070,
+        tight_spread_penalty=0.025,
+        spread_bonus=0.060,
+        top_quality_weight=0.040,
+        average_quality_weight=0.018,
+        very_weak_top_penalty=0.070,
+        weak_top_penalty=0.030,
+        weak_average_penalty=0.020,
+        very_low_mark_penalty=0.030,
+        average_risk_penalty=0.080,
+        worst_risk_penalty=0.015,
+        clean_risk_bonus=0.010,
+        missing_odds_many_penalty=0.015,
+        missing_odds_some_penalty=0.005,
+        partial_odds_bonus=0.000,
+        crowded_high_score_penalty=0.075,
+        missing_mark_penalty=0.035,
+    ),
+    "central_turf": CoverageConfidenceConfig(
+        base=0.625,
+        floor=0.42,
+        ceiling=0.86,
+        medium_threshold=0.67,
+        high_threshold=0.85,
+        gap_bonus_strong=0.060,
+        gap_bonus_mild=0.030,
+        weak_boundary_penalty=0.050,
+        flat_spread_penalty=0.075,
+        tight_spread_penalty=0.030,
+        spread_bonus=0.065,
+        top_quality_weight=0.040,
+        average_quality_weight=0.018,
+        very_weak_top_penalty=0.075,
+        weak_top_penalty=0.030,
+        weak_average_penalty=0.025,
+        very_low_mark_penalty=0.030,
+        average_risk_penalty=0.085,
+        worst_risk_penalty=0.020,
+        clean_risk_bonus=0.010,
+        missing_odds_many_penalty=0.015,
+        missing_odds_some_penalty=0.005,
+        partial_odds_bonus=0.000,
+        crowded_high_score_penalty=0.080,
+        missing_mark_penalty=0.035,
+    ),
+}
+
+
+def _coverage_confidence_config(scope_key: str) -> CoverageConfidenceConfig:
+    return COVERAGE_CONFIDENCE_CONFIG_BY_SCOPE.get(scope_key, COVERAGE_CONFIDENCE_DEFAULT_CONFIG)
 
 
 PUBLIC_STRENGTH_LABELS = (
@@ -216,11 +339,8 @@ def _estimate_marked_top3_pair_coverage_score(
         return 0.0
 
     scope_key = _race_scope_key(race_data)
-    score = {
-        "central_dirt": 0.690,
-        "central_turf": 0.620,
-        "local": 0.750,
-    }.get(scope_key, 0.660)
+    config = _coverage_confidence_config(scope_key)
+    score = config.base
 
     marked_score_values = [score_item.total_score for score_item in marked_scores]
     average_marked_score = sum(marked_score_values) / len(marked_score_values)
@@ -250,61 +370,83 @@ def _estimate_marked_top3_pair_coverage_score(
             missing_odds_count += 1
 
     if gap_5_to_6 >= 2.0:
-        score += 0.050
+        score += config.gap_bonus_strong
     elif gap_5_to_6 >= 1.0:
-        score += 0.025
+        score += config.gap_bonus_mild
     elif gap_5_to_6 < 0.5:
-        score -= 0.035
+        score -= config.weak_boundary_penalty
 
     if marked_spread < 3.0:
-        score -= 0.080
+        score -= config.flat_spread_penalty
     elif marked_spread < 6.0:
-        score -= 0.030
+        score -= config.tight_spread_penalty
     else:
-        score += 0.055 * _normalized_span(marked_spread, 6.0, 8.0)
+        score += config.spread_bonus * _normalized_span(marked_spread, 6.0, 8.0)
 
-    score += 0.035 * _normalized_span(highest_marked_score, 35.0, 10.0)
-    score += 0.020 * _normalized_span(average_marked_score, 25.0, 10.0)
+    score += config.top_quality_weight * _normalized_span(highest_marked_score, 35.0, 10.0)
+    score += config.average_quality_weight * _normalized_span(average_marked_score, 25.0, 10.0)
 
     if highest_marked_score < 25.0:
-        score -= 0.065
+        score -= config.very_weak_top_penalty
     elif highest_marked_score < 30.0:
-        score -= 0.025
+        score -= config.weak_top_penalty
     elif average_marked_score < 25.0:
-        score -= 0.020
+        score -= config.weak_average_penalty
 
     if lowest_marked_score < 15.0:
-        score -= 0.025
+        score -= config.very_low_mark_penalty
 
     if average_marked_risk < -6.0:
-        score -= 0.080
+        score -= config.average_risk_penalty
     elif worst_marked_risk <= -7:
-        score -= 0.015
+        score -= config.worst_risk_penalty
     elif average_marked_risk > -2.0:
-        score += 0.015
+        score += config.clean_risk_bonus
 
     if missing_odds_count >= 4:
-        score -= 0.040
+        score -= config.missing_odds_many_penalty
     elif missing_odds_count >= 3:
-        score -= 0.015
+        score -= config.missing_odds_some_penalty
     elif 1 <= missing_odds_count <= 2:
-        score += 0.025
+        score += config.partial_odds_bonus
 
     if average_marked_score > 40.0 and gap_5_to_6 < 0.5:
-        score -= 0.070
+        score -= config.crowded_high_score_penalty
 
     if len(marked_scores) < 5:
-        score -= 0.030 * (5 - len(marked_scores))
+        score -= config.missing_mark_penalty * (5 - len(marked_scores))
 
-    return round(_clamp(score, 0.46, 0.90), 3)
+    return round(_clamp(score, config.floor, config.ceiling), 3)
 
 
-def _coverage_confidence_label_from_score(confidence_score: float) -> str:
-    if confidence_score >= 0.85:
+def _coverage_confidence_label_from_score(confidence_score: float, scope_key: str = "") -> str:
+    config = _coverage_confidence_config(scope_key)
+    if confidence_score >= config.high_threshold:
         return "high"
-    if confidence_score >= 0.70:
+    if confidence_score >= config.medium_threshold:
         return "medium"
     return "low"
+
+
+def _axis_confidence_component(axis_strength_score: float) -> float:
+    return _clamp(0.50 + 0.38 * _normalized_span(axis_strength_score, 0.38, 0.28), 0.45, 0.88)
+
+
+def _strategy_confidence_score_for_scope(
+    *,
+    scope_key: str,
+    coverage_confidence_score: float,
+    axis_strength_score: float,
+) -> float:
+    if scope_key not in {"central_dirt", "central_turf"}:
+        return coverage_confidence_score
+    if coverage_confidence_score >= 0.85:
+        return coverage_confidence_score
+
+    config = _coverage_confidence_config(scope_key)
+    axis_weight = 0.35
+    score = (1.0 - axis_weight) * coverage_confidence_score + axis_weight * _axis_confidence_component(axis_strength_score)
+    return round(_clamp(score, config.floor, config.ceiling), 3)
 
 
 def evaluate_bet_strategy(
@@ -406,12 +548,18 @@ def evaluate_bet_strategy(
     )
     axis_strength = _axis_strength_label_from_score(axis_strength_score)
     marked_scores = _marked_scores_for_coverage(horse_scores, marks)
-    confidence_score = _estimate_marked_top3_pair_coverage_score(
+    scope_key = _race_scope_key(race_data)
+    coverage_confidence_score = _estimate_marked_top3_pair_coverage_score(
         race_data=race_data,
         horse_scores=horse_scores,
         marked_scores=marked_scores,
     )
-    confidence = _coverage_confidence_label_from_score(confidence_score)
+    confidence_score = _strategy_confidence_score_for_scope(
+        scope_key=scope_key,
+        coverage_confidence_score=coverage_confidence_score,
+        axis_strength_score=axis_strength_score,
+    )
+    confidence = _coverage_confidence_label_from_score(confidence_score, scope_key)
 
     should_skip = (
         top.total_score < 32

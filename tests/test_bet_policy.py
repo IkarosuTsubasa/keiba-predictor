@@ -214,6 +214,40 @@ class BetPolicyTests(unittest.TestCase):
         self.assertLessEqual(strategy.confidence_score, 0.90)
         self.assertIn("confidence_score", strategy.model_dump())
 
+    def test_central_and_local_confidence_use_separate_calibration(self) -> None:
+        horse_scores = [
+            build_horse_score(1, 42.0),
+            build_horse_score(2, 39.0),
+            build_horse_score(3, 35.0),
+            build_horse_score(4, 32.0),
+            build_horse_score(5, 30.0),
+            build_horse_score(6, 27.0),
+        ]
+        marks = {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5}
+        central = evaluate_bet_strategy(
+            self.build_race_data([4.0, 8.0, 12.0, 16.0, 18.0, 20.0], surface="芝", scope_key="central_turf"),
+            horse_scores,
+            marks,
+            [],
+            [],
+        )
+        local = evaluate_bet_strategy(
+            self.build_race_data(
+                [4.0, 8.0, 12.0, 16.0, 18.0, 20.0],
+                surface="ダート",
+                scope_key="local",
+                source="local",
+            ),
+            horse_scores,
+            marks,
+            [],
+            [],
+        )
+
+        self.assertEqual(central.confidence, "medium")
+        self.assertEqual(local.confidence, "high")
+        self.assertLess(central.confidence_score, local.confidence_score)
+
     def test_close_top_group_adds_reason_code(self) -> None:
         race_data = self.build_race_data([14.9, 23.3, 49.4])
         strategy = evaluate_bet_strategy(

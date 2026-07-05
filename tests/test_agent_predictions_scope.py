@@ -86,6 +86,45 @@ class AgentPredictionsScopeTests(unittest.TestCase):
         self.assertNotEqual(close_score, 0.82)
         self.assertNotEqual(clear_score, 0.82)
 
+    def test_strategy_confidence_fallback_uses_scope_calibration(self) -> None:
+        horse_scores = [
+            {"horse_no": 1, "total_score": 42.0},
+            {"horse_no": 2, "total_score": 39.0},
+            {"horse_no": 3, "total_score": 35.0},
+            {"horse_no": 4, "total_score": 32.0},
+            {"horse_no": 5, "total_score": 30.0},
+            {"horse_no": 6, "total_score": 27.0},
+        ]
+        central_payload = {
+            "race_info": {"scope_key": "central_turf", "course": "東京", "surface": "芝"},
+            "strategy": {"confidence": "high"},
+            "horse_scores": horse_scores,
+        }
+        local_payload = {
+            "race_info": {"scope_key": "local", "source": "local", "course": "大井", "surface": "ダート"},
+            "strategy": {"confidence": "high"},
+            "horse_scores": horse_scores,
+        }
+
+        central_score = agent_predictions.strategy_confidence_score(central_payload)
+        local_score = agent_predictions.strategy_confidence_score(local_payload)
+
+        self.assertLess(central_score, local_score)
+        self.assertGreaterEqual(local_score, 0.46)
+        self.assertLessEqual(central_score, 0.86)
+
+    def test_strategy_confidence_keeps_explicit_score(self) -> None:
+        payload = {
+            "race_info": {"scope_key": "central_turf", "course": "東京", "surface": "芝"},
+            "strategy": {"confidence": "low", "confidence_score": 0.86},
+            "horse_scores": [
+                {"horse_no": 1, "total_score": 31.0},
+                {"horse_no": 2, "total_score": 30.8},
+            ],
+        }
+
+        self.assertEqual(agent_predictions.strategy_confidence_score(payload), 0.86)
+
     def test_top_horse_items_prefers_public_llm_memo(self) -> None:
         payload = {
             "marks": {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},

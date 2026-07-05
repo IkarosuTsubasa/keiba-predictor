@@ -29,6 +29,45 @@ TRACK_CONDITION_LABELS = {
     "不": "不良",
     "不良": "不良",
 }
+
+CONFIDENCE_FALLBACK_SCORE_BY_SCOPE = {
+    "local": {
+        "high": 0.88,
+        "medium": 0.76,
+        "low": 0.62,
+    },
+    "central_dirt": {
+        "high": 0.84,
+        "medium": 0.72,
+        "low": 0.56,
+    },
+    "central_turf": {
+        "high": 0.82,
+        "medium": 0.70,
+        "low": 0.54,
+    },
+    "central": {
+        "high": 0.83,
+        "medium": 0.71,
+        "low": 0.55,
+    },
+}
+
+CONFIDENCE_SHAPE_WEIGHT_BY_SCOPE = {
+    "local": 0.55,
+    "central_dirt": 0.65,
+    "central_turf": 0.68,
+    "central": 0.66,
+}
+
+CONFIDENCE_FALLBACK_LIMIT_BY_SCOPE = {
+    "local": (0.46, 0.90),
+    "central_dirt": (0.42, 0.88),
+    "central_turf": (0.40, 0.86),
+    "central": (0.40, 0.87),
+}
+
+
 def _repo_root(base_dir):
     return Path(base_dir).resolve().parent
 
@@ -242,6 +281,47 @@ def _scope_matches(payload, scope_key):
     return True
 
 
+def _payload_scope_key(payload):
+    race_info = dict(payload.get("race_info") or {})
+    payload_scope = _normalize_history_scope_key(payload.get("scope_key")) or _normalize_history_scope_key(
+        race_info.get("scope_key")
+    )
+    if payload_scope in ("local", "central_turf", "central_dirt"):
+        return payload_scope
+
+    payload_source = (_safe_text(payload.get("source")) or _safe_text(race_info.get("source"))).lower()
+    if payload_source == "local":
+        return "local"
+
+    surface = _safe_text(race_info.get("surface"))
+    if "芝" in surface:
+        return "central_turf"
+    if "ダ" in surface or "砂" in surface:
+        return "central_dirt"
+
+    if payload_scope == "central":
+        return "central"
+
+    course = _safe_text(race_info.get("course"))
+    if course in COURSE_ORDER:
+        return "central"
+    if course:
+        return "local"
+    return ""
+
+
+def _confidence_fallback_prior(confidence, scope_key):
+    scoped_scores = CONFIDENCE_FALLBACK_SCORE_BY_SCOPE.get(scope_key)
+    if scoped_scores and confidence in scoped_scores:
+        return scoped_scores[confidence]
+    return AGENT_CONFIDENCE_FALLBACK_SCORE.get(confidence, 0.5)
+
+
+def _clamp_confidence_for_scope(value, scope_key):
+    lower, upper = CONFIDENCE_FALLBACK_LIMIT_BY_SCOPE.get(scope_key, (0.0, 1.0))
+    return max(lower, min(upper, value))
+
+
 def _horse_map(payload):
     out = {}
     for item in list(payload.get("horse_scores") or []):
@@ -393,7 +473,21 @@ def _score_shape_metrics(payload):
         "top_gap_score": top_gap_score,
         "top3_gap_score": top3_gap_score,
         "concentration_score": concentration_score,
+        "quality_score": quality_score,
+        "field_score": field_score,
     }
+
+
+def _confidence_shape_score_for_scope(metrics, scope_key):
+    if scope_key in ("central_turf", "central_dirt", "central"):
+        return _clamp01(
+            0.40 * float(metrics.get("top_gap_score", 0.0) or 0.0)
+            + 0.34 * float(metrics.get("top3_gap_score", 0.0) or 0.0)
+            + 0.12 * float(metrics.get("concentration_score", 0.0) or 0.0)
+            + 0.10 * float(metrics.get("quality_score", 0.0) or 0.0)
+            + 0.04 * float(metrics.get("field_score", 0.0) or 0.0)
+        )
+    return float(metrics.get("shape_score", 0.0) or 0.0)
 
 
 def strategy_confidence_score(payload):
@@ -404,14 +498,18 @@ def strategy_confidence_score(payload):
     if explicit is not None:
         return round(_clamp01(explicit), 6)
 
+    scope_key = _payload_scope_key(payload)
     confidence = _safe_text(strategy.get("confidence")).lower()
-    prior = AGENT_CONFIDENCE_FALLBACK_SCORE.get(confidence, 0.5)
+    prior = _confidence_fallback_prior(confidence, scope_key)
     metrics = _score_shape_metrics(payload)
     if not metrics:
-        return round(_clamp01(prior), 6)
+        label_fallback = AGENT_CONFIDENCE_FALLBACK_SCORE.get(confidence, prior)
+        return round(_clamp01(_clamp_confidence_for_scope(label_fallback, scope_key)), 6)
 
-    confidence_score = 0.45 * prior + 0.55 * float(metrics.get("shape_score", 0.0) or 0.0)
-    return round(_clamp01(confidence_score), 6)
+    shape_weight = CONFIDENCE_SHAPE_WEIGHT_BY_SCOPE.get(scope_key, 0.55)
+    shape_score = _confidence_shape_score_for_scope(metrics, scope_key)
+    confidence_score = (1.0 - shape_weight) * prior + shape_weight * shape_score
+    return round(_clamp01(_clamp_confidence_for_scope(confidence_score, scope_key)), 6)
 
 
 def strategy_agreement_score(payload):
