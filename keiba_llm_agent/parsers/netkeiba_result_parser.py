@@ -21,6 +21,17 @@ BET_TYPE_LABELS = {
     "三連単": "三連単",
 }
 
+RESULT_UNAVAILABLE_MARKERS = ("取り止め", "取止", "中止", "不成立")
+
+
+class NetkeibaResultUnavailableError(ValueError):
+    result_unavailable = True
+
+    def __init__(self, *, race_id: str, reason: str):
+        self.race_id = str(race_id or "").strip()
+        self.reason = str(reason or "").strip()
+        super().__init__(f"netkeiba結果がありません: {self.reason or self.race_id}")
+
 
 def normalize_text(value: str | None) -> str:
     if value is None:
@@ -50,6 +61,19 @@ def parse_float_safe(value: str | None) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _extract_result_unavailable_reason(soup: BeautifulSoup) -> str:
+    candidate_texts: list[str] = []
+    for node in soup.select(".Race_Infomation_Box, .RaceInformationBox, .Result_Information_Box, .ResultTableWrap"):
+        text = normalize_text(node.get_text(" ", strip=True))
+        if text:
+            candidate_texts.append(text)
+
+    for text in candidate_texts:
+        if any(marker in text for marker in RESULT_UNAVAILABLE_MARKERS):
+            return text
+    return ""
 
 
 def extract_race_id_from_result_html(soup: BeautifulSoup) -> str | None:
@@ -277,6 +301,9 @@ def parse_netkeiba_result_html(html: str, race_id: str | None = None) -> ResultD
     finish_order = parse_finish_order(soup)
     warnings: list[str] = []
     if not finish_order:
+        unavailable_reason = _extract_result_unavailable_reason(soup)
+        if unavailable_reason:
+            raise NetkeibaResultUnavailableError(race_id=parsed_race_id, reason=unavailable_reason)
         warnings.append("着順テーブルを解析できませんでした。")
     top3_payload = _build_top3_from_finish_order(finish_order)
 

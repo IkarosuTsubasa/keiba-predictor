@@ -856,6 +856,15 @@ def _fetch_and_save_agent_result_for_job(base_dir, job):
     }
 
 
+def _is_agent_result_unavailable_error(exc):
+    return bool(getattr(exc, "result_unavailable", False)) or exc.__class__.__name__ == "NetkeibaResultUnavailableError"
+
+
+def _agent_result_unavailable_reason(exc):
+    reason = str(getattr(exc, "reason", "") or "").strip()
+    return reason or str(exc or "").strip()
+
+
 def _public_site_url():
     return str(os.environ.get("PIPELINE_PUBLIC_SITE_URL", "https://www.ikaimo-ai.com") or "").strip().rstrip("/")
 
@@ -1374,6 +1383,7 @@ def _compact_run_due_summary(summary):
         "agent_dispatched_count": int(row.get("agent_dispatched_count", 0) or 0),
         "settled_count": int(row.get("settled_count", 0) or 0),
         "agent_result_count": int(row.get("agent_result_count", 0) or 0),
+        "agent_result_unavailable_count": int(row.get("agent_result_unavailable_count", 0) or 0),
         "stale_agent_prediction_count": int(row.get("stale_agent_prediction_count", 0) or 0),
         "scan_due_candidate_count": int(row.get("scan_due_candidate_count", 0) or 0),
         "scan_due_reason_counts": _diagnostic_reason_counts(row.get("scan_due_candidates", [])),
@@ -1387,6 +1397,7 @@ def _compact_run_due_summary(summary):
         "agent_dispatched_job_ids": list(row.get("agent_dispatched_job_ids", []) or [])[:8],
         "settled_job_ids": list(row.get("settled_job_ids", []) or [])[:8],
         "agent_result_job_ids": list(row.get("agent_result_job_ids", []) or [])[:8],
+        "agent_result_unavailable_job_ids": list(row.get("agent_result_unavailable_job_ids", []) or [])[:8],
         "stale_agent_prediction_job_ids": list(row.get("stale_agent_prediction_job_ids", []) or [])[:8],
         "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
         "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
@@ -1471,6 +1482,7 @@ def run_due_jobs_once(
     agent_dispatch_results = []
     settle_results = []
     agent_result_results = []
+    agent_result_unavailable_results = []
     stale_agent_prediction_results = []
     errors = list(autofill_errors or [])
     auto_settle_skipped = []
@@ -1799,6 +1811,53 @@ def run_due_jobs_once(
                 flush=True,
             )
         except Exception as exc:
+            if _is_agent_result_unavailable_error(exc):
+                unavailable_reason = _agent_result_unavailable_reason(exc)
+                unavailable_message = str(exc)
+                try:
+                    unavailable_result_url = _build_agent_result_url(job)
+                except Exception:
+                    unavailable_result_url = ""
+                unavailable_result = {
+                    "race_id": race_id,
+                    "result_url": unavailable_result_url,
+                    "result_unavailable": True,
+                    "reason": unavailable_reason,
+                }
+
+                def _mark_agent_result_unavailable(row, now_text):
+                    row["status"] = "failed"
+                    row["error_message"] = unavailable_message
+                    row["actual_top1"] = ""
+                    row["actual_top2"] = ""
+                    row["actual_top3"] = ""
+                    row["last_settlement_output"] = json.dumps(unavailable_result, ensure_ascii=False, indent=2)
+                    row["last_process_output"] = append_job_process_log_entry(
+                        row,
+                        "agent_result_unavailable",
+                        0,
+                        json.dumps(unavailable_result, ensure_ascii=False),
+                    )
+                    _set_race_job_step_state(row, "settlement", "failed", now_text, unavailable_message)
+
+                update_race_job(base_dir, job_id, _mark_agent_result_unavailable)
+                agent_result_unavailable_results.append({"job_id": job_id, **unavailable_result})
+                print(
+                    "[web_app] "
+                    + json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "event": "agent_result_unavailable",
+                            "job_id": job_id,
+                            "race_id": race_id,
+                            "reason": unavailable_reason,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
+
             def _mark_agent_result_failed(row, now_text):
                 row["status"] = "agent_prediction_ready"
                 row["error_message"] = str(exc)
@@ -1964,6 +2023,11 @@ def run_due_jobs_once(
         "agent_result_count": len(agent_result_results),
         "agent_result_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_result_results],
         "agent_result_results": agent_result_results,
+        "agent_result_unavailable_count": len(agent_result_unavailable_results),
+        "agent_result_unavailable_job_ids": [
+            str(item.get("job_id", "") or "").strip() for item in agent_result_unavailable_results
+        ],
+        "agent_result_unavailable_results": agent_result_unavailable_results,
         "stale_agent_prediction_count": len(stale_agent_prediction_results),
         "stale_agent_prediction_job_ids": [
             str(item.get("job_id", "") or "").strip() for item in stale_agent_prediction_results

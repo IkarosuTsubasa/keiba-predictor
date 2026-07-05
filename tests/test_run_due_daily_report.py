@@ -14,6 +14,7 @@ if str(PIPELINE_DIR) not in sys.path:
 from web_admin import task_routes
 from race_job_store import create_job, get_job, load_jobs, save_jobs, update_job
 from v5_remote_tasks import create_task, find_latest_task_for_job, load_tasks, save_tasks
+from keiba_llm_agent.parsers.netkeiba_result_parser import NetkeibaResultUnavailableError
 
 
 class RunDueDailyReportTests(unittest.TestCase):
@@ -156,6 +157,60 @@ class RunDueDailyReportTests(unittest.TestCase):
         self.assertEqual(updated_job.get("status"), "failed")
         self.assertIn("timed out", updated_job.get("error_message", ""))
         self.assertEqual(updated_task.get("status"), "expired")
+
+    def test_unavailable_agent_result_is_terminal_without_run_due_error(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202655062509",
+                scope_key="local",
+                race_name="テスト",
+                race_date="2026-06-25",
+                scheduled_off_time="2026-06-25T10:00:00",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            job_id = str(job.get("job_id", "") or "").strip()
+
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "").strip() == job_id:
+                    row["status"] = "agent_prediction_ready"
+                    row["predictor_status"] = "succeeded"
+            save_jobs(base_dir, jobs)
+
+            def scan_due_fixed(target_base_dir):
+                return []
+
+            def scan_due_diagnostics_fixed(target_base_dir):
+                return []
+
+            unavailable = NetkeibaResultUnavailableError(
+                race_id="202655062509",
+                reason="天候不良のため取り止めとなりました。",
+            )
+            with patch.dict(os.environ, {"PIPELINE_AUTO_DISCOVER_RACES_ENABLED": "0"}, clear=False):
+                with patch.object(task_routes, "_jst_now", return_value=datetime(2026, 6, 25, 13, 0, 0)):
+                    with patch.object(task_routes, "_fetch_and_save_agent_result_for_job", side_effect=unavailable):
+                        summary = task_routes.run_due_jobs_once(
+                            base_dir=base_dir,
+                            scan_due_race_jobs=scan_due_fixed,
+                            scan_due_race_job_diagnostics=scan_due_diagnostics_fixed,
+                            load_race_jobs=load_jobs,
+                            update_race_job=update_job,
+                            compute_race_job_initial_status=lambda row: str(row.get("status", "") or ""),
+                        )
+
+            updated_job = get_job(base_dir, job_id) or {}
+
+        self.assertEqual(summary["errors"], [])
+        self.assertEqual(summary["agent_result_unavailable_count"], 1)
+        self.assertEqual(summary["agent_result_unavailable_job_ids"], [job_id])
+        self.assertEqual(updated_job.get("status"), "failed")
+        self.assertIn("取り止め", updated_job.get("error_message", ""))
+        self.assertEqual(updated_job.get("settlement_status"), "failed")
 
     def test_compact_run_due_summary_keeps_daily_report(self):
         compact = task_routes._compact_run_due_summary(
