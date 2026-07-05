@@ -3,6 +3,8 @@ import json
 import os
 import sys
 
+from fastapi.testclient import TestClient
+
 import web_app
 
 
@@ -54,6 +56,14 @@ def main():
     public_race_detail_html = getattr(public_race_detail, "body", b"").decode("utf-8", errors="ignore")
     assert_true(getattr(public_race_detail, "status_code", 0) == 200, "public race detail should return 200")
     assert_true("<!doctype html" in public_race_detail_html.lower(), "public race detail should render frontend html")
+
+    client = TestClient(web_app.app)
+    verification = client.get(f"{web_app.PUBLIC_BASE_PATH}/googlecf15c2eb74c69935.html")
+    assert_true(verification.status_code == 200, "google verification file should return 200")
+    assert_true(
+        "google-site-verification: googlecf15c2eb74c69935.html" in verification.text,
+        "google verification file should include expected token",
+    )
 
     public_history = web_app.public_history_spa()
     public_history_html = getattr(public_history, "body", b"").decode("utf-8", errors="ignore")

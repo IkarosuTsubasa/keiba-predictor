@@ -31,6 +31,9 @@ PUBLIC_OG_IMAGE_PATH = f"{PUBLIC_BASE_PATH}/og.png"
 PUBLIC_GOOGLE_PLAY_BADGE_PATH = f"{PUBLIC_BASE_PATH}/GetItOnGooglePlay_Badge_Web_color_Japanese.png"
 PUBLIC_APP_ADS_TXT_PATH = "/app-ads.txt"
 PUBLIC_ADS_TXT_PATH = "/ads.txt"
+PUBLIC_GOOGLE_SITE_VERIFICATION_FILENAME = "googlecf15c2eb74c69935.html"
+PUBLIC_GOOGLE_SITE_VERIFICATION_PATH = f"{PUBLIC_BASE_PATH}/{PUBLIC_GOOGLE_SITE_VERIFICATION_FILENAME}"
+PUBLIC_GOOGLE_SITE_VERIFICATION_FILE = BASE_DIR.parent / PUBLIC_GOOGLE_SITE_VERIFICATION_FILENAME
 PUBLIC_SITE_URL = "https://www.ikaimo-ai.com"
 PUBLIC_CANONICAL_URL = f"{PUBLIC_SITE_URL}{PUBLIC_BASE_PATH}"
 PUBLIC_OG_IMAGE_URL = f"{PUBLIC_SITE_URL}{PUBLIC_OG_IMAGE_PATH}"
@@ -1592,6 +1595,13 @@ def build_public_index_response(path="", home_intro_payload=None, initial_board_
 
 
 def register_public_static_routes(app: FastAPI) -> None:
+    @app.get(PUBLIC_GOOGLE_SITE_VERIFICATION_PATH)
+    @app.get(f"/{PUBLIC_GOOGLE_SITE_VERIFICATION_FILENAME}")
+    def public_google_site_verification():
+        if not PUBLIC_GOOGLE_SITE_VERIFICATION_FILE.exists():
+            raise HTTPException(status_code=404, detail="google verification file not found")
+        return FileResponse(PUBLIC_GOOGLE_SITE_VERIFICATION_FILE, media_type="text/html; charset=utf-8")
+
     @app.get(PUBLIC_APP_ADS_TXT_PATH)
     @app.get(f"{PUBLIC_BASE_PATH}/app-ads.txt")
     def public_app_ads_txt():
