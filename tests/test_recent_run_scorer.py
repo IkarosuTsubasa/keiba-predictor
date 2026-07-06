@@ -153,6 +153,36 @@ class RecentRunScorerTests(unittest.TestCase):
         self.assertGreaterEqual(score.scores.track_condition_fit, 6)
         self.assertEqual(score.scores.risk, -3)
 
+    def test_three_and_four_run_pedigree_risk_still_blends_down_distance_fit(self) -> None:
+        pedigree = build_pedigree_analysis([], risk_flags=["PEDIGREE_DISTANCE_RISK"])
+        for run_count in (3, 4):
+            with self.subTest(run_count=run_count):
+                horse = HorseEntry(
+                    horse_no=4,
+                    horse_name="D",
+                    jockey="騎手D",
+                    recent_runs=[
+                        build_run(
+                            f"2026-0{index + 1}-20",
+                            "東京",
+                            "芝",
+                            1600,
+                            2,
+                            16,
+                            "騎手D",
+                        )
+                        for index in range(run_count)
+                    ],
+                )
+                baseline = score_horse_by_recent_runs(horse, self.race_info)
+                adjusted = score_horse_by_recent_runs(
+                    horse,
+                    self.race_info,
+                    pedigree_analysis=pedigree,
+                )
+
+                self.assertLess(adjusted.scores.distance_fit, baseline.scores.distance_fit)
+
     def test_debut_race_without_recent_runs_still_uses_scoring_path(self) -> None:
         race_data = RaceData(
             race_info=self.debut_race_info,

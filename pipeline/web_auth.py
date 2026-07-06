@@ -23,6 +23,6 @@ def admin_token_enabled():
 def admin_token_valid(token=""):
     expected = admin_token_expected()
     if not expected:
-        return True
+        return False
     supplied = str(token or "").strip()
     return bool(supplied) and secrets.compare_digest(supplied, expected)

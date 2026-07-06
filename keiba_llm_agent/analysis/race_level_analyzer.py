@@ -5,6 +5,7 @@ from collections import defaultdict
 from keiba_llm_agent.analysis.race_class import infer_run_race_class_level, infer_target_race_class_level
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceInfo, RecentRun
 from keiba_llm_agent.schemas.race_level_analysis import RaceLevelAnalysis
+from keiba_llm_agent.utils.margin import parse_margin_value
 
 
 POSITIVE_HINTS = {
@@ -39,31 +40,6 @@ def _top3_runs(runs: list[RecentRun]) -> int:
 
 def _double_digit_runs(runs: list[RecentRun]) -> int:
     return sum(1 for run in runs if run.finish is not None and run.finish >= 10)
-
-
-def _parse_margin_value(value: str | None) -> float | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    symbolic = {
-        "ハナ": 0.05,
-        "アタマ": 0.1,
-        "クビ": 0.2,
-        "大": 3.0,
-        "大差": 4.0,
-    }
-    if text in symbolic:
-        return symbolic[text]
-    cleaned = ""
-    for char in text:
-        if char.isdigit() or char in ".-":
-            cleaned += char
-    if not cleaned:
-        return None
-    try:
-        return abs(float(cleaned))
-    except ValueError:
-        return None
 
 
 def _build_run_index(all_horses: list[HorseEntry]) -> dict[str, list[tuple[HorseEntry, RecentRun]]]:
@@ -141,7 +117,7 @@ def analyze_race_level_for_horse(
             large_field_good_runs += 1
             _append_flag(positive_flags, "LARGE_FIELD_GOOD_RUN")
         run_level = infer_run_race_class_level(run)
-        margin = _parse_margin_value(run.margin)
+        margin = parse_margin_value(run.margin)
         if run_level is not None:
             if run_level >= 9.0 and margin is not None and margin <= 1.2 and run.finish <= 12:
                 grade1_small_margins += 1

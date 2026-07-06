@@ -70,6 +70,17 @@ class _InvalidLessonEnhancingLLM(MockLLMClient):
         return super().generate_json(system_prompt, user_prompt, schema_name=schema_name)
 
 
+class _InvalidSchemaReviewEnhancementLLM(MockLLMClient):
+    def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str | None = None) -> dict:
+        if schema_name == "review_enhancement":
+            return {
+                "good_points": "not-a-list",
+                "bad_points": ["LLM bad point"],
+                "lessons": "not-a-list",
+            }
+        return super().generate_json(system_prompt, user_prompt, schema_name=schema_name)
+
+
 class ReviewLLMEnhancementTests(unittest.TestCase):
     def setUp(self) -> None:
         prediction_agent = RaceAnalysisAgent(llm_client=MockLLMClient())
@@ -107,6 +118,14 @@ class ReviewLLMEnhancementTests(unittest.TestCase):
         payload = json.loads(self.lessons_path.read_text(encoding="utf-8"))
         self.assertTrue(all(item["course"] != "unknown" for item in payload))
         self.assertTrue(all(item["distance"] != 0 for item in payload))
+
+    def test_invalid_review_enhancement_schema_is_ignored(self) -> None:
+        agent = RaceReviewAgent(llm_client=_InvalidSchemaReviewEnhancementLLM())
+        review = agent.run("sample_001", SAMPLE_RESULT, self.prediction, race_info=self.prediction.race_info)
+
+        self.assertEqual(review.race_id, "sample_001")
+        self.assertNotEqual(review.good_points, "not-a-list")
+        self.assertNotEqual(review.bad_points, ["LLM bad point"])
 
 
 if __name__ == "__main__":

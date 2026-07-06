@@ -177,6 +177,80 @@ load_local_env(BASE_DIR, override=False)
 mount_public_assets(app)
 register_public_static_routes(app)
 
+RATE_LIMIT_WINDOW_SECONDS = 60.0
+RATE_LIMITS = {
+    "admin_auth": (20, RATE_LIMIT_WINDOW_SECONDS),
+    "admin_read": (180, RATE_LIMIT_WINDOW_SECONDS),
+    "admin_write": (90, RATE_LIMIT_WINDOW_SECONDS),
+    "mobile_api": (180, RATE_LIMIT_WINDOW_SECONDS),
+    "internal_callback": (90, RATE_LIMIT_WINDOW_SECONDS),
+    "internal_api": (60, RATE_LIMIT_WINDOW_SECONDS),
+}
+_RATE_LIMIT_STATE: dict[tuple[str, str], list[float]] = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
+
+def _client_ip_for_rate_limit(request: Request) -> str:
+    forwarded_for = str(request.headers.get("x-forwarded-for", "") or "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip() or "unknown"
+    client = getattr(request, "client", None)
+    return str(getattr(client, "host", "") or "unknown")
+
+
+def _rate_limit_profile(path: str, method: str) -> str | None:
+    normalized_path = str(path or "")
+    normalized_method = str(method or "").upper()
+    admin_prefixes = (f"{PUBLIC_BASE_PATH}/api/admin/", "/api/admin/")
+    mobile_prefixes = (f"{PUBLIC_BASE_PATH}/api/mobile/", "/api/mobile/")
+    internal_prefixes = (f"{PUBLIC_BASE_PATH}/internal/", "/internal/")
+
+    if normalized_path.endswith("/api/admin/auth-check"):
+        return "admin_auth"
+    if normalized_path.startswith(admin_prefixes):
+        return "admin_write" if normalized_method in {"POST", "PUT", "PATCH", "DELETE"} else "admin_read"
+    if normalized_path.startswith(mobile_prefixes):
+        return "mobile_api"
+    if "callback" in normalized_path and normalized_path.startswith(internal_prefixes):
+        return "internal_callback"
+    if normalized_path.startswith(internal_prefixes):
+        return "internal_api"
+    return None
+
+
+def _rate_limit_decision(profile: str, client_id: str, now: float | None = None) -> tuple[bool, int, float]:
+    limit, window_seconds = RATE_LIMITS[profile]
+    current_time = time.monotonic() if now is None else float(now)
+    cutoff = current_time - window_seconds
+    key = (profile, client_id)
+    with _RATE_LIMIT_LOCK:
+        timestamps = [stamp for stamp in _RATE_LIMIT_STATE.get(key, []) if stamp > cutoff]
+        if len(timestamps) >= limit:
+            retry_after = max(1.0, window_seconds - (current_time - timestamps[0]))
+            _RATE_LIMIT_STATE[key] = timestamps
+            return False, 0, retry_after
+        timestamps.append(current_time)
+        _RATE_LIMIT_STATE[key] = timestamps
+        return True, limit - len(timestamps), 0.0
+
+
+@app.middleware("http")
+async def apply_sensitive_api_rate_limits(request: Request, call_next):
+    profile = _rate_limit_profile(str(request.url.path or ""), request.method)
+    if profile:
+        allowed, remaining, retry_after = _rate_limit_decision(profile, _client_ip_for_rate_limit(request))
+        if not allowed:
+            return JSONResponse(
+                {"ok": False, "error": "rate limit exceeded"},
+                status_code=429,
+                headers={"Retry-After": str(int(math.ceil(retry_after)))},
+            )
+        response = await call_next(request)
+        response.headers.setdefault("X-RateLimit-Limit", str(RATE_LIMITS[profile][0]))
+        response.headers.setdefault("X-RateLimit-Remaining", str(max(0, remaining)))
+        return response
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def add_public_cache_headers(request: Request, call_next):
@@ -5367,7 +5441,7 @@ def admin_auth_check(request: Request, token: str = ""):
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/jobs")
 def admin_jobs_api(request: Request, token: str = "", show_settled: str = ""):
     supplied = _admin_supplied_token(request, token)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
     show_settled_flag = str(show_settled or "").strip().lower() in ("1", "true", "yes", "on")
     return JSONResponse(_build_admin_jobs_payload(token=supplied, show_settled=show_settled_flag))
@@ -5376,7 +5450,7 @@ def admin_jobs_api(request: Request, token: str = "", show_settled: str = ""):
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/agent_health")
 def admin_agent_health_api(request: Request, token: str = ""):
     supplied = _admin_supplied_token(request, token)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
     return JSONResponse(_build_agent_health_payload())
 
@@ -5384,7 +5458,7 @@ def admin_agent_health_api(request: Request, token: str = ""):
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/runs")
 def admin_runs_api(request: Request, token: str = "", scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q: str = ""):
     supplied = _admin_supplied_token(request, token)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
     return JSONResponse(
         {
@@ -5405,7 +5479,7 @@ def admin_runs_api(request: Request, token: str = "", scope_key: str = "central_
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/workspace")
 def admin_workspace_api(request: Request, token: str = "", scope_key: str = "", run_id: str = ""):
     supplied = _admin_supplied_token(request, token)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"authorized": False, "error": "admin token invalid"}, status_code=403)
     try:
         payload = _build_admin_workspace_payload(token=supplied, scope_key=scope_key, run_id=run_id)
@@ -5417,7 +5491,7 @@ def admin_workspace_api(request: Request, token: str = "", scope_key: str = "", 
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/ops/reset_llm_state")
 async def admin_reset_llm_state_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     reset_llm_state_files(BASE_DIR)
     return JSONResponse({"ok": True, "output_text": "LLM state reset completed."})
@@ -5433,7 +5507,7 @@ def _llm_buy_disabled_response():
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_llm_buy")
 async def admin_workspace_run_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
@@ -5499,7 +5573,7 @@ async def admin_workspace_run_llm_buy_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/run_all_llm_buy")
 async def admin_workspace_run_all_llm_buy_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     return _llm_buy_disabled_response()
     payload = await request.json()
@@ -5553,7 +5627,7 @@ async def admin_workspace_run_all_llm_buy_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/topup_all_llm_budget")
 async def admin_workspace_topup_all_llm_budget_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     return _llm_buy_disabled_response()
     payload = await request.json()
@@ -5589,7 +5663,7 @@ async def admin_workspace_topup_all_llm_budget_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/record_predictor")
 async def admin_workspace_record_predictor_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
@@ -5629,7 +5703,7 @@ async def admin_workspace_record_predictor_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/workspace/fetch_result_and_settle")
 async def admin_workspace_fetch_result_and_settle_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     scope_key = str((payload or {}).get("scope_key", "") or "").strip()
@@ -5671,7 +5745,7 @@ async def admin_workspace_fetch_result_and_settle_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/process_now")
 async def admin_jobs_process_now_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     job_id = str((payload or {}).get("job_id", "") or "").strip()
@@ -5729,7 +5803,7 @@ async def admin_jobs_process_now_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/fetch_info")
 async def admin_jobs_fetch_info_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     job_id = str((payload or {}).get("job_id", "") or "").strip()
@@ -5773,7 +5847,7 @@ async def admin_jobs_fetch_info_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/delete")
 async def admin_jobs_delete_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     job_id = str((payload or {}).get("job_id", "") or "").strip()
@@ -5788,7 +5862,7 @@ async def admin_jobs_delete_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/edit")
 async def admin_jobs_edit_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     job_id = str((payload or {}).get("job_id", "") or "").strip()
@@ -5859,7 +5933,7 @@ async def admin_jobs_edit_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/update")
 async def admin_jobs_update_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     job_id = str((payload or {}).get("job_id", "") or "").strip()
@@ -5877,7 +5951,7 @@ async def admin_jobs_update_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/create_agent_races")
 async def admin_jobs_create_agent_races_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     race_ids = _extract_agent_race_ids(payload or {})
@@ -5972,7 +6046,7 @@ async def admin_jobs_create_api(
     shutuba_file: UploadFile = File(None),
 ):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
 
     if kachiuma_file is None or not str(getattr(kachiuma_file, "filename", "") or "").strip():
@@ -6112,7 +6186,7 @@ async def admin_jobs_import_archive_api(
     archive_file: UploadFile = File(None),
 ):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     if archive_file is None or not str(getattr(archive_file, "filename", "") or "").strip():
         return JSONResponse({"ok": False, "error": "archive_file required"}, status_code=400)
@@ -6132,7 +6206,7 @@ async def admin_jobs_import_archive_api(
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/scan_due")
 async def admin_jobs_scan_due_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     changed = scan_due_race_jobs(BASE_DIR)
     return JSONResponse(
@@ -6165,7 +6239,7 @@ def admin_jobs_run_due_now_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/daily_summary_share")
 async def admin_jobs_daily_summary_share_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     date_text = str((payload or {}).get("date_text", "") or "").strip()
@@ -6179,7 +6253,7 @@ async def admin_jobs_daily_summary_share_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/generate_daily_report")
 async def admin_jobs_generate_daily_report_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     payload = await request.json()
     date_text = str((payload or {}).get("date_text", "") or "").strip()
@@ -6213,7 +6287,7 @@ async def admin_jobs_generate_daily_report_api(request: Request):
 @app.post(f"{PUBLIC_BASE_PATH}/api/admin/jobs/topup_today_all_llm")
 async def admin_jobs_topup_today_all_llm_api(request: Request):
     supplied = _admin_supplied_token(request)
-    if _admin_token_enabled() and not _admin_token_valid(supplied):
+    if not _admin_token_valid(supplied):
         return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
     return _llm_buy_disabled_response()
     ledger_date = datetime.now().strftime("%Y%m%d")

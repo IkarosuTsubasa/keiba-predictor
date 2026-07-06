@@ -32,6 +32,7 @@ from keiba_llm_agent.schemas.prediction import (
 )
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, RecentRun
 from keiba_llm_agent.schemas.review import LessonItem
+from keiba_llm_agent.utils.margin import parse_margin_value
 
 
 WEIGHTS = [1.5, 1.2, 1.0, 0.8, 0.6]
@@ -393,10 +394,7 @@ def _blend_low_sample_prior(current_score: int, prior_score: int | None, run_cou
     blend = _low_sample_prior_blend(run_count)
     if blend <= 0:
         return current_score
-    blended = clamp_score(current_score * (1.0 - blend) + prior_score * blend)
-    if prior_score >= current_score:
-        return max(current_score, blended)
-    return min(current_score, blended) if run_count <= 2 else current_score
+    return clamp_score(current_score * (1.0 - blend) + prior_score * blend)
 
 
 def _pedigree_distance_prior_score(pedigree_analysis: PedigreeAnalysis | None) -> int | None:
@@ -506,31 +504,6 @@ def finish_percentile_score(run: RecentRun) -> float:
     if run.field_size and run.field_size > 1:
         return clamp_float(10.0 * (run.field_size - run.finish) / (run.field_size - 1))
     return float(safe_finish_bucket(run))
-
-
-def parse_margin_value(value: str | None) -> float | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    symbolic = {
-        "ハナ": 0.05,
-        "アタマ": 0.1,
-        "クビ": 0.2,
-        "大": 3.0,
-        "大差": 4.0,
-    }
-    if text in symbolic:
-        return symbolic[text]
-    cleaned = ""
-    for char in text:
-        if char.isdigit() or char in ".-":
-            cleaned += char
-    if not cleaned:
-        return None
-    try:
-        return abs(float(cleaned))
-    except ValueError:
-        return None
 
 
 def run_condition_mismatch(run: RecentRun, race_info: RaceInfo | None) -> bool:

@@ -5,6 +5,7 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 
+from keiba_llm_agent.schemas.llm_enhancement import PredictionEnhancement, ReviewEnhancement
 from keiba_llm_agent.schemas.prediction import Prediction
 from keiba_llm_agent.schemas.race_data import RaceData
 from keiba_llm_agent.schemas.review import LessonItem, Review
@@ -94,11 +95,12 @@ class BaseLLMClient(ABC):
             "used_lessons": [lesson.model_dump() for lesson in used_lessons],
         }
         try:
-            return self.generate_json(
+            response = self.generate_json(
                 PREDICTION_ENHANCEMENT_PROMPT,
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 schema_name="prediction_enhancement",
             )
+            return PredictionEnhancement.model_validate(response).model_dump(exclude_unset=True)
         except Exception as exc:
             warnings.warn(f"prediction enhancement failed: {exc}", stacklevel=2)
             return None
@@ -119,11 +121,12 @@ class BaseLLMClient(ABC):
             "lessons": [lesson.model_dump() for lesson in review.lessons],
         }
         try:
-            return self.generate_json(
+            response = self.generate_json(
                 REVIEW_ENHANCEMENT_PROMPT,
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 schema_name="review_enhancement",
             )
+            return ReviewEnhancement.model_validate(response).model_dump(exclude_unset=True)
         except Exception as exc:
             warnings.warn(f"review enhancement failed: {exc}", stacklevel=2)
             return None

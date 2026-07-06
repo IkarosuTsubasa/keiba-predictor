@@ -53,6 +53,17 @@ class _ForbiddenCopyEnhancingLLM(MockLLMClient):
         return super().generate_json(system_prompt, user_prompt, schema_name=schema_name)
 
 
+class _InvalidSchemaEnhancingLLM(MockLLMClient):
+    def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str | None = None) -> dict:
+        if schema_name == "prediction_enhancement":
+            return {
+                "summary": ["not", "a", "string"],
+                "risks": "not-a-list",
+                "top_horse_memos": [{"horse_no": "bad", "memo": ["bad"]}],
+            }
+        return super().generate_json(system_prompt, user_prompt, schema_name=schema_name)
+
+
 class PredictionLLMEnhancementTests(unittest.TestCase):
     def test_mock_llm_enhancement_can_modify_summary(self) -> None:
         agent = RaceAnalysisAgent(llm_client=_SummaryEnhancingLLM())
@@ -92,6 +103,15 @@ class PredictionLLMEnhancementTests(unittest.TestCase):
         self.assertEqual(prediction.race_id, "sample_001")
         self.assertGreater(len(prediction.horse_scores), 0)
         self.assertIsNone(prediction.commentary)
+        self.assertIn("買い判断=", prediction.summary)
+
+    def test_invalid_llm_enhancement_schema_is_ignored(self) -> None:
+        agent = RaceAnalysisAgent(llm_client=_InvalidSchemaEnhancingLLM())
+        prediction = agent.run(SAMPLE_RACE_DATA, [])
+
+        self.assertEqual(prediction.race_id, "sample_001")
+        self.assertNotIsInstance(prediction.summary, list)
+        self.assertEqual(prediction.top_horse_memos, [])
         self.assertIn("買い判断=", prediction.summary)
 
 
