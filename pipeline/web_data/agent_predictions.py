@@ -179,7 +179,7 @@ def _clamp01(value):
     return max(0.0, min(1.0, number))
 
 
-_PREDICTION_PAYLOAD_CACHE = {}
+_PREDICTION_INDEX_CACHE = {}
 _PREDICTION_HISTORY_CACHE = {}
 _PREDICTION_CACHE_LOCK = threading.RLock()
 
@@ -201,8 +201,27 @@ def _prediction_cache_key(base_dir):
     return resolved_base, dirs
 
 
-def _build_prediction_payload_snapshot(base_dir):
-    payloads = []
+def _prediction_metadata(path, payload):
+    race_info = dict(payload.get("race_info") or {})
+    race_id = _safe_text(payload.get("race_id")) or _safe_text(race_info.get("race_id")) or Path(path).stem
+    return {
+        "_source_path": str(path),
+        "race_id": race_id,
+        "scope_key": _safe_text(payload.get("scope_key")),
+        "source": _safe_text(payload.get("source")),
+        "race_info": {
+            "race_id": race_id,
+            "race_date": _safe_text(race_info.get("race_date")),
+            "scope_key": _safe_text(race_info.get("scope_key")),
+            "source": _safe_text(race_info.get("source")),
+            "surface": _safe_text(race_info.get("surface")),
+            "course": _safe_text(race_info.get("course")),
+        },
+    }
+
+
+def _build_prediction_index(base_dir):
+    items = []
     by_date = {}
     seen_race_ids = set()
     for directory in _prediction_dir_candidates(base_dir):
@@ -211,64 +230,84 @@ def _build_prediction_payload_snapshot(base_dir):
                 payload = _read_json(path)
             except (OSError, json.JSONDecodeError):
                 continue
-            race_id = _safe_text(payload.get("race_id")) or path.stem
+            item = _prediction_metadata(path, payload)
+            race_id = _safe_text(item.get("race_id"))
             if not race_id or race_id in seen_race_ids:
                 continue
             seen_race_ids.add(race_id)
-            payload["_source_path"] = str(path)
-            payloads.append(payload)
-            race_info = dict(payload.get("race_info") or {})
+            items.append(item)
+            race_info = dict(item.get("race_info") or {})
             race_date = _safe_text(race_info.get("race_date"))
             if race_date:
-                by_date.setdefault(race_date, []).append(payload)
-    return {"payloads": payloads, "by_date": by_date}
+                by_date.setdefault(race_date, []).append(item)
+    return {"items": items, "by_date": by_date}
 
 
-def _prediction_payload_snapshot(base_dir):
+def _prediction_index(base_dir):
     ttl_seconds = _prediction_cache_ttl_seconds()
     if ttl_seconds <= 0:
-        return _build_prediction_payload_snapshot(base_dir)
+        return _build_prediction_index(base_dir)
 
     key = _prediction_cache_key(base_dir)
     now = time.time()
-    cached = _PREDICTION_PAYLOAD_CACHE.get(key)
+    cached = _PREDICTION_INDEX_CACHE.get(key)
     if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
-        return cached.get("snapshot") or {"payloads": [], "by_date": {}}
+        return cached.get("index") or {"items": [], "by_date": {}}
 
     with _PREDICTION_CACHE_LOCK:
-        cached = _PREDICTION_PAYLOAD_CACHE.get(key)
+        cached = _PREDICTION_INDEX_CACHE.get(key)
         if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
-            return cached.get("snapshot") or {"payloads": [], "by_date": {}}
-        snapshot = _build_prediction_payload_snapshot(base_dir)
-        _PREDICTION_PAYLOAD_CACHE.clear()
-        _PREDICTION_PAYLOAD_CACHE[key] = {"created_at": time.time(), "snapshot": snapshot}
-        return snapshot
+            return cached.get("index") or {"items": [], "by_date": {}}
+        index = _build_prediction_index(base_dir)
+        _PREDICTION_INDEX_CACHE.clear()
+        _PREDICTION_HISTORY_CACHE.clear()
+        _PREDICTION_INDEX_CACHE[key] = {"created_at": time.time(), "index": index}
+        return index
 
 
 def _iter_prediction_payloads(base_dir):
-    for payload in list((_prediction_payload_snapshot(base_dir).get("payloads") or [])):
-        yield dict(payload)
+    for item in list((_prediction_index(base_dir).get("items") or [])):
+        path = str((item or {}).get("_source_path", "") or "").strip()
+        if not path:
+            continue
+        try:
+            payload = _read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        payload["_source_path"] = path
+        yield payload
 
 
 def _prediction_payloads_for_date(base_dir, target_date):
     target = _safe_text(target_date)
     if not target:
         return []
-    snapshot = _prediction_payload_snapshot(base_dir)
-    return [dict(payload) for payload in list((snapshot.get("by_date") or {}).get(target, []) or [])]
+    payloads = []
+    index = _prediction_index(base_dir)
+    for item in list((index.get("by_date") or {}).get(target, []) or []):
+        path = str((item or {}).get("_source_path", "") or "").strip()
+        if not path:
+            continue
+        try:
+            payload = _read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        payload["_source_path"] = path
+        payloads.append(payload)
+    return payloads
 
 
 def available_dates(base_dir, scope_key=""):
     scope = _normalize_history_scope_key(scope_key)
-    snapshot = _prediction_payload_snapshot(base_dir)
+    index = _prediction_index(base_dir)
     if not scope:
-        return sorted((snapshot.get("by_date") or {}).keys())
+        return sorted((index.get("by_date") or {}).keys())
 
     dates = set()
-    for payload in list(snapshot.get("payloads") or []):
-        if not _scope_matches(payload, scope_key):
+    for item in list(index.get("items") or []):
+        if not _scope_matches(item, scope_key):
             continue
-        race_info = dict(payload.get("race_info") or {})
+        race_info = dict(item.get("race_info") or {})
         race_date = _safe_text(race_info.get("race_date"))
         if race_date:
             dates.add(race_date)
