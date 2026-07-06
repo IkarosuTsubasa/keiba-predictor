@@ -3,6 +3,8 @@
 **/data/
 AGENTS.md
 *.csv
+.qoder/
+analysis_outputs/
 
 # Local environment / secrets
 .env
