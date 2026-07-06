@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -33,6 +34,43 @@ LOCAL_LIST_HTML = """
     <a href="../race/shutuba.html?race_id=202665061312">12R B2ー4 20:30 ダ200m 8頭</a>
   </div>
 </div>
+"""
+
+
+def local_list_html_for_race_ids(race_ids):
+    links = "\n".join(
+        f'    <a href="../race/shutuba.html?race_id={race_id}">{int(str(race_id)[-2:])}R テスト</a>'
+        for race_id in race_ids
+    )
+    return f"""
+<div class="RaceList_Body RaceList_Top">
+  <div class="RaceList_Box clearfix">
+{links}
+  </div>
+</div>
+"""
+
+
+def local_shutuba_page_html(race_name, time_text="18:30", distance="1400", venue="川崎"):
+    return f"""
+<div class="RaceList_Item02">
+  <h1 class="RaceName">{race_name}</h1>
+  <div class="RaceData01">{time_text}発走 / ダ{distance}m (左) / 馬場:良</div>
+  <div class="RaceData02"><span>{venue}</span></div>
+</div>
+"""
+
+
+def local_canceled_shutuba_page_html(race_name, time_text="18:30", distance="1400", venue="川崎"):
+    return local_shutuba_page_html(race_name, time_text, distance, venue).replace(
+        "</div>\n",
+        "<p>取止</p>\n</div>\n",
+        1,
+    )
+
+
+LOCAL_INVALID_RACE_PAGE_HTML = """
+<html><body><p>レース情報が見つかりません。</p></body></html>
 """
 
 
@@ -78,6 +116,78 @@ class RaceDiscoveryTests(unittest.TestCase):
             summary["races"][1]["shutuba_url"],
             "https://nar.netkeiba.com/race/shutuba.html?race_id=202665061312",
         )
+
+    def test_local_discovery_supplements_july6_internal_missing_races(self):
+        morioka_ids = [f"2026350706{race_no:02d}" for race_no in range(1, 13) if race_no != 11]
+        kawasaki_ids = [f"2026450706{race_no:02d}" for race_no in range(1, 13) if race_no != 8]
+        list_html = local_list_html_for_race_ids(morioka_ids + kawasaki_ids).encode("utf-8")
+
+        def fake_fetcher(url, timeout=30):
+            if "race_list_sub.html" in url:
+                return list_html
+            if "race_id=202635070611" in url:
+                return local_shutuba_page_html("茉莉花特別(A)", "17:40", "1600", "盛岡").encode("utf-8")
+            if "race_id=202645070608" in url:
+                return local_shutuba_page_html("アルテミス賞(C2)", "18:30", "2000", "川崎").encode("utf-8")
+            return LOCAL_INVALID_RACE_PAGE_HTML.encode("utf-8")
+
+        summary = race_discovery.discover_races_for_date(
+            "2026-07-06",
+            include_central=False,
+            fetcher=fake_fetcher,
+        )
+
+        race_ids = [row["race_id"] for row in summary["races"]]
+        self.assertIn("202635070611", race_ids)
+        self.assertIn("202645070608", race_ids)
+        self.assertEqual(len([race_id for race_id in race_ids if race_id.startswith("2026350706")]), 12)
+        self.assertEqual(len([race_id for race_id in race_ids if race_id.startswith("2026450706")]), 12)
+        self.assertEqual(summary["source_results"][0]["supplemented_count"], 2)
+        self.assertEqual(summary["errors"], [])
+
+    def test_local_discovery_warns_for_unresolved_internal_missing_race(self):
+        morioka_ids = [f"2026350706{race_no:02d}" for race_no in range(1, 13) if race_no != 11]
+        list_html = local_list_html_for_race_ids(morioka_ids).encode("utf-8")
+
+        def fake_fetcher(url, timeout=30):
+            if "race_list_sub.html" in url:
+                return list_html
+            return LOCAL_INVALID_RACE_PAGE_HTML.encode("utf-8")
+
+        summary = race_discovery.discover_races_for_date(
+            "2026-07-06",
+            include_central=False,
+            fetcher=fake_fetcher,
+        )
+
+        self.assertNotIn("202635070611", [row["race_id"] for row in summary["races"]])
+        self.assertEqual(summary["source_results"][0]["supplemented_count"], 0)
+        self.assertEqual(summary["source_results"][0]["supplement_errors"], [])
+        self.assertTrue(summary["source_results"][0]["supplement_warnings"])
+        self.assertEqual(summary["warnings"][0]["stage"], "supplement")
+        self.assertEqual(summary["errors"], [])
+
+    def test_local_discovery_does_not_supplement_canceled_internal_missing_race(self):
+        morioka_ids = [f"2026350706{race_no:02d}" for race_no in range(1, 13) if race_no != 11]
+        list_html = local_list_html_for_race_ids(morioka_ids).encode("utf-8")
+
+        def fake_fetcher(url, timeout=30):
+            if "race_list_sub.html" in url:
+                return list_html
+            if "race_id=202635070611" in url:
+                return local_canceled_shutuba_page_html("茉莉花特別(A)", "17:40", "1600", "盛岡").encode("utf-8")
+            return LOCAL_INVALID_RACE_PAGE_HTML.encode("utf-8")
+
+        summary = race_discovery.discover_races_for_date(
+            "2026-07-06",
+            include_central=False,
+            fetcher=fake_fetcher,
+        )
+
+        self.assertNotIn("202635070611", [row["race_id"] for row in summary["races"]])
+        self.assertEqual(summary["source_results"][0]["supplemented_count"], 0)
+        self.assertTrue(summary["warnings"])
+        self.assertEqual(summary["errors"], [])
 
 
 class RunDueAutoDiscoveryTests(unittest.TestCase):
@@ -209,6 +319,36 @@ class RunDueAutoDiscoveryTests(unittest.TestCase):
             self.assertEqual(summary["auto_discovery"]["created_count"], 1)
             self.assertEqual(summary["auto_discovery"]["skipped_count"], 1)
             self.assertEqual({job["race_id"] for job in load_jobs(base_dir)}, {"202605030301", "202654061301"})
+
+    def test_run_due_persists_auto_discovery_warnings_without_blocking_completion(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            discovery_payload = {
+                "target_date": "2026-06-13",
+                "races": [{"race_id": "202654061301", "source": "local"}],
+                "source_counts": {"central": 0, "local": 1},
+                "warnings": [
+                    {
+                        "source": "local",
+                        "stage": "supplement",
+                        "warnings": [{"race_id": "202654061302", "warning": "取止"}],
+                    }
+                ],
+                "errors": [],
+            }
+            with patch.dict(os.environ, {"PIPELINE_AUTO_DISCOVER_AFTER_HOUR_JST": "0"}, clear=False):
+                with patch.object(task_routes, "_jst_now", return_value=datetime(2026, 6, 13, 6, 0, 0)):
+                    with patch.object(task_routes, "discover_races_for_date", return_value=discovery_payload):
+                        with patch.object(task_routes, "fetch_race_meta", side_effect=self.fake_meta):
+                            summary = self.run_due_once(base_dir)
+
+            self.assertEqual(summary["auto_discovery"]["errors"], [])
+            self.assertTrue(summary["auto_discovery"]["warnings"])
+            state_path = base_dir / "data" / "_shared" / task_routes.RUN_DUE_AUTO_DISCOVERY_STATE_FILE
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertTrue(state["2026-06-13"]["completed"])
+            self.assertEqual(state["2026-06-13"]["warning_count"], 1)
 
 
 if __name__ == "__main__":

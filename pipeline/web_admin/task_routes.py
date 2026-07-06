@@ -508,6 +508,7 @@ def _maybe_auto_discover_agent_race_jobs(
         "created_job_ids": [],
         "created_jobs": [],
         "skipped_jobs": [],
+        "warnings": [],
         "errors": [],
     }
     if not enabled:
@@ -559,6 +560,9 @@ def _maybe_auto_discover_agent_race_jobs(
     races = list(discovery.get("races", []) or [])
     base_summary["discovered_count"] = len(races)
     base_summary["source_counts"] = dict(discovery.get("source_counts", {}) or {})
+    discovery_warnings = list(discovery.get("warnings", []) or [])
+    if discovery_warnings:
+        base_summary["warnings"].extend({"kind": "discovery", **dict(item or {})} for item in discovery_warnings)
     discovery_errors = list(discovery.get("errors", []) or [])
     if discovery_errors:
         base_summary["errors"].extend({"kind": "discovery_source", **dict(item or {})} for item in discovery_errors)
@@ -652,10 +656,12 @@ def _maybe_auto_discover_agent_race_jobs(
         "created_count": len(created),
         "skipped_count": len(skipped),
         "error_count": base_summary["error_count"],
+        "warning_count": len(base_summary["warnings"]),
         "source_counts": base_summary["source_counts"],
         "reason": base_summary["reason"],
         "created_race_ids": [str(item.get("race_id", "") or "").strip() for item in created],
         "skipped_race_ids": [str(item.get("race_id", "") or "").strip() for item in skipped],
+        "warnings": list(base_summary["warnings"] or [])[:10],
     }
     _save_auto_discovery_state(base_dir, state)
     return base_summary
@@ -1372,10 +1378,12 @@ def _compact_run_due_summary(summary):
             "discovered_count": int(auto_discovery.get("discovered_count", 0) or 0),
             "skipped_count": int(auto_discovery.get("skipped_count", 0) or 0),
             "error_count": int(auto_discovery.get("error_count", 0) or 0),
+            "warning_count": len(list(auto_discovery.get("warnings", []) or [])),
             "reason": str(auto_discovery.get("reason", "") or "").strip(),
             "target_date": str(auto_discovery.get("target_date", "") or "").strip(),
             "source_counts": dict(auto_discovery.get("source_counts", {}) or {}),
             "created_job_ids": list(auto_discovery.get("created_job_ids", []) or [])[:8],
+            "warnings": list(auto_discovery.get("warnings", []) or [])[:3],
         },
         "autofill_count": int(row.get("autofill_count", 0) or 0),
         "queued_count": int(row.get("queued_count", 0) or 0),
@@ -1461,6 +1469,7 @@ def run_due_jobs_once(
                     "discovered_count": int(auto_discovery_summary.get("discovered_count", 0) or 0),
                     "created_count": int(auto_discovery_summary.get("created_count", 0) or 0),
                     "error_count": int(auto_discovery_summary.get("error_count", 0) or 0),
+                    "warning_count": len(list(auto_discovery_summary.get("warnings", []) or [])),
                     "source_counts": dict(auto_discovery_summary.get("source_counts", {}) or {}),
                 },
                 ensure_ascii=False,

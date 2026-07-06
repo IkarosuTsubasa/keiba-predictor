@@ -9,6 +9,7 @@ from race_meta_fetcher import (
     build_shutuba_url,
     fetch_html,
     normalize_race_id,
+    parse_race_page,
 )
 from race_meta_fetcher import _decode_html_text
 
@@ -18,6 +19,8 @@ CENTRAL_TOP_URL = "https://race.netkeiba.com/top/"
 CENTRAL_RACE_LIST_URL = "https://race.netkeiba.com/top/race_list_sub.html"
 LOCAL_TOP_URL = "https://nar.netkeiba.com/top/?rf=navi"
 LOCAL_RACE_LIST_URL = "https://nar.netkeiba.com/top/race_list_sub.html"
+LOCAL_DIRECT_PROBE_MAX_RACE_NO = 12
+LOCAL_UNAVAILABLE_RACE_MARKERS = ("取止", "取り止め", "開催中止")
 
 
 def _jst_today_text():
@@ -60,6 +63,33 @@ def _unique_urls(urls):
         seen.add(text)
         out.append(text)
     return out
+
+
+def _race_number_value(race_id):
+    race_id_text = normalize_race_id(race_id)
+    if len(race_id_text) < 2:
+        return None
+    try:
+        return int(race_id_text[-2:])
+    except ValueError:
+        return None
+
+
+def _local_venue_code_from_race_id(race_id):
+    race_id_text = normalize_race_id(race_id)
+    if len(race_id_text) < 6:
+        return ""
+    venue_code = race_id_text[4:6]
+    return venue_code if venue_code in LOCAL_VENUE_MAP else ""
+
+
+def _build_local_race_id(date_compact, venue_code, race_no):
+    return f"{date_compact[:4]}{venue_code}{date_compact[4:]}{int(race_no):02d}"
+
+
+def _is_unavailable_race_page(html_text):
+    text = _clean_text(BeautifulSoup(_decoded_html(html_text), "html.parser").get_text(" ", strip=True))
+    return any(marker in text for marker in LOCAL_UNAVAILABLE_RACE_MARKERS)
 
 
 def _extract_race_list_tab_urls(html_text, base_url, target_date_compact):
@@ -123,6 +153,81 @@ def _fetch_races_from_urls(urls, *, source, timeout, fetcher):
     }
 
 
+def _local_probe_row(html_text, *, race_id, source_url):
+    if _is_unavailable_race_page(html_text):
+        return None
+    payload = parse_race_page(html_text, race_id=race_id, source="local", source_url=source_url)
+    if not payload.get("meta_complete"):
+        return None
+    race_number = str(payload.get("race_number", "") or "").strip()
+    race_name = str(payload.get("race_name", "") or "").strip()
+    list_text = _clean_text(" ".join(part for part in (race_number, race_name) if part))
+    return {
+        "race_id": normalize_race_id(race_id),
+        "source": "local",
+        "list_text": list_text,
+        "source_url": source_url,
+        "shutuba_url": source_url,
+    }
+
+
+def _supplement_local_races_with_direct_probe(races, *, date_compact, timeout, fetcher):
+    races_by_id = {
+        normalize_race_id(row.get("race_id", "")): dict(row)
+        for row in list(races or [])
+        if normalize_race_id(row.get("race_id", ""))
+    }
+    venue_numbers = {}
+    for race_id in races_by_id:
+        venue_code = _local_venue_code_from_race_id(race_id)
+        race_no = _race_number_value(race_id)
+        if not venue_code or race_no is None:
+            continue
+        venue_numbers.setdefault(venue_code, set()).add(race_no)
+
+    supplemented = []
+    probe_urls = []
+    probe_errors = []
+    probe_warnings = []
+    for venue_code in sorted(venue_numbers):
+        existing_numbers = venue_numbers.get(venue_code, set())
+        max_existing_no = max(existing_numbers) if existing_numbers else 0
+        for race_no in range(1, LOCAL_DIRECT_PROBE_MAX_RACE_NO + 1):
+            race_id = _build_local_race_id(date_compact, venue_code, race_no)
+            if race_id in races_by_id:
+                continue
+            url = build_shutuba_url(race_id, source="local")
+            is_internal_gap = race_no <= max_existing_no
+            try:
+                html_bytes = fetcher(url, timeout=timeout)
+                probe_urls.append(url)
+                row = _local_probe_row(html_bytes, race_id=race_id, source_url=url)
+            except Exception as exc:
+                if is_internal_gap:
+                    probe_warnings.append({"url": url, "warning": str(exc), "race_id": race_id})
+                continue
+            if row is None:
+                if is_internal_gap:
+                    probe_warnings.append(
+                        {
+                            "url": url,
+                            "warning": "race meta incomplete for missing internal race number",
+                            "race_id": race_id,
+                        }
+                    )
+                continue
+            races_by_id[race_id] = row
+            supplemented.append(row)
+
+    return {
+        "races": [races_by_id[key] for key in sorted(races_by_id)],
+        "supplemented_races": supplemented,
+        "probe_urls": probe_urls,
+        "probe_errors": probe_errors,
+        "probe_warnings": probe_warnings,
+    }
+
+
 def _central_candidate_urls(date_compact, fetcher, timeout):
     urls = []
     top_error = ""
@@ -172,6 +277,26 @@ def discover_races_for_date(date_text="", *, include_central=True, include_local
         if top_error:
             warnings.append({"source": "local", "stage": "top", "error": top_error})
         result = _fetch_races_from_urls(urls, source="local", timeout=timeout, fetcher=fetcher)
+        supplement = _supplement_local_races_with_direct_probe(
+            result["races"],
+            date_compact=date_compact,
+            timeout=timeout,
+            fetcher=fetcher,
+        )
+        result["races"] = supplement["races"]
+        result["supplemented_races"] = supplement["supplemented_races"]
+        result["supplemented_count"] = len(supplement["supplemented_races"])
+        result["supplement_probe_urls"] = supplement["probe_urls"]
+        result["supplement_errors"] = supplement["probe_errors"]
+        result["supplement_warnings"] = supplement["probe_warnings"]
+        if result["supplement_warnings"]:
+            warnings.append(
+                {
+                    "source": "local",
+                    "stage": "supplement",
+                    "warnings": list(result["supplement_warnings"] or [])[:3],
+                }
+            )
         result.update({"source": "local", "candidate_count": len(urls), "top_error": top_error})
         source_results.append(result)
         for row in result["races"]:
@@ -189,6 +314,14 @@ def discover_races_for_date(date_text="", *, include_central=True, include_local
                     "source": str(item.get("source", "") or ""),
                     "errors": list(item.get("errors", []) or [])[:3],
                     "top_error": str(item.get("top_error", "") or ""),
+                }
+            )
+        if item.get("supplement_errors"):
+            fatal_errors.append(
+                {
+                    "source": str(item.get("source", "") or ""),
+                    "stage": "supplement",
+                    "errors": list(item.get("supplement_errors", []) or [])[:3],
                 }
             )
     return {
