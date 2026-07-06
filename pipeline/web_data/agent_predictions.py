@@ -2,6 +2,8 @@ import json
 import math
 import os
 import re
+import threading
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -177,11 +179,31 @@ def _clamp01(value):
     return max(0.0, min(1.0, number))
 
 
+_PREDICTION_PAYLOAD_CACHE = {}
+_PREDICTION_HISTORY_CACHE = {}
+_PREDICTION_CACHE_LOCK = threading.RLock()
+
+
 def _read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _iter_prediction_payloads(base_dir):
+def _prediction_cache_ttl_seconds():
+    try:
+        return max(0, int(os.environ.get("KEIBA_AGENT_PREDICTION_CACHE_TTL_SECONDS", "120") or "120"))
+    except ValueError:
+        return 120
+
+
+def _prediction_cache_key(base_dir):
+    resolved_base = str(Path(base_dir).resolve())
+    dirs = tuple(str(path) for path in _prediction_dir_candidates(base_dir))
+    return resolved_base, dirs
+
+
+def _build_prediction_payload_snapshot(base_dir):
+    payloads = []
+    by_date = {}
     seen_race_ids = set()
     for directory in _prediction_dir_candidates(base_dir):
         for path in sorted(directory.glob("*.json")):
@@ -194,12 +216,56 @@ def _iter_prediction_payloads(base_dir):
                 continue
             seen_race_ids.add(race_id)
             payload["_source_path"] = str(path)
-            yield payload
+            payloads.append(payload)
+            race_info = dict(payload.get("race_info") or {})
+            race_date = _safe_text(race_info.get("race_date"))
+            if race_date:
+                by_date.setdefault(race_date, []).append(payload)
+    return {"payloads": payloads, "by_date": by_date}
+
+
+def _prediction_payload_snapshot(base_dir):
+    ttl_seconds = _prediction_cache_ttl_seconds()
+    if ttl_seconds <= 0:
+        return _build_prediction_payload_snapshot(base_dir)
+
+    key = _prediction_cache_key(base_dir)
+    now = time.time()
+    cached = _PREDICTION_PAYLOAD_CACHE.get(key)
+    if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+        return cached.get("snapshot") or {"payloads": [], "by_date": {}}
+
+    with _PREDICTION_CACHE_LOCK:
+        cached = _PREDICTION_PAYLOAD_CACHE.get(key)
+        if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+            return cached.get("snapshot") or {"payloads": [], "by_date": {}}
+        snapshot = _build_prediction_payload_snapshot(base_dir)
+        _PREDICTION_PAYLOAD_CACHE.clear()
+        _PREDICTION_PAYLOAD_CACHE[key] = {"created_at": time.time(), "snapshot": snapshot}
+        return snapshot
+
+
+def _iter_prediction_payloads(base_dir):
+    for payload in list((_prediction_payload_snapshot(base_dir).get("payloads") or [])):
+        yield dict(payload)
+
+
+def _prediction_payloads_for_date(base_dir, target_date):
+    target = _safe_text(target_date)
+    if not target:
+        return []
+    snapshot = _prediction_payload_snapshot(base_dir)
+    return [dict(payload) for payload in list((snapshot.get("by_date") or {}).get(target, []) or [])]
 
 
 def available_dates(base_dir, scope_key=""):
+    scope = _normalize_history_scope_key(scope_key)
+    snapshot = _prediction_payload_snapshot(base_dir)
+    if not scope:
+        return sorted((snapshot.get("by_date") or {}).keys())
+
     dates = set()
-    for payload in _iter_prediction_payloads(base_dir):
+    for payload in list(snapshot.get("payloads") or []):
         if not _scope_matches(payload, scope_key):
             continue
         race_info = dict(payload.get("race_info") or {})
@@ -739,13 +805,13 @@ def _history_group_rows(records, key):
     return rows
 
 
-def build_history_payload(base_dir, target_date="", scope_key=""):
-    all_records = []
-    target = _parse_date(target_date)
-    if target is None:
-        dates = available_dates(base_dir)
-        target = _parse_date(dates[-1] if dates else "")
+def _history_cache_key(base_dir, target, scope_key):
+    target_text = target.isoformat() if target is not None else ""
+    return str(Path(base_dir).resolve()), target_text, _normalize_history_scope_key(scope_key)
 
+
+def _build_history_payload_uncached(base_dir, target=None, scope_key=""):
+    all_records = []
     for payload in _iter_prediction_payloads(base_dir):
         if not _scope_matches(payload, scope_key):
             continue
@@ -796,6 +862,32 @@ def build_history_payload(base_dir, target_date="", scope_key=""):
         "scope_key": _normalize_history_scope_key(scope_key),
         "periods": out_periods,
     }
+
+
+def build_history_payload(base_dir, target_date="", scope_key=""):
+    target = _parse_date(target_date)
+    if target is None:
+        dates = available_dates(base_dir)
+        target = _parse_date(dates[-1] if dates else "")
+
+    ttl_seconds = _prediction_cache_ttl_seconds()
+    if ttl_seconds <= 0:
+        return _build_history_payload_uncached(base_dir, target=target, scope_key=scope_key)
+
+    key = _history_cache_key(base_dir, target, scope_key)
+    now = time.time()
+    cached = _PREDICTION_HISTORY_CACHE.get(key)
+    if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+        return cached.get("payload") or {}
+
+    with _PREDICTION_CACHE_LOCK:
+        cached = _PREDICTION_HISTORY_CACHE.get(key)
+        if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+            return cached.get("payload") or {}
+        payload = _build_history_payload_uncached(base_dir, target=target, scope_key=scope_key)
+        _PREDICTION_HISTORY_CACHE.clear()
+        _PREDICTION_HISTORY_CACHE[key] = {"created_at": time.time(), "payload": payload}
+        return payload
 
 
 def _agent_prediction_detail(payload):
@@ -891,10 +983,8 @@ def build_public_races(base_dir, target_date="", scope_key="", include_detail_fi
     if not target:
         return []
     rows = []
-    for payload in _iter_prediction_payloads(base_dir):
+    for payload in _prediction_payloads_for_date(base_dir, target):
         race_info = dict(payload.get("race_info") or {})
-        if _safe_text(race_info.get("race_date")) != target:
-            continue
         if not _scope_matches(payload, scope_key):
             continue
         row = _public_race_row(base_dir, payload, include_detail_fields=include_detail_fields)

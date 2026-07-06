@@ -580,7 +580,10 @@ export default function App() {
   }, [isAdminConsole, isAdminWorkspace, normalizedPath, search]);
 
   const shouldLoadPublicHeaderData =
-    !isAdminConsole && !isAdminWorkspace && !isAppShell && normalizedPath !== APP_BASE_PATH;
+    !isAdminConsole &&
+    !isAdminWorkspace &&
+    !isAppShell &&
+    (Boolean(staticPage) || isReportsPage || isReportDetail);
   const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
   const { loading, error, data } = useBoardData(
     search,
