@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from keiba_llm_agent.backtest.audit_snapshot import read_backtest_audit_payload
 from keiba_llm_agent import main as main_module
 from keiba_llm_agent.fetchers import netkeiba_fetcher, netkeiba_result_fetcher
 from keiba_llm_agent.schemas.race_data import RaceData, RecentRun
@@ -69,6 +70,7 @@ class PipelineCommandTests(unittest.TestCase):
         self.reviews_dir = self.temp_path / "reviews"
         self.reports_dir = self.temp_path / "reports"
         self.social_posts_dir = self.temp_path / "social_posts"
+        self.backtest_audit_dir = self.temp_path / "backtest_audit"
         self.lessons_path = self.temp_path / "lessons.json"
         for directory in (
             self.race_data_dir,
@@ -77,6 +79,7 @@ class PipelineCommandTests(unittest.TestCase):
             self.reviews_dir,
             self.reports_dir,
             self.social_posts_dir,
+            self.backtest_audit_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self.lessons_path.write_text("[]\n", encoding="utf-8")
@@ -90,6 +93,7 @@ class PipelineCommandTests(unittest.TestCase):
             patch.object(main_module, "DEFAULT_RACE_DATA_DIR", self.race_data_dir),
             patch.object(main_module, "DEFAULT_REPORTS_DIR", self.reports_dir),
             patch.object(main_module, "DEFAULT_SOCIAL_POSTS_DIR", self.social_posts_dir),
+            patch.object(main_module, "DEFAULT_BACKTEST_AUDIT_DIR", self.backtest_audit_dir),
             patch.object(main_module, "DEFAULT_LESSONS_PATH", self.lessons_path),
         ]
         for active_patch in self.patches:
@@ -110,6 +114,11 @@ class PipelineCommandTests(unittest.TestCase):
 
         self.assertTrue(Path(result["race_data_path"]).exists())
         self.assertTrue(Path(result["prediction_path"]).exists())
+        self.assertTrue(Path(result["backtest_audit_path"]).exists())
+        audit_payload = read_backtest_audit_payload(result["backtest_audit_path"])
+        self.assertEqual(audit_payload["audit_kind"], "full")
+        self.assertTrue(audit_payload["backtest_capabilities"]["can_recompute_from_recent_runs"])
+        self.assertEqual(audit_payload["inputs"]["race_data"]["race_info"]["race_id"], "sample_001")
         self.assertIsNone(result["prediction_report_path"])
         self.assertFalse((self.reports_dir / "sample_001_prediction.md").exists())
         self.assertTrue(Path(result["prediction_social_post_path"]).exists())

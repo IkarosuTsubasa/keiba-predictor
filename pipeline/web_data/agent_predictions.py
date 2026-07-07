@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import time
+import gzip
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -91,6 +92,152 @@ def agent_result_write_dir(base_dir):
     if configured is not None:
         return configured.resolve()
     return Path(base_dir).resolve() / "data" / "agent_results"
+
+
+def agent_backtest_audit_write_dir(base_dir):
+    configured = _configured_dir("KEIBA_AGENT_BACKTEST_AUDIT_DIR")
+    if configured is not None:
+        return configured.resolve()
+    return Path(base_dir).resolve() / "data" / "agent_backtest_audit"
+
+
+def agent_backtest_audit_path_for_race(base_dir, race_id):
+    race_id_text = _safe_text(race_id)
+    if not race_id_text:
+        return None
+    return agent_backtest_audit_write_dir(base_dir) / f"{race_id_text}.json.gz"
+
+
+def _utc_now_text():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _audit_capabilities(race_data_payload=None, prediction_payload=None, result_payload=None):
+    has_recent_runs = False
+    if isinstance(race_data_payload, dict):
+        for horse in list(race_data_payload.get("horses") or []):
+            if isinstance(horse, dict) and horse.get("recent_runs"):
+                has_recent_runs = True
+                break
+    return {
+        "can_reweight_saved_scores": isinstance(prediction_payload, dict),
+        "can_recompute_scoring_logic": isinstance(race_data_payload, dict),
+        "can_recompute_from_recent_runs": has_recent_runs,
+        "has_result_for_evaluation": isinstance(result_payload, dict),
+    }
+
+
+def _audit_missing_inputs(race_data_payload=None, prediction_payload=None, result_payload=None):
+    missing = []
+    if not isinstance(prediction_payload, dict):
+        missing.append("prediction")
+    if not isinstance(race_data_payload, dict):
+        missing.append("race_data")
+    elif not _audit_capabilities(race_data_payload=race_data_payload).get("can_recompute_from_recent_runs"):
+        missing.append("recent_runs")
+    if not isinstance(result_payload, dict):
+        missing.append("result")
+    return missing
+
+
+def build_prediction_only_backtest_audit(prediction_payload, *, task=None, source_paths=None):
+    prediction_payload = dict(prediction_payload or {})
+    race_info = dict(prediction_payload.get("race_info") or {})
+    race_id = _safe_text(prediction_payload.get("race_id")) or _safe_text(race_info.get("race_id"))
+    task_row = dict(task or {})
+    return {
+        "schema_version": "agent_backtest_audit_v1",
+        "audit_kind": "prediction_only",
+        "created_at": _utc_now_text(),
+        "source": "render_callback",
+        "race_id": race_id,
+        "race_info": race_info,
+        "source_paths": dict(source_paths or {}),
+        "remote_task": {
+            "task_id": _safe_text(task_row.get("task_id")),
+            "job_id": _safe_text(task_row.get("job_id")),
+            "scope_key": _safe_text(task_row.get("scope_key")),
+        },
+        "backtest_capabilities": _audit_capabilities(prediction_payload=prediction_payload),
+        "missing_inputs": _audit_missing_inputs(prediction_payload=prediction_payload),
+        "inputs": {
+            "race_data": None,
+            "lessons": list(prediction_payload.get("used_lessons") or []),
+        },
+        "scoring": {
+            "scoring_profile": prediction_payload.get("scoring_profile"),
+            "scoring_mode": prediction_payload.get("scoring_mode"),
+            "scoring_config": prediction_payload.get("scoring_config") or {},
+            "market_signal_config": prediction_payload.get("market_signal_config") or {},
+            "borderline_recovery_config": prediction_payload.get("borderline_recovery_config") or {},
+            "horse_scores": list(prediction_payload.get("horse_scores") or []),
+            "marks": dict(prediction_payload.get("marks") or {}),
+        },
+        "analyses": {
+            "deep_analyses": list(prediction_payload.get("deep_analyses") or []),
+            "pedigree_analyses": list(prediction_payload.get("pedigree_analyses") or []),
+            "race_level_analyses": list(prediction_payload.get("race_level_analyses") or []),
+            "pace_analyses": list(prediction_payload.get("pace_analyses") or []),
+            "race_pace_projection": prediction_payload.get("race_pace_projection"),
+            "race_simulation": prediction_payload.get("race_simulation"),
+            "borderline_recovery_result": prediction_payload.get("borderline_recovery_result") or {},
+        },
+        "outcomes": {
+            "result": None,
+        },
+        "outputs": {
+            "prediction": prediction_payload,
+        },
+    }
+
+
+def write_agent_backtest_audit_payload(base_dir, race_id, payload):
+    path = agent_backtest_audit_path_for_race(base_dir, race_id)
+    if path is None:
+        raise ValueError("race_id missing for agent backtest audit")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(dict(payload or {}), fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return path
+
+
+def write_agent_backtest_audit_bytes(base_dir, race_id, content_bytes):
+    path = agent_backtest_audit_path_for_race(base_dir, race_id)
+    if path is None:
+        raise ValueError("race_id missing for agent backtest audit")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(content_bytes or b""))
+    return path
+
+
+def read_agent_backtest_audit_payload(path):
+    audit_path = Path(path)
+    if audit_path.suffix == ".gz":
+        with gzip.open(audit_path, "rt", encoding="utf-8") as fh:
+            return json.load(fh)
+    return json.loads(audit_path.read_text(encoding="utf-8"))
+
+
+def attach_result_to_agent_backtest_audit(base_dir, race_id, result_payload):
+    path = agent_backtest_audit_path_for_race(base_dir, race_id)
+    if path is None or not path.exists():
+        return None
+    payload = read_agent_backtest_audit_payload(path)
+    payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
+    race_data_payload = (payload.get("inputs") or {}).get("race_data")
+    prediction_payload = (payload.get("outputs") or {}).get("prediction")
+    payload["backtest_capabilities"] = _audit_capabilities(
+        race_data_payload=race_data_payload,
+        prediction_payload=prediction_payload,
+        result_payload=result_payload,
+    )
+    payload["missing_inputs"] = _audit_missing_inputs(
+        race_data_payload=race_data_payload,
+        prediction_payload=prediction_payload,
+        result_payload=result_payload,
+    )
+    return write_agent_backtest_audit_payload(base_dir, race_id, payload)
 
 
 def _existing_unique_dirs(candidates):

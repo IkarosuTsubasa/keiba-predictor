@@ -75,6 +75,34 @@ python -m keiba_llm_agent.main condition-weight-simulate --from-date 2026-05-01 
 - Markdown: `keiba_llm_agent/data/error_analysis/{from}_{to}_condition_weight_simulation.md`
 - Main purpose: verify whether conditional weights, such as turf race-level support or stricter rank6 recovery, are stable enough for later scoring changes.
 
+### Agent LLM Render backtest audit
+Use this flow when optimizing Agent LLM scoring, coefficients, confidence, or central/local prediction quality. It keeps historical Render data intact and separates full scoring-logic backtests from saved-score reweighting.
+
+Fresh Render snapshots should be downloaded into a new directory under `analysis_outputs/`, for example:
+```
+powershell -ExecutionPolicy Bypass -File scripts\download_render_agent_data.ps1 -WorkspaceRoot D:\keiba\new
+```
+
+Rebuild audit bundles for a downloaded snapshot:
+```
+python pipeline\build_agent_backtest_audit.py ^
+  --predictions-dir analysis_outputs\<snapshot>\agent_predictions ^
+  --results-dir analysis_outputs\<snapshot>\agent_results ^
+  --audit-dir analysis_outputs\<snapshot>\agent_backtest_audit ^
+  --race-data-dir keiba_llm_agent\data\race_data
+```
+
+Audit interpretation:
+- `audit_kind=full`: raw `race_data` exists, so scoring logic can be recomputed.
+- `audit_kind=prediction_only`: only saved prediction scores exist, so use it for coefficient/weight replay only.
+- Always report sample counts, settled result coverage, central/local split, and missing inputs before recommending changes.
+- Do not delete or overwrite `pipeline/data/agent_predictions`, `pipeline/data/agent_results`, `pipeline/data/agent_backtest_audit`, `keiba_llm_agent/data/backtest_audit`, or `analysis_outputs/` snapshots during optimization.
+
+Personal Codex skill shortcut:
+```
+Use $keiba-agent-optimizer to download Render Agent data and run a safe scoring backtest review.
+```
+
 ### Record race results
 ```
 python pipeline/record_result.py

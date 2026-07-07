@@ -33,6 +33,11 @@ from keiba_llm_agent.backtest.backtest_runner import (
     save_backtest_json,
     save_backtest_markdown,
 )
+from keiba_llm_agent.backtest.audit_snapshot import (
+    audit_path_for_race,
+    build_backtest_audit_payload,
+    write_backtest_audit_payload,
+)
 from keiba_llm_agent.fetchers.netkeiba_fetcher import (
     fetch_and_parse_netkeiba_race,
     get_html_cache_path,
@@ -136,6 +141,7 @@ DEFAULT_SOCIAL_POSTS_DIR = BASE_DIR / "data" / "social_posts"
 DEFAULT_DAILY_REPORTS_DIR = BASE_DIR / "data" / "daily_reports"
 DEFAULT_AUTO_SKIP_REPORT = True
 DEFAULT_BACKTESTS_DIR = BASE_DIR / "data" / "backtests"
+DEFAULT_BACKTEST_AUDIT_DIR = BASE_DIR / "data" / "backtest_audit"
 DEFAULT_ERROR_ANALYSIS_DIR = BASE_DIR / "data" / "error_analysis"
 DEFAULT_AUDITS_DIR = BASE_DIR / "data" / "audits"
 DEFAULT_ANALYSIS_REPORTS_DIR = BASE_DIR / "data" / "analysis_reports"
@@ -249,6 +255,26 @@ def _write_json(path: str | Path, payload: dict) -> Path:
     return output_path
 
 
+def _write_prediction_backtest_audit(
+    *,
+    race_data: RaceData,
+    prediction: Prediction,
+    race_data_path: str | Path | None = None,
+    prediction_path: str | Path | None = None,
+) -> Path:
+    source_paths: dict[str, str] = {}
+    if race_data_path is not None:
+        source_paths["race_data_path"] = str(race_data_path)
+    if prediction_path is not None:
+        source_paths["prediction_path"] = str(prediction_path)
+    payload = build_backtest_audit_payload(
+        race_data=race_data,
+        prediction=prediction,
+        source_paths=source_paths,
+    )
+    return write_backtest_audit_payload(DEFAULT_BACKTEST_AUDIT_DIR, payload)
+
+
 def _load_race_info_for_review(
     race_id: str,
     prediction: Prediction,
@@ -303,6 +329,12 @@ def run_analysis(
     prediction = lesson_store.sync_prediction_used_lessons(prediction)
     final_output_path = Path(output_path) if output_path else DEFAULT_PREDICTIONS_DIR / f"{prediction.race_id}.json"
     saved_path = _write_json(final_output_path, prediction.model_dump())
+    _write_prediction_backtest_audit(
+        race_data=race_data,
+        prediction=prediction,
+        race_data_path=race_data_path,
+        prediction_path=saved_path,
+    )
     return prediction, saved_path
 
 
@@ -443,6 +475,7 @@ def run_analyze_url(
         )
     race_data_path = save_race_data(race_data)
     prediction_path: Path | None = None
+    backtest_audit_path: Path | None = None
 
     if not dry_run:
         final_lessons_path = Path(lessons_path) if lessons_path is not None else DEFAULT_LESSONS_PATH
@@ -458,6 +491,9 @@ def run_analyze_url(
             pace_weight=pace_weight,
             borderline_recovery_enabled=borderline_recovery_enabled,
         )
+        expected_audit_path = audit_path_for_race(DEFAULT_BACKTEST_AUDIT_DIR, race_data.race_info.race_id)
+        if expected_audit_path.exists():
+            backtest_audit_path = expected_audit_path
 
     return {
         "race_id": race_data.race_info.race_id,
@@ -466,6 +502,7 @@ def run_analyze_url(
         "scoring_profile": resolved_scoring_profile or DEFAULT_SCORING_PROFILE,
         "race_data_path": str(race_data_path),
         "prediction_path": str(prediction_path) if prediction_path else None,
+        "backtest_audit_path": str(backtest_audit_path) if backtest_audit_path else None,
     }
 
 
@@ -716,6 +753,8 @@ def run_predict_race(
         pace_weight=pace_weight,
         borderline_recovery_enabled=borderline_recovery_enabled,
     )
+    expected_audit_path = audit_path_for_race(DEFAULT_BACKTEST_AUDIT_DIR, race_data.race_info.race_id)
+    backtest_audit_path = expected_audit_path if expected_audit_path.exists() else None
 
     report_path: str | None = None
     social_post_path: str | None = None
@@ -733,6 +772,7 @@ def run_predict_race(
         "scoring_profile": resolved_scoring_profile or DEFAULT_SCORING_PROFILE,
         "race_data_path": str(race_data_path),
         "prediction_path": str(prediction_path),
+        "backtest_audit_path": str(backtest_audit_path) if backtest_audit_path else None,
         "prediction_report_path": report_path,
         "prediction_social_post_path": social_post_path,
     }

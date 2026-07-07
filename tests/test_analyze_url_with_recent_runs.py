@@ -24,13 +24,17 @@ class AnalyzeUrlWithRecentRunsTests(unittest.TestCase):
         self.temp_path = Path(self.temp_dir.name)
         self.race_data_dir = self.temp_path / "race_data"
         self.predictions_dir = self.temp_path / "predictions"
+        self.backtest_audit_dir = self.temp_path / "backtest_audit"
 
         self.race_data_patch = patch.object(netkeiba_fetcher, "RACE_DATA_DIR", self.race_data_dir)
         self.predictions_patch = patch.object(main_module, "DEFAULT_PREDICTIONS_DIR", self.predictions_dir)
+        self.backtest_audit_patch = patch.object(main_module, "DEFAULT_BACKTEST_AUDIT_DIR", self.backtest_audit_dir)
         self.race_data_patch.start()
         self.predictions_patch.start()
+        self.backtest_audit_patch.start()
 
     def tearDown(self) -> None:
+        self.backtest_audit_patch.stop()
         self.race_data_patch.stop()
         self.predictions_patch.stop()
         self.temp_dir.cleanup()

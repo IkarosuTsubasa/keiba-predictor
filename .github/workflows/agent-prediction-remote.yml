@@ -87,6 +87,7 @@ jobs:
           exit_code = int(str(os.environ.get("RUN_EXIT_CODE", "1") or "1"))
           log_path = Path("agent_prediction_output.log")
           prediction_path = Path("keiba_llm_agent/data/predictions") / f"{race_id}.json"
+          audit_path = Path("keiba_llm_agent/data/backtest_audit") / f"{race_id}.json.gz"
 
           log_excerpt = ""
           if log_path.exists():
@@ -95,17 +96,22 @@ jobs:
           summary = {
               "race_id": race_id,
               "prediction_path": str(prediction_path),
+              "backtest_audit_path": str(audit_path),
               "exit_code": exit_code,
           }
 
           if exit_code == 0 and prediction_path.exists():
+              result = {
+                  "filename": prediction_path.name,
+                  "content_base64": base64.b64encode(prediction_path.read_bytes()).decode("ascii"),
+              }
+              if audit_path.exists():
+                  result["audit_filename"] = audit_path.name
+                  result["audit_content_base64"] = base64.b64encode(audit_path.read_bytes()).decode("ascii")
               payload = {
                   "status": "succeeded",
                   "summary": summary,
-                  "result": {
-                      "filename": prediction_path.name,
-                      "content_base64": base64.b64encode(prediction_path.read_bytes()).decode("ascii"),
-                  },
+                  "result": result,
                   "log_excerpt": log_excerpt,
               }
           else:
@@ -164,6 +170,7 @@ jobs:
             callback_payload.json
             agent_prediction_output.log
             keiba_llm_agent/data/predictions/${{ inputs.race_id }}.json
+            keiba_llm_agent/data/backtest_audit/${{ inputs.race_id }}.json.gz
 
       - name: Fail workflow on remote failure
         shell: bash

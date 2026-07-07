@@ -23,7 +23,11 @@ from race_job_store import initialize_job_step_fields as _initialize_race_job_st
 from race_job_store import set_job_step_state as _set_race_job_step_state
 from v5_remote_tasks import create_task as create_remote_task
 from v5_remote_tasks import find_latest_task_for_job, update_task as update_remote_task
-from web_data.agent_predictions import agent_result_path_for_race, agent_result_write_dir
+from web_data.agent_predictions import (
+    agent_result_path_for_race,
+    agent_result_write_dir,
+    attach_result_to_agent_backtest_audit,
+)
 from web_admin.remote_predictors import append_job_process_log_entry
 
 RUN_DUE_LOCK_TTL_SECONDS = 60 * 30
@@ -848,6 +852,11 @@ def _fetch_and_save_agent_result_for_job(base_dir, job):
         json.dumps(result_data.model_dump(by_alias=True), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    audit_path = attach_result_to_agent_backtest_audit(
+        base_dir,
+        result_data.race_id,
+        result_data.model_dump(by_alias=True),
+    )
     top3_names = [str((item or {}).get("horse_name", "") or "").strip() for item in result_data.model_dump().get("finish_order", [])[:3]]
     top3_numbers = [
         str((item or {}).get("horse_no", "") or "").strip()
@@ -857,6 +866,7 @@ def _fetch_and_save_agent_result_for_job(base_dir, job):
         "race_id": result_data.race_id,
         "result_url": result_url,
         "result_path": str(output_path),
+        "backtest_audit_path": str(audit_path) if audit_path else "",
         "top3_names": top3_names,
         "top3_numbers": top3_numbers,
     }

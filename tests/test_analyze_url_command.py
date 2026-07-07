@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from keiba_llm_agent.backtest.audit_snapshot import read_backtest_audit_payload
 from keiba_llm_agent import main as main_module
 from keiba_llm_agent.fetchers import netkeiba_fetcher
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, RecentRun
@@ -25,13 +26,17 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
         self.temp_path = Path(self.temp_dir.name)
         self.race_data_dir = self.temp_path / "race_data"
         self.predictions_dir = self.temp_path / "predictions"
+        self.backtest_audit_dir = self.temp_path / "backtest_audit"
 
         self.race_data_patch = patch.object(netkeiba_fetcher, "RACE_DATA_DIR", self.race_data_dir)
         self.predictions_patch = patch.object(main_module, "DEFAULT_PREDICTIONS_DIR", self.predictions_dir)
+        self.backtest_audit_patch = patch.object(main_module, "DEFAULT_BACKTEST_AUDIT_DIR", self.backtest_audit_dir)
         self.race_data_patch.start()
         self.predictions_patch.start()
+        self.backtest_audit_patch.start()
 
     def tearDown(self) -> None:
+        self.backtest_audit_patch.stop()
         self.race_data_patch.stop()
         self.predictions_patch.stop()
         self.temp_dir.cleanup()
@@ -46,6 +51,7 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
         payload = json.loads(buffer.getvalue())
         self.assertTrue(Path(payload["race_data_path"]).exists())
         self.assertIsNone(payload["prediction_path"])
+        self.assertIsNone(payload["backtest_audit_path"])
         self.assertFalse((self.predictions_dir / "sample_001.json").exists())
 
     def test_analyze_url_generates_race_data_and_prediction(self) -> None:
@@ -60,8 +66,11 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
         prediction_path = Path(payload["prediction_path"])
         self.assertTrue(race_data_path.exists())
         self.assertTrue(prediction_path.exists())
+        self.assertTrue(Path(payload["backtest_audit_path"]).exists())
         prediction = json.loads(prediction_path.read_text(encoding="utf-8"))
         self.assertEqual(prediction["race_id"], "sample_001")
+        audit_payload = read_backtest_audit_payload(payload["backtest_audit_path"])
+        self.assertEqual(audit_payload["outputs"]["prediction"]["race_id"], "sample_001")
 
     def test_force_refresh_is_passed_to_fetcher(self) -> None:
         with patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=SAMPLE_RACE_DATA) as mock_fetch:

@@ -6351,6 +6351,7 @@ def _apply_remote_agent_prediction_result(task, payload):
     result_payload = dict(payload.get("result") or {})
     prediction_payload = result_payload.get("prediction")
     content_base64 = str(result_payload.get("content_base64", "") or "").strip()
+    audit_content_base64 = str(result_payload.get("audit_content_base64", "") or "").strip()
     if prediction_payload is None:
         if not content_base64:
             raise ValueError("agent prediction result content_base64 missing")
@@ -6371,10 +6372,25 @@ def _apply_remote_agent_prediction_result(task, payload):
         json.dumps(prediction_payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    audit_path = None
+    if audit_content_base64:
+        try:
+            audit_bytes = base64.b64decode(audit_content_base64)
+        except Exception as exc:
+            raise ValueError(f"invalid agent backtest audit base64: {exc}") from exc
+        audit_path = agent_predictions.write_agent_backtest_audit_bytes(BASE_DIR, race_id, audit_bytes)
+    else:
+        audit_payload = agent_predictions.build_prediction_only_backtest_audit(
+            prediction_payload,
+            task=task_row,
+            source_paths={"prediction_path": str(output_path)},
+        )
+        audit_path = agent_predictions.write_agent_backtest_audit_payload(BASE_DIR, race_id, audit_payload)
     return {
         "race_id": race_id,
         "result_path": str(output_path),
         "prediction_path": str(output_path),
+        "backtest_audit_path": str(audit_path) if audit_path else "",
     }
 
 
