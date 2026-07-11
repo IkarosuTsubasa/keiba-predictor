@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import warnings
 
 from keiba_llm_agent.llm.llm_client import BaseLLMClient, extract_json_object
@@ -14,6 +15,7 @@ class GeminiLLMClient(BaseLLMClient):
         model: str,
         fallback_client: BaseLLMClient | None = None,
         enable_fallback: bool = True,
+        request_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__(fallback_client=fallback_client)
         self.api_key = api_key
@@ -23,7 +25,17 @@ class GeminiLLMClient(BaseLLMClient):
             from google import genai
         except ImportError as exc:
             raise RuntimeError("google-genai package is not installed") from exc
-        self._client = genai.Client(api_key=api_key)
+        if request_timeout_seconds is None:
+            raw_timeout = str(os.environ.get("GEMINI_REQUEST_TIMEOUT_SECONDS", "180") or "180").strip()
+            try:
+                request_timeout_seconds = float(raw_timeout)
+            except ValueError:
+                request_timeout_seconds = 180.0
+        self.request_timeout_seconds = max(1.0, float(request_timeout_seconds))
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": int(self.request_timeout_seconds * 1000)},
+        )
 
     @staticmethod
     def _extract_response_text(response: object) -> str:

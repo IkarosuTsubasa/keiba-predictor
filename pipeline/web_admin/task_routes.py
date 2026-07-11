@@ -722,7 +722,7 @@ def _task_reference_dt(task):
 
 
 def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race_job, now_dt=None):
-    stale_minutes = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_STALE_MINUTES", 180))
+    stale_minutes = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_STALE_MINUTES", 75))
     if stale_minutes <= 0:
         return []
     current_dt = now_dt or _jst_now()
@@ -792,6 +792,148 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
             }
         )
     return expired
+
+
+def _agent_prediction_retry_delays():
+    raw = str(os.environ.get("RUN_DUE_AGENT_PREDICTION_RETRY_DELAYS_MINUTES", "5,15") or "").strip()
+    delays = []
+    for item in raw.split(","):
+        try:
+            delays.append(max(0, int(item.strip())))
+        except ValueError:
+            continue
+    return delays or [5, 15]
+
+
+def _is_retryable_agent_prediction_error(message):
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    terminal_markers = (
+        "取り止め",
+        "取止",
+        "開催中止",
+        "callback signature invalid",
+        "invalid race_id",
+        "race id invalid",
+        "race not found",
+        "configuration missing",
+    )
+    if any(marker in text for marker in terminal_markers):
+        return False
+    retryable_markers = (
+        "agent prediction failed with exit_code=",
+        "timed out",
+        "timeout",
+        "operation was canceled",
+        "operation was cancelled",
+        "gemini json generation failed",
+        "rate limit",
+        "429",
+        "temporar",
+        "service unavailable",
+        "connection",
+        "network",
+        "remote disconnected",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race_job, now_dt=None):
+    if not _env_flag("RUN_DUE_AGENT_PREDICTION_AUTO_RETRY_ENABLED", True):
+        return []
+    max_retries = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_MAX_RETRIES", 2))
+    if max_retries <= 0:
+        return []
+    current_dt = now_dt or _jst_now()
+    delays = _agent_prediction_retry_delays()
+    retried = []
+    for job in list(load_race_jobs(base_dir) or []):
+        if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
+            continue
+        if str((job or {}).get("status", "") or "").strip().lower() != "failed":
+            continue
+        error_message = str((job or {}).get("error_message", "") or "").strip()
+        if not _is_retryable_agent_prediction_error(error_message):
+            continue
+        job_id = str((job or {}).get("job_id", "") or "").strip()
+        if not job_id:
+            continue
+        try:
+            retry_count = max(0, int((job or {}).get("agent_prediction_retry_count", 0) or 0))
+        except (TypeError, ValueError):
+            retry_count = 0
+        if retry_count >= max_retries:
+            continue
+        active_task = find_latest_task_for_job(
+            base_dir,
+            job_id,
+            statuses=("queued", "dispatching", "dispatched", "running"),
+        )
+        if active_task:
+            continue
+        delay_minutes = delays[min(retry_count, len(delays) - 1)]
+        failed_at = _parse_dt_text((job or {}).get("updated_at", ""))
+        if failed_at is not None and current_dt < failed_at + timedelta(minutes=delay_minutes):
+            continue
+
+        def _queue_retry(row, now_text):
+            current_status = str(row.get("status", "") or "").strip().lower()
+            current_error = str(row.get("error_message", "") or "").strip()
+            try:
+                current_retry_count = max(0, int(row.get("agent_prediction_retry_count", 0) or 0))
+            except (TypeError, ValueError):
+                current_retry_count = 0
+            if current_status != "failed" or current_retry_count != retry_count:
+                return
+            if not _is_retryable_agent_prediction_error(current_error):
+                return
+            row.update(_initialize_race_job_step_fields(row))
+            row["status"] = "queued_agent_prediction"
+            row["current_v5_task_id"] = ""
+            row["current_run_id"] = ""
+            row["ready_at"] = ""
+            row["settling_started_at"] = ""
+            row["settled_at"] = ""
+            row["queued_process_at"] = now_text
+            row["agent_prediction_retry_count"] = retry_count + 1
+            row["agent_prediction_last_retry_at"] = now_text
+            row["agent_prediction_last_retry_error"] = current_error
+            row["error_message"] = ""
+            row["last_process_output"] = append_job_process_log_entry(
+                row,
+                "agent_prediction_auto_retry",
+                0,
+                json.dumps(
+                    {
+                        "retry_count": retry_count + 1,
+                        "max_retries": max_retries,
+                        "delay_minutes": delay_minutes,
+                        "previous_error": current_error,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            _set_race_job_step_state(row, "predictor", "queued", now_text)
+            _set_race_job_step_state(row, "settlement", "idle", now_text)
+
+        updated = update_race_job(base_dir, job_id, _queue_retry)
+        if str((updated or {}).get("status", "") or "").strip().lower() != "queued_agent_prediction":
+            continue
+        retried.append(
+            {
+                "job_id": job_id,
+                "race_id": str((job or {}).get("race_id", "") or "").strip(),
+                "retry_count": retry_count + 1,
+                "max_retries": max_retries,
+                "delay_minutes": delay_minutes,
+            }
+        )
+    return retried
 
 
 def _jst_now():
@@ -1403,6 +1545,7 @@ def _compact_run_due_summary(summary):
         "agent_result_count": int(row.get("agent_result_count", 0) or 0),
         "agent_result_unavailable_count": int(row.get("agent_result_unavailable_count", 0) or 0),
         "stale_agent_prediction_count": int(row.get("stale_agent_prediction_count", 0) or 0),
+        "agent_prediction_retry_count": int(row.get("agent_prediction_retry_count", 0) or 0),
         "scan_due_candidate_count": int(row.get("scan_due_candidate_count", 0) or 0),
         "scan_due_reason_counts": _diagnostic_reason_counts(row.get("scan_due_candidates", [])),
         "auto_settle_candidate_count": int(row.get("auto_settle_candidate_count", 0) or 0),
@@ -1417,6 +1560,7 @@ def _compact_run_due_summary(summary):
         "agent_result_job_ids": list(row.get("agent_result_job_ids", []) or [])[:8],
         "agent_result_unavailable_job_ids": list(row.get("agent_result_unavailable_job_ids", []) or [])[:8],
         "stale_agent_prediction_job_ids": list(row.get("stale_agent_prediction_job_ids", []) or [])[:8],
+        "agent_prediction_retry_job_ids": list(row.get("agent_prediction_retry_job_ids", []) or [])[:8],
         "auto_settle_attempted": list(row.get("auto_settle_attempted", []) or [])[:8],
         "auto_settle_skipped": list(row.get("auto_settle_skipped", []) or [])[:8],
         "cleanup": {
@@ -1503,10 +1647,50 @@ def run_due_jobs_once(
     agent_result_results = []
     agent_result_unavailable_results = []
     stale_agent_prediction_results = []
+    agent_prediction_retry_results = []
     errors = list(autofill_errors or [])
     auto_settle_skipped = []
     auto_settle_attempted = []
     auto_settle_now = _jst_now()
+    try:
+        agent_prediction_retry_results = _auto_retry_failed_agent_prediction_jobs(
+            base_dir=base_dir,
+            load_race_jobs=load_race_jobs,
+            update_race_job=update_race_job,
+            now_dt=auto_settle_now,
+        )
+        if agent_prediction_retry_results:
+            print(
+                "[web_app] "
+                + json.dumps(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "event": "run_due_agent_prediction_auto_retry",
+                        "count": len(agent_prediction_retry_results),
+                        "job_ids": [
+                            str(item.get("job_id", "") or "").strip()
+                            for item in agent_prediction_retry_results[:8]
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    except Exception as exc:
+        errors.append({"kind": "agent_prediction_auto_retry", "error": str(exc)})
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_agent_prediction_auto_retry_error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     auto_settle_candidates = _auto_settle_diagnostics(
         load_race_jobs=lambda: load_race_jobs(base_dir),
         now_dt=auto_settle_now,
@@ -2052,6 +2236,11 @@ def run_due_jobs_once(
             str(item.get("job_id", "") or "").strip() for item in stale_agent_prediction_results
         ],
         "stale_agent_prediction_results": stale_agent_prediction_results,
+        "agent_prediction_retry_count": len(agent_prediction_retry_results),
+        "agent_prediction_retry_job_ids": [
+            str(item.get("job_id", "") or "").strip() for item in agent_prediction_retry_results
+        ],
+        "agent_prediction_retry_results": agent_prediction_retry_results,
         "auto_settle_candidate_count": len(auto_settle_candidates),
         "auto_settle_candidates": auto_settle_candidates,
         "agent_result_candidate_count": len(agent_result_candidates),

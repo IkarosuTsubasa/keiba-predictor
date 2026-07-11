@@ -497,6 +497,9 @@ def create_job(
         "settled_at": "",
         "current_run_id": "",
         "current_v5_task_id": "",
+        "agent_prediction_retry_count": 0,
+        "agent_prediction_last_retry_at": "",
+        "agent_prediction_last_retry_error": "",
         "morning_run_id": "",
         "current_morning_task_id": "",
         "actual_top1": "",
@@ -731,6 +734,9 @@ def apply_job_action(base_dir, job_id, action):
                 job["status"] = "queued_agent_prediction"
                 job["current_v5_task_id"] = ""
                 job["current_run_id"] = ""
+                job["agent_prediction_retry_count"] = 0
+                job["agent_prediction_last_retry_at"] = ""
+                job["agent_prediction_last_retry_error"] = ""
                 job["ready_at"] = ""
                 job["settling_started_at"] = ""
                 job["settled_at"] = ""

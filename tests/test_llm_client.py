@@ -181,6 +181,22 @@ class LLMClientTests(unittest.TestCase):
             "application/json",
         )
 
+    def test_gemini_client_applies_request_timeout(self) -> None:
+        with (
+            patch.dict(os.environ, {"GEMINI_REQUEST_TIMEOUT_SECONDS": "90"}),
+            patch.dict("sys.modules", _google_genai_modules(_FakeGenAIClient)),
+        ):
+            GeminiLLMClient(
+                api_key="test-key",
+                model="gemini-3.1-flash-lite",
+                fallback_client=MockLLMClient(),
+                enable_fallback=True,
+            )
+        self.assertEqual(
+            _FakeGenAIClient.last_instance.kwargs["http_options"]["timeout"],
+            90_000,
+        )
+
     def test_gemini_failure_falls_back_to_mock_when_enabled(self) -> None:
         with patch.dict("sys.modules", _google_genai_modules(_FailingGenAIClient)):
             client = GeminiLLMClient(

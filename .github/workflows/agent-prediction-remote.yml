@@ -32,6 +32,8 @@ jobs:
   agent_prediction:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      AGENT_PREDICTION_TIMEOUT_MINUTES: "45"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,18 +57,24 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3.1-flash-lite
+          GEMINI_REQUEST_TIMEOUT_SECONDS: "180"
           KEIBA_LLM_PROVIDER: gemini
+          PYTHONUNBUFFERED: "1"
         run: |
           set +e
-          python keiba_llm_agent/main.py predict-race \
+          timeout --signal=TERM --kill-after=30s "${AGENT_PREDICTION_TIMEOUT_MINUTES}m" \
+            python keiba_llm_agent/main.py predict-race \
             --url "${{ inputs.race_url }}" \
             --force-refresh \
             --skip-report \
             --skip-social \
             --llm-provider gemini \
             --scoring-profile "${{ inputs.scoring_profile || 'accuracy_default' }}" \
-            > agent_prediction_output.log 2>&1
-          status=$?
+            2>&1 | tee agent_prediction_output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 124 ] || [ "$status" -eq 137 ] || [ "$status" -eq 143 ]; then
+            echo "agent prediction command timed out after ${AGENT_PREDICTION_TIMEOUT_MINUTES} minutes (exit_code=${status})" | tee -a agent_prediction_output.log
+          fi
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -75,6 +83,7 @@ jobs:
         env:
           RUN_EXIT_CODE: ${{ steps.run_agent.outputs.exit_code }}
           RACE_ID: ${{ inputs.race_id }}
+          AGENT_PREDICTION_TIMEOUT_MINUTES: ${{ env.AGENT_PREDICTION_TIMEOUT_MINUTES }}
         run: |
           python - <<'PY'
           import base64
@@ -115,7 +124,11 @@ jobs:
                   "log_excerpt": log_excerpt,
               }
           else:
-              error_message = f"agent prediction failed with exit_code={exit_code}"
+              if exit_code in (124, 137, 143):
+                  timeout_minutes = os.environ.get("AGENT_PREDICTION_TIMEOUT_MINUTES", "45")
+                  error_message = f"agent prediction timed out after {timeout_minutes} minutes"
+              else:
+                  error_message = f"agent prediction failed with exit_code={exit_code}"
               if not prediction_path.exists():
                   error_message += f" prediction_missing={prediction_path}"
               payload = {
@@ -141,23 +154,36 @@ jobs:
           import hashlib
           import hmac
           import os
+          import time
           import urllib.request
           from pathlib import Path
 
           payload_bytes = Path("callback_payload.json").read_bytes()
           secret = os.environ.get("PIPELINE_CALLBACK_SECRET", "").encode("utf-8")
           sig = "sha256=" + hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
-          req = urllib.request.Request(
-              os.environ["CALLBACK_URL"],
-              data=payload_bytes,
-              headers={
-                  "Content-Type": "application/json; charset=utf-8",
-                  "X-Hub-Signature-256": sig,
-              },
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=120) as resp:
-              print(resp.read().decode("utf-8", errors="replace"))
+          delays = (0, 5, 15)
+          last_error = None
+          for attempt, delay in enumerate(delays, start=1):
+              if delay:
+                  time.sleep(delay)
+              req = urllib.request.Request(
+                  os.environ["CALLBACK_URL"],
+                  data=payload_bytes,
+                  headers={
+                      "Content-Type": "application/json; charset=utf-8",
+                      "X-Hub-Signature-256": sig,
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      print(resp.read().decode("utf-8", errors="replace"))
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  print(f"callback attempt {attempt}/{len(delays)} failed: {exc}", flush=True)
+          else:
+              raise RuntimeError(f"callback failed after {len(delays)} attempts: {last_error}")
           PY
 
       - name: Upload diagnostics

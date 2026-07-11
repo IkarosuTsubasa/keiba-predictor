@@ -158,6 +158,86 @@ class RunDueDailyReportTests(unittest.TestCase):
         self.assertIn("timed out", updated_job.get("error_message", ""))
         self.assertEqual(updated_task.get("status"), "expired")
 
+    def test_failed_agent_prediction_is_requeued_after_backoff(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202654062109",
+                scope_key="local",
+                race_name="テスト",
+                race_date="2026-06-21",
+                scheduled_off_time="2026-06-21T10:00:00",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            job_id = str(job.get("job_id", "") or "").strip()
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "").strip() == job_id:
+                    row["status"] = "failed"
+                    row["updated_at"] = "2026-06-21T12:50:00"
+                    row["predictor_status"] = "failed"
+                    row["error_message"] = "agent prediction timed out after 45 minutes"
+            save_jobs(base_dir, jobs)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "RUN_DUE_AGENT_PREDICTION_AUTO_RETRY_ENABLED": "1",
+                    "RUN_DUE_AGENT_PREDICTION_MAX_RETRIES": "2",
+                    "RUN_DUE_AGENT_PREDICTION_RETRY_DELAYS_MINUTES": "5,15",
+                },
+            ):
+                retried = task_routes._auto_retry_failed_agent_prediction_jobs(
+                    base_dir=base_dir,
+                    load_race_jobs=load_jobs,
+                    update_race_job=update_job,
+                    now_dt=datetime(2026, 6, 21, 13, 0, 0),
+                )
+            updated_job = get_job(base_dir, job_id) or {}
+
+        self.assertEqual([item.get("job_id") for item in retried], [job_id])
+        self.assertEqual(updated_job.get("status"), "queued_agent_prediction")
+        self.assertEqual(updated_job.get("agent_prediction_retry_count"), 1)
+        self.assertEqual(updated_job.get("predictor_status"), "queued")
+        self.assertIn("timed out", updated_job.get("agent_prediction_last_retry_error", ""))
+
+    def test_canceled_race_agent_prediction_is_not_retried(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202654062110",
+                scope_key="local",
+                race_name="テスト",
+                race_date="2026-06-21",
+                scheduled_off_time="2026-06-21T10:00:00",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            job_id = str(job.get("job_id", "") or "").strip()
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "").strip() == job_id:
+                    row["status"] = "failed"
+                    row["updated_at"] = "2026-06-21T12:00:00"
+                    row["error_message"] = "開催中止のため取り止め"
+            save_jobs(base_dir, jobs)
+
+            retried = task_routes._auto_retry_failed_agent_prediction_jobs(
+                base_dir=base_dir,
+                load_race_jobs=load_jobs,
+                update_race_job=update_job,
+                now_dt=datetime(2026, 6, 21, 13, 0, 0),
+            )
+            updated_job = get_job(base_dir, job_id) or {}
+
+        self.assertEqual(retried, [])
+        self.assertEqual(updated_job.get("status"), "failed")
+
     def test_unavailable_agent_result_is_terminal_without_run_due_error(self):
         with TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir) / "pipeline"

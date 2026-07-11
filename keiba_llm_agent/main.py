@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -709,6 +711,23 @@ def _resolve_skip_report(skip_report: bool = False, enable_report: bool = False)
     return DEFAULT_AUTO_SKIP_REPORT
 
 
+@contextmanager
+def _prediction_stage(name: str):
+    started_at = time.monotonic()
+    print(f"[predict-race] stage_start={name}", file=sys.stderr, flush=True)
+    status = "failed"
+    try:
+        yield
+        status = "succeeded"
+    finally:
+        elapsed = time.monotonic() - started_at
+        print(
+            f"[predict-race] stage_end={name} status={status} elapsed_seconds={elapsed:.1f}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def run_predict_race(
     url: str,
     force_refresh: bool = False,
@@ -724,45 +743,51 @@ def run_predict_race(
     pace_weight: float | None = None,
     borderline_recovery_enabled: bool | None = None,
 ) -> dict[str, object]:
-    race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
+    with _prediction_stage("fetch_race_card"):
+        race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
     resolved_scoring_profile = _resolve_scoring_profile_for_race(race_data, scoring_profile)
     warning_messages: list[str] = []
     if not race_data.horses:
         warning_messages.append("no horses parsed from shutuba HTML")
     if race_data.horses:
-        race_data = enrich_race_data_with_recent_runs(
-            race_data,
-            limit=recent_run_limit,
-            force_refresh=force_refresh,
-        )
+        with _prediction_stage("enrich_recent_runs"):
+            race_data = enrich_race_data_with_recent_runs(
+                race_data,
+                limit=recent_run_limit,
+                force_refresh=force_refresh,
+            )
         if all(not horse.recent_runs for horse in race_data.horses):
             warning_messages.append("recent_runs are empty for all horses")
     for warning_message in warning_messages:
         warnings.warn(warning_message, stacklevel=2)
 
-    race_data_path = save_race_data(race_data)
-    _, prediction_path = run_analysis(
-        race_data_path=race_data_path,
-        output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
-        lessons_path=lessons_path,
-        llm_provider=llm_provider,
-        scoring_profile=resolved_scoring_profile,
-        scoring_mode=scoring_mode,
-        pedigree_weight=pedigree_weight,
-        race_level_weight=race_level_weight,
-        pace_weight=pace_weight,
-        borderline_recovery_enabled=borderline_recovery_enabled,
-    )
+    with _prediction_stage("save_race_data"):
+        race_data_path = save_race_data(race_data)
+    with _prediction_stage("run_analysis"):
+        _, prediction_path = run_analysis(
+            race_data_path=race_data_path,
+            output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
+            lessons_path=lessons_path,
+            llm_provider=llm_provider,
+            scoring_profile=resolved_scoring_profile,
+            scoring_mode=scoring_mode,
+            pedigree_weight=pedigree_weight,
+            race_level_weight=race_level_weight,
+            pace_weight=pace_weight,
+            borderline_recovery_enabled=borderline_recovery_enabled,
+        )
     expected_audit_path = audit_path_for_race(DEFAULT_BACKTEST_AUDIT_DIR, race_data.race_info.race_id)
     backtest_audit_path = expected_audit_path if expected_audit_path.exists() else None
 
     report_path: str | None = None
     social_post_path: str | None = None
     if not skip_report:
-        report_result = run_report_prediction(race_data.race_info.race_id, prediction_path=prediction_path)
+        with _prediction_stage("build_report"):
+            report_result = run_report_prediction(race_data.race_info.race_id, prediction_path=prediction_path)
         report_path = report_result["report_path"]
     if not skip_social:
-        social_result = run_social_prediction(race_data.race_info.race_id, prediction_path=prediction_path)
+        with _prediction_stage("build_social_post"):
+            social_result = run_social_prediction(race_data.race_info.race_id, prediction_path=prediction_path)
         social_post_path = social_result["post_path"]
 
     result: dict[str, object] = {
