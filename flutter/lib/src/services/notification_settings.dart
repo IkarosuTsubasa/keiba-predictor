@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'android_platform_bridge.dart';
+import 'native_platform_bridge.dart';
 
 enum NotificationScope { central, local, general }
 
@@ -75,7 +75,7 @@ class NotificationSettingsRepository {
   final SharedPreferencesAsync _preferences;
 
   Future<NotificationSettings> load() async {
-    final legacy = await AndroidPlatformBridge.getNotificationSettings();
+    final legacy = await NativePlatformBridge.getNotificationSettings();
     if (legacy != null) {
       final settings = NotificationSettings(
         enabled: legacy['enabled'] as bool? ?? true,
@@ -103,7 +103,7 @@ class NotificationSettingsRepository {
 
   Future<void> save(NotificationSettings settings) async {
     await _saveMirror(settings);
-    await AndroidPlatformBridge.setNotificationSettings(
+    await NativePlatformBridge.setNotificationSettings(
       enabled: settings.enabled,
       centralEnabled: settings.centralEnabled,
       localEnabled: settings.localEnabled,

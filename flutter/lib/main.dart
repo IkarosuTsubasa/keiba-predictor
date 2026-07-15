@@ -5,15 +5,15 @@ import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'src/app.dart';
-import 'src/services/android_platform_bridge.dart';
+import 'src/services/ad_consent_service.dart';
+import 'src/services/native_platform_bridge.dart';
 import 'src/services/push_notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await AndroidPlatformBridge.initialize();
+  await NativePlatformBridge.initialize();
   await Firebase.initializeApp();
 
   FlutterError.onError = (details) {
@@ -25,7 +25,6 @@ Future<void> main() async {
     return true;
   };
 
-  await MobileAds.instance.initialize();
   await PushNotificationService.instance.initialize();
   runApp(
     KeibaApp(
@@ -34,9 +33,11 @@ Future<void> main() async {
       ],
     ),
   );
-  unawaited(
-    Future<void>.delayed(const Duration(milliseconds: 350)).then(
-      (_) => PushNotificationService.instance.requestPermissionOnFirstLaunch(),
-    ),
-  );
+  unawaited(_initializePostLaunchPrivacyAndPermissions());
+}
+
+Future<void> _initializePostLaunchPrivacyAndPermissions() async {
+  await AdConsentService.instance.initialize();
+  await Future<void>.delayed(const Duration(milliseconds: 350));
+  await PushNotificationService.instance.requestPermissionOnFirstLaunch();
 }

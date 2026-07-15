@@ -1,0 +1,8 @@
+// Safe local defaults. Release/Profile builds reject these Google demo IDs.
+// Override them in the git-ignored Flutter/Local.xcconfig file.
+KEIBA_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511
+KEIBA_BANNER_AD_UNIT_ID = ca-app-pub-3940256099942544/2435281174
+KEIBA_NATIVE_MORE_AD_UNIT_ID = ca-app-pub-3940256099942544/3986624511
+KEIBA_FCM_TOPIC = keiba-public-updates
+KEIBA_FCM_CENTRAL_TOPIC = keiba-public-updates-central
+KEIBA_FCM_LOCAL_TOPIC = keiba-public-updates-local

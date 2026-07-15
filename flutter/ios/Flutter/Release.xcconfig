@@ -1,1 +1,3 @@
+#include "Keiba.xcconfig"
+#include? "Local.xcconfig"
 #include "Generated.xcconfig"

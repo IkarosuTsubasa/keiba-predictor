@@ -6,7 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart'
     hide NotificationSettings;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-import 'android_platform_bridge.dart';
+import 'native_platform_bridge.dart';
 import 'notification_settings.dart';
 
 const _channel = AndroidNotificationChannel(
@@ -117,10 +117,10 @@ class PushNotificationService {
   }
 
   Future<void> requestPermissionOnFirstLaunch() async {
-    if (!await AndroidPlatformBridge.shouldRequestNotificationPermission()) {
+    if (!await NativePlatformBridge.shouldRequestNotificationPermission()) {
       return;
     }
-    await AndroidPlatformBridge.markNotificationPermissionPrompted();
+    await NativePlatformBridge.markNotificationPermissionPrompted();
     await requestPermissionFromSettings();
   }
 
@@ -130,6 +130,21 @@ class PushNotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.requestNotificationsPermission();
+    await _notifications
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >()
+        ?.requestPermissions(alert: true, badge: true, sound: true);
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      await _syncTopics(await NotificationSettingsRepository().loadMirror());
+    } on FirebaseException {
+      // APNs/FCM の準備前なら、次回起動または設定変更時に再同期する。
+    }
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
@@ -167,7 +182,7 @@ class PushNotificationService {
   }
 
   Future<void> _syncTopics(NotificationSettings settings) async {
-    final config = AndroidPlatformBridge.runtimeConfig;
+    final config = NativePlatformBridge.runtimeConfig;
     if (config == null) return;
     await Future.wait([
       _syncTopic(config.fcmTopic, settings.enabled),
@@ -207,6 +222,11 @@ Future<void> _initializeLocalNotifications(
 }) async {
   const initializationSettings = InitializationSettings(
     android: AndroidInitializationSettings('ic_stat_name'),
+    iOS: DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    ),
   );
   await notifications.initialize(
     settings: initializationSettings,
@@ -242,6 +262,7 @@ Future<void> _showRemoteMessage(
       priority: Priority.defaultPriority,
       styleInformation: BigTextStyleInformation(body),
     ),
+    iOS: const DarwinNotificationDetails(),
   );
   await notifications.show(
     id: DateTime.now().millisecondsSinceEpoch.remainder(0x0fffffff),

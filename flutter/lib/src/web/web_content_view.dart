@@ -6,7 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-import '../services/android_platform_bridge.dart';
+import '../services/native_platform_bridge.dart';
 import 'app_web.dart';
 
 class WebContentView extends StatefulWidget {
@@ -58,7 +58,7 @@ class WebContentViewState extends State<WebContentView> {
   }
 
   Future<void> _configureAndLoad() async {
-    final userAgent = AndroidPlatformBridge.runtimeConfig?.userAgent;
+    final userAgent = NativePlatformBridge.runtimeConfig?.userAgent;
     if (userAgent != null && userAgent.isNotEmpty) {
       await _controller.setUserAgent(userAgent);
     }

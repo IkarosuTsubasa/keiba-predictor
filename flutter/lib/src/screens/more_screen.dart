@@ -3,15 +3,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
+import '../services/ad_consent_service.dart';
 import '../services/notification_settings.dart';
 import '../services/push_notification_service.dart';
 import '../web/app_web.dart';
 import 'static_web_page.dart';
 
 class MoreScreen extends StatefulWidget {
-  const MoreScreen({this.showNotificationSettings, super.key});
+  const MoreScreen({
+    this.showNotificationSettings,
+    this.adConsentService,
+    super.key,
+  });
 
   final bool? showNotificationSettings;
+  final AdConsentService? adConsentService;
 
   @override
   State<MoreScreen> createState() => _MoreScreenState();
@@ -43,6 +49,10 @@ class _MoreScreenState extends State<MoreScreen> {
 
   NotificationSettingsRepository? _settingsRepository;
   NotificationSettings? _settings;
+  bool _privacyOptionsBusy = false;
+
+  AdConsentService get _adConsentService =>
+      widget.adConsentService ?? AdConsentService.instance;
 
   @override
   void initState() {
@@ -91,6 +101,19 @@ class _MoreScreenState extends State<MoreScreen> {
     );
   }
 
+  Future<void> _openPrivacyOptions() async {
+    if (_privacyOptionsBusy) return;
+    setState(() => _privacyOptionsBusy = true);
+    final shown = await _adConsentService.showPrivacyOptions();
+    if (!mounted) return;
+    setState(() => _privacyOptionsBusy = false);
+    if (!shown) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('広告のプライバシー設定を開けませんでした。')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -101,6 +124,16 @@ class _MoreScreenState extends State<MoreScreen> {
           _buildNotificationCard(),
           const SizedBox(height: 12),
         ],
+        ValueListenableBuilder<bool>(
+          valueListenable: _adConsentService.privacyOptionsRequired,
+          builder: (context, required, _) {
+            if (!required) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildPrivacyOptionsCard(),
+            );
+          },
+        ),
         for (final page in _pages) ...[
           _buildPageCard(page),
           const SizedBox(height: 12),
@@ -161,6 +194,56 @@ class _MoreScreenState extends State<MoreScreen> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrivacyOptionsCard() {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _privacyOptionsBusy ? null : _openPrivacyOptions,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 82),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '広告のプライバシー設定',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        '広告に関する同意内容を確認・変更できます',
+                        style: TextStyle(
+                          color: Color(0xFF66746F),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_privacyOptionsBusy)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  const Icon(Icons.chevron_right, color: Color(0xFF8C9692)),
+              ],
+            ),
+          ),
         ),
       ),
     );

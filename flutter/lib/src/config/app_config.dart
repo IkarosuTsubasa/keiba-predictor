@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../services/android_platform_bridge.dart';
+import '../services/native_platform_bridge.dart';
 
 class AppConfig {
   AppConfig._();
@@ -11,9 +11,8 @@ class AppConfig {
   );
 
   static bool get notificationsEnabled =>
-      !kIsWeb &&
-      defaultTargetPlatform == TargetPlatform.android &&
-      AndroidPlatformBridge.runtimeConfig != null;
+      NativePlatformBridge.isSupported &&
+      NativePlatformBridge.runtimeConfig != null;
 
   static bool get adsEnabled => notificationsEnabled;
 
@@ -21,7 +20,7 @@ class AppConfig {
     if (_baseWebUrlOverride.trim().isNotEmpty) {
       return _baseWebUrlOverride.trim().replaceFirst(RegExp(r'/+$'), '');
     }
-    final nativeUrl = AndroidPlatformBridge.runtimeConfig?.baseWebUrl.trim();
+    final nativeUrl = NativePlatformBridge.runtimeConfig?.baseWebUrl.trim();
     if (nativeUrl != null && nativeUrl.isNotEmpty) {
       return nativeUrl.replaceFirst(RegExp(r'/+$'), '');
     }

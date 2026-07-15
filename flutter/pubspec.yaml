@@ -1,7 +1,7 @@
 name: ikaimo_keiba
 description: "いかいもAI競馬のAndroid・iOS共通クライアント。"
 publish_to: 'none'
-version: 1.3.0+4
+version: 1.3.0+5
 
 environment:
   sdk: ^3.12.2

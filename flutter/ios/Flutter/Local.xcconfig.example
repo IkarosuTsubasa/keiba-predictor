@@ -1,0 +1,10 @@
+// Copy this file to Local.xcconfig and insert the production iOS AdMob IDs.
+// Local.xcconfig is intentionally ignored by Git.
+KEIBA_ADMOB_APP_ID = ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
+KEIBA_BANNER_AD_UNIT_ID = ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy
+KEIBA_NATIVE_MORE_AD_UNIT_ID = ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy
+
+// Override these only when the server uses different topic names.
+KEIBA_FCM_TOPIC = keiba-public-updates
+KEIBA_FCM_CENTRAL_TOPIC = keiba-public-updates-central
+KEIBA_FCM_LOCAL_TOPIC = keiba-public-updates-local

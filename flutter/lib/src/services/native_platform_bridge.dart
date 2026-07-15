@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-class AndroidRuntimeConfig {
-  const AndroidRuntimeConfig({
+class NativeRuntimeConfig {
+  const NativeRuntimeConfig({
     required this.baseWebUrl,
     required this.bannerAdUnitId,
     required this.nativeMoreAdUnitId,
@@ -12,9 +12,9 @@ class AndroidRuntimeConfig {
     required this.userAgent,
   });
 
-  factory AndroidRuntimeConfig.fromMap(Map<Object?, Object?> values) {
+  factory NativeRuntimeConfig.fromMap(Map<Object?, Object?> values) {
     String value(String key) => values[key]?.toString().trim() ?? '';
-    return AndroidRuntimeConfig(
+    return NativeRuntimeConfig(
       baseWebUrl: value('baseWebUrl'),
       bannerAdUnitId: value('bannerAdUnitId'),
       nativeMoreAdUnitId: value('nativeMoreAdUnitId'),
@@ -34,25 +34,27 @@ class AndroidRuntimeConfig {
   final String userAgent;
 }
 
-class AndroidPlatformBridge {
-  AndroidPlatformBridge._();
+class NativePlatformBridge {
+  NativePlatformBridge._();
 
   static const _channel = MethodChannel('com.ikaimo.keiba.app/platform');
 
-  static AndroidRuntimeConfig? runtimeConfig;
+  static NativeRuntimeConfig? runtimeConfig;
 
-  static bool get _isAndroid =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  static bool get isSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   static Future<void> initialize() async {
-    if (!_isAndroid) return;
+    if (!isSupported) return;
     try {
       final values = await _channel.invokeMapMethod<Object?, Object?>(
         'getRuntimeConfig',
       );
-      if (values != null) {
-        runtimeConfig = AndroidRuntimeConfig.fromMap(values);
-      }
+      runtimeConfig = values == null
+          ? null
+          : NativeRuntimeConfig.fromMap(values);
     } on PlatformException {
       runtimeConfig = null;
     } on MissingPluginException {
@@ -61,7 +63,7 @@ class AndroidPlatformBridge {
   }
 
   static Future<Map<Object?, Object?>?> getNotificationSettings() async {
-    if (!_isAndroid) return null;
+    if (!isSupported) return null;
     try {
       return await _channel.invokeMapMethod<Object?, Object?>(
         'getNotificationSettings',
@@ -78,7 +80,7 @@ class AndroidPlatformBridge {
     required bool centralEnabled,
     required bool localEnabled,
   }) async {
-    if (!_isAndroid) return;
+    if (!isSupported) return;
     try {
       await _channel.invokeMethod<void>('setNotificationSettings', {
         'enabled': enabled,
@@ -93,7 +95,7 @@ class AndroidPlatformBridge {
   }
 
   static Future<bool> shouldRequestNotificationPermission() async {
-    if (!_isAndroid) return false;
+    if (!isSupported) return false;
     try {
       return await _channel.invokeMethod<bool>(
             'shouldRequestNotificationPermission',
@@ -107,11 +109,11 @@ class AndroidPlatformBridge {
   }
 
   static Future<void> markNotificationPermissionPrompted() async {
-    if (!_isAndroid) return;
+    if (!isSupported) return;
     try {
       await _channel.invokeMethod<void>('markNotificationPermissionPrompted');
     } on PlatformException {
-      // 権限ダイアログ自体は Android が管理するため続行する。
+      // 権限ダイアログ自体は OS が管理するため続行する。
     } on MissingPluginException {
       // Widget test や未対応プラットフォームでは何もしない。
     }
