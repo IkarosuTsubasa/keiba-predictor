@@ -56,6 +56,8 @@ def initialize_job_step_fields(job):
     row = job if isinstance(job, dict) else dict(job or {})
     row.setdefault("job_source", "legacy")
     row["run_kind"] = normalize_run_kind(row.get("run_kind", ""))
+    row.setdefault("agent_prediction_schedule", "")
+    row.setdefault("agent_prediction_queue_after_time", "")
     row.setdefault("race_name", "")
     row.setdefault("race_number", "")
     row.setdefault("meta_source_url", "")
@@ -423,6 +425,17 @@ def _derive_process_after_dt(job):
     return off_dt - timedelta(minutes=lead)
 
 
+def _effective_process_after_dt(job):
+    row = dict(job or {})
+    if is_agent_prediction_job(row):
+        schedule = str(row.get("agent_prediction_schedule", "") or "").strip().lower()
+        queue_after_dt = _parse_dt(row.get("agent_prediction_queue_after_time", ""))
+        if schedule == "daily_morning" and queue_after_dt is not None:
+            return queue_after_dt
+    process_dt = _parse_dt(row.get("process_after_time", ""))
+    return process_dt or _derive_process_after_dt(row)
+
+
 def save_artifact(base_dir, job_id, artifact_type, original_name, content):
     now = _jst_now()
     safe_name = _safe_filename(original_name)
@@ -479,6 +492,8 @@ def create_job(
         "target_distance": str(target_distance or "").strip(),
         "target_track_condition": str(target_track_condition or "").strip(),
         "lead_minutes": lead,
+        "agent_prediction_schedule": "",
+        "agent_prediction_queue_after_time": "",
         "job_source": str(job_source or "legacy").strip() or "legacy",
         "run_kind": normalize_run_kind(run_kind),
         "status": "uploaded",
@@ -574,13 +589,13 @@ def scan_due_jobs(base_dir, now_text=""):
             dirty = True
             changed.append(dict(job))
             continue
-        process_dt = _parse_dt(job.get("process_after_time", ""))
-        if process_dt is None:
+        stored_process_dt = _parse_dt(job.get("process_after_time", ""))
+        if stored_process_dt is None:
             derived_process_dt = _derive_process_after_dt(job)
             if derived_process_dt is not None:
-                process_dt = derived_process_dt
                 job["process_after_time"] = _dt_text(derived_process_dt)
                 dirty = True
+        process_dt = _effective_process_after_dt(job)
         if status != "scheduled" or process_dt is None or process_dt > now_dt:
             if dirty:
                 jobs[idx] = job
@@ -614,8 +629,9 @@ def scan_due_diagnostics(base_dir, now_text=""):
         has_required = all(artifact_map.get(name) for name in REQUIRED_ARTIFACT_TYPES)
         expected_status = compute_initial_status(row)
         effective_status = expected_status if status == "uploaded" and expected_status in ("waiting_input_info", "waiting_morning", "scheduled") else status
-        process_dt = _parse_dt(row.get("process_after_time", ""))
-        derived_process_dt = _derive_process_after_dt(row) if process_dt is None else process_dt
+        stored_process_dt = _parse_dt(row.get("process_after_time", ""))
+        derived_process_dt = _derive_process_after_dt(row) if stored_process_dt is None else stored_process_dt
+        effective_process_dt = _effective_process_after_dt(row)
         reason = "eligible"
         if effective_status == "waiting_morning":
             reason = "eligible_morning"
@@ -635,9 +651,9 @@ def scan_due_diagnostics(base_dir, now_text=""):
                 reason = "missing_off_time"
             else:
                 reason = f"status_{status or 'unknown'}"
-        elif derived_process_dt is None:
+        elif effective_process_dt is None:
             reason = "missing_process_after"
-        elif derived_process_dt > now_dt:
+        elif effective_process_dt > now_dt:
             reason = "wait_process_after"
         elif is_agent_prediction_job(row):
             reason = "eligible_agent_prediction"
@@ -649,6 +665,11 @@ def scan_due_diagnostics(base_dir, now_text=""):
                 "race_id": str(row.get("race_id", "") or "").strip(),
                 "scheduled_off_time": str(row.get("scheduled_off_time", "") or "").strip(),
                 "process_after_time": _dt_text(derived_process_dt) if derived_process_dt else "",
+                "agent_prediction_schedule": str(row.get("agent_prediction_schedule", "") or "").strip(),
+                "agent_prediction_queue_after_time": str(
+                    row.get("agent_prediction_queue_after_time", "") or ""
+                ).strip(),
+                "effective_process_after_time": _dt_text(effective_process_dt) if effective_process_dt else "",
                 "has_required_artifacts": bool(has_required),
                 "reason": reason,
             }

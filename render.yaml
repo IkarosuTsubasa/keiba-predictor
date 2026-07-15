@@ -13,6 +13,6 @@ services:
   - type: cron
     name: keiba-run-due-cron
     runtime: python
-    schedule: "*/5 * * * *"
+    schedule: "*/4 * * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: cd pipeline && python cron_trigger_run_due.py

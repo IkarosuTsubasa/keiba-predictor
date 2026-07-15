@@ -238,6 +238,41 @@ class RunDueDailyReportTests(unittest.TestCase):
         self.assertEqual(retried, [])
         self.assertEqual(updated_job.get("status"), "failed")
 
+    def test_agent_result_remains_due_fifteen_minutes_after_off_time(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202655062508",
+                scope_key="local",
+                race_name="結果待機テスト",
+                race_date="2026-06-25",
+                scheduled_off_time="2026-06-25T10:00:00",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "") == str(job.get("job_id", "") or ""):
+                    row["status"] = "agent_prediction_ready"
+                    row["predictor_status"] = "succeeded"
+            save_jobs(base_dir, jobs)
+
+            before = task_routes._agent_result_diagnostics(
+                base_dir=base_dir,
+                load_race_jobs=lambda: load_jobs(base_dir),
+                now_dt=datetime(2026, 6, 25, 10, 14, 59),
+            )
+            at_due = task_routes._agent_result_diagnostics(
+                base_dir=base_dir,
+                load_race_jobs=lambda: load_jobs(base_dir),
+                now_dt=datetime(2026, 6, 25, 10, 15, 0),
+            )
+
+        self.assertEqual(before[0]["reason"], "wait_15min")
+        self.assertEqual(at_due[0]["reason"], "eligible")
+
     def test_unavailable_agent_result_is_terminal_without_run_due_error(self):
         with TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir) / "pipeline"

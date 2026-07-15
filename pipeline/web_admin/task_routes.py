@@ -474,9 +474,33 @@ def _meta_payload_for_auto_discovered_race(race_id, source, race_date, timeout=3
     return payload
 
 
+def _daily_agent_prediction_queue_after_text(race_date):
+    race_date_text = str(race_date or "").strip()
+    try:
+        datetime.strptime(race_date_text, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    start_hour = max(0, min(23, _env_int("PIPELINE_AGENT_PREDICTION_START_HOUR_JST", 6)))
+    start_minute = max(0, min(59, _env_int("PIPELINE_AGENT_PREDICTION_START_MINUTE_JST", 0)))
+    return f"{race_date_text}T{start_hour:02d}:{start_minute:02d}:00"
+
+
+def _mark_daily_agent_prediction_schedule(base_dir, update_race_job, job_id, race_date):
+    queue_after_time = _daily_agent_prediction_queue_after_text(race_date)
+    if not queue_after_time:
+        return None
+
+    def _apply(row, now_text):
+        row["agent_prediction_schedule"] = "daily_morning"
+        row["agent_prediction_queue_after_time"] = queue_after_time
+
+    return update_race_job(base_dir, job_id, _apply)
+
+
 def _annotate_auto_discovered_job(base_dir, update_race_job, job_id, meta_payload, discovered_row):
     payload = dict(meta_payload or {})
     source_row = dict(discovered_row or {})
+    queue_after_time = _daily_agent_prediction_queue_after_text(payload.get("race_date", ""))
 
     def _apply(row, now_text):
         row["race_number"] = str(payload.get("race_number", "") or "").strip()
@@ -484,6 +508,8 @@ def _annotate_auto_discovered_job(base_dir, update_race_job, job_id, meta_payloa
         row["meta_fetched_at"] = now_text
         row["meta_error"] = ""
         row["meta_retry_count"] = str(row.get("meta_retry_count", "0") or "0")
+        row["agent_prediction_schedule"] = "daily_morning"
+        row["agent_prediction_queue_after_time"] = queue_after_time
 
     return update_race_job(base_dir, job_id, _apply)
 
@@ -535,20 +561,6 @@ def _maybe_auto_discover_agent_race_jobs(
         base_summary["source_counts"] = dict(state_for_date.get("source_counts", {}) or {})
         return base_summary
 
-    existing_today_jobs = _agent_jobs_for_date(load_race_jobs, base_dir, target_date)
-    if existing_today_jobs and not state_for_date:
-        base_summary["reason"] = "agent_jobs_exist"
-        base_summary["skipped_count"] = len(existing_today_jobs)
-        base_summary["skipped_jobs"] = [
-            {
-                "race_id": str(job.get("race_id", "") or "").strip(),
-                "job_id": str(job.get("job_id", "") or "").strip(),
-                "reason": "agent_jobs_exist",
-            }
-            for job in existing_today_jobs[:20]
-        ]
-        return base_summary
-
     base_summary["attempted"] = True
     try:
         discovery = discover_races_for_date(
@@ -583,10 +595,18 @@ def _maybe_auto_discover_agent_race_jobs(
             continue
         existing = _find_existing_agent_job_for_race(current_jobs, race_id, target_date)
         if existing:
+            existing_job_id = str(existing.get("job_id", "") or "").strip()
+            if existing_job_id:
+                _mark_daily_agent_prediction_schedule(
+                    base_dir,
+                    update_race_job,
+                    existing_job_id,
+                    target_date,
+                )
             skipped.append(
                 {
                     "race_id": race_id,
-                    "job_id": str(existing.get("job_id", "") or "").strip(),
+                    "job_id": existing_job_id,
                     "reason": "already_exists",
                 }
             )
@@ -693,11 +713,22 @@ def pick_next_settle_job_id(*, load_race_jobs):
 
 
 def pick_next_agent_prediction_job_id(*, load_race_jobs):
-    jobs = load_race_jobs()
+    jobs = [
+        dict(job or {})
+        for job in list(load_race_jobs() or [])
+        if str((job or {}).get("status", "") or "").strip().lower() == "queued_agent_prediction"
+    ]
+    jobs.sort(
+        key=lambda job: (
+            str(job.get("scheduled_off_time", "") or "9999-12-31T23:59:59"),
+            str(job.get("race_id", "") or ""),
+            str(job.get("created_at", "") or ""),
+        )
+    )
     for job in jobs:
-        status = str(job.get("status", "") or "").strip().lower()
-        if status == "queued_agent_prediction":
-            return str(job.get("job_id", "") or "").strip()
+        job_id = str(job.get("job_id", "") or "").strip()
+        if job_id:
+            return job_id
     return ""
 
 
@@ -1541,6 +1572,7 @@ def _compact_run_due_summary(summary):
         "queued_count": int(row.get("queued_count", 0) or 0),
         "processed_count": int(row.get("processed_count", 0) or 0),
         "agent_dispatched_count": int(row.get("agent_dispatched_count", 0) or 0),
+        "agent_dispatch_limit": int(row.get("agent_dispatch_limit", 0) or 0),
         "settled_count": int(row.get("settled_count", 0) or 0),
         "agent_result_count": int(row.get("agent_result_count", 0) or 0),
         "agent_result_unavailable_count": int(row.get("agent_result_unavailable_count", 0) or 0),
@@ -1703,7 +1735,8 @@ def run_due_jobs_once(
     )
     _log_diagnostic_summary("agent_result_candidates", agent_result_candidates, sample_reasons=("eligible", "already_saved"))
 
-    while True:
+    agent_dispatch_limit = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_DISPATCH_LIMIT", 1))
+    for _ in range(agent_dispatch_limit):
         job_id = pick_next_agent_prediction_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
         if not job_id:
             break
@@ -2219,6 +2252,7 @@ def run_due_jobs_once(
         "processed_count": len(process_results),
         "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
         "agent_dispatched_count": len(agent_dispatch_results),
+        "agent_dispatch_limit": agent_dispatch_limit,
         "agent_dispatched_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_dispatch_results],
         "agent_dispatch_results": agent_dispatch_results,
         "settled_count": len(settle_results),

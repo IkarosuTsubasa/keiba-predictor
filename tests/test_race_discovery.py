@@ -191,6 +191,15 @@ class RaceDiscoveryTests(unittest.TestCase):
 
 
 class RunDueAutoDiscoveryTests(unittest.TestCase):
+    def fake_dispatch(self, base_dir, task, job):
+        return {
+            "task_id": str((task or {}).get("task_id", "") or "").strip(),
+            "workflow": "agent-prediction-remote.yml",
+            "ref": "test",
+            "race_id": str((job or {}).get("race_id", "") or "").strip(),
+            "dispatch_http_status": 204,
+        }
+
     def run_due_once(self, base_dir):
         def scan_due_fixed(target_base_dir):
             return scan_due_jobs(target_base_dir, now_text="2026-06-13T06:00:00")
@@ -198,15 +207,16 @@ class RunDueAutoDiscoveryTests(unittest.TestCase):
         def scan_due_diagnostics_fixed(target_base_dir):
             return scan_due_diagnostics(target_base_dir, now_text="2026-06-13T06:00:00")
 
-        return task_routes.run_due_jobs_once(
-            base_dir=base_dir,
-            scan_due_race_jobs=scan_due_fixed,
-            scan_due_race_job_diagnostics=scan_due_diagnostics_fixed,
-            load_race_jobs=load_jobs,
-            update_race_job=update_job,
-            compute_race_job_initial_status=compute_initial_status,
-            create_race_job=create_job,
-        )
+        with patch.object(task_routes, "_dispatch_agent_prediction_task", side_effect=self.fake_dispatch):
+            return task_routes.run_due_jobs_once(
+                base_dir=base_dir,
+                scan_due_race_jobs=scan_due_fixed,
+                scan_due_race_job_diagnostics=scan_due_diagnostics_fixed,
+                load_race_jobs=load_jobs,
+                update_race_job=update_job,
+                compute_race_job_initial_status=compute_initial_status,
+                create_race_job=create_job,
+            )
 
     def fake_meta(self, race_id, source="", timeout=30):
         local = str(source or "").strip().lower() == "local"
@@ -245,14 +255,23 @@ class RunDueAutoDiscoveryTests(unittest.TestCase):
 
             self.assertEqual(summary["auto_discovery"]["reason"], "created")
             self.assertEqual(summary["auto_discovery"]["created_count"], 2)
-            self.assertEqual(summary["agent_dispatched_count"], 0)
+            self.assertEqual(summary["agent_dispatched_count"], 1)
+            self.assertEqual(summary["agent_dispatch_limit"], 1)
             self.assertEqual(summary["errors"], [])
             jobs = load_jobs(base_dir)
             self.assertEqual(len(jobs), 2)
             self.assertEqual({job["race_id"] for job in jobs}, {"202605030301", "202654061301"})
             self.assertTrue(all(job["job_source"] == "agent_prediction" for job in jobs))
+            self.assertTrue(all(job["agent_prediction_schedule"] == "daily_morning" for job in jobs))
+            self.assertTrue(
+                all(job["agent_prediction_queue_after_time"] == "2026-06-13T06:00:00" for job in jobs)
+            )
+            self.assertEqual(
+                sorted(job["status"] for job in jobs),
+                ["processing_agent_prediction", "queued_agent_prediction"],
+            )
 
-    def test_run_due_skips_discovery_when_today_agent_job_exists(self):
+    def test_run_due_discovers_full_list_when_today_agent_job_exists(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir) / "pipeline"
             base_dir.mkdir(parents=True, exist_ok=True)
@@ -269,13 +288,74 @@ class RunDueAutoDiscoveryTests(unittest.TestCase):
                 target_track_condition="良",
                 job_source="agent_prediction",
             )
+            discovery_payload = {
+                "target_date": "2026-06-13",
+                "races": [{"race_id": "202605030301", "source": "central"}],
+                "source_counts": {"central": 1, "local": 0},
+                "errors": [],
+            }
             with patch.dict(os.environ, {"PIPELINE_AUTO_DISCOVER_AFTER_HOUR_JST": "0"}, clear=False):
                 with patch.object(task_routes, "_jst_now", return_value=datetime(2026, 6, 13, 6, 0, 0)):
-                    with patch.object(task_routes, "discover_races_for_date", side_effect=AssertionError("should not discover")):
+                    with patch.object(task_routes, "discover_races_for_date", return_value=discovery_payload):
                         summary = self.run_due_once(base_dir)
 
-            self.assertEqual(summary["auto_discovery"]["reason"], "agent_jobs_exist")
+            self.assertEqual(summary["auto_discovery"]["reason"], "no_new_jobs")
+            self.assertEqual(summary["auto_discovery"]["skipped_count"], 1)
+            self.assertEqual(summary["agent_dispatched_count"], 1)
             self.assertEqual(len(load_jobs(base_dir)), 1)
+
+    def test_daily_morning_queue_ignores_lead_minutes_after_six(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202605030301",
+                scope_key="central_dirt",
+                race_name="早朝キューテスト",
+                race_date="2026-06-13",
+                scheduled_off_time="2026-06-13T23:59:00",
+                target_surface="dirt",
+                target_distance="1600",
+                target_track_condition="良",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            task_routes._mark_daily_agent_prediction_schedule(
+                base_dir,
+                update_job,
+                str(job.get("job_id", "") or ""),
+                "2026-06-13",
+            )
+
+            before = scan_due_jobs(base_dir, now_text="2026-06-13T05:59:00")
+            at_start = scan_due_jobs(base_dir, now_text="2026-06-13T06:00:00")
+            jobs = load_jobs(base_dir)
+
+        self.assertEqual(before, [])
+        self.assertEqual(len(at_start), 1)
+        self.assertEqual(jobs[0]["status"], "queued_agent_prediction")
+        self.assertEqual(jobs[0]["lead_minutes"], 60)
+
+    def test_agent_prediction_queue_selects_earliest_off_time(self):
+        jobs = [
+            {
+                "job_id": "late",
+                "race_id": "202654061312",
+                "scheduled_off_time": "2026-06-13T20:30:00",
+                "status": "queued_agent_prediction",
+            },
+            {
+                "job_id": "early",
+                "race_id": "202605030301",
+                "scheduled_off_time": "2026-06-13T09:55:00",
+                "status": "queued_agent_prediction",
+            },
+        ]
+
+        selected = task_routes.pick_next_agent_prediction_job_id(load_race_jobs=lambda: jobs)
+
+        self.assertEqual(selected, "early")
 
     def test_run_due_retries_incomplete_discovery_and_adds_missing_jobs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
