@@ -116,12 +116,16 @@ def build_backtest_audit_payload_from_dicts(
     race_info = dict(race_info or prediction_payload.get("race_info") or (race_data_payload or {}).get("race_info") or {})
     race_id = str(race_id or prediction_payload.get("race_id") or race_info.get("race_id") or "").strip()
     audit_kind = "full" if race_data_payload else "prediction_only"
+    prediction_stage = str(prediction_payload.get("prediction_stage") or "early").strip().lower()
+    if prediction_stage not in {"early", "final"}:
+        prediction_stage = "early"
     return {
         "schema_version": SCHEMA_VERSION,
         "audit_kind": audit_kind,
         "created_at": created_at or utc_now_text(),
         "source": source,
         "race_id": race_id,
+        "prediction_stage": prediction_stage,
         "race_info": race_info,
         "source_paths": dict(source_paths or {}),
         "code_version": _code_version(),

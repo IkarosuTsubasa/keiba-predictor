@@ -23,6 +23,11 @@ on:
         description: keiba_llm_agent scoring profile
         required: false
         type: string
+      prediction_stage:
+        description: early or final prediction stage
+        required: false
+        default: early
+        type: string
       callback_url:
         description: Render callback URL
         required: true
@@ -83,6 +88,7 @@ jobs:
         env:
           RUN_EXIT_CODE: ${{ steps.run_agent.outputs.exit_code }}
           RACE_ID: ${{ inputs.race_id }}
+          PREDICTION_STAGE: ${{ inputs.prediction_stage || 'early' }}
           AGENT_PREDICTION_TIMEOUT_MINUTES: ${{ env.AGENT_PREDICTION_TIMEOUT_MINUTES }}
         run: |
           python - <<'PY'
@@ -93,6 +99,7 @@ jobs:
           from pathlib import Path
 
           race_id = re.sub(r"\D", "", os.environ.get("RACE_ID", ""))
+          prediction_stage = "final" if os.environ.get("PREDICTION_STAGE", "").strip().lower() == "final" else "early"
           exit_code = int(str(os.environ.get("RUN_EXIT_CODE", "1") or "1"))
           log_path = Path("agent_prediction_output.log")
           prediction_path = Path("keiba_llm_agent/data/predictions") / f"{race_id}.json"
@@ -107,6 +114,7 @@ jobs:
               "prediction_path": str(prediction_path),
               "backtest_audit_path": str(audit_path),
               "exit_code": exit_code,
+              "prediction_stage": prediction_stage,
           }
 
           if exit_code == 0 and prediction_path.exists():

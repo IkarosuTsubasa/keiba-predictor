@@ -18,6 +18,7 @@ from keiba_llm_agent.backtest.audit_snapshot import (  # noqa: E402
     build_backtest_audit_payload_from_dicts,
     write_backtest_audit_payload,
 )
+from keiba_llm_agent.backtest.input_selection import select_effective_prediction_paths  # noqa: E402
 from keiba_llm_agent.schemas.prediction import Prediction  # noqa: E402
 from keiba_llm_agent.schemas.race_data import RaceData  # noqa: E402
 from web_data.agent_predictions import (  # noqa: E402
@@ -141,7 +142,11 @@ def build_agent_backtest_audit(
     results_dir = results_dir or agent_result_write_dir(base_dir)
     audit_dir = audit_dir or agent_backtest_audit_write_dir(base_dir)
     rows = []
-    for prediction_path in sorted(predictions_dir.glob("*.json")):
+    source_file_count = len(list(predictions_dir.glob("*.json")))
+    source_file_count += len(list((predictions_dir / "_versions").glob("*/early/*.json")))
+    source_file_count += len(list((predictions_dir / "_versions").glob("*/final/*.json")))
+    selected_predictions = select_effective_prediction_paths(predictions_dir)
+    for selected_race_id, prediction_path in selected_predictions.items():
         try:
             rows.append(
                 _build_one_audit(
@@ -154,7 +159,7 @@ def build_agent_backtest_audit(
         except Exception as exc:
             rows.append(
                 {
-                    "race_id": prediction_path.stem,
+                    "race_id": selected_race_id,
                     "audit_kind": "error",
                     "has_result": False,
                     "has_race_data": False,
@@ -171,6 +176,9 @@ def build_agent_backtest_audit(
         "results_dir": str(results_dir),
         "audit_dir": str(audit_dir),
         "race_count": len(rows),
+        "source_prediction_file_count": source_file_count,
+        "duplicate_prediction_versions_excluded": max(0, source_file_count - len(selected_predictions)),
+        "selection_rule": "one_per_race_final_over_early",
         "counts": counts,
     }
     if include_items:

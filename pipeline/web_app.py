@@ -14,6 +14,7 @@ import time
 import traceback
 import zipfile
 import base64
+import gzip
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2188,6 +2189,12 @@ def _public_display_status(row, variant):
         return {"label": "予測中", "tone": "open"}
     if variant == "settled":
         return {"label": "結果確定", "tone": "settled"}
+    if str((row or {}).get("source_type", "") or "").strip() == "agent_prediction":
+        stage = agent_predictions.normalize_prediction_stage((row or {}).get("prediction_stage"))
+        return {
+            "label": agent_predictions.prediction_stage_label(stage),
+            "tone": "final" if stage == "final" else "open",
+        }
     return {"label": "確定待ち", "tone": "open"}
 
 
@@ -3208,6 +3215,8 @@ def _public_board_api_race_item(row):
     item = dict(row or {})
     return {
         "source_type": str(item.get("source_type", "") or "").strip(),
+        "prediction_stage": str(item.get("prediction_stage", "") or "").strip(),
+        "prediction_stage_label": str(item.get("prediction_stage_label", "") or "").strip(),
         "run_id": str(item.get("run_id", "") or "").strip(),
         "race_id": str(item.get("race_id", "") or "").strip(),
         "race_title": str(item.get("race_title", "") or "").strip(),
@@ -4561,6 +4570,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
         remote_task = find_latest_task_for_job(BASE_DIR, job_id_text)
         remote_task_payload = None
         if remote_task:
+            remote_task_meta = dict((remote_task or {}).get("bundle_meta") or {})
             remote_task_payload = {
                 "task_id": str((remote_task or {}).get("task_id", "") or "").strip(),
                 "task_type": str((remote_task or {}).get("task_type", "") or "").strip(),
@@ -4571,6 +4581,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "workflow_dispatch_ref": str((remote_task or {}).get("workflow_dispatch_ref", "") or "").strip(),
                 "result_path": str((remote_task or {}).get("result_path", "") or "").strip(),
                 "error_message": str((remote_task or {}).get("error_message", "") or "").strip(),
+                "prediction_stage": str(remote_task_meta.get("prediction_stage", "") or "").strip(),
             }
         agent_prediction_path = agent_predictions.agent_prediction_path_for_race(BASE_DIR, race_id_text)
         agent_result_path = agent_predictions.agent_result_path_for_race(BASE_DIR, race_id_text)
@@ -4587,6 +4598,8 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             "processing_morning",
             "queued_agent_prediction",
             "processing_agent_prediction",
+            "queued_final_prediction",
+            "processing_final_prediction",
             "fetching_agent_result",
             "queued_process",
             "processing",
@@ -4597,7 +4610,7 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
             "settling",
         ):
             summary["processing"] += 1
-        elif status in ("ready", "preview_ready", "agent_prediction_ready"):
+        elif status in ("ready", "preview_ready", "agent_prediction_ready", "final_prediction_ready"):
             summary["ready"] += 1
         elif status == "settled":
             summary["settled"] += 1
@@ -4638,6 +4651,12 @@ def _build_admin_jobs_payload(token: str = "", show_settled: bool = False):
                 "target_distance": str(hydrated.get("target_distance", "") or "").strip(),
                 "target_track_condition": str(hydrated.get("target_track_condition", "") or "").strip(),
                 "lead_minutes": hydrated.get("lead_minutes", ""),
+                "prediction_stage": str(hydrated.get("prediction_stage", "") or "").strip(),
+                "early_prediction_ready_at": str(hydrated.get("early_prediction_ready_at", "") or "").strip(),
+                "final_prediction_due_time": str(hydrated.get("final_prediction_due_time", "") or "").strip(),
+                "final_prediction_status": str(hydrated.get("final_prediction_status", "") or "").strip(),
+                "final_prediction_ready_at": str(hydrated.get("final_prediction_ready_at", "") or "").strip(),
+                "final_prediction_error": str(hydrated.get("final_prediction_error", "") or "").strip(),
                 "job_source": str(hydrated.get("job_source", "") or "").strip(),
                 "remote_task": remote_task_payload,
                 "agent_prediction_saved": bool(agent_prediction_path and agent_prediction_path.exists()),
@@ -4795,7 +4814,13 @@ def _build_agent_health_payload():
             "status_counts": dict(sorted(status_counts.items())),
             "processing": sum(
                 int(status_counts.get(status, 0) or 0)
-                for status in ("queued_agent_prediction", "processing_agent_prediction", "fetching_agent_result")
+                for status in (
+                    "queued_agent_prediction",
+                    "processing_agent_prediction",
+                    "queued_final_prediction",
+                    "processing_final_prediction",
+                    "fetching_agent_result",
+                )
             ),
             "failed": int(status_counts.get("failed", 0) or 0),
             "latest": {
@@ -6310,6 +6335,8 @@ async def admin_jobs_topup_today_all_llm_api(request: Request):
 @app.post("/internal/run_due")
 def internal_run_due(request: Request):
     supplied = _admin_supplied_token(request)
+    requested_source = str(request.headers.get("X-Run-Due-Source", "") or "").strip().lower()
+    history_source = "cron" if requested_source == "cron" else "internal"
     return web_admin_tasks.internal_run_due_response(
         base_dir=BASE_DIR,
         token=supplied,
@@ -6321,6 +6348,7 @@ def internal_run_due(request: Request):
         compute_race_job_initial_status=compute_race_job_initial_status,
         create_race_job=create_race_job,
         daily_report_generator=_run_due_daily_report_generator,
+        history_source=history_source,
     )
 
 
@@ -6347,6 +6375,11 @@ def _agent_prediction_output_dir():
 
 def _apply_remote_agent_prediction_result(task, payload):
     task_row = dict(task or {})
+    task_meta = dict(task_row.get("bundle_meta") or {})
+    prediction_stage = agent_predictions.normalize_prediction_stage(task_meta.get("prediction_stage"))
+    final_prediction_expected = bool(task_meta.get("final_prediction_expected"))
+    prediction_stage_label = agent_predictions.prediction_stage_label(prediction_stage)
+    version_id = str(task_row.get("task_id", "") or "").strip() or str(time.time_ns())
     race_id = normalize_race_id(task_row.get("race_id", ""))
     result_payload = dict(payload.get("result") or {})
     prediction_payload = result_payload.get("prediction")
@@ -6362,51 +6395,143 @@ def _apply_remote_agent_prediction_result(task, payload):
             raise ValueError(f"invalid agent prediction payload: {exc}") from exc
     if not isinstance(prediction_payload, dict):
         raise ValueError("agent prediction payload must be object")
+    prediction_payload = dict(prediction_payload)
     payload_race_id = normalize_race_id(prediction_payload.get("race_id", ""))
     if payload_race_id:
         race_id = payload_race_id
     if not race_id:
         raise ValueError("agent prediction race_id missing")
-    output_path = _agent_prediction_output_dir() / f"{race_id}.json"
-    output_path.write_text(
-        json.dumps(prediction_payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    prediction_payload["prediction_stage"] = prediction_stage
+    prediction_payload["prediction_stage_label"] = prediction_stage_label
+    prediction_payload["prediction_version_id"] = version_id
+    prediction_payload["prediction_received_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    output_path = agent_predictions.write_agent_prediction_version_payload(
+        BASE_DIR,
+        race_id,
+        prediction_stage,
+        version_id,
+        prediction_payload,
     )
+    compatibility_prediction_path = _agent_prediction_output_dir() / f"{race_id}.json"
+    if prediction_stage == "final" or not compatibility_prediction_path.exists():
+        compatibility_prediction_path = agent_predictions.write_agent_prediction_payload(
+            BASE_DIR,
+            race_id,
+            prediction_payload,
+        )
     audit_path = None
+    compatibility_audit_path = agent_predictions.agent_backtest_audit_path_for_race(BASE_DIR, race_id)
     if audit_content_base64:
         try:
             audit_bytes = base64.b64decode(audit_content_base64)
         except Exception as exc:
             raise ValueError(f"invalid agent backtest audit base64: {exc}") from exc
-        audit_path = agent_predictions.write_agent_backtest_audit_bytes(BASE_DIR, race_id, audit_bytes)
+        try:
+            audit_payload = json.loads(gzip.decompress(audit_bytes).decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"invalid agent backtest audit payload: {exc}") from exc
+        audit_payload["prediction_stage"] = prediction_stage
+        audit_payload["prediction_stage_label"] = prediction_stage_label
+        audit_payload["prediction_version_id"] = version_id
+        audit_payload.setdefault("outputs", {})["prediction"] = prediction_payload
+        audit_path = agent_predictions.write_agent_backtest_audit_version_payload(
+            BASE_DIR,
+            race_id,
+            prediction_stage,
+            version_id,
+            audit_payload,
+        )
+        if (
+            compatibility_audit_path is not None
+            and (
+                prediction_stage == "final"
+                or (not compatibility_audit_path.exists() and not final_prediction_expected)
+            )
+        ):
+            agent_predictions.write_agent_backtest_audit_payload(BASE_DIR, race_id, audit_payload)
     else:
         audit_payload = agent_predictions.build_prediction_only_backtest_audit(
             prediction_payload,
             task=task_row,
             source_paths={"prediction_path": str(output_path)},
         )
-        audit_path = agent_predictions.write_agent_backtest_audit_payload(BASE_DIR, race_id, audit_payload)
+        audit_path = agent_predictions.write_agent_backtest_audit_version_payload(
+            BASE_DIR,
+            race_id,
+            prediction_stage,
+            version_id,
+            audit_payload,
+        )
+        if (
+            compatibility_audit_path is not None
+            and (
+                prediction_stage == "final"
+                or (not compatibility_audit_path.exists() and not final_prediction_expected)
+            )
+        ):
+            agent_predictions.write_agent_backtest_audit_payload(BASE_DIR, race_id, audit_payload)
+    existing_result_path = agent_predictions.agent_result_path_for_race(BASE_DIR, race_id)
+    if existing_result_path is not None and existing_result_path.exists():
+        try:
+            existing_result_payload = json.loads(existing_result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing_result_payload = {}
+        if existing_result_payload:
+            agent_predictions.attach_result_to_agent_backtest_audit(BASE_DIR, race_id, existing_result_payload)
+    agent_predictions.clear_agent_prediction_caches()
     return {
         "race_id": race_id,
+        "prediction_stage": prediction_stage,
+        "prediction_stage_label": prediction_stage_label,
+        "prediction_version_id": version_id,
         "result_path": str(output_path),
         "prediction_path": str(output_path),
+        "compatibility_prediction_path": str(compatibility_prediction_path) if compatibility_prediction_path.exists() else "",
         "backtest_audit_path": str(audit_path) if audit_path else "",
     }
 
 
-def _promote_job_after_remote_agent_prediction(*, job_id, task_id, race_id, log_output):
+def _promote_job_after_remote_agent_prediction(*, job_id, task_id, race_id, log_output, prediction_stage="early"):
+    stage = agent_predictions.normalize_prediction_stage(prediction_stage)
+
     def _mutate(row, now_text):
         row.update(initialize_race_job_step_fields(row))
         current_status = str(row.get("status", "") or "").strip().lower()
         current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
-        if current_status not in ("queued_agent_prediction", "processing_agent_prediction", "scheduled"):
+        regular_statuses = (
+            "queued_agent_prediction",
+            "processing_agent_prediction",
+            "agent_prediction_ready",
+            "scheduled",
+            "queued_final_prediction",
+            "processing_final_prediction",
+        )
+        preserve_settlement_status = stage == "final" and current_status in (
+            "fetching_agent_result",
+            "settled",
+        )
+        if current_status not in regular_statuses and not preserve_settlement_status:
             return
         if current_task_id and current_task_id != str(task_id or "").strip():
             return
-        row["status"] = "agent_prediction_ready"
+        if stage == "final":
+            if not preserve_settlement_status:
+                row["status"] = "final_prediction_ready"
+            row["prediction_stage"] = "final"
+            row["final_prediction_status"] = "succeeded"
+            row["final_prediction_ready_at"] = now_text
+            row["final_prediction_task_id"] = str(task_id or "").strip()
+            row["final_prediction_error"] = ""
+        else:
+            row["status"] = "agent_prediction_ready"
+            row["prediction_stage"] = "early"
+            row["early_prediction_ready_at"] = now_text
+            if str(row.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning":
+                row["final_prediction_status"] = "waiting"
         row["current_v5_task_id"] = str(task_id or "").strip()
         row["current_run_id"] = str(race_id or "").strip()
         row["ready_at"] = now_text
+        row["pending_prediction_stage"] = ""
         row["error_message"] = ""
         row["last_process_output"] = web_remote_predictors.append_job_process_log_entry(
             row,
@@ -6416,6 +6541,60 @@ def _promote_job_after_remote_agent_prediction(*, job_id, task_id, race_id, log_
         )
         set_race_job_step_state(row, "predictor", "succeeded", now_text)
         set_race_job_step_state(row, "policy", "idle")
+
+    return update_race_job(BASE_DIR, job_id, _mutate)
+
+
+def _fail_job_after_remote_agent_prediction(*, job_id, task_id, prediction_stage, error_message, log_output=""):
+    stage = agent_predictions.normalize_prediction_stage(prediction_stage)
+    if stage != "final":
+        from race_job_runner import fail_race_job
+
+        return fail_race_job(BASE_DIR, job_id, error_message)
+
+    def _mutate(row, now_text):
+        row.update(initialize_race_job_step_fields(row))
+        current_status = str(row.get("status", "") or "").strip().lower()
+        preserve_settlement_status = current_status in ("fetching_agent_result", "settled")
+        current_task_id = str(row.get("current_v5_task_id", "") or "").strip()
+        if current_task_id and current_task_id != str(task_id or "").strip():
+            return
+        if str(row.get("early_prediction_ready_at", "") or "").strip():
+            if not preserve_settlement_status:
+                row["status"] = "agent_prediction_ready"
+            row["prediction_stage"] = "early"
+            row["final_prediction_status"] = "failed"
+            row["final_prediction_error"] = str(error_message or "").strip()
+            row["pending_prediction_stage"] = "" if preserve_settlement_status else "final"
+            if not preserve_settlement_status:
+                row["error_message"] = str(error_message or "").strip()
+            row["last_process_output"] = web_remote_predictors.append_job_process_log_entry(
+                row,
+                "final_prediction_callback_failed",
+                1,
+                str(log_output or error_message or "").strip(),
+            )
+            set_race_job_step_state(
+                row,
+                "predictor",
+                "succeeded",
+                row.get("early_prediction_ready_at", "") or now_text,
+            )
+            return
+        if preserve_settlement_status:
+            row["final_prediction_status"] = "failed"
+            row["final_prediction_error"] = str(error_message or "").strip()
+            row["pending_prediction_stage"] = ""
+            row["last_process_output"] = web_remote_predictors.append_job_process_log_entry(
+                row,
+                "final_prediction_callback_failed",
+                1,
+                str(log_output or error_message or "").strip(),
+            )
+            return
+        row["status"] = "failed"
+        row["error_message"] = str(error_message or "").strip()
+        set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
 
     return update_race_job(BASE_DIR, job_id, _mutate)
 
@@ -6519,6 +6698,9 @@ async def internal_v5_task_callback(task_id: str, request: Request):
     run_id = str((task or {}).get("run_id", "") or "").strip()
     scope_key = str((task or {}).get("scope_key", "") or "").strip()
     task_type = str((task or {}).get("task_type", "") or "").strip().lower()
+    task_prediction_stage = agent_predictions.normalize_prediction_stage(
+        dict((task or {}).get("bundle_meta") or {}).get("prediction_stage")
+    )
 
     if status == "succeeded":
         if task_type == "agent_prediction":
@@ -6538,9 +6720,13 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                     ),
                 )
                 if job_id:
-                    from race_job_runner import fail_race_job
-
-                    fail_race_job(BASE_DIR, job_id, str(exc))
+                    _fail_job_after_remote_agent_prediction(
+                        job_id=job_id,
+                        task_id=task_id,
+                        prediction_stage=task_prediction_stage,
+                        error_message=str(exc),
+                        log_output=log_excerpt,
+                    )
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
             update_v5_remote_task(
                 BASE_DIR,
@@ -6560,6 +6746,7 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                     job_id=job_id,
                     task_id=task_id,
                     race_id=str(saved.get("race_id", "") or ""),
+                    prediction_stage=str(saved.get("prediction_stage", "") or ""),
                     log_output=log_excerpt,
                 )
                 from race_job_runner import _maybe_send_agent_prediction_notification
@@ -6649,9 +6836,18 @@ async def internal_v5_task_callback(task_id: str, request: Request):
         ),
     )
     if job_id:
-        from race_job_runner import fail_race_job
+        if task_type == "agent_prediction":
+            _fail_job_after_remote_agent_prediction(
+                job_id=job_id,
+                task_id=task_id,
+                prediction_stage=task_prediction_stage,
+                error_message=error_message,
+                log_output=log_excerpt,
+            )
+        else:
+            from race_job_runner import fail_race_job
 
-        fail_race_job(BASE_DIR, job_id, error_message)
+            fail_race_job(BASE_DIR, job_id, error_message)
     return JSONResponse(
         {
             "ok": True,

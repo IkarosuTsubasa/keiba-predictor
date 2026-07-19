@@ -12,6 +12,12 @@ from confidence_policy import AGENT_CONFIDENCE_FALLBACK_SCORE, public_decision_t
 
 
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
+PREDICTION_STAGE_EARLY = "early"
+PREDICTION_STAGE_FINAL = "final"
+PREDICTION_STAGE_LABELS = {
+    PREDICTION_STAGE_EARLY: "早期予測",
+    PREDICTION_STAGE_FINAL: "最終予測",
+}
 COURSE_ORDER = (
     "札幌",
     "函館",
@@ -108,8 +114,69 @@ def agent_backtest_audit_path_for_race(base_dir, race_id):
     return agent_backtest_audit_write_dir(base_dir) / f"{race_id_text}.json.gz"
 
 
+def normalize_prediction_stage(value):
+    text = _safe_text(value).lower()
+    if text in {PREDICTION_STAGE_FINAL, "final_prediction", "finalized"}:
+        return PREDICTION_STAGE_FINAL
+    return PREDICTION_STAGE_EARLY
+
+
+def prediction_stage_label(value):
+    return PREDICTION_STAGE_LABELS[normalize_prediction_stage(value)]
+
+
+def _safe_version_id(value):
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", _safe_text(value)).strip("._")
+    return text or str(time.time_ns())
+
+
+def agent_prediction_version_path_for_race(base_dir, race_id, stage, version_id):
+    race_id_text = _safe_text(race_id)
+    if not race_id_text:
+        return None
+    return (
+        agent_prediction_write_dir(base_dir)
+        / "_versions"
+        / race_id_text
+        / normalize_prediction_stage(stage)
+        / f"{_safe_version_id(version_id)}.json"
+    )
+
+
+def agent_backtest_audit_version_path_for_race(base_dir, race_id, stage, version_id):
+    race_id_text = _safe_text(race_id)
+    if not race_id_text:
+        return None
+    return (
+        agent_backtest_audit_write_dir(base_dir)
+        / "_versions"
+        / race_id_text
+        / normalize_prediction_stage(stage)
+        / f"{_safe_version_id(version_id)}.json.gz"
+    )
+
+
 def _utc_now_text():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _atomic_write_bytes(path, content):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target.with_name(f".{target.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        temp_path.write_bytes(bytes(content or b""))
+        temp_path.replace(target)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_write_json(path, payload, *, compressed=False):
+    raw = (json.dumps(dict(payload or {}), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _atomic_write_bytes(path, gzip.compress(raw) if compressed else raw)
 
 
 def _audit_capabilities(race_data_payload=None, prediction_payload=None, result_payload=None):
@@ -145,18 +212,25 @@ def build_prediction_only_backtest_audit(prediction_payload, *, task=None, sourc
     race_info = dict(prediction_payload.get("race_info") or {})
     race_id = _safe_text(prediction_payload.get("race_id")) or _safe_text(race_info.get("race_id"))
     task_row = dict(task or {})
+    task_meta = dict(task_row.get("bundle_meta") or {})
+    stage = normalize_prediction_stage(
+        prediction_payload.get("prediction_stage") or task_meta.get("prediction_stage")
+    )
     return {
         "schema_version": "agent_backtest_audit_v1",
         "audit_kind": "prediction_only",
         "created_at": _utc_now_text(),
         "source": "render_callback",
         "race_id": race_id,
+        "prediction_stage": stage,
+        "prediction_stage_label": prediction_stage_label(stage),
         "race_info": race_info,
         "source_paths": dict(source_paths or {}),
         "remote_task": {
             "task_id": _safe_text(task_row.get("task_id")),
             "job_id": _safe_text(task_row.get("job_id")),
             "scope_key": _safe_text(task_row.get("scope_key")),
+            "prediction_stage": stage,
         },
         "backtest_capabilities": _audit_capabilities(prediction_payload=prediction_payload),
         "missing_inputs": _audit_missing_inputs(prediction_payload=prediction_payload),
@@ -195,10 +269,7 @@ def write_agent_backtest_audit_payload(base_dir, race_id, payload):
     path = agent_backtest_audit_path_for_race(base_dir, race_id)
     if path is None:
         raise ValueError("race_id missing for agent backtest audit")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt", encoding="utf-8") as fh:
-        json.dump(dict(payload or {}), fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
+    _atomic_write_json(path, payload, compressed=True)
     return path
 
 
@@ -206,8 +277,48 @@ def write_agent_backtest_audit_bytes(base_dir, race_id, content_bytes):
     path = agent_backtest_audit_path_for_race(base_dir, race_id)
     if path is None:
         raise ValueError("race_id missing for agent backtest audit")
+    _atomic_write_bytes(path, content_bytes)
+    return path
+
+
+def write_agent_prediction_payload(base_dir, race_id, payload):
+    race_id_text = _safe_text(race_id)
+    if not race_id_text:
+        raise ValueError("race_id missing for agent prediction")
+    path = agent_prediction_write_dir(base_dir) / f"{race_id_text}.json"
+    _atomic_write_json(path, payload)
+    clear_agent_prediction_caches()
+    return path
+
+
+def write_agent_prediction_version_payload(base_dir, race_id, stage, version_id, payload):
+    path = agent_prediction_version_path_for_race(base_dir, race_id, stage, version_id)
+    if path is None:
+        raise ValueError("race_id missing for agent prediction version")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(bytes(content_bytes or b""))
+    if not path.exists():
+        _atomic_write_json(path, payload)
+    clear_agent_prediction_caches()
+    return path
+
+
+def write_agent_backtest_audit_version_payload(base_dir, race_id, stage, version_id, payload):
+    path = agent_backtest_audit_version_path_for_race(base_dir, race_id, stage, version_id)
+    if path is None:
+        raise ValueError("race_id missing for agent backtest audit version")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        _atomic_write_json(path, payload, compressed=True)
+    return path
+
+
+def write_agent_backtest_audit_version_bytes(base_dir, race_id, stage, version_id, content_bytes):
+    path = agent_backtest_audit_version_path_for_race(base_dir, race_id, stage, version_id)
+    if path is None:
+        raise ValueError("race_id missing for agent backtest audit version")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        _atomic_write_bytes(path, content_bytes)
     return path
 
 
@@ -220,24 +331,42 @@ def read_agent_backtest_audit_payload(path):
 
 
 def attach_result_to_agent_backtest_audit(base_dir, race_id, result_payload):
-    path = agent_backtest_audit_path_for_race(base_dir, race_id)
-    if path is None or not path.exists():
+    race_id_text = _safe_text(race_id)
+    if not race_id_text:
         return None
-    payload = read_agent_backtest_audit_payload(path)
-    payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
-    race_data_payload = (payload.get("inputs") or {}).get("race_data")
-    prediction_payload = (payload.get("outputs") or {}).get("prediction")
-    payload["backtest_capabilities"] = _audit_capabilities(
-        race_data_payload=race_data_payload,
-        prediction_payload=prediction_payload,
-        result_payload=result_payload,
-    )
-    payload["missing_inputs"] = _audit_missing_inputs(
-        race_data_payload=race_data_payload,
-        prediction_payload=prediction_payload,
-        result_payload=result_payload,
-    )
-    return write_agent_backtest_audit_payload(base_dir, race_id, payload)
+    root = agent_backtest_audit_write_dir(base_dir)
+    paths = []
+    legacy_path = agent_backtest_audit_path_for_race(base_dir, race_id_text)
+    if legacy_path is not None and legacy_path.exists():
+        paths.append(legacy_path)
+    version_root = root / "_versions" / race_id_text
+    if version_root.exists():
+        paths.extend(sorted(version_root.glob("*/*.json.gz")))
+
+    updated_paths = []
+    for path in paths:
+        try:
+            payload = read_agent_backtest_audit_payload(path)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or not payload:
+            continue
+        payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
+        race_data_payload = (payload.get("inputs") or {}).get("race_data")
+        prediction_payload = (payload.get("outputs") or {}).get("prediction")
+        payload["backtest_capabilities"] = _audit_capabilities(
+            race_data_payload=race_data_payload,
+            prediction_payload=prediction_payload,
+            result_payload=result_payload,
+        )
+        payload["missing_inputs"] = _audit_missing_inputs(
+            race_data_payload=race_data_payload,
+            prediction_payload=prediction_payload,
+            result_payload=result_payload,
+        )
+        _atomic_write_json(path, payload, compressed=True)
+        updated_paths.append(path)
+    return updated_paths[-1] if updated_paths else None
 
 
 def _existing_unique_dirs(candidates):
@@ -265,6 +394,32 @@ def _prediction_dir_candidates(base_dir):
     return _existing_unique_dirs(candidates)
 
 
+def _latest_version_path(directory, race_id, stage):
+    stage_dir = Path(directory) / "_versions" / _safe_text(race_id) / normalize_prediction_stage(stage)
+    if not stage_dir.exists():
+        return None
+    paths = sorted(stage_dir.glob("*.json"), key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+    expected_race_id = _safe_text(race_id)
+    expected_stage = normalize_prediction_stage(stage)
+    for path in paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or not payload:
+            continue
+        race_info = payload.get("race_info")
+        payload_race_id = _safe_text(payload.get("race_id"))
+        if not payload_race_id and isinstance(race_info, dict):
+            payload_race_id = _safe_text(race_info.get("race_id"))
+        if payload_race_id and payload_race_id != expected_race_id:
+            continue
+        if normalize_prediction_stage(payload.get("prediction_stage")) != expected_stage:
+            continue
+        return path
+    return None
+
+
 def _results_dir_candidates(base_dir):
     root = _repo_root(base_dir)
     candidates = [
@@ -280,7 +435,13 @@ def agent_prediction_path_for_race(base_dir, race_id):
     race_id_text = _safe_text(race_id)
     if not race_id_text:
         return None
-    for directory in _prediction_dir_candidates(base_dir):
+    directories = _prediction_dir_candidates(base_dir)
+    for stage in (PREDICTION_STAGE_FINAL, PREDICTION_STAGE_EARLY):
+        for directory in directories:
+            path = _latest_version_path(directory, race_id_text, stage)
+            if path is not None:
+                return path
+    for directory in directories:
         path = directory / f"{race_id_text}.json"
         if path.exists():
             return path
@@ -331,6 +492,12 @@ _PREDICTION_HISTORY_CACHE = {}
 _PREDICTION_CACHE_LOCK = threading.RLock()
 
 
+def clear_agent_prediction_caches():
+    with _PREDICTION_CACHE_LOCK:
+        _PREDICTION_INDEX_CACHE.clear()
+        _PREDICTION_HISTORY_CACHE.clear()
+
+
 def _read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -351,9 +518,12 @@ def _prediction_cache_key(base_dir):
 def _prediction_metadata(path, payload):
     race_info = dict(payload.get("race_info") or {})
     race_id = _safe_text(payload.get("race_id")) or _safe_text(race_info.get("race_id")) or Path(path).stem
+    stage = normalize_prediction_stage(payload.get("prediction_stage"))
     return {
         "_source_path": str(path),
         "race_id": race_id,
+        "prediction_stage": stage,
+        "prediction_stage_label": prediction_stage_label(stage),
         "scope_key": _safe_text(payload.get("scope_key")),
         "source": _safe_text(payload.get("source")),
         "race_info": {
@@ -370,23 +540,36 @@ def _prediction_metadata(path, payload):
 def _build_prediction_index(base_dir):
     items = []
     by_date = {}
-    seen_race_ids = set()
-    for directory in _prediction_dir_candidates(base_dir):
-        for path in sorted(directory.glob("*.json")):
+    selected = {}
+    for directory_index, directory in enumerate(_prediction_dir_candidates(base_dir)):
+        candidates = []
+        candidates.extend((path, 1) for path in sorted(directory.glob("*.json")))
+        candidates.extend((path, 2) for path in sorted((directory / "_versions").glob("*/early/*.json")))
+        candidates.extend((path, 3) for path in sorted((directory / "_versions").glob("*/final/*.json")))
+        for path, stage_priority in candidates:
             try:
                 payload = _read_json(path)
             except (OSError, json.JSONDecodeError):
                 continue
             item = _prediction_metadata(path, payload)
             race_id = _safe_text(item.get("race_id"))
-            if not race_id or race_id in seen_race_ids:
+            if not race_id:
                 continue
-            seen_race_ids.add(race_id)
-            items.append(item)
-            race_info = dict(item.get("race_info") or {})
-            race_date = _safe_text(race_info.get("race_date"))
-            if race_date:
-                by_date.setdefault(race_date, []).append(item)
+            try:
+                modified_ns = path.stat().st_mtime_ns
+            except OSError:
+                modified_ns = 0
+            priority = (stage_priority, -directory_index, modified_ns, path.name)
+            current = selected.get(race_id)
+            if current is None or priority > current[0]:
+                selected[race_id] = (priority, item)
+    for race_id in sorted(selected):
+        item = selected[race_id][1]
+        items.append(item)
+        race_info = dict(item.get("race_info") or {})
+        race_date = _safe_text(race_info.get("race_date"))
+        if race_date:
+            by_date.setdefault(race_date, []).append(item)
     return {"items": items, "by_date": by_date}
 
 
@@ -1082,6 +1265,8 @@ def _agent_prediction_detail(payload):
     simulation = dict(payload.get("race_simulation") or {})
     return {
         "source": "keiba_llm_agent",
+        "prediction_stage": normalize_prediction_stage(payload.get("prediction_stage")),
+        "prediction_stage_label": prediction_stage_label(payload.get("prediction_stage")),
         "scoring_profile": _safe_text(payload.get("scoring_profile")),
         "scoring_mode": _safe_text(payload.get("scoring_mode")),
         "marks": dict(payload.get("marks") or {}),
@@ -1136,6 +1321,8 @@ def _public_race_row(base_dir, payload, include_detail_fields=False):
     actual_text, actual_result = _actual_result_for_prediction(base_dir, payload)
     row = {
         "source_type": "agent_prediction",
+        "prediction_stage": normalize_prediction_stage(payload.get("prediction_stage")),
+        "prediction_stage_label": prediction_stage_label(payload.get("prediction_stage")),
         "scope_key": "",
         "scope_label": "予測",
         "race_id": race_id,

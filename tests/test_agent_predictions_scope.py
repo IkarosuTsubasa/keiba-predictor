@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,87 @@ from web_data import agent_predictions
 
 
 class AgentPredictionsScopeTests(unittest.TestCase):
+    def test_final_version_is_publicly_preferred_without_overwriting_early_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            prediction_dir = base_dir / "data" / "agent_predictions"
+            prediction_dir.mkdir(parents=True, exist_ok=True)
+            race_id = "202601010101"
+            early_payload = {
+                "race_id": race_id,
+                "race_info": {
+                    "race_id": race_id,
+                    "race_date": "2026-07-19",
+                    "course": "東京",
+                    "surface": "芝",
+                    "distance": 1600,
+                },
+                "marks": {"◎": 1},
+                "horse_scores": [{"horse_no": 1, "horse_name": "早期馬", "total_score": 10}],
+            }
+            legacy_path = prediction_dir / f"{race_id}.json"
+            legacy_text = json.dumps(early_payload, ensure_ascii=False, indent=2)
+            legacy_path.write_text(legacy_text, encoding="utf-8")
+            agent_predictions.write_agent_prediction_version_payload(
+                base_dir,
+                race_id,
+                "early",
+                "task-early",
+                {**early_payload, "prediction_stage": "early"},
+            )
+            final_payload = {
+                **early_payload,
+                "prediction_stage": "final",
+                "horse_scores": [{"horse_no": 2, "horse_name": "最終馬", "total_score": 20}],
+                "marks": {"◎": 2},
+            }
+            final_path = agent_predictions.write_agent_prediction_version_payload(
+                base_dir,
+                race_id,
+                "final",
+                "task-final",
+                final_payload,
+            )
+
+            resolved = agent_predictions.agent_prediction_path_for_race(base_dir, race_id)
+            rows = agent_predictions.build_public_races(base_dir, "2026-07-19")
+            preserved_legacy_text = legacy_path.read_text(encoding="utf-8")
+
+        self.assertEqual(resolved, final_path)
+        self.assertEqual(rows[0]["prediction_stage"], "final")
+        self.assertEqual(rows[0]["prediction_stage_label"], "最終予測")
+        self.assertEqual(rows[0]["top5"][0]["horse_name"], "最終馬")
+        self.assertEqual(preserved_legacy_text, legacy_text)
+
+    def test_result_is_attached_to_early_and_final_version_audits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            race_id = "202601010101"
+            for stage in ("early", "final"):
+                prediction = {"race_id": race_id, "prediction_stage": stage}
+                audit = agent_predictions.build_prediction_only_backtest_audit(prediction)
+                agent_predictions.write_agent_backtest_audit_version_payload(
+                    base_dir,
+                    race_id,
+                    stage,
+                    f"task-{stage}",
+                    audit,
+                )
+            result = {"race_id": race_id, "finish_order": [{"horse_no": 1}]}
+
+            agent_predictions.attach_result_to_agent_backtest_audit(base_dir, race_id, result)
+            early_path = agent_predictions.agent_backtest_audit_version_path_for_race(
+                base_dir, race_id, "early", "task-early"
+            )
+            final_path = agent_predictions.agent_backtest_audit_version_path_for_race(
+                base_dir, race_id, "final", "task-final"
+            )
+            early = agent_predictions.read_agent_backtest_audit_payload(early_path)
+            final = agent_predictions.read_agent_backtest_audit_payload(final_path)
+
+        self.assertEqual(early["outcomes"]["result"], result)
+        self.assertEqual(final["outcomes"]["result"], result)
+
     def test_scope_matches_local_from_race_info_scope_key(self) -> None:
         payload = {
             "race_id": "202644031102",

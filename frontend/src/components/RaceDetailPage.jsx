@@ -943,7 +943,7 @@ export default function RaceDetailPage({ race, races = [], search = "", appShell
         <div className="race-detail-hero__meta">
           <DetailSummary label="公開状態" value={status?.label || "公開中"} accent />
           <DetailSummary label="信頼度" value={detailConfidenceText} />
-          <DetailAppSummary />
+          {!appShell ? <DetailAppSummary /> : null}
         </div>
       </div>
 

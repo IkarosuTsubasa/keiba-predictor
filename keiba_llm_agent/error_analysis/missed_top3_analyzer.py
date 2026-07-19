@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from keiba_llm_agent.backtest.scoring_comparator import calculate_weighted_score, result_top3_list
+from keiba_llm_agent.backtest.input_selection import select_effective_prediction_paths
 from keiba_llm_agent.config.scoring_config import effective_scoring_weights, resolve_scoring_config
 from keiba_llm_agent.parsers.netkeiba_race_parser import infer_scope_key, infer_source_from_race_id
 from keiba_llm_agent.scoring.borderline_recovery import apply_top5_borderline_recovery
@@ -96,7 +97,7 @@ def _collect_predictions_in_period(
     if not predictions_dir.exists():
         return predictions, warnings
 
-    for path in sorted(predictions_dir.glob("*.json")):
+    for path in select_effective_prediction_paths(predictions_dir).values():
         prediction = _load_prediction(path)
         if prediction.race_info is None or not prediction.race_info.race_date:
             warnings.append(f"prediction skipped because race_info.race_date is missing: race_id={prediction.race_id}")

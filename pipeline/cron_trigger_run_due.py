@@ -27,6 +27,7 @@ def main():
         headers={
             "Authorization": f"Bearer {admin_token}",
             "Accept": "application/json",
+            "X-Run-Due-Source": "cron",
         },
     )
     last_error = None

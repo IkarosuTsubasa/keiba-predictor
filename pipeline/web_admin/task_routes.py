@@ -50,6 +50,9 @@ ACTIVE_RUN_DUE_JOB_STATUSES = {
     "queued_agent_prediction",
     "processing_agent_prediction",
     "agent_prediction_ready",
+    "queued_final_prediction",
+    "processing_final_prediction",
+    "final_prediction_ready",
     "fetching_agent_result",
     "queued_settle",
     "settling",
@@ -712,14 +715,20 @@ def pick_next_settle_job_id(*, load_race_jobs):
     return ""
 
 
-def pick_next_agent_prediction_job_id(*, load_race_jobs):
+def pick_next_agent_prediction_job_id(*, load_race_jobs, prediction_stage=""):
+    requested_stage = str(prediction_stage or "").strip().lower()
+    allowed_statuses = {
+        "early": {"queued_agent_prediction"},
+        "final": {"queued_final_prediction"},
+    }.get(requested_stage, {"queued_final_prediction", "queued_agent_prediction"})
     jobs = [
         dict(job or {})
         for job in list(load_race_jobs() or [])
-        if str((job or {}).get("status", "") or "").strip().lower() == "queued_agent_prediction"
+        if str((job or {}).get("status", "") or "").strip().lower() in allowed_statuses
     ]
     jobs.sort(
         key=lambda job: (
+            0 if str(job.get("status", "") or "").strip().lower() == "queued_final_prediction" else 1,
             str(job.get("scheduled_off_time", "") or "9999-12-31T23:59:59"),
             str(job.get("race_id", "") or ""),
             str(job.get("created_at", "") or ""),
@@ -730,6 +739,22 @@ def pick_next_agent_prediction_job_id(*, load_race_jobs):
         if job_id:
             return job_id
     return ""
+
+
+def _agent_job_prediction_stage(job):
+    status = str((job or {}).get("status", "") or "").strip().lower()
+    pending_stage = str((job or {}).get("pending_prediction_stage", "") or "").strip().lower()
+    if status in ("queued_final_prediction", "processing_final_prediction", "final_prediction_ready"):
+        return "final"
+    if pending_stage == "final":
+        return "final"
+    return "early"
+
+
+def _task_prediction_stage(task):
+    bundle_meta = dict((task or {}).get("bundle_meta") or {})
+    stage = str(bundle_meta.get("prediction_stage", "") or "").strip().lower()
+    return "final" if stage == "final" else "early"
 
 
 def _parse_dt_text(value):
@@ -762,7 +787,10 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
     for job in list(load_race_jobs(base_dir) or []):
         if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
             continue
-        if str((job or {}).get("status", "") or "").strip().lower() != "processing_agent_prediction":
+        if str((job or {}).get("status", "") or "").strip().lower() not in (
+            "processing_agent_prediction",
+            "processing_final_prediction",
+        ):
             continue
         job_id = str((job or {}).get("job_id", "") or "").strip()
         if not job_id:
@@ -776,6 +804,7 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
         if reference_dt is None or reference_dt > stale_before:
             continue
         task_id = str((task or {}).get("task_id", "") or "").strip()
+        prediction_stage = _task_prediction_stage(task) if task else _agent_job_prediction_stage(job)
         race_id = str((job or {}).get("race_id", "") or "").strip()
         error_message = f"agent prediction task timed out after {stale_minutes} minutes"
         if task_id:
@@ -793,7 +822,14 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
 
         def _mark_timeout(row, now_text):
             row.update(_initialize_race_job_step_fields(row))
-            row["status"] = "failed"
+            if prediction_stage == "final" and str(row.get("early_prediction_ready_at", "") or "").strip():
+                row["status"] = "agent_prediction_ready"
+                row["prediction_stage"] = "early"
+                row["final_prediction_status"] = "failed"
+                row["final_prediction_error"] = error_message
+                row["pending_prediction_stage"] = "final"
+            else:
+                row["status"] = "failed"
             row["error_message"] = error_message
             row["last_process_output"] = append_job_process_log_entry(
                 row,
@@ -809,7 +845,10 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
                     ensure_ascii=False,
                 ),
             )
-            _set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
+            if prediction_stage == "final" and str(row.get("early_prediction_ready_at", "") or "").strip():
+                _set_race_job_step_state(row, "predictor", "succeeded", row.get("early_prediction_ready_at", "") or now_text)
+            else:
+                _set_race_job_step_state(row, "predictor", "failed", now_text, error_message)
 
         updated = update_race_job(base_dir, job_id, _mark_timeout)
         expired.append(
@@ -820,6 +859,7 @@ def _expire_stale_agent_prediction_jobs(*, base_dir, load_race_jobs, update_race
                 "status": str((updated or {}).get("status", "") or "").strip(),
                 "reference_at": reference_dt.isoformat(timespec="seconds"),
                 "stale_minutes": stale_minutes,
+                "prediction_stage": prediction_stage,
             }
         )
     return expired
@@ -886,20 +926,46 @@ def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update
     for job in list(load_race_jobs(base_dir) or []):
         if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
             continue
-        if str((job or {}).get("status", "") or "").strip().lower() != "failed":
+        status = str((job or {}).get("status", "") or "").strip().lower()
+        final_status = str((job or {}).get("final_prediction_status", "") or "").strip().lower()
+        prediction_stage = "final" if status == "agent_prediction_ready" and final_status == "failed" else "early"
+        if prediction_stage == "early" and status != "failed":
             continue
-        error_message = str((job or {}).get("error_message", "") or "").strip()
+        if prediction_stage == "final" and not str((job or {}).get("early_prediction_ready_at", "") or "").strip():
+            continue
+        error_message = str(
+            (job or {}).get("final_prediction_error" if prediction_stage == "final" else "error_message", "") or ""
+        ).strip()
         if not _is_retryable_agent_prediction_error(error_message):
             continue
         job_id = str((job or {}).get("job_id", "") or "").strip()
         if not job_id:
             continue
         try:
-            retry_count = max(0, int((job or {}).get("agent_prediction_retry_count", 0) or 0))
+            retry_count = max(
+                0,
+                int(
+                    (job or {}).get(
+                        "final_prediction_retry_count" if prediction_stage == "final" else "agent_prediction_retry_count",
+                        0,
+                    )
+                    or 0
+                ),
+            )
         except (TypeError, ValueError):
             retry_count = 0
         if retry_count >= max_retries:
             continue
+        if prediction_stage == "final":
+            off_dt = _parse_dt_text((job or {}).get("scheduled_off_time", ""))
+            if off_dt is not None and current_dt >= off_dt:
+                def _skip_late_final(row, now_text):
+                    row["final_prediction_status"] = "skipped"
+                    row["final_prediction_error"] = "final prediction retry window missed"
+                    row["pending_prediction_stage"] = ""
+
+                update_race_job(base_dir, str((job or {}).get("job_id", "") or "").strip(), _skip_late_final)
+                continue
         active_task = find_latest_task_for_job(
             base_dir,
             job_id,
@@ -914,26 +980,51 @@ def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update
 
         def _queue_retry(row, now_text):
             current_status = str(row.get("status", "") or "").strip().lower()
-            current_error = str(row.get("error_message", "") or "").strip()
+            current_final_status = str(row.get("final_prediction_status", "") or "").strip().lower()
+            current_error = str(
+                row.get("final_prediction_error" if prediction_stage == "final" else "error_message", "") or ""
+            ).strip()
             try:
-                current_retry_count = max(0, int(row.get("agent_prediction_retry_count", 0) or 0))
+                current_retry_count = max(
+                    0,
+                    int(
+                        row.get(
+                            "final_prediction_retry_count" if prediction_stage == "final" else "agent_prediction_retry_count",
+                            0,
+                        )
+                        or 0
+                    ),
+                )
             except (TypeError, ValueError):
                 current_retry_count = 0
-            if current_status != "failed" or current_retry_count != retry_count:
+            if prediction_stage == "final":
+                if current_status != "agent_prediction_ready" or current_final_status != "failed":
+                    return
+            elif current_status != "failed":
+                return
+            if current_retry_count != retry_count:
                 return
             if not _is_retryable_agent_prediction_error(current_error):
                 return
             row.update(_initialize_race_job_step_fields(row))
-            row["status"] = "queued_agent_prediction"
+            row["status"] = "queued_final_prediction" if prediction_stage == "final" else "queued_agent_prediction"
             row["current_v5_task_id"] = ""
-            row["current_run_id"] = ""
-            row["ready_at"] = ""
-            row["settling_started_at"] = ""
-            row["settled_at"] = ""
+            row["pending_prediction_stage"] = prediction_stage
             row["queued_process_at"] = now_text
-            row["agent_prediction_retry_count"] = retry_count + 1
-            row["agent_prediction_last_retry_at"] = now_text
-            row["agent_prediction_last_retry_error"] = current_error
+            if prediction_stage == "final":
+                row["final_prediction_status"] = "queued"
+                row["final_prediction_queued_at"] = now_text
+                row["final_prediction_retry_count"] = retry_count + 1
+                row["final_prediction_last_retry_at"] = now_text
+                row["final_prediction_error"] = ""
+            else:
+                row["current_run_id"] = ""
+                row["ready_at"] = ""
+                row["settling_started_at"] = ""
+                row["settled_at"] = ""
+                row["agent_prediction_retry_count"] = retry_count + 1
+                row["agent_prediction_last_retry_at"] = now_text
+                row["agent_prediction_last_retry_error"] = current_error
             row["error_message"] = ""
             row["last_process_output"] = append_job_process_log_entry(
                 row,
@@ -945,6 +1036,7 @@ def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update
                         "max_retries": max_retries,
                         "delay_minutes": delay_minutes,
                         "previous_error": current_error,
+                        "prediction_stage": prediction_stage,
                     },
                     ensure_ascii=False,
                 ),
@@ -953,7 +1045,8 @@ def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update
             _set_race_job_step_state(row, "settlement", "idle", now_text)
 
         updated = update_race_job(base_dir, job_id, _queue_retry)
-        if str((updated or {}).get("status", "") or "").strip().lower() != "queued_agent_prediction":
+        expected_status = "queued_final_prediction" if prediction_stage == "final" else "queued_agent_prediction"
+        if str((updated or {}).get("status", "") or "").strip().lower() != expected_status:
             continue
         retried.append(
             {
@@ -962,6 +1055,7 @@ def _auto_retry_failed_agent_prediction_jobs(*, base_dir, load_race_jobs, update
                 "retry_count": retry_count + 1,
                 "max_retries": max_retries,
                 "delay_minutes": delay_minutes,
+                "prediction_stage": prediction_stage,
             }
         )
     return retried
@@ -1103,6 +1197,7 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
     scope_key = _agent_prediction_scope_key(job)
     race_url = _agent_prediction_race_url(job)
     scoring_profile = _agent_prediction_scoring_profile(job)
+    prediction_stage = _task_prediction_stage(task)
     if not task_id:
         raise RuntimeError("agent prediction task id missing")
     if not owner or not repo or not workflow or not token:
@@ -1128,6 +1223,7 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
             "scope_key": scope_key,
             "race_url": race_url,
             "scoring_profile": scoring_profile,
+            "prediction_stage": prediction_stage,
             "callback_url": _agent_prediction_callback_url(task),
         },
     }
@@ -1186,6 +1282,7 @@ def _dispatch_agent_prediction_task(base_dir, task, job):
         "scope_key": scope_key,
         "race_url": race_url,
         "scoring_profile": scoring_profile,
+        "prediction_stage": prediction_stage,
         "callback_url": _agent_prediction_callback_url(task),
         "dispatch_http_status": int(status_code),
     }
@@ -1202,8 +1299,15 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
     if str((job or {}).get("job_source", "") or "").strip().lower() != "agent_prediction":
         raise ValueError("job is not agent prediction")
     status = str((job or {}).get("status", "") or "").strip().lower()
-    if status not in ("queued_agent_prediction", "scheduled", "processing_agent_prediction"):
+    if status not in (
+        "queued_agent_prediction",
+        "scheduled",
+        "processing_agent_prediction",
+        "queued_final_prediction",
+        "processing_final_prediction",
+    ):
         raise ValueError(f"job status is not dispatchable: {status or '-'}")
+    prediction_stage = _agent_job_prediction_stage(job)
 
     existing_task = find_latest_task_for_job(
         base_dir,
@@ -1216,8 +1320,13 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
 
         def _mark_existing_dispatched(row, now_text):
             row.update(initialize_job_step_fields(row))
-            row["status"] = "processing_agent_prediction"
+            row["status"] = "processing_final_prediction" if prediction_stage == "final" else "processing_agent_prediction"
             row["current_v5_task_id"] = existing_task_id
+            row["pending_prediction_stage"] = prediction_stage
+            if prediction_stage == "final":
+                row["final_prediction_status"] = "running"
+                row["final_prediction_started_at"] = str(row.get("final_prediction_started_at", "") or now_text)
+                row["final_prediction_task_id"] = existing_task_id
             row["error_message"] = ""
             row["last_process_output"] = append_job_process_log_entry(
                 row,
@@ -1239,6 +1348,7 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
             "job_id": target_job_id,
             "race_id": str((job or {}).get("race_id", "") or "").strip(),
             "task_id": existing_task_id,
+            "prediction_stage": prediction_stage,
             "already_dispatched": True,
         }
 
@@ -1262,14 +1372,21 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
             "location": str((job or {}).get("location", "") or "").strip(),
             "race_url": _agent_prediction_race_url(job),
             "scoring_profile": scoring_profile,
+            "prediction_stage": prediction_stage,
+            "final_prediction_expected": str((job or {}).get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning",
         },
     )
     dispatch_info = _dispatch_agent_prediction_task(base_dir, task, job)
 
     def _mark_dispatched(row, now_text):
         row.update(initialize_job_step_fields(row))
-        row["status"] = "processing_agent_prediction"
+        row["status"] = "processing_final_prediction" if prediction_stage == "final" else "processing_agent_prediction"
         row["current_v5_task_id"] = str(task.get("task_id", "") or "").strip()
+        row["pending_prediction_stage"] = prediction_stage
+        if prediction_stage == "final":
+            row["final_prediction_status"] = "running"
+            row["final_prediction_started_at"] = now_text
+            row["final_prediction_task_id"] = str(task.get("task_id", "") or "").strip()
         row["error_message"] = ""
         row["last_process_output"] = append_job_process_log_entry(
             row,
@@ -1280,7 +1397,13 @@ def dispatch_agent_prediction_job(*, base_dir, job_id, load_race_jobs, update_ra
         set_job_step_state(row, "predictor", "running", now_text)
 
     update_race_job(base_dir, target_job_id, _mark_dispatched)
-    return {"job_id": target_job_id, "race_id": race_id, "task_id": str(task.get("task_id", "") or "").strip(), **dispatch_info}
+    return {
+        "job_id": target_job_id,
+        "race_id": race_id,
+        "task_id": str(task.get("task_id", "") or "").strip(),
+        "prediction_stage": prediction_stage,
+        **dispatch_info,
+    }
 
 
 def _job_has_required_artifacts(job):
@@ -1440,7 +1563,13 @@ def _agent_result_diagnostics(*, base_dir, load_race_jobs, now_dt=None):
         if str(job.get("job_source", "") or "").strip().lower() != "agent_prediction":
             continue
         status = str(job.get("status", "") or "").strip().lower()
-        if status not in ("agent_prediction_ready", "fetching_agent_result"):
+        if status not in (
+            "agent_prediction_ready",
+            "queued_final_prediction",
+            "processing_final_prediction",
+            "final_prediction_ready",
+            "fetching_agent_result",
+        ):
             continue
         job_id = str(job.get("job_id", "") or "").strip()
         race_id = str(job.get("race_id", "") or "").strip()
@@ -1573,6 +1702,11 @@ def _compact_run_due_summary(summary):
         "processed_count": int(row.get("processed_count", 0) or 0),
         "agent_dispatched_count": int(row.get("agent_dispatched_count", 0) or 0),
         "agent_dispatch_limit": int(row.get("agent_dispatch_limit", 0) or 0),
+        "agent_dispatch_configured_limit": int(row.get("agent_dispatch_configured_limit", 0) or 0),
+        "agent_prediction_cadence_minutes": int(row.get("agent_prediction_cadence_minutes", 0) or 0),
+        "agent_prediction_dispatch_slot": bool(row.get("agent_prediction_dispatch_slot")),
+        "agent_prediction_cadence_applied": bool(row.get("agent_prediction_cadence_applied")),
+        "final_prediction_dispatch_limit": int(row.get("final_prediction_dispatch_limit", 0) or 0),
         "settled_count": int(row.get("settled_count", 0) or 0),
         "agent_result_count": int(row.get("agent_result_count", 0) or 0),
         "agent_result_unavailable_count": int(row.get("agent_result_unavailable_count", 0) or 0),
@@ -1735,65 +1869,100 @@ def run_due_jobs_once(
     )
     _log_diagnostic_summary("agent_result_candidates", agent_result_candidates, sample_reasons=("eligible", "already_saved"))
 
-    agent_dispatch_limit = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_DISPATCH_LIMIT", 1))
-    for _ in range(agent_dispatch_limit):
-        job_id = pick_next_agent_prediction_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
-        if not job_id:
-            break
-        print(
-            "[web_app] "
-            + json.dumps(
-                {"ts": datetime.now().isoformat(timespec="seconds"), "event": "run_due_agent_prediction_dispatch_start", "job_id": job_id},
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-        try:
-            result = dispatch_agent_prediction_job(
-                base_dir=base_dir,
-                job_id=job_id,
-                load_race_jobs=load_race_jobs,
-                update_race_job=update_race_job,
-                initialize_job_step_fields=_initialize_race_job_step_fields,
-                set_job_step_state=_set_race_job_step_state,
+    final_dispatch_limit = max(0, _env_int("RUN_DUE_FINAL_PREDICTION_DISPATCH_LIMIT", 1))
+    configured_early_dispatch_limit = max(0, _env_int("RUN_DUE_AGENT_PREDICTION_DISPATCH_LIMIT", 1))
+    early_cadence_minutes = max(1, _env_int("RUN_DUE_AGENT_PREDICTION_CADENCE_MINUTES", 4))
+    early_start_minute = max(0, min(59, _env_int("PIPELINE_AGENT_PREDICTION_START_MINUTE_JST", 0)))
+    cadence_applies = str(history_source or "").strip().lower() == "cron"
+    early_dispatch_slot = (
+        not cadence_applies
+        or (auto_settle_now.minute - early_start_minute) % early_cadence_minutes == 0
+    )
+    early_dispatch_limit = configured_early_dispatch_limit if early_dispatch_slot else 0
+    dispatch_lanes = (("final", final_dispatch_limit), ("early", early_dispatch_limit))
+    for prediction_stage, agent_dispatch_limit in dispatch_lanes:
+        for _ in range(agent_dispatch_limit):
+            job_id = pick_next_agent_prediction_job_id(
+                load_race_jobs=lambda: load_race_jobs(base_dir),
+                prediction_stage=prediction_stage,
             )
-            agent_dispatch_results.append(result)
+            if not job_id:
+                break
             print(
                 "[web_app] "
                 + json.dumps(
                     {
                         "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "run_due_agent_prediction_dispatch_done",
+                        "event": "run_due_agent_prediction_dispatch_start",
                         "job_id": job_id,
-                        "task_id": str((result or {}).get("task_id", "") or "").strip(),
+                        "prediction_stage": prediction_stage,
                     },
                     ensure_ascii=False,
                 ),
                 flush=True,
             )
-        except Exception as exc:
             try:
-                def _mark_agent_dispatch_failed(row, now_text):
-                    row["status"] = "failed"
-                    row["error_message"] = str(exc)
-                update_race_job(base_dir, job_id, _mark_agent_dispatch_failed)
-            except Exception:
-                pass
-            print(
-                "[web_app] "
-                + json.dumps(
+                result = dispatch_agent_prediction_job(
+                    base_dir=base_dir,
+                    job_id=job_id,
+                    load_race_jobs=load_race_jobs,
+                    update_race_job=update_race_job,
+                    initialize_job_step_fields=_initialize_race_job_step_fields,
+                    set_job_step_state=_set_race_job_step_state,
+                )
+                agent_dispatch_results.append(result)
+                print(
+                    "[web_app] "
+                    + json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "event": "run_due_agent_prediction_dispatch_done",
+                            "job_id": job_id,
+                            "prediction_stage": prediction_stage,
+                            "task_id": str((result or {}).get("task_id", "") or "").strip(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+            except Exception as exc:
+                try:
+                    def _mark_agent_dispatch_failed(row, now_text):
+                        if prediction_stage == "final" and str(row.get("early_prediction_ready_at", "") or "").strip():
+                            row["status"] = "agent_prediction_ready"
+                            row["prediction_stage"] = "early"
+                            row["final_prediction_status"] = "failed"
+                            row["final_prediction_error"] = str(exc)
+                            row["pending_prediction_stage"] = "final"
+                        else:
+                            row["status"] = "failed"
+                        row["error_message"] = str(exc)
+                    update_race_job(base_dir, job_id, _mark_agent_dispatch_failed)
+                except Exception:
+                    pass
+                print(
+                    "[web_app] "
+                    + json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "event": "run_due_agent_prediction_dispatch_error",
+                            "job_id": job_id,
+                            "prediction_stage": prediction_stage,
+                            "error": str(exc),
+                            "traceback": traceback.format_exc(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                errors.append(
                     {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "event": "run_due_agent_prediction_dispatch_error",
+                        "kind": "agent_prediction_dispatch",
                         "job_id": job_id,
+                        "prediction_stage": prediction_stage,
                         "error": str(exc),
-                        "traceback": traceback.format_exc(),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            errors.append({"kind": "agent_prediction_dispatch", "job_id": job_id, "error": str(exc)})
+                    }
+                )
 
     while True:
         job_id = pick_next_process_job_id(load_race_jobs=lambda: load_race_jobs(base_dir))
@@ -2001,9 +2170,19 @@ def run_due_jobs_once(
             update_race_job(base_dir, job_id, _mark_fetching)
 
             if existing_result_path is not None and existing_result_path.exists():
+                try:
+                    existing_result_payload = json.loads(existing_result_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    existing_result_payload = {}
+                existing_audit_path = attach_result_to_agent_backtest_audit(
+                    base_dir,
+                    race_id,
+                    existing_result_payload,
+                ) if existing_result_payload else None
                 result = {
                     "race_id": race_id,
                     "result_path": str(existing_result_path),
+                    "backtest_audit_path": str(existing_audit_path) if existing_audit_path else "",
                     "result_url": "",
                     "top3_names": [],
                     "top3_numbers": [],
@@ -2095,7 +2274,11 @@ def run_due_jobs_once(
                 continue
 
             def _mark_agent_result_failed(row, now_text):
-                row["status"] = "agent_prediction_ready"
+                row["status"] = (
+                    "final_prediction_ready"
+                    if str(row.get("prediction_stage", "") or "").strip().lower() == "final"
+                    else "agent_prediction_ready"
+                )
                 row["error_message"] = str(exc)
                 _set_race_job_step_state(row, "settlement", "failed", now_text, str(exc))
 
@@ -2252,7 +2435,12 @@ def run_due_jobs_once(
         "processed_count": len(process_results),
         "processed_job_ids": [str(item.get("job_id", "") or "").strip() for item in process_results],
         "agent_dispatched_count": len(agent_dispatch_results),
-        "agent_dispatch_limit": agent_dispatch_limit,
+        "agent_dispatch_limit": early_dispatch_limit,
+        "agent_dispatch_configured_limit": configured_early_dispatch_limit,
+        "agent_prediction_cadence_minutes": early_cadence_minutes,
+        "agent_prediction_dispatch_slot": early_dispatch_slot,
+        "agent_prediction_cadence_applied": cadence_applies,
+        "final_prediction_dispatch_limit": final_dispatch_limit,
         "agent_dispatched_job_ids": [str(item.get("job_id", "") or "").strip() for item in agent_dispatch_results],
         "agent_dispatch_results": agent_dispatch_results,
         "settled_count": len(settle_results),

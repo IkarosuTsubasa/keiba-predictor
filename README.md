@@ -93,6 +93,7 @@ python pipeline\build_agent_backtest_audit.py ^
 ```
 
 Audit interpretation:
+- Audit inputs are grouped by `race_id`; `final` is preferred over `early`, and only one effective sample per race is counted. Files below `_versions` are preserved evidence, not additional samples.
 - `audit_kind=full`: raw `race_data` exists, so scoring logic can be recomputed.
 - `audit_kind=prediction_only`: only saved prediction scores exist, so use it for coefficient/weight replay only.
 - Always report sample counts, settled result coverage, central/local split, and missing inputs before recommending changes.
@@ -140,6 +141,8 @@ python cleanup_runtime_artifacts.py --dry-run
 python cleanup_runtime_artifacts.py
 ```
 - Keeps web-facing run history and race snapshots
+- Removes superseded early Agent prediction/audit files only after matching final prediction and final audit files both validate successfully
+- Add `--skip-agent-early-prediction-cleanup` to keep early Agent versions during a manual cleanup run
 - Archives settled/failed/deleted jobs older than 3 days out of the active queue and cleans their stale artifacts, caches, and old experimental files
 - Add `--include-offline-research` to also remove old `offline_eval.csv`, `context_dataset.csv`, `context_summary.csv`, and `history_races.csv`
 - Add `--include-legacy-debug` to also remove old `bet_engine_v*_cfg_*.json`

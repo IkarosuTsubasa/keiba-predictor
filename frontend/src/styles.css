@@ -10752,3 +10752,9 @@ body.home-app-ready .site-footer {
     display: none;
   }
 }
+
+.race-card-header__status--final {
+  color: #f7f0ff;
+  border-color: rgba(167, 139, 250, 0.38);
+  background: rgba(109, 40, 217, 0.78);
+}

@@ -18,6 +18,9 @@ STATUS_FLOW = (
     "queued_agent_prediction",
     "processing_agent_prediction",
     "agent_prediction_ready",
+    "queued_final_prediction",
+    "processing_final_prediction",
+    "final_prediction_ready",
     "fetching_agent_result",
     "queued_process",
     "processing",
@@ -58,6 +61,39 @@ def initialize_job_step_fields(job):
     row["run_kind"] = normalize_run_kind(row.get("run_kind", ""))
     row.setdefault("agent_prediction_schedule", "")
     row.setdefault("agent_prediction_queue_after_time", "")
+    row.setdefault("prediction_stage", "")
+    row.setdefault("early_prediction_ready_at", "")
+    row.setdefault("final_prediction_lead_minutes", 30)
+    row.setdefault("final_prediction_due_time", "")
+    row.setdefault("final_prediction_status", "")
+    row.setdefault("final_prediction_queued_at", "")
+    row.setdefault("final_prediction_started_at", "")
+    row.setdefault("final_prediction_ready_at", "")
+    row.setdefault("final_prediction_task_id", "")
+    row.setdefault("final_prediction_error", "")
+    row.setdefault("final_prediction_retry_count", 0)
+    row.setdefault("final_prediction_last_retry_at", "")
+    row.setdefault("pending_prediction_stage", "")
+    if not str(row.get("final_prediction_due_time", "") or "").strip():
+        off_dt = _parse_dt(row.get("scheduled_off_time", ""))
+        try:
+            final_lead = max(0, int(row.get("final_prediction_lead_minutes", 30) or 30))
+        except (TypeError, ValueError):
+            final_lead = 30
+        if off_dt is not None:
+            row["final_prediction_due_time"] = _dt_text(off_dt - timedelta(minutes=final_lead))
+    if is_agent_prediction_job(row):
+        status = str(row.get("status", "") or "").strip().lower()
+        schedule = str(row.get("agent_prediction_schedule", "") or "").strip().lower()
+        stage = str(row.get("prediction_stage", "") or "").strip().lower()
+        final_status = str(row.get("final_prediction_status", "") or "").strip().lower()
+        if stage not in ("early", "final"):
+            if status == "final_prediction_ready" or final_status == "succeeded":
+                row["prediction_stage"] = "final"
+            elif status in ("agent_prediction_ready", "queued_final_prediction", "processing_final_prediction"):
+                row["prediction_stage"] = "early"
+        if schedule == "daily_morning" and not final_status:
+            row["final_prediction_status"] = "waiting"
     row.setdefault("race_name", "")
     row.setdefault("race_number", "")
     row.setdefault("meta_source_url", "")
@@ -144,6 +180,12 @@ def hydrate_job_step_states(job):
             row = set_job_step_state(row, "predictor", "queued")
         elif legacy_status == "processing_agent_prediction":
             row = set_job_step_state(row, "predictor", "running", row.get("updated_at", ""))
+        elif legacy_status == "queued_final_prediction":
+            row = set_job_step_state(row, "predictor", "queued")
+        elif legacy_status == "processing_final_prediction":
+            row = set_job_step_state(row, "predictor", "running", row.get("final_prediction_started_at", "") or row.get("updated_at", ""))
+        elif legacy_status == "final_prediction_ready":
+            row = set_job_step_state(row, "predictor", "succeeded", row.get("final_prediction_ready_at", "") or row.get("updated_at", ""))
         elif legacy_status == "queued_process":
             row = set_job_step_state(row, "odds", "queued")
         elif legacy_status == "processing":
@@ -229,11 +271,21 @@ def derive_job_display_state(job):
     if legacy_status == "processing_morning":
         return {"code": "processing_morning", "label": "速報生成中", "tone": "active"}
     if legacy_status == "queued_agent_prediction":
+        if str(row.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning":
+            return {"code": "queued_agent_prediction", "label": "早期予測キュー", "tone": "active"}
         return {"code": "queued_agent_prediction", "label": "AI予測キュー", "tone": "active"}
     if legacy_status == "processing_agent_prediction":
+        if str(row.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning":
+            return {"code": "processing_agent_prediction", "label": "早期予測中", "tone": "active"}
         return {"code": "processing_agent_prediction", "label": "AI予測実行中", "tone": "active"}
     if legacy_status == "agent_prediction_ready":
-        return {"code": "agent_prediction_ready", "label": "AI予測完了", "tone": "good"}
+        return {"code": "agent_prediction_ready", "label": "早期予測", "tone": "good"}
+    if legacy_status == "queued_final_prediction":
+        return {"code": "queued_final_prediction", "label": "最終予測キュー", "tone": "active"}
+    if legacy_status == "processing_final_prediction":
+        return {"code": "processing_final_prediction", "label": "最終予測中", "tone": "active"}
+    if legacy_status == "final_prediction_ready":
+        return {"code": "final_prediction_ready", "label": "最終予測", "tone": "good"}
     if legacy_status == "fetching_agent_result":
         return {"code": "fetching_agent_result", "label": "結果取得中", "tone": "active"}
     if legacy_status == "waiting_v5":
@@ -277,7 +329,9 @@ def derive_job_display_state(job):
     if legacy_status == "waiting_input_info":
         return {"code": "waiting_input_info", "label": "情報補完待ち", "tone": "muted"}
     if legacy_status == "scheduled":
-        return {"code": "scheduled", "label": "最終予想待ち", "tone": "muted"}
+        if is_agent_prediction_job(row) and str(row.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning":
+            return {"code": "scheduled", "label": "早期予測待ち", "tone": "muted"}
+        return {"code": "scheduled", "label": "最終予測待ち", "tone": "muted"}
     if legacy_status == "uploaded":
         return {"code": "uploaded", "label": "已上传", "tone": "muted"}
     return {"code": legacy_status or "unknown", "label": legacy_status or "-", "tone": "muted"}
@@ -557,6 +611,13 @@ def update_job(base_dir, job_id, mutate_fn):
             continue
         current = initialize_job_step_fields(job)
         mutate_fn(current, now_text)
+        if is_agent_prediction_job(current):
+            off_dt = _parse_dt(current.get("scheduled_off_time", ""))
+            try:
+                final_lead = max(0, int(current.get("final_prediction_lead_minutes", 30) or 30))
+            except (TypeError, ValueError):
+                final_lead = 30
+            current["final_prediction_due_time"] = _dt_text(off_dt - timedelta(minutes=final_lead)) if off_dt else ""
         current = hydrate_job_step_states(current)
         current["updated_at"] = now_text
         jobs[idx] = current
@@ -589,6 +650,32 @@ def scan_due_jobs(base_dir, now_text=""):
             dirty = True
             changed.append(dict(job))
             continue
+        if (
+            is_agent_prediction_job(job)
+            and str(job.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning"
+            and status == "agent_prediction_ready"
+            and str(job.get("prediction_stage", "") or "").strip().lower() != "final"
+            and str(job.get("final_prediction_status", "") or "").strip().lower() in ("", "waiting")
+        ):
+            final_due_dt = _parse_dt(job.get("final_prediction_due_time", ""))
+            off_dt = _parse_dt(job.get("scheduled_off_time", ""))
+            if final_due_dt is not None and final_due_dt <= now_dt:
+                if off_dt is not None and now_dt >= off_dt:
+                    job["final_prediction_status"] = "skipped"
+                    job["final_prediction_error"] = "final prediction window missed"
+                else:
+                    job["status"] = "queued_final_prediction"
+                    job["final_prediction_status"] = "queued"
+                    job["final_prediction_queued_at"] = _dt_text(now_dt)
+                    job["pending_prediction_stage"] = "final"
+                    job["current_v5_task_id"] = ""
+                    job["error_message"] = ""
+                    job = set_job_step_state(job, "predictor", "queued")
+                    changed.append(dict(job))
+                job["updated_at"] = _dt_text(now_dt)
+                jobs[idx] = job
+                dirty = True
+                continue
         stored_process_dt = _parse_dt(job.get("process_after_time", ""))
         if stored_process_dt is None:
             derived_process_dt = _derive_process_after_dt(job)
@@ -602,6 +689,7 @@ def scan_due_jobs(base_dir, now_text=""):
             continue
         if is_agent_prediction_job(job):
             job["status"] = "queued_agent_prediction"
+            job["pending_prediction_stage"] = "early"
             job["queued_process_at"] = _dt_text(now_dt)
             job = set_job_step_state(job, "predictor", "queued")
         else:
@@ -739,6 +827,17 @@ def apply_job_action(base_dir, job_id, action):
             job["settling_started_at"] = ""
             job["settled_at"] = ""
             job["current_v5_task_id"] = ""
+            job["prediction_stage"] = ""
+            job["early_prediction_ready_at"] = ""
+            job["final_prediction_status"] = "waiting" if str(job.get("agent_prediction_schedule", "") or "").strip().lower() == "daily_morning" else ""
+            job["final_prediction_queued_at"] = ""
+            job["final_prediction_started_at"] = ""
+            job["final_prediction_ready_at"] = ""
+            job["final_prediction_task_id"] = ""
+            job["final_prediction_error"] = ""
+            job["final_prediction_retry_count"] = 0
+            job["final_prediction_last_retry_at"] = ""
+            job["pending_prediction_stage"] = ""
             if action_key == "force_reset":
                 job["current_run_id"] = ""
                 job["actual_top1"] = ""
@@ -752,21 +851,33 @@ def apply_job_action(base_dir, job_id, action):
             job["status"] = compute_initial_status(job)
         elif action_key == "retry_agent_prediction":
             if is_agent_prediction_job(job) and current != "settled":
-                job["status"] = "queued_agent_prediction"
+                retry_final = (
+                    str(job.get("final_prediction_status", "") or "").strip().lower() == "failed"
+                    and bool(str(job.get("early_prediction_ready_at", "") or "").strip())
+                )
+                job["status"] = "queued_final_prediction" if retry_final else "queued_agent_prediction"
                 job["current_v5_task_id"] = ""
-                job["current_run_id"] = ""
-                job["agent_prediction_retry_count"] = 0
-                job["agent_prediction_last_retry_at"] = ""
-                job["agent_prediction_last_retry_error"] = ""
-                job["ready_at"] = ""
-                job["settling_started_at"] = ""
-                job["settled_at"] = ""
+                job["pending_prediction_stage"] = "final" if retry_final else "early"
+                if retry_final:
+                    job["final_prediction_status"] = "queued"
+                    job["final_prediction_queued_at"] = now_text
+                    job["final_prediction_retry_count"] = 0
+                    job["final_prediction_last_retry_at"] = ""
+                    job["final_prediction_error"] = ""
+                else:
+                    job["current_run_id"] = ""
+                    job["agent_prediction_retry_count"] = 0
+                    job["agent_prediction_last_retry_at"] = ""
+                    job["agent_prediction_last_retry_error"] = ""
+                    job["ready_at"] = ""
+                    job["settling_started_at"] = ""
+                    job["settled_at"] = ""
                 job["error_message"] = ""
                 set_job_step_state(job, "predictor", "queued")
                 set_job_step_state(job, "settlement", "idle")
         elif action_key == "retry_agent_result":
-            if is_agent_prediction_job(job) and current in ("agent_prediction_ready", "fetching_agent_result", "failed"):
-                job["status"] = "agent_prediction_ready"
+            if is_agent_prediction_job(job) and current in ("agent_prediction_ready", "final_prediction_ready", "fetching_agent_result", "failed"):
+                job["status"] = "final_prediction_ready" if str(job.get("prediction_stage", "") or "").strip().lower() == "final" else "agent_prediction_ready"
                 job["settling_started_at"] = ""
                 job["settled_at"] = ""
                 job["error_message"] = ""

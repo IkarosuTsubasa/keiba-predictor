@@ -856,7 +856,7 @@ function JobCard({ job, onAction, busyAction }) {
     isAgentJob &&
     job.agent_prediction_saved &&
     !job.agent_result_saved &&
-    ["agent_prediction_ready", "fetching_agent_result", "failed"].includes(String(job.status || "").trim());
+    ["agent_prediction_ready", "final_prediction_ready", "fetching_agent_result", "failed"].includes(String(job.status || "").trim());
   const workspaceUrl =
     job.current_run_id && job.scope_key
       ? `/keiba/console/workspace?scope_key=${encodeURIComponent(job.scope_key)}&run_id=${encodeURIComponent(job.current_run_id)}`

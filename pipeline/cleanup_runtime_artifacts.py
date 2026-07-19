@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
+import os
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -246,6 +248,221 @@ def _cleanup_agent_html_caches(*, dry_run: bool):
     }
 
 
+def _agent_storage_dir(env_key: str, dir_name: str) -> Path:
+    configured = str(os.environ.get(env_key, "") or "").strip()
+    return Path(configured).resolve() if configured else (DATA_DIR / dir_name).resolve()
+
+
+def _read_agent_payload(path: Path, *, compressed: bool = False):
+    try:
+        if compressed:
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        else:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _agent_payload_identity(payload):
+    row = dict(payload or {})
+    race_info_value = row.get("race_info")
+    race_info = dict(race_info_value) if isinstance(race_info_value, dict) else {}
+    outputs_value = row.get("outputs")
+    outputs = dict(outputs_value) if isinstance(outputs_value, dict) else {}
+    prediction_value = outputs.get("prediction")
+    prediction = dict(prediction_value) if isinstance(prediction_value, dict) else {}
+    prediction_race_info_value = prediction.get("race_info")
+    prediction_race_info = (
+        dict(prediction_race_info_value) if isinstance(prediction_race_info_value, dict) else {}
+    )
+    race_id = str(
+        row.get("race_id")
+        or race_info.get("race_id")
+        or prediction.get("race_id")
+        or prediction_race_info.get("race_id")
+        or ""
+    ).strip()
+    stage = str(row.get("prediction_stage") or prediction.get("prediction_stage") or "early").strip().lower()
+    return race_id, "final" if stage in {"final", "final_prediction", "finalized"} else "early"
+
+
+def _latest_valid_final_agent_path(paths, race_id: str, *, compressed: bool = False):
+    candidates = []
+    for path in paths:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            modified_ns = path.stat().st_mtime_ns
+        except OSError:
+            modified_ns = 0
+        candidates.append((modified_ns, path.name, path))
+    for _, _, path in sorted(candidates, reverse=True):
+        payload = _read_agent_payload(path, compressed=compressed)
+        payload_race_id, stage = _agent_payload_identity(payload)
+        if payload_race_id == race_id and stage == "final":
+            return path
+    return None
+
+
+def _promote_agent_file(source_path: Path, target_path: Path, *, dry_run: bool) -> bool:
+    source = Path(source_path)
+    target = Path(target_path)
+    try:
+        if source.resolve() == target.resolve():
+            return False
+    except OSError:
+        return False
+    if dry_run:
+        return True
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target.with_name(f".{target.name}.{os.getpid()}.cleanup.tmp")
+    try:
+        shutil.copyfile(source, temp_path)
+        temp_path.replace(target)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return True
+
+
+def _cleanup_superseded_agent_early_predictions(*, dry_run: bool, data_dir: Path | None = None):
+    storage_root = Path(data_dir).resolve() if data_dir is not None else DATA_DIR.resolve()
+    predictions_dir = (
+        storage_root / "agent_predictions"
+        if data_dir is not None
+        else _agent_storage_dir("KEIBA_AGENT_PREDICTIONS_DIR", "agent_predictions")
+    )
+    audits_dir = (
+        storage_root / "agent_backtest_audit"
+        if data_dir is not None
+        else _agent_storage_dir("KEIBA_AGENT_BACKTEST_AUDIT_DIR", "agent_backtest_audit")
+    )
+    prediction_versions_root = predictions_dir / "_versions"
+    audit_versions_root = audits_dir / "_versions"
+    race_ids = set()
+    if prediction_versions_root.exists() and prediction_versions_root.is_dir():
+        for race_dir in prediction_versions_root.iterdir():
+            if race_dir.is_dir() and str(race_dir.name or "").strip():
+                race_ids.add(str(race_dir.name).strip())
+
+    removed_prediction_files = []
+    removed_audit_files = []
+    removed_empty_dirs = []
+    promoted_prediction_files = []
+    promoted_audit_files = []
+    skipped_reason_counts = {}
+    eligible_races = []
+    reclaimed_bytes = 0
+
+    def skip(reason):
+        skipped_reason_counts[reason] = skipped_reason_counts.get(reason, 0) + 1
+
+    for race_id in sorted(race_ids):
+        prediction_root_path = predictions_dir / f"{race_id}.json"
+        prediction_final_dir = prediction_versions_root / race_id / "final"
+        prediction_final_candidates = list(prediction_final_dir.glob("*.json"))
+        if prediction_root_path.exists():
+            prediction_final_candidates.append(prediction_root_path)
+        final_prediction_path = _latest_valid_final_agent_path(
+            prediction_final_candidates,
+            race_id,
+        )
+        if final_prediction_path is None:
+            skip("final_prediction_missing_or_invalid")
+            continue
+
+        audit_root_path = audits_dir / f"{race_id}.json.gz"
+        audit_final_dir = audit_versions_root / race_id / "final"
+        audit_final_candidates = list(audit_final_dir.glob("*.json.gz"))
+        if audit_root_path.exists():
+            audit_final_candidates.append(audit_root_path)
+        final_audit_path = _latest_valid_final_agent_path(
+            audit_final_candidates,
+            race_id,
+            compressed=True,
+        )
+        if final_audit_path is None:
+            skip("final_audit_missing_or_invalid")
+            continue
+
+        if _promote_agent_file(final_prediction_path, prediction_root_path, dry_run=dry_run):
+            promoted_prediction_files.append(str(prediction_root_path))
+            final_prediction_path = prediction_root_path
+        if _promote_agent_file(final_audit_path, audit_root_path, dry_run=dry_run):
+            promoted_audit_files.append(str(audit_root_path))
+            final_audit_path = audit_root_path
+
+        eligible_races.append(race_id)
+        prediction_early_dir = prediction_versions_root / race_id / "early"
+        audit_early_dir = audit_versions_root / race_id / "early"
+        prediction_paths = list(prediction_early_dir.glob("*.json"))
+        audit_paths = list(audit_early_dir.glob("*.json.gz"))
+
+        if prediction_root_path.exists() and prediction_root_path != final_prediction_path:
+            root_payload = _read_agent_payload(prediction_root_path)
+            root_race_id, root_stage = _agent_payload_identity(root_payload)
+            if root_race_id == race_id and root_stage == "early":
+                prediction_paths.append(prediction_root_path)
+        if audit_root_path.exists() and audit_root_path != final_audit_path:
+            root_payload = _read_agent_payload(audit_root_path, compressed=True)
+            root_race_id, root_stage = _agent_payload_identity(root_payload)
+            if root_race_id == race_id and root_stage == "early":
+                audit_paths.append(audit_root_path)
+
+        for path in sorted(set(prediction_paths)):
+            if not _is_relative_to(path, predictions_dir) or not path.is_file():
+                continue
+            try:
+                file_bytes = path.stat().st_size
+            except OSError:
+                file_bytes = 0
+            if _remove_file(path, dry_run):
+                removed_prediction_files.append(str(path))
+                reclaimed_bytes += file_bytes
+
+        for path in sorted(set(audit_paths)):
+            if not _is_relative_to(path, audits_dir) or not path.is_file():
+                continue
+            try:
+                file_bytes = path.stat().st_size
+            except OSError:
+                file_bytes = 0
+            if _remove_file(path, dry_run):
+                removed_audit_files.append(str(path))
+                reclaimed_bytes += file_bytes
+
+        if not dry_run:
+            empty_dir_candidates = [
+                prediction_early_dir,
+                audit_early_dir,
+                prediction_versions_root / race_id,
+                audit_versions_root / race_id,
+            ]
+            for path in empty_dir_candidates:
+                if _remove_empty_dir(path, dry_run=False):
+                    removed_empty_dirs.append(str(path))
+
+    return {
+        "dry_run": bool(dry_run),
+        "predictions_dir": str(predictions_dir),
+        "audits_dir": str(audits_dir),
+        "candidate_races": len(race_ids),
+        "eligible_races": len(eligible_races),
+        "eligible_race_ids": eligible_races,
+        "skipped_reason_counts": skipped_reason_counts,
+        "removed_prediction_files": removed_prediction_files,
+        "removed_audit_files": removed_audit_files,
+        "removed_empty_dirs": removed_empty_dirs,
+        "promoted_prediction_files": promoted_prediction_files,
+        "promoted_audit_files": promoted_audit_files,
+        "reclaimed_bytes": reclaimed_bytes,
+    }
+
+
 def _job_retention_dt(job):
     row = dict(job or {})
     for key in ("settled_at", "updated_at", "ready_at", "created_at"):
@@ -461,6 +678,7 @@ def cleanup(
     research_days: int = 30,
     include_offline_research: bool = False,
     include_legacy_debug: bool = False,
+    include_agent_early_predictions: bool = True,
     dry_run: bool = False,
 ):
     now = datetime.now()
@@ -523,6 +741,21 @@ def cleanup(
                 _remove_old_files(research_paths, research_cutoff, dry_run)
             )
 
+    if include_agent_early_predictions:
+        agent_early_prediction_summary = _cleanup_superseded_agent_early_predictions(dry_run=dry_run)
+    else:
+        agent_early_prediction_summary = {
+            "dry_run": bool(dry_run),
+            "disabled": True,
+            "candidate_races": 0,
+            "eligible_races": 0,
+            "removed_prediction_files": [],
+            "removed_audit_files": [],
+            "removed_empty_dirs": [],
+            "promoted_prediction_files": [],
+            "promoted_audit_files": [],
+            "reclaimed_bytes": 0,
+        }
     agent_html_cache_summary = _cleanup_agent_html_caches(dry_run=dry_run)
 
     summary = {
@@ -536,6 +769,7 @@ def cleanup(
         "research_days": int(research_days),
         "include_offline_research": bool(include_offline_research),
         "include_legacy_debug": bool(include_legacy_debug),
+        "include_agent_early_predictions": bool(include_agent_early_predictions),
         "archived_jobs": archived_jobs_summary,
         "runtime": runtime_summary,
         "referenced_artifacts": referenced_artifact_summary,
@@ -546,6 +780,7 @@ def cleanup(
         "removed_legacy_race_files": removed_legacy_race_files,
         "removed_prompt_input_files": removed_prompt_input_files,
         "removed_offline_research_files": removed_offline_research_files,
+        "agent_early_predictions": agent_early_prediction_summary,
         "agent_html_caches": agent_html_cache_summary,
     }
     summary["totals"] = {
@@ -564,6 +799,14 @@ def cleanup(
         "legacy_race_files": len(removed_legacy_race_files),
         "prompt_input_files": len(removed_prompt_input_files),
         "offline_research_files": len(removed_offline_research_files),
+        "agent_early_prediction_files": len(agent_early_prediction_summary.get("removed_prediction_files", [])),
+        "agent_early_audit_files": len(agent_early_prediction_summary.get("removed_audit_files", [])),
+        "agent_early_empty_dirs": len(agent_early_prediction_summary.get("removed_empty_dirs", [])),
+        "agent_final_prediction_promotions": len(
+            agent_early_prediction_summary.get("promoted_prediction_files", [])
+        ),
+        "agent_final_audit_promotions": len(agent_early_prediction_summary.get("promoted_audit_files", [])),
+        "agent_early_reclaimed_bytes": int(agent_early_prediction_summary.get("reclaimed_bytes", 0) or 0),
         "agent_html_cache_files": len(agent_html_cache_summary.get("removed_files", [])),
         "agent_html_cache_empty_dirs": len(agent_html_cache_summary.get("removed_empty_dirs", [])),
     }
@@ -586,6 +829,7 @@ def main():
     parser.add_argument("--research-days", type=int, default=30)
     parser.add_argument("--include-offline-research", action="store_true")
     parser.add_argument("--include-legacy-debug", action="store_true")
+    parser.add_argument("--skip-agent-early-prediction-cleanup", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     summary = cleanup(
@@ -598,6 +842,7 @@ def main():
         research_days=args.research_days,
         include_offline_research=args.include_offline_research,
         include_legacy_debug=args.include_legacy_debug,
+        include_agent_early_predictions=not args.skip_agent_early_prediction_cleanup,
         dry_run=args.dry_run,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))

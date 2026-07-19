@@ -15,6 +15,7 @@ from keiba_llm_agent.backtest.scoring_comparator import (
     evaluate_weight_tuning_mode_against_result,
     result_top3_list,
 )
+from keiba_llm_agent.backtest.input_selection import select_effective_prediction_paths
 from keiba_llm_agent.parsers.netkeiba_race_parser import infer_scope_key, infer_source_from_race_id
 from keiba_llm_agent.schemas.prediction import Prediction
 from keiba_llm_agent.schemas.result import ResultData
@@ -129,7 +130,7 @@ def _collect_predictions_in_period(
     if not predictions_dir.exists():
         return predictions, warnings
 
-    for path in sorted(predictions_dir.glob("*.json")):
+    for path in select_effective_prediction_paths(predictions_dir).values():
         prediction = _load_prediction(path)
         race_info = prediction.race_info
         if race_info is None or not race_info.race_date:

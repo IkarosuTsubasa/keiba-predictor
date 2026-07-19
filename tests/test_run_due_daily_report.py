@@ -204,6 +204,58 @@ class RunDueDailyReportTests(unittest.TestCase):
         self.assertEqual(updated_job.get("predictor_status"), "queued")
         self.assertIn("timed out", updated_job.get("agent_prediction_last_retry_error", ""))
 
+    def test_failed_final_prediction_retries_without_losing_early_prediction(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202654062109",
+                scope_key="local",
+                race_name="最終予測再試行テスト",
+                race_date="2026-06-21",
+                scheduled_off_time="2026-06-21T14:00:00",
+                lead_minutes=60,
+                job_source="agent_prediction",
+            )
+            job_id = str(job.get("job_id", "") or "").strip()
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "").strip() == job_id:
+                    row["status"] = "agent_prediction_ready"
+                    row["prediction_stage"] = "early"
+                    row["early_prediction_ready_at"] = "2026-06-21T06:04:00"
+                    row["current_run_id"] = "202654062109"
+                    row["ready_at"] = "2026-06-21T06:04:00"
+                    row["final_prediction_status"] = "failed"
+                    row["final_prediction_error"] = "agent prediction timed out after 45 minutes"
+                    row["pending_prediction_stage"] = "final"
+                    row["updated_at"] = "2026-06-21T13:20:00"
+                    row["predictor_status"] = "succeeded"
+            save_jobs(base_dir, jobs)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "RUN_DUE_AGENT_PREDICTION_AUTO_RETRY_ENABLED": "1",
+                    "RUN_DUE_AGENT_PREDICTION_MAX_RETRIES": "2",
+                    "RUN_DUE_AGENT_PREDICTION_RETRY_DELAYS_MINUTES": "5,15",
+                },
+            ):
+                retried = task_routes._auto_retry_failed_agent_prediction_jobs(
+                    base_dir=base_dir,
+                    load_race_jobs=load_jobs,
+                    update_race_job=update_job,
+                    now_dt=datetime(2026, 6, 21, 13, 25, 0),
+                )
+            updated_job = get_job(base_dir, job_id) or {}
+
+        self.assertEqual([item.get("job_id") for item in retried], [job_id])
+        self.assertEqual(updated_job.get("status"), "queued_final_prediction")
+        self.assertEqual(updated_job.get("prediction_stage"), "early")
+        self.assertEqual(updated_job.get("current_run_id"), "202654062109")
+        self.assertEqual(updated_job.get("final_prediction_retry_count"), 1)
+
     def test_canceled_race_agent_prediction_is_not_retried(self):
         with TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir) / "pipeline"
@@ -271,6 +323,37 @@ class RunDueDailyReportTests(unittest.TestCase):
             )
 
         self.assertEqual(before[0]["reason"], "wait_15min")
+        self.assertEqual(at_due[0]["reason"], "eligible")
+
+    def test_agent_result_is_still_due_while_final_prediction_is_processing(self):
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202655062508",
+                scope_key="local",
+                race_name="最終予測実行中の結果取得テスト",
+                race_date="2026-06-25",
+                scheduled_off_time="2026-06-25T10:00:00",
+                job_source="agent_prediction",
+            )
+            jobs = load_jobs(base_dir)
+            for row in jobs:
+                if str(row.get("job_id", "") or "") == str(job.get("job_id", "") or ""):
+                    row["status"] = "processing_final_prediction"
+                    row["prediction_stage"] = "early"
+                    row["early_prediction_ready_at"] = "2026-06-25T06:04:00"
+                    row["final_prediction_status"] = "running"
+                    row["predictor_status"] = "running"
+            save_jobs(base_dir, jobs)
+
+            at_due = task_routes._agent_result_diagnostics(
+                base_dir=base_dir,
+                load_race_jobs=lambda: load_jobs(base_dir),
+                now_dt=datetime(2026, 6, 25, 10, 15, 0),
+            )
+
         self.assertEqual(at_due[0]["reason"], "eligible")
 
     def test_unavailable_agent_result_is_terminal_without_run_due_error(self):

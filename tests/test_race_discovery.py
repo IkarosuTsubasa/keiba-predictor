@@ -357,6 +357,137 @@ class RunDueAutoDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(selected, "early")
 
+    def test_final_prediction_is_queued_exactly_thirty_minutes_before_off(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            job = create_job(
+                base_dir,
+                race_id="202605030301",
+                scope_key="central_dirt",
+                race_name="最終予測テスト",
+                race_date="2026-06-13",
+                scheduled_off_time="2026-06-13T10:00:00",
+                target_surface="dirt",
+                target_distance="1600",
+                target_track_condition="良",
+                job_source="agent_prediction",
+            )
+            job_id = str(job.get("job_id", "") or "")
+            task_routes._mark_daily_agent_prediction_schedule(base_dir, update_job, job_id, "2026-06-13")
+
+            def mark_early_ready(row, now_text):
+                row["status"] = "agent_prediction_ready"
+                row["prediction_stage"] = "early"
+                row["early_prediction_ready_at"] = "2026-06-13T06:04:00"
+                row["final_prediction_status"] = "waiting"
+                row["predictor_status"] = "succeeded"
+
+            update_job(base_dir, job_id, mark_early_ready)
+            before = scan_due_jobs(base_dir, now_text="2026-06-13T09:29:59")
+            at_due = scan_due_jobs(base_dir, now_text="2026-06-13T09:30:00")
+            updated = load_jobs(base_dir)[0]
+
+        self.assertEqual(before, [])
+        self.assertEqual(len(at_due), 1)
+        self.assertEqual(updated["status"], "queued_final_prediction")
+        self.assertEqual(updated["pending_prediction_stage"], "final")
+        self.assertEqual(updated["final_prediction_due_time"], "2026-06-13T09:30:00")
+
+    def test_final_prediction_queue_has_priority_over_early_queue(self):
+        jobs = [
+            {
+                "job_id": "early",
+                "race_id": "202605030301",
+                "scheduled_off_time": "2026-06-13T09:55:00",
+                "status": "queued_agent_prediction",
+            },
+            {
+                "job_id": "final",
+                "race_id": "202654061312",
+                "scheduled_off_time": "2026-06-13T20:30:00",
+                "status": "queued_final_prediction",
+            },
+        ]
+
+        selected = task_routes.pick_next_agent_prediction_job_id(load_race_jobs=lambda: jobs)
+        early = task_routes.pick_next_agent_prediction_job_id(
+            load_race_jobs=lambda: jobs,
+            prediction_stage="early",
+        )
+
+        self.assertEqual(selected, "final")
+        self.assertEqual(early, "early")
+
+    def test_minute_cron_dispatches_final_while_early_queue_waits_for_four_minute_slot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            early_job = create_job(
+                base_dir,
+                race_id="202605030301",
+                scope_key="central_dirt",
+                race_name="早期キュー",
+                race_date="2026-06-13",
+                scheduled_off_time="2026-06-13T20:00:00",
+                target_surface="dirt",
+                target_distance="1600",
+                target_track_condition="良",
+                job_source="agent_prediction",
+            )
+            final_job = create_job(
+                base_dir,
+                race_id="202605030302",
+                scope_key="central_turf",
+                race_name="最終キュー",
+                race_date="2026-06-13",
+                scheduled_off_time="2026-06-13T06:31:00",
+                target_surface="turf",
+                target_distance="1600",
+                target_track_condition="良",
+                job_source="agent_prediction",
+            )
+
+            update_job(
+                base_dir,
+                early_job["job_id"],
+                lambda row, now_text: row.update({"status": "queued_agent_prediction", "pending_prediction_stage": "early"}),
+            )
+            update_job(
+                base_dir,
+                final_job["job_id"],
+                lambda row, now_text: row.update(
+                    {
+                        "status": "queued_final_prediction",
+                        "prediction_stage": "early",
+                        "early_prediction_ready_at": "2026-06-13T06:00:00",
+                        "final_prediction_status": "queued",
+                        "pending_prediction_stage": "final",
+                    }
+                ),
+            )
+
+            with patch.dict(os.environ, {"PIPELINE_AUTO_DISCOVER_RACES_ENABLED": "0"}, clear=False):
+                with patch.object(task_routes, "_jst_now", return_value=datetime(2026, 6, 13, 6, 1, 0)):
+                    with patch.object(task_routes, "_dispatch_agent_prediction_task", side_effect=self.fake_dispatch):
+                        summary = task_routes.run_due_jobs_once(
+                            base_dir=base_dir,
+                            scan_due_race_jobs=lambda target_base_dir: [],
+                            scan_due_race_job_diagnostics=lambda target_base_dir: [],
+                            load_race_jobs=load_jobs,
+                            update_race_job=update_job,
+                            compute_race_job_initial_status=compute_initial_status,
+                            history_source="cron",
+                        )
+            jobs = {row["job_id"]: row for row in load_jobs(base_dir)}
+
+        self.assertEqual(summary["agent_dispatched_count"], 1)
+        self.assertEqual(summary["agent_dispatch_limit"], 0)
+        self.assertEqual(summary["final_prediction_dispatch_limit"], 1)
+        self.assertEqual(summary["agent_dispatch_results"][0]["prediction_stage"], "final")
+        self.assertEqual(jobs[early_job["job_id"]]["status"], "queued_agent_prediction")
+        self.assertEqual(jobs[final_job["job_id"]]["status"], "processing_final_prediction")
+
     def test_run_due_retries_incomplete_discovery_and_adds_missing_jobs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir) / "pipeline"

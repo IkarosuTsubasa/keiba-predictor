@@ -8,6 +8,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from keiba_llm_agent.backtest.input_selection import (
+    select_effective_prediction_path,
+    select_effective_prediction_paths,
+)
 from keiba_llm_agent.schemas.prediction import Prediction
 from keiba_llm_agent.schemas.race_data import RaceData
 from keiba_llm_agent.schemas.result import ResultData
@@ -401,9 +405,10 @@ def audit_single_race_data_flow(
     predictions_dir: Path,
     results_dir: Path,
     reviews_dir: Path,
+    prediction_path: Path | None = None,
 ) -> dict[str, Any]:
     race_data_path = race_data_dir / f"{race_id}.json"
-    prediction_path = predictions_dir / f"{race_id}.json"
+    prediction_path = prediction_path or select_effective_prediction_path(predictions_dir, race_id)
     result_path = results_dir / f"{race_id}.json"
     review_path = reviews_dir / f"{race_id}.json"
 
@@ -494,18 +499,18 @@ def audit_data_flow_period(
     results_dir: Path,
     reviews_dir: Path,
 ) -> dict[str, Any]:
-    race_ids: list[str] = []
+    selected_predictions: dict[str, Path] = {}
     warnings: list[str] = []
     if not predictions_dir.exists():
         warnings.append(f"predictions_dir missing: {predictions_dir}")
     else:
-        for path in sorted(predictions_dir.glob("*.json")):
+        for race_id, path in select_effective_prediction_paths(predictions_dir).items():
             race_date = _prediction_date(path)
             if race_date is None:
                 warnings.append(f"prediction skipped because race_info.race_date is missing: {path.name}")
                 continue
             if from_date <= race_date <= to_date:
-                race_ids.append(path.stem)
+                selected_predictions[race_id] = path
 
     race_audits = [
         audit_single_race_data_flow(
@@ -514,8 +519,9 @@ def audit_data_flow_period(
             predictions_dir=predictions_dir,
             results_dir=results_dir,
             reviews_dir=reviews_dir,
+            prediction_path=prediction_path,
         )
-        for race_id in race_ids
+        for race_id, prediction_path in selected_predictions.items()
     ]
     issue_counter: Counter[str] = Counter()
     severity_counter: Counter[str] = Counter()
