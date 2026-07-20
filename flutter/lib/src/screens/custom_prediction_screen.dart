@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/custom_prediction.dart';
+import '../services/custom_prediction_access.dart';
 import '../services/custom_prediction_service.dart';
 import '../services/custom_prediction_settings.dart';
 import 'custom_prediction_settings_screen.dart';
@@ -11,62 +12,210 @@ class CustomPredictionScreen extends StatefulWidget {
   const CustomPredictionScreen({
     this.dataSource,
     this.settingsStore,
+    this.accessStore,
+    this.rewardedGateway,
+    this.now,
     super.key,
   });
 
   final CustomPredictionDataSource? dataSource;
   final CustomPredictionSettingsStore? settingsStore;
+  final CustomPredictionAccessStore? accessStore;
+  final CustomPredictionRewardedGateway? rewardedGateway;
+  final DateTime Function()? now;
 
   @override
   State<CustomPredictionScreen> createState() => _CustomPredictionScreenState();
 }
 
-class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
+class _CustomPredictionScreenState extends State<CustomPredictionScreen>
+    with WidgetsBindingObserver {
+  static const _navy = Color(0xFF07111F);
   static const _accent = Color(0xFF0D6E6E);
   static const _muted = Color(0xFF66746F);
 
   late final CustomPredictionDataSource _dataSource;
   late final CustomPredictionSettingsStore _settingsStore;
+  late final CustomPredictionAccessStore _accessStore;
+  late final CustomPredictionRewardedGateway _rewardedGateway;
+  late final DateTime Function() _now;
   CustomPredictionParameters _parameters = const CustomPredictionParameters();
   CustomPredictionDay? _day;
   String? _selectedCourse;
   String? _selectedRaceId;
   String? _errorMessage;
   bool _settingsLoading = true;
+  bool _accessLoading = true;
   bool _configured = false;
   bool _loading = false;
+  bool _unlocking = false;
+  DateTime? _unlockedUntil;
+  Timer? _accessExpiryTimer;
   int _requestSerial = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _dataSource = widget.dataSource ?? const CustomPredictionService();
     _settingsStore =
         widget.settingsStore ?? CustomPredictionSettingsRepository();
+    _accessStore = widget.accessStore ?? CustomPredictionAccessRepository();
+    _rewardedGateway =
+        widget.rewardedGateway ?? GoogleCustomPredictionRewardedGateway();
+    _now = widget.now ?? DateTime.now;
     unawaited(_initialize());
   }
 
-  Future<void> _initialize() async {
-    try {
-      final saved = await _settingsStore.load();
-      if (!mounted) return;
-      setState(() {
-        _parameters = saved.parameters;
-        _configured = saved.isConfigured;
-        _settingsLoading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _settingsLoading = false;
-        _configured = false;
-      });
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _accessExpiryTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshAccessState();
     }
-    if (_configured) await _loadDay();
+  }
+
+  Future<void> _initialize() async {
+    final settingsFuture = _settingsStore.load();
+    final accessFuture = _accessStore.loadUnlockedUntil();
+    CustomPredictionSettingsSnapshot? savedSettings;
+    DateTime? unlockedUntil;
+    try {
+      savedSettings = await settingsFuture;
+    } catch (_) {
+      savedSettings = null;
+    }
+    try {
+      unlockedUntil = await accessFuture;
+    } catch (_) {
+      unlockedUntil = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _parameters =
+          savedSettings?.parameters ?? const CustomPredictionParameters();
+      _configured = savedSettings?.isConfigured ?? false;
+      _settingsLoading = false;
+      _unlockedUntil = unlockedUntil?.toUtc();
+      _accessLoading = false;
+    });
+    _scheduleAccessExpiry();
+    if (_configured && _hasAccess) {
+      await _loadDay();
+    }
+  }
+
+  bool get _hasAccess {
+    if (_accessLoading) return false;
+    final unlockedUntil = _unlockedUntil;
+    return unlockedUntil != null && unlockedUntil.isAfter(_now().toUtc());
+  }
+
+  String get _accessUntilLabel {
+    final local = _unlockedUntil?.toLocal();
+    if (local == null) return '';
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour:$minuteまで利用できます';
+  }
+
+  void _scheduleAccessExpiry() {
+    _accessExpiryTimer?.cancel();
+    final unlockedUntil = _unlockedUntil;
+    if (unlockedUntil == null) return;
+    final remaining = unlockedUntil.difference(_now().toUtc());
+    if (remaining <= Duration.zero) {
+      _expireAccess();
+      return;
+    }
+    _accessExpiryTimer = Timer(remaining, _expireAccess);
+  }
+
+  void _refreshAccessState() {
+    if (!mounted) return;
+    final unlockedUntil = _unlockedUntil;
+    if (unlockedUntil == null) return;
+    if (!unlockedUntil.isAfter(_now().toUtc())) {
+      _expireAccess();
+      return;
+    }
+    _scheduleAccessExpiry();
+    setState(() {});
+  }
+
+  void _expireAccess() {
+    if (!mounted) return;
+    _accessExpiryTimer?.cancel();
+    _requestSerial += 1;
+    setState(() {
+      _unlockedUntil = null;
+      _day = null;
+      _selectedCourse = null;
+      _selectedRaceId = null;
+      _errorMessage = null;
+      _loading = false;
+    });
+  }
+
+  Future<void> _unlockWithRewardedAd() async {
+    if (_unlocking || _hasAccess) return;
+    setState(() => _unlocking = true);
+    CustomPredictionRewardResult result;
+    try {
+      result = await _rewardedGateway.showRewardedAd();
+    } catch (_) {
+      result = CustomPredictionRewardResult.failed;
+    }
+    if (!mounted) return;
+
+    if (result == CustomPredictionRewardResult.rewarded) {
+      final unlockedUntil = _now().toUtc().add(const Duration(hours: 1));
+      try {
+        await _accessStore.saveUnlockedUntil(unlockedUntil);
+      } catch (_) {
+        // 保存に失敗しても、現在のセッションでは獲得した権利を有効にする。
+      }
+      if (!mounted) return;
+      setState(() {
+        _unlockedUntil = unlockedUntil;
+        _unlocking = false;
+      });
+      _scheduleAccessExpiry();
+      _showMessage('カスタム予測を1時間利用できます。');
+      await _loadDay();
+      return;
+    }
+
+    setState(() => _unlocking = false);
+    switch (result) {
+      case CustomPredictionRewardResult.dismissed:
+        _showMessage('動画を最後まで見ると、1時間利用できます。');
+        break;
+      case CustomPredictionRewardResult.unavailable:
+        _showMessage('現在、動画を準備できません。しばらくしてからお試しください。');
+        break;
+      case CustomPredictionRewardResult.failed:
+        _showMessage('動画を読み込めませんでした。もう一度お試しください。');
+        break;
+      case CustomPredictionRewardResult.rewarded:
+        break;
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _loadDay() async {
-    if (!_configured) return;
+    if (!_configured || !_hasAccess) return;
     final requestSerial = ++_requestSerial;
     setState(() {
       _loading = true;
@@ -154,38 +303,121 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
     return _visibleRaces.isEmpty ? null : _visibleRaces.first;
   }
 
+  List<(String, int)> get _settings => [
+    ('地力', _parameters.abilityLevel),
+    ('近走内容', _parameters.recentLevel),
+    ('条件適性', _parameters.conditionLevel),
+    ('相手関係', _parameters.opponentLevel),
+    ('展開・騎手', _parameters.paceJockeyLevel),
+    ('血統適性', _parameters.pedigreeLevel),
+    ('安定性', _parameters.stabilityLevel),
+  ];
+
+  List<(String, int)> get _changedSettings =>
+      _settings.where((setting) => setting.$2 != 0).toList(growable: false);
+
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
       color: _accent,
-      onRefresh: _configured ? _loadDay : () async {},
+      onRefresh: _configured && _hasAccess ? _loadDay : () async {},
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+        padding: EdgeInsets.zero,
         children: [
-          if (_settingsLoading)
-            _buildSettingsLoadingCard()
-          else if (!_configured)
-            _buildSetupCard()
-          else ...[
-            _buildSavedSettingsCard(),
-            const SizedBox(height: 12),
-            if (_loading)
-              _buildLoadingCard()
-            else if (_errorMessage != null)
-              _buildErrorCard()
-            else if (_day == null || _day!.races.isEmpty)
-              _buildEmptyCard()
-            else ...[
-              if (_day!.fallbackNotice.isNotEmpty) ...[
-                _buildNoticeCard(_day!.fallbackNotice),
-                const SizedBox(height: 12),
+          _buildPredictionHero(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+            child: Column(
+              children: [
+                if (_settingsLoading || _accessLoading)
+                  _buildSettingsLoadingCard()
+                else if (!_configured)
+                  _buildSetupCard()
+                else ...[
+                  _buildSavedSettingsCard(),
+                  const SizedBox(height: 14),
+                  if (!_hasAccess)
+                    _buildLockedAccessCard()
+                  else if (_loading)
+                    _buildLoadingCard()
+                  else if (_errorMessage != null)
+                    _buildErrorCard()
+                  else if (_day == null || _day!.races.isEmpty)
+                    _buildEmptyCard()
+                  else ...[
+                    if (_day!.fallbackNotice.isNotEmpty) ...[
+                      _buildNoticeCard(_day!.fallbackNotice),
+                      const SizedBox(height: 12),
+                    ],
+                    _buildRaceSelector(),
+                    const SizedBox(height: 12),
+                    _buildResultCard(),
+                  ],
+                ],
               ],
-              _buildRaceSelector(),
-              const SizedBox(height: 12),
-              _buildResultCard(),
-            ],
-          ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPredictionHero() {
+    final ready = _configured && !_settingsLoading;
+    return Container(
+      height: 170,
+      decoration: const BoxDecoration(
+        color: _navy,
+        image: DecorationImage(
+          image: AssetImage('assets/images/prediction_settings_hero.png'),
+          fit: BoxFit.cover,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: 4,
+            bottom: 7,
+            child: Image.asset(
+              'assets/images/prediction_horse.png',
+              width: 134,
+              height: 126,
+              fit: BoxFit.contain,
+            ),
+          ),
+          Positioned(
+            left: 22,
+            right: 126,
+            top: 20,
+            bottom: 18,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _HeroStatusBadge(label: 'カスタム予測'),
+                const Spacer(),
+                Text(
+                  ready ? '今日の予測を\n自分の基準で' : '自分だけの予測を\n始めよう',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    height: 1.17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.45,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  ready ? 'あなたの感覚から、今日だけの答えを導き出します' : 'あなたの感覚を映した、特別な予測体験へ',
+                  style: const TextStyle(
+                    color: Color(0xFFD5E2EA),
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -209,33 +441,45 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
   Widget _buildSetupCard() {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 34),
+        padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.tune_rounded, color: _accent, size: 38),
-            const SizedBox(height: 13),
-            const Text(
-              '予測設定がまだ保存されていません',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 9),
-            const Text(
-              '最初に7つの要素を設定すると、保存した内容で本日のマイ予測を作成します。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _muted, height: 1.55),
+            const Row(
+              children: [
+                _FeatureIcon(icon: Icons.tune_rounded),
+                SizedBox(width: 13),
+                Expanded(
+                  child: Text(
+                    '予測設定がまだ保存されていません',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 18),
-            FilledButton.icon(
-              key: const Key('start-custom-prediction-settings'),
-              onPressed: _openSettings,
-              icon: const Icon(Icons.tune_rounded),
-              label: const Text('設定を始める'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(190, 48),
-                textStyle: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+            const Text(
+              '最初に7つの要素を設定すると、保存した内容で本日のマイ予測を作成します。',
+              style: TextStyle(color: _muted, height: 1.55, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('start-custom-prediction-settings'),
+                onPressed: _openSettings,
+                icon: const Icon(Icons.tune_rounded),
+                label: const Text('設定を始める'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _accent,
+                  minimumSize: const Size.fromHeight(50),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
                 ),
               ),
             ),
@@ -246,61 +490,165 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
   }
 
   Widget _buildSavedSettingsCard() {
-    final settings = [
-      ('地力', _parameters.abilityLevel),
-      ('近走内容', _parameters.recentLevel),
-      ('条件適性', _parameters.conditionLevel),
-      ('相手関係', _parameters.opponentLevel),
-      ('展開・騎手', _parameters.paceJockeyLevel),
-      ('血統適性', _parameters.pedigreeLevel),
-      ('安定性', _parameters.stabilityLevel),
-    ];
+    final changedSettings = _changedSettings;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Expanded(
+                const _FeatureIcon(icon: Icons.auto_awesome_rounded),
+                const SizedBox(width: 12),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '保存した設定で予測中',
-                        style: TextStyle(
+                        _hasAccess ? 'カスタム予測を利用中' : '予測バランスを保存済み',
+                        style: const TextStyle(
                           fontSize: 17,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      SizedBox(height: 4),
+                      const SizedBox(height: 4),
                       Text(
-                        '本日の全レースに同じ設定を使用します',
-                        style: TextStyle(color: _muted, fontSize: 13),
+                        _hasAccess ? _accessUntilLabel : 'いつでも同じ設定から再開できます',
+                        style: const TextStyle(color: _muted, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
+                OutlinedButton(
                   onPressed: _openSettings,
-                  icon: const Icon(Icons.tune_rounded, size: 18),
-                  label: const Text('設定を変更'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _accent,
+                    side: const BorderSide(color: Color(0xFF9BC8C4)),
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  child: const Text(
+                    '設定を変更',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final setting in settings)
-                  _SavedSettingBadge(
-                    title: setting.$1,
-                    label: CustomPredictionParameters.labelFor(setting.$2),
+            const SizedBox(height: 11),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(13, 10, 13, 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F7F6),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '現在の予測バランス',
+                    style: TextStyle(
+                      color: _muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
+                  const SizedBox(height: 9),
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      if (changedSettings.isEmpty)
+                        const _SavedSettingBadge(title: '全項目', label: '標準')
+                      else
+                        for (final setting in changedSettings.take(4))
+                          _SavedSettingBadge(
+                            title: setting.$1,
+                            label: CustomPredictionParameters.labelFor(
+                              setting.$2,
+                            ),
+                          ),
+                    ],
+                  ),
+                  if (changedSettings.length > 4) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'ほか${changedSettings.length - 4}項目も設定済み',
+                      style: const TextStyle(color: _muted, fontSize: 11),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLockedAccessCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                _FeatureIcon(icon: Icons.play_circle_outline_rounded),
+                SizedBox(width: 12),
+                _StatusPill(label: '1時間アクセス'),
               ],
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              '動画を見て、予測をひらく',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 9),
+            const Text(
+              '短い動画を最後まで見ると、カスタム予測を1時間自由に利用できます。',
+              style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('unlock-custom-prediction'),
+                onPressed: _unlocking ? null : _unlockWithRewardedAd,
+                icon: _unlocking
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.play_arrow_rounded),
+                label: Text(
+                  _unlocking ? '動画を準備しています' : '動画を見て1時間使う',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFF6AA5A1),
+                  disabledForegroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Center(
+              child: Text(
+                '保存した予測バランスはそのまま残ります',
+                style: TextStyle(color: _muted, fontSize: 11),
+              ),
             ),
           ],
         ),
@@ -345,14 +693,62 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
   }
 
   Widget _buildEmptyCard() {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 34),
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.event_busy_outlined, color: _muted, size: 34),
-            SizedBox(height: 10),
-            Text('本日のレース情報はまだ準備できていません。しばらくお待ちください。'),
+            const Row(
+              children: [
+                _FeatureIcon(icon: Icons.schedule_rounded),
+                SizedBox(width: 12),
+                _StatusPill(label: '本日分を準備中'),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              '今日の予測はもうすぐ',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 9),
+            const Text(
+              '本日のレース情報はまだ準備できていません。しばらくお待ちください。',
+              style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
+            ),
+            const SizedBox(height: 14),
+            const Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded, color: _accent, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '準備が整い次第、あなただけの予測が完成します',
+                    style: TextStyle(color: _accent, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _loadDay,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text(
+                  '最新情報を確認',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _accent,
+                  minimumSize: const Size.fromHeight(48),
+                  side: const BorderSide(color: Color(0xFF9BC8C4)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -474,7 +870,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
             ),
             const SizedBox(height: 4),
             const Text(
-              '保存した設定で端末内計算した結果です',
+              'あなたの予測バランスから導き出した結果です',
               style: TextStyle(color: _muted, fontSize: 13),
             ),
             const SizedBox(height: 14),
@@ -492,6 +888,87 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen> {
               style: TextStyle(color: _muted, fontSize: 12, height: 1.45),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroStatusBadge extends StatelessWidget {
+  const _HeroStatusBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFDDF5F1),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            color: Color(0xFF08736F),
+            size: 15,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF08736F),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeatureIcon extends StatelessWidget {
+  const _FeatureIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: Color(0xFFE7F4F1),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, color: Color(0xFF0D6E6E), size: 21),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3D8),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF836311),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );

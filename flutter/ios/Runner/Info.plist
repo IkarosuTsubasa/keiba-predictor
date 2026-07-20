@@ -38,6 +38,8 @@
 	<string>$(KEIBA_FCM_TOPIC)</string>
 	<key>KEIBA_NATIVE_MORE_AD_UNIT_ID</key>
 	<string>$(KEIBA_NATIVE_MORE_AD_UNIT_ID)</string>
+	<key>KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID</key>
+	<string>$(KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

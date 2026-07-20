@@ -55,7 +55,7 @@ class _HomeShellState extends State<HomeShell> {
 
   static const _customPredictionChrome = AppPageChrome(
     title: 'マイ予測',
-    subtitle: '保存した設定で本日の予測を表示します',
+    subtitle: 'あなたの感覚から、本日の答えを導きます',
   );
 
   static const _moreChrome = AppPageChrome(

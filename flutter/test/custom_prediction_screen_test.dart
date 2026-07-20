@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ikaimo_keiba/src/models/custom_prediction.dart';
 import 'package:ikaimo_keiba/src/screens/custom_prediction_screen.dart';
+import 'package:ikaimo_keiba/src/services/custom_prediction_access.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_service.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_settings.dart';
 
 void main() {
+  final now = DateTime.utc(2026, 7, 20, 12);
+
   testWidgets('マイ予測页面只显示保存参数后的结果', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -20,13 +23,19 @@ void main() {
               isConfigured: true,
               parameters: const CustomPredictionParameters(abilityLevel: 2),
             ),
+            accessStore: _MemoryAccessStore(
+              unlockedUntil: now.add(const Duration(hours: 1)),
+            ),
+            now: () => now,
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('保存した設定で予測中'), findsOneWidget);
+    expect(find.text('カスタム予測を利用中'), findsOneWidget);
+    expect(find.text('13:00まで利用できます'), findsOneWidget);
+    expect(find.text('今日の予測を\n自分の基準で'), findsOneWidget);
     expect(find.text('設定を変更'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
     expect(find.text('日付を選ぶ'), findsNothing);
@@ -56,6 +65,10 @@ void main() {
           body: CustomPredictionScreen(
             dataSource: dataSource,
             settingsStore: settingsStore,
+            accessStore: _MemoryAccessStore(
+              unlockedUntil: now.add(const Duration(hours: 1)),
+            ),
+            now: () => now,
           ),
         ),
       ),
@@ -71,15 +84,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('予測設定'), findsOneWidget);
+    expect(find.text('現在のバランスプロフィール'), findsNothing);
+    expect(find.text('カスタム予測'), findsOneWidget);
     expect(find.byType(Slider), findsNWidgets(7));
     expect(find.text('マイ予測結果'), findsNothing);
 
-    await tester.tap(find.text('保存して予測を見る'));
+    await tester.drag(find.byType(Slider).first, const Offset(220, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('このバランスを保存'));
     await tester.pumpAndSettle();
 
     expect(settingsStore.isConfigured, isTrue);
+    expect(settingsStore.parameters.abilityLevel, 2);
     expect(dataSource.fetchCount, 1);
-    expect(find.text('保存した設定で予測中'), findsOneWidget);
+    expect(find.text('カスタム予測を利用中'), findsOneWidget);
     expect(find.text('マイ予測結果'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
   });
@@ -91,6 +109,10 @@ void main() {
           body: CustomPredictionScreen(
             dataSource: _EmptyDataSource(),
             settingsStore: _MemorySettingsStore(isConfigured: true),
+            accessStore: _MemoryAccessStore(
+              unlockedUntil: now.add(const Duration(hours: 1)),
+            ),
+            now: () => now,
           ),
         ),
       ),
@@ -99,6 +121,76 @@ void main() {
 
     expect(find.text('日付を選ぶ'), findsNothing);
     expect(find.text('本日のレース情報はまだ準備できていません。しばらくお待ちください。'), findsOneWidget);
+    expect(find.text('今日の予測はもうすぐ'), findsOneWidget);
+    expect(find.text('最新情報を確認'), findsOneWidget);
+  });
+
+  testWidgets('リワード獲得後に1時間解锁并开始获取预测', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1100));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final dataSource = _FakeDataSource();
+    final accessStore = _MemoryAccessStore();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomPredictionScreen(
+            dataSource: dataSource,
+            settingsStore: _MemorySettingsStore(isConfigured: true),
+            accessStore: accessStore,
+            rewardedGateway: const _FakeRewardedGateway(
+              CustomPredictionRewardResult.rewarded,
+            ),
+            now: () => now,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('動画を見て1時間使う'), findsOneWidget);
+    expect(find.text('マイ予測結果'), findsNothing);
+    expect(dataSource.fetchCount, 0);
+
+    await tester.tap(find.text('動画を見て1時間使う'));
+    await tester.pumpAndSettle();
+
+    expect(accessStore.unlockedUntil, now.add(const Duration(hours: 1)));
+    expect(find.text('13:00まで利用できます'), findsOneWidget);
+    expect(find.text('マイ予測結果'), findsOneWidget);
+    expect(dataSource.fetchCount, 1);
+  });
+
+  testWidgets('動画を途中で閉じた場合はアクセスを付与しない', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1100));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final dataSource = _FakeDataSource();
+    final accessStore = _MemoryAccessStore();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomPredictionScreen(
+            dataSource: dataSource,
+            settingsStore: _MemorySettingsStore(isConfigured: true),
+            accessStore: accessStore,
+            rewardedGateway: const _FakeRewardedGateway(
+              CustomPredictionRewardResult.dismissed,
+            ),
+            now: () => now,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('動画を見て1時間使う'));
+    await tester.pumpAndSettle();
+
+    expect(accessStore.unlockedUntil, isNull);
+    expect(dataSource.fetchCount, 0);
+    expect(find.text('動画を最後まで見ると、1時間利用できます。'), findsOneWidget);
+    expect(find.text('動画を見て1時間使う'), findsOneWidget);
   });
 }
 
@@ -194,4 +286,27 @@ class _EmptyDataSource implements CustomPredictionDataSource {
       races: [],
     );
   }
+}
+
+class _MemoryAccessStore implements CustomPredictionAccessStore {
+  _MemoryAccessStore({this.unlockedUntil});
+
+  DateTime? unlockedUntil;
+
+  @override
+  Future<DateTime?> loadUnlockedUntil() async => unlockedUntil;
+
+  @override
+  Future<void> saveUnlockedUntil(DateTime value) async {
+    unlockedUntil = value;
+  }
+}
+
+class _FakeRewardedGateway implements CustomPredictionRewardedGateway {
+  const _FakeRewardedGateway(this.result);
+
+  final CustomPredictionRewardResult result;
+
+  @override
+  Future<CustomPredictionRewardResult> showRewardedAd() async => result;
 }

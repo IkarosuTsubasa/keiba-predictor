@@ -339,11 +339,11 @@ class CustomPredictionParameters {
 
   static String labelFor(int value) {
     return switch (_clampLevel(value)) {
-      -2 => '弱め',
-      -1 => 'やや弱め',
+      -2 => '軽視',
+      -1 => 'やや軽視',
       0 => '標準',
-      1 => 'やや強め',
-      _ => '強め',
+      1 => 'やや重視',
+      _ => '重視',
     };
   }
 }
