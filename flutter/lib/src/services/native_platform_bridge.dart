@@ -6,6 +6,7 @@ class NativeRuntimeConfig {
     required this.baseWebUrl,
     required this.bannerAdUnitId,
     required this.nativeMoreAdUnitId,
+    required this.customPredictionRewardedAdUnitId,
     required this.fcmTopic,
     required this.fcmCentralTopic,
     required this.fcmLocalTopic,
@@ -18,6 +19,9 @@ class NativeRuntimeConfig {
       baseWebUrl: value('baseWebUrl'),
       bannerAdUnitId: value('bannerAdUnitId'),
       nativeMoreAdUnitId: value('nativeMoreAdUnitId'),
+      customPredictionRewardedAdUnitId: value(
+        'customPredictionRewardedAdUnitId',
+      ),
       fcmTopic: value('fcmTopic'),
       fcmCentralTopic: value('fcmCentralTopic'),
       fcmLocalTopic: value('fcmLocalTopic'),
@@ -28,6 +32,7 @@ class NativeRuntimeConfig {
   final String baseWebUrl;
   final String bannerAdUnitId;
   final String nativeMoreAdUnitId;
+  final String customPredictionRewardedAdUnitId;
   final String fcmTopic;
   final String fcmCentralTopic;
   final String fcmLocalTopic;

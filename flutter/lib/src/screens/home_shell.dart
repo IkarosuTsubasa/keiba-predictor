@@ -10,6 +10,7 @@ import '../web/web_content_view.dart';
 import '../widgets/banner_ad_slot.dart';
 import '../widgets/native_more_ad.dart';
 import '../widgets/native_nav_icon.dart';
+import 'custom_prediction_screen.dart';
 import 'more_screen.dart';
 
 class HomeShell extends StatefulWidget {
@@ -20,6 +21,10 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
+  static const _webDestinationCount = 3;
+  static const _customPredictionIndex = 3;
+  static const _moreIndex = 4;
+
   static const _destinations = [
     NavigationDestination(
       icon: NativeNavIcon(NativeNavIconKind.races),
@@ -37,11 +42,21 @@ class _HomeShellState extends State<HomeShell> {
       label: '日報',
     ),
     NavigationDestination(
+      icon: NativeNavIcon(NativeNavIconKind.customPrediction),
+      selectedIcon: NativeNavIcon(NativeNavIconKind.customPrediction),
+      label: 'マイ予測',
+    ),
+    NavigationDestination(
       icon: NativeNavIcon(NativeNavIconKind.more),
       selectedIcon: NativeNavIcon(NativeNavIconKind.more),
       label: 'その他',
     ),
   ];
+
+  static const _customPredictionChrome = AppPageChrome(
+    title: 'マイ予測',
+    subtitle: 'あなたの感覚から、本日の答えを導きます',
+  );
 
   static const _moreChrome = AppPageChrome(
     title: 'その他',
@@ -53,6 +68,7 @@ class _HomeShellState extends State<HomeShell> {
   late AppPageChrome _webChrome;
   int _selectedIndex = 0;
   int _lastWebIndex = 0;
+  bool _customPredictionActivated = false;
   StreamSubscription<NotificationDestination>? _notificationSubscription;
 
   @override
@@ -103,7 +119,7 @@ class _HomeShellState extends State<HomeShell> {
     final index = switch (destination.destination) {
       'history' => 1,
       'reports' => 2,
-      'more' => 3,
+      'more' => _moreIndex,
       _ => 0,
     };
     await _selectDestination(index);
@@ -111,18 +127,21 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _selectDestination(int index) async {
     if (index == _selectedIndex) {
-      if (index < 3) {
+      if (index < _webDestinationCount) {
         await _webKey.currentState?.scrollToTop();
       }
       return;
     }
 
-    if (index == 3) {
+    if (index >= _webDestinationCount) {
       setState(() {
-        if (_selectedIndex < 3) {
+        if (_selectedIndex < _webDestinationCount) {
           _lastWebIndex = _selectedIndex;
         }
-        _selectedIndex = 3;
+        if (index == _customPredictionIndex) {
+          _customPredictionActivated = true;
+        }
+        _selectedIndex = index;
       });
       return;
     }
@@ -147,7 +166,7 @@ class _HomeShellState extends State<HomeShell> {
     if (!mounted) return;
     setState(() {
       _webChrome = AppWeb.chromeFor(uri, _baseUri);
-      if (_selectedIndex < 3) {
+      if (_selectedIndex < _webDestinationCount) {
         _selectedIndex = sectionIndex;
         _lastWebIndex = sectionIndex;
       }
@@ -155,7 +174,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _handleBack() async {
-    if (_selectedIndex == 3) {
+    if (_selectedIndex >= _webDestinationCount) {
       setState(() => _selectedIndex = _lastWebIndex);
       return;
     }
@@ -169,7 +188,11 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final chrome = _selectedIndex == 3 ? _moreChrome : _webChrome;
+    final chrome = switch (_selectedIndex) {
+      _customPredictionIndex => _customPredictionChrome,
+      _moreIndex => _moreChrome,
+      _ => _webChrome,
+    };
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -212,7 +235,11 @@ class _HomeShellState extends State<HomeShell> {
           children: [
             Expanded(
               child: IndexedStack(
-                index: _selectedIndex == 3 ? 1 : 0,
+                index: switch (_selectedIndex) {
+                  _customPredictionIndex => 1,
+                  _moreIndex => 2,
+                  _ => 0,
+                },
                 children: [
                   WebContentView(
                     key: _webKey,
@@ -223,12 +250,15 @@ class _HomeShellState extends State<HomeShell> {
                     baseUri: _baseUri,
                     onLocationChanged: _onLocationChanged,
                   ),
+                  _customPredictionActivated
+                      ? const CustomPredictionScreen()
+                      : const SizedBox.shrink(),
                   const MoreScreen(),
                 ],
               ),
             ),
-            if (_selectedIndex < 3) const BannerAdSlot(),
-            if (_selectedIndex == 3)
+            if (_selectedIndex < _webDestinationCount) const BannerAdSlot(),
+            if (_selectedIndex == _moreIndex)
               const Padding(
                 padding: EdgeInsets.fromLTRB(12, 10, 12, 8),
                 child: NativeMoreAd(),

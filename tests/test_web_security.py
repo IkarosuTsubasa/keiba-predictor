@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -56,6 +57,27 @@ class WebSecurityTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(remaining, 0)
         self.assertGreater(retry_after, 0)
+
+    def test_custom_prediction_api_uses_only_current_jst_date(self) -> None:
+        with (
+            patch.object(web_app, "_daily_summary_jst_date_text", return_value="2026-07-20"),
+            patch.object(
+                web_app.agent_predictions,
+                "build_custom_prediction_races",
+                return_value=[],
+            ) as build_races,
+        ):
+            response = web_app.public_custom_predictions_api()
+
+        payload = json.loads(response.body)
+        self.assertEqual(payload["data"]["target_date"], "2026-07-20")
+        self.assertEqual(payload["data"]["races"], [])
+        self.assertEqual(payload["data"]["fallback_notice"], "")
+        build_races.assert_called_once_with(
+            web_app.BASE_DIR,
+            target_date="2026-07-20",
+            scope_key="",
+        )
 
 
 if __name__ == "__main__":

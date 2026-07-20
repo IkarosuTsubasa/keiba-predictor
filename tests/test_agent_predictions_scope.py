@@ -222,6 +222,78 @@ class AgentPredictionsScopeTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["reason"], "勝負所で前を射程に入れられれば崩れにくい。")
 
+    def test_custom_prediction_payload_exposes_factors_without_final_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "pipeline"
+            prediction_dir = base_dir / "data" / "agent_predictions"
+            prediction_dir.mkdir(parents=True, exist_ok=True)
+            race_id = "202601010101"
+            payload = {
+                "race_id": race_id,
+                "prediction_stage": "final",
+                "race_info": {
+                    "race_id": race_id,
+                    "race_date": "2026-07-19",
+                    "race_name": "テスト競走",
+                    "course": "東京",
+                    "surface": "芝",
+                    "distance": 1600,
+                    "scope_key": "central_turf",
+                },
+                "strategy": {"bet_decision": "BET"},
+                "marks": {"◎": 7},
+                "horse_scores": [
+                    {
+                        "horse_no": 7,
+                        "horse_name": "テストホース",
+                        "base_total_score": 21.5,
+                        "total_score": 99.9,
+                        "reason": "非公開テキスト",
+                        "scores": {
+                            "ability_score": 8,
+                            "recent_quality_score": 7,
+                            "trend_score": 6,
+                            "condition_fit_score": 5,
+                            "race_level_score": 4,
+                            "pace_jockey_score": 3,
+                            "risk": -2,
+                        },
+                        "score_breakdown": {
+                            "base_total_score": 21.5,
+                            "pedigree_adjustment_raw": 1.4,
+                            "pedigree_weight": 0.6,
+                            "race_level_adjustment_raw": -0.3,
+                            "race_level_weight": 1.1,
+                            "pace_adjustment_raw": 0.8,
+                            "pace_weight": 0.2,
+                            "total_score": 99.9,
+                        },
+                    }
+                ],
+            }
+            (prediction_dir / f"{race_id}.json").write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            rows = agent_predictions.build_custom_prediction_races(base_dir, "2026-07-19")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["race_title"], "東京1R")
+        self.assertEqual(rows[0]["scope_key"], "central_turf")
+        horse = rows[0]["horses"][0]
+        self.assertEqual(horse["horse_no"], 7)
+        self.assertEqual(horse["factors"]["base"], 21.5)
+        self.assertEqual(horse["factors"]["pedigree"], 1.4)
+        self.assertEqual(horse["factors"]["ability"], 8.0)
+        self.assertEqual(horse["factors"]["recent_quality"], 7.0)
+        self.assertEqual(horse["factors"]["risk"], -2.0)
+        self.assertEqual(horse["default_weights"]["race_level"], 1.1)
+        self.assertNotIn("total_score", horse)
+        self.assertNotIn("marks", rows[0])
+        self.assertNotIn("strategy", rows[0])
+        self.assertNotIn("reason", horse)
+
     def test_history_public_evaluation_counts_use_confidence_not_raw_bet(self) -> None:
         def payload(race_id, bet_decision, confidence_score):
             return {

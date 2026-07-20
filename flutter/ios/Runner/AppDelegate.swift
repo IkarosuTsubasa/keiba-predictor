@@ -8,6 +8,8 @@ import WebKit
   private enum ConfigKey {
     static let bannerAdUnitID = "KEIBA_BANNER_AD_UNIT_ID"
     static let nativeMoreAdUnitID = "KEIBA_NATIVE_MORE_AD_UNIT_ID"
+    static let customPredictionRewardedAdUnitID =
+      "KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID"
     static let fcmTopic = "KEIBA_FCM_TOPIC"
     static let fcmCentralTopic = "KEIBA_FCM_CENTRAL_TOPIC"
     static let fcmLocalTopic = "KEIBA_FCM_LOCAL_TOPIC"
@@ -93,6 +95,9 @@ import WebKit
         "baseWebUrl": baseWebURL,
         "bannerAdUnitId": self.infoValue(ConfigKey.bannerAdUnitID),
         "nativeMoreAdUnitId": self.infoValue(ConfigKey.nativeMoreAdUnitID),
+        "customPredictionRewardedAdUnitId": self.infoValue(
+          ConfigKey.customPredictionRewardedAdUnitID
+        ),
         "fcmTopic": self.infoValue(ConfigKey.fcmTopic),
         "fcmCentralTopic": self.infoValue(ConfigKey.fcmCentralTopic),
         "fcmLocalTopic": self.infoValue(ConfigKey.fcmLocalTopic),

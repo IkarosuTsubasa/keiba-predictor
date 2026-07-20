@@ -55,6 +55,7 @@ class MainActivity : FlutterActivity() {
             "baseWebUrl" to BuildConfig.BASE_WEB_URL,
             "bannerAdUnitId" to BuildConfig.BANNER_AD_UNIT_ID,
             "nativeMoreAdUnitId" to BuildConfig.NATIVE_MORE_AD_UNIT_ID,
+            "customPredictionRewardedAdUnitId" to BuildConfig.CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID,
             "fcmTopic" to BuildConfig.FCM_TOPIC,
             "fcmCentralTopic" to BuildConfig.FCM_CENTRAL_TOPIC,
             "fcmLocalTopic" to BuildConfig.FCM_LOCAL_TOPIC,
