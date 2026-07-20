@@ -44,7 +44,7 @@ class _HomeShellState extends State<HomeShell> {
     NavigationDestination(
       icon: NativeNavIcon(NativeNavIconKind.customPrediction),
       selectedIcon: NativeNavIcon(NativeNavIconKind.customPrediction),
-      label: 'マイ予測',
+      label: 'My予測',
     ),
     NavigationDestination(
       icon: NativeNavIcon(NativeNavIconKind.more),
@@ -52,11 +52,6 @@ class _HomeShellState extends State<HomeShell> {
       label: 'その他',
     ),
   ];
-
-  static const _customPredictionChrome = AppPageChrome(
-    title: 'マイ予測',
-    subtitle: 'あなたの感覚から、本日の答えを導きます',
-  );
 
   static const _moreChrome = AppPageChrome(
     title: 'その他',
@@ -189,10 +184,13 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final chrome = switch (_selectedIndex) {
-      _customPredictionIndex => _customPredictionChrome,
+      _customPredictionIndex => null,
       _moreIndex => _moreChrome,
       _ => _webChrome,
     };
+    final headerColor =
+        Theme.of(context).appBarTheme.backgroundColor ??
+        const Color(0xFF07111F);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -201,36 +199,38 @@ class _HomeShellState extends State<HomeShell> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(
-          toolbarHeight: 86,
-          titleSpacing: 16,
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                chrome.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.w700,
+        appBar: chrome == null
+            ? null
+            : AppBar(
+                toolbarHeight: 86,
+                titleSpacing: 16,
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      chrome.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 23,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      chrome.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFC9D4DE),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 3),
-              Text(
-                chrome.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFFC9D4DE),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-        ),
         body: Column(
           children: [
             Expanded(
@@ -251,7 +251,25 @@ class _HomeShellState extends State<HomeShell> {
                     onLocationChanged: _onLocationChanged,
                   ),
                   _customPredictionActivated
-                      ? const CustomPredictionScreen()
+                      ? AnnotatedRegion<SystemUiOverlayStyle>(
+                          value: const SystemUiOverlayStyle(
+                            statusBarColor: Colors.transparent,
+                            statusBarIconBrightness: Brightness.light,
+                            statusBarBrightness: Brightness.dark,
+                          ),
+                          child: ColoredBox(
+                            color: headerColor,
+                            child: SafeArea(
+                              bottom: false,
+                              child: ColoredBox(
+                                color: Theme.of(
+                                  context,
+                                ).scaffoldBackgroundColor,
+                                child: const CustomPredictionScreen(),
+                              ),
+                            ),
+                          ),
+                        )
                       : const SizedBox.shrink(),
                   const MoreScreen(),
                 ],

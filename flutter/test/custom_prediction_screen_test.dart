@@ -9,7 +9,13 @@ import 'package:ikaimo_keiba/src/services/custom_prediction_settings.dart';
 void main() {
   final now = DateTime.utc(2026, 7, 20, 12);
 
-  testWidgets('マイ予測页面只显示保存参数后的结果', (tester) async {
+  String accessUntilLabel(DateTime value) {
+    final local = value.toLocal();
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.hour}:$minuteまで利用できます';
+  }
+
+  testWidgets('My予測页面只显示保存参数后的结果', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final dataSource = _FakeDataSource();
@@ -33,8 +39,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('カスタム予測を利用中'), findsOneWidget);
-    expect(find.text('13:00まで利用できます'), findsOneWidget);
+    expect(find.text('My予測を利用中'), findsOneWidget);
+    expect(
+      find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
+      findsOneWidget,
+    );
     expect(find.text('今日の予測を\n自分の基準で'), findsOneWidget);
     expect(find.text('設定を変更'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
@@ -43,17 +52,17 @@ void main() {
     expect(find.text('99.9'), findsNothing);
 
     await tester.scrollUntilVisible(
-      find.text('マイ予測結果'),
+      find.text('My予測結果'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('マイ予測結果'), findsOneWidget);
+    expect(find.text('My予測結果'), findsOneWidget);
     expect(find.text('ホースA'), findsOneWidget);
     expect(find.text('◎'), findsOneWidget);
     expect(find.text('99.9'), findsNothing);
   });
 
-  testWidgets('首次保存设置后返回マイ予測并开始取数', (tester) async {
+  testWidgets('首次保存设置后返回My予測并开始取数', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final dataSource = _FakeDataSource();
@@ -77,7 +86,7 @@ void main() {
 
     expect(find.text('予測設定がまだ保存されていません'), findsOneWidget);
     expect(find.text('設定を始める'), findsOneWidget);
-    expect(find.text('マイ予測結果'), findsNothing);
+    expect(find.text('My予測結果'), findsNothing);
     expect(dataSource.fetchCount, 0);
 
     await tester.tap(find.text('設定を始める'));
@@ -85,9 +94,9 @@ void main() {
 
     expect(find.text('予測設定'), findsOneWidget);
     expect(find.text('現在のバランスプロフィール'), findsNothing);
-    expect(find.text('カスタム予測'), findsOneWidget);
+    expect(find.text('My予測'), findsOneWidget);
     expect(find.byType(Slider), findsNWidgets(7));
-    expect(find.text('マイ予測結果'), findsNothing);
+    expect(find.text('My予測結果'), findsNothing);
 
     await tester.drag(find.byType(Slider).first, const Offset(220, 0));
     await tester.pumpAndSettle();
@@ -97,8 +106,8 @@ void main() {
     expect(settingsStore.isConfigured, isTrue);
     expect(settingsStore.parameters.abilityLevel, 2);
     expect(dataSource.fetchCount, 1);
-    expect(find.text('カスタム予測を利用中'), findsOneWidget);
-    expect(find.text('マイ予測結果'), findsOneWidget);
+    expect(find.text('My予測を利用中'), findsOneWidget);
+    expect(find.text('My予測結果'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
   });
 
@@ -149,16 +158,69 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('動画を見て1時間使う'), findsOneWidget);
-    expect(find.text('マイ予測結果'), findsNothing);
+    expect(find.text('My予測結果'), findsNothing);
     expect(dataSource.fetchCount, 0);
 
     await tester.tap(find.text('動画を見て1時間使う'));
     await tester.pumpAndSettle();
 
     expect(accessStore.unlockedUntil, now.add(const Duration(hours: 1)));
-    expect(find.text('13:00まで利用できます'), findsOneWidget);
-    expect(find.text('マイ予測結果'), findsOneWidget);
+    expect(
+      find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
+      findsOneWidget,
+    );
+    expect(find.text('My予測結果'), findsOneWidget);
     expect(dataSource.fetchCount, 1);
+  });
+
+  testWidgets('レース选择后分阶段演算并在完成后显示对应结果', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1100));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomPredictionScreen(
+            dataSource: _FakeDataSource(),
+            settingsStore: _MemorySettingsStore(isConfigured: true),
+            accessStore: _MemoryAccessStore(
+              unlockedUntil: now.add(const Duration(hours: 1)),
+            ),
+            now: () => now,
+            calculationDuration: () => const Duration(seconds: 4),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final raceSelector = find.byKey(const ValueKey('東京-202601010101'));
+    await tester.scrollUntilVisible(
+      raceSelector,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(raceSelector);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('東京2R  テスト競走2'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('あなたの基準で再予測中'), findsOneWidget);
+    expect(find.text('レース条件を読み解いています'), findsOneWidget);
+    expect(find.text('My予測結果'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 1100));
+    expect(find.text('あなたの予測バランスを反映しています'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 1400));
+    expect(find.text('各馬を比較し、最終順位を導いています'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 1300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('あなたの基準で再予測中'), findsNothing);
+    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('ホースC'), findsOneWidget);
   });
 
   testWidgets('動画を途中で閉じた場合はアクセスを付与しない', (tester) async {
@@ -242,6 +304,28 @@ class _FakeDataSource implements CustomPredictionDataSource {
                 'horse_no': 2,
                 'horse_name': 'ホースB',
                 'factors': {'base': 12},
+                'default_weights': {},
+              },
+            ],
+          },
+          {
+            'race_id': '202601010102',
+            'race_title': '東京2R',
+            'race_name': 'テスト競走2',
+            'course': '東京',
+            'distance_label': 'ダート1400m',
+            'track_condition': '稍重',
+            'horses': [
+              {
+                'horse_no': 3,
+                'horse_name': 'ホースC',
+                'factors': {'base': 18},
+                'default_weights': {},
+              },
+              {
+                'horse_no': 4,
+                'horse_name': 'ホースD',
+                'factors': {'base': 10},
                 'default_weights': {},
               },
             ],

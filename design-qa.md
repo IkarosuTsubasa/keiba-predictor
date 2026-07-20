@@ -1,9 +1,9 @@
-# マイ予測双页面设计校对
+# My予測双页面设计校对
 
 - source visual truth paths:
   - `D:\keiba\new\analysis_outputs\product_design_selected_settings_option1.png`（已选定的第一种视觉方向）
   - `D:\keiba\new\analysis_outputs\product_design_user_settings_feedback.png`（用户指出重复概览与摆位问题的设置页）
-  - `D:\keiba\new\analysis_outputs\product_design_user_home_before.png`（改版前的マイ予測主页）
+  - `D:\keiba\new\analysis_outputs\product_design_user_home_before.png`（改版前的My予測主页）
 - implementation screenshot paths:
   - `D:\keiba\new\analysis_outputs\product_design_implementation_settings_redesign.png`
   - `D:\keiba\new\analysis_outputs\product_design_implementation_home_redesign.png`

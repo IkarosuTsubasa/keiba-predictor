@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +16,7 @@ class CustomPredictionScreen extends StatefulWidget {
     this.accessStore,
     this.rewardedGateway,
     this.now,
+    this.calculationDuration,
     super.key,
   });
 
@@ -23,22 +25,30 @@ class CustomPredictionScreen extends StatefulWidget {
   final CustomPredictionAccessStore? accessStore;
   final CustomPredictionRewardedGateway? rewardedGateway;
   final DateTime Function()? now;
+  final Duration Function()? calculationDuration;
 
   @override
   State<CustomPredictionScreen> createState() => _CustomPredictionScreenState();
 }
 
 class _CustomPredictionScreenState extends State<CustomPredictionScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const _navy = Color(0xFF07111F);
   static const _accent = Color(0xFF0D6E6E);
   static const _muted = Color(0xFF66746F);
+  static const _calculationMessages = [
+    'レース条件を読み解いています',
+    'あなたの予測バランスを反映しています',
+    '各馬を比較し、最終順位を導いています',
+  ];
 
   late final CustomPredictionDataSource _dataSource;
   late final CustomPredictionSettingsStore _settingsStore;
   late final CustomPredictionAccessStore _accessStore;
   late final CustomPredictionRewardedGateway _rewardedGateway;
   late final DateTime Function() _now;
+  late final Duration Function() _calculationDuration;
+  final math.Random _random = math.Random();
   CustomPredictionParameters _parameters = const CustomPredictionParameters();
   CustomPredictionDay? _day;
   String? _selectedCourse;
@@ -49,8 +59,14 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   bool _configured = false;
   bool _loading = false;
   bool _unlocking = false;
+  bool _calculatingPrediction = false;
+  int _calculationPhase = 0;
+  int _calculationSerial = 0;
   DateTime? _unlockedUntil;
   Timer? _accessExpiryTimer;
+  Timer? _calculationPhaseTimer;
+  Timer? _calculationCompleteTimer;
+  late final AnimationController _calculationProgressController;
   int _requestSerial = 0;
 
   @override
@@ -64,6 +80,10 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     _rewardedGateway =
         widget.rewardedGateway ?? GoogleCustomPredictionRewardedGateway();
     _now = widget.now ?? DateTime.now;
+    _calculationDuration =
+        widget.calculationDuration ??
+        () => Duration(milliseconds: 3000 + _random.nextInt(2001));
+    _calculationProgressController = AnimationController(vsync: this);
     unawaited(_initialize());
   }
 
@@ -71,6 +91,8 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _accessExpiryTimer?.cancel();
+    _cancelPredictionCalculation();
+    _calculationProgressController.dispose();
     super.dispose();
   }
 
@@ -152,6 +174,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   void _expireAccess() {
     if (!mounted) return;
     _accessExpiryTimer?.cancel();
+    _cancelPredictionCalculation();
     _requestSerial += 1;
     setState(() {
       _unlockedUntil = null;
@@ -160,6 +183,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
       _selectedRaceId = null;
       _errorMessage = null;
       _loading = false;
+      _calculatingPrediction = false;
     });
   }
 
@@ -187,7 +211,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
         _unlocking = false;
       });
       _scheduleAccessExpiry();
-      _showMessage('カスタム予測を1時間利用できます。');
+      _showMessage('My予測を1時間利用できます。');
       await _loadDay();
       return;
     }
@@ -216,10 +240,12 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   Future<void> _loadDay() async {
     if (!_configured || !_hasAccess) return;
+    _cancelPredictionCalculation();
     final requestSerial = ++_requestSerial;
     setState(() {
       _loading = true;
       _errorMessage = null;
+      _calculatingPrediction = false;
     });
     try {
       final day = await _dataSource.fetch();
@@ -250,16 +276,82 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     }
   }
 
+  void _cancelPredictionCalculation() {
+    _calculationPhaseTimer?.cancel();
+    _calculationCompleteTimer?.cancel();
+    _calculationPhaseTimer = null;
+    _calculationCompleteTimer = null;
+    _calculationProgressController.stop();
+  }
+
+  void _beginPredictionCalculation({
+    required String? course,
+    required String? raceId,
+  }) {
+    if (raceId == null || raceId.isEmpty) {
+      _cancelPredictionCalculation();
+      setState(() {
+        _selectedCourse = course;
+        _selectedRaceId = raceId;
+        _calculatingPrediction = false;
+      });
+      return;
+    }
+    if (course == _selectedCourse && raceId == _selectedRaceId) return;
+
+    _cancelPredictionCalculation();
+    final requestedDuration = _calculationDuration();
+    final duration = requestedDuration > Duration.zero
+        ? requestedDuration
+        : const Duration(milliseconds: 1);
+    final calculationSerial = ++_calculationSerial;
+    final phaseInterval = Duration(
+      milliseconds: math.max(
+        1,
+        duration.inMilliseconds ~/ _calculationMessages.length,
+      ),
+    );
+    setState(() {
+      _selectedCourse = course;
+      _selectedRaceId = raceId;
+      _calculatingPrediction = true;
+      _calculationPhase = 0;
+    });
+    _calculationProgressController.duration = duration;
+    unawaited(_calculationProgressController.forward(from: 0));
+
+    _calculationPhaseTimer = Timer.periodic(phaseInterval, (timer) {
+      if (!mounted || calculationSerial != _calculationSerial) {
+        timer.cancel();
+        return;
+      }
+      if (_calculationPhase >= _calculationMessages.length - 1) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _calculationPhase += 1);
+    });
+    _calculationCompleteTimer = Timer(duration, () {
+      if (!mounted || calculationSerial != _calculationSerial) return;
+      _calculationPhaseTimer?.cancel();
+      _calculationPhaseTimer = null;
+      _calculationCompleteTimer = null;
+      setState(() => _calculatingPrediction = false);
+    });
+  }
+
   void _selectCourse(String course) {
     final races = _day?.races
         .where((race) => race.course == course)
         .toList(growable: false);
-    setState(() {
-      _selectedCourse = course;
-      _selectedRaceId = races == null || races.isEmpty
-          ? null
-          : races.first.raceId;
-    });
+    _beginPredictionCalculation(
+      course: course,
+      raceId: races == null || races.isEmpty ? null : races.first.raceId,
+    );
+  }
+
+  void _selectRace(String? raceId) {
+    _beginPredictionCalculation(course: _selectedCourse, raceId: raceId);
   }
 
   Future<void> _openSettings() async {
@@ -352,7 +444,18 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     ],
                     _buildRaceSelector(),
                     const SizedBox(height: 12),
-                    _buildResultCard(),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 260),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: _calculatingPrediction
+                            ? _buildPredictionCalculationCard()
+                            : _buildResultCard(),
+                      ),
+                    ),
                   ],
                 ],
               ],
@@ -394,7 +497,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _HeroStatusBadge(label: 'カスタム予測'),
+                _HeroStatusBadge(label: 'My予測'),
                 const Spacer(),
                 Text(
                   ready ? '今日の予測を\n自分の基準で' : '自分だけの予測を\n始めよう',
@@ -459,7 +562,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
             ),
             const SizedBox(height: 18),
             const Text(
-              '最初に7つの要素を設定すると、保存した内容で本日のマイ予測を作成します。',
+              '最初に7つの要素を設定すると、保存した内容で本日のMy予測を作成します。',
               style: TextStyle(color: _muted, height: 1.55, fontSize: 14),
             ),
             const SizedBox(height: 20),
@@ -506,7 +609,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _hasAccess ? 'カスタム予測を利用中' : '予測バランスを保存済み',
+                        _hasAccess ? 'My予測を利用中' : '予測バランスを保存済み',
                         style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
@@ -608,7 +711,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
             ),
             const SizedBox(height: 9),
             const Text(
-              '短い動画を最後まで見ると、カスタム予測を1時間自由に利用できます。',
+              '短い動画を最後まで見ると、My予測を1時間自由に利用できます。',
               style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
             ),
             const SizedBox(height: 18),
@@ -809,7 +912,9 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     FilterChip(
                       label: Text(course),
                       selected: course == _selectedCourse,
-                      onSelected: (_) => _selectCourse(course),
+                      onSelected: (selected) {
+                        if (selected) _selectCourse(course);
+                      },
                     ),
                 ],
               ),
@@ -836,7 +941,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     ),
                   ),
               ],
-              onChanged: (value) => setState(() => _selectedRaceId = value),
+              onChanged: _selectRace,
             ),
             if (selectedRace != null) ...[
               const SizedBox(height: 11),
@@ -854,18 +959,104 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     );
   }
 
+  Widget _buildPredictionCalculationCard() {
+    return Card(
+      key: ValueKey('prediction-calculation-$_calculationSerial'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 19),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                _FeatureIcon(icon: Icons.psychology_alt_rounded),
+                SizedBox(width: 12),
+                _StatusPill(label: 'カスタム演算'),
+              ],
+            ),
+            const SizedBox(height: 17),
+            const Text(
+              'あなたの基準で再予測中',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: Text(
+                _calculationMessages[_calculationPhase],
+                key: ValueKey(_calculationPhase),
+                style: const TextStyle(
+                  color: _muted,
+                  fontSize: 14,
+                  height: 1.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            AnimatedBuilder(
+              animation: _calculationProgressController,
+              builder: (context, _) {
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: LinearProgressIndicator(
+                    minHeight: 7,
+                    value: _calculationProgressController.value,
+                    backgroundColor: const Color(0xFFDCE9E8),
+                    valueColor: const AlwaysStoppedAnimation(_accent),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 13),
+            Row(
+              children: [
+                for (
+                  var index = 0;
+                  index < _calculationMessages.length;
+                  index++
+                ) ...[
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: index == _calculationPhase ? 18 : 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: index <= _calculationPhase
+                          ? _accent
+                          : const Color(0xFFCFDCDA),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  if (index < _calculationMessages.length - 1)
+                    const SizedBox(width: 6),
+                ],
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'まもなく、あなただけの予測が完成します',
+                    style: TextStyle(color: _accent, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildResultCard() {
     final race = _selectedRace;
     final picks =
         race?.calculate(_parameters) ?? const <CustomPredictionPick>[];
     return Card(
+      key: ValueKey('prediction-result-${race?.raceId ?? 'empty'}'),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 17, 18, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'マイ予測結果',
+              'My予測結果',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),

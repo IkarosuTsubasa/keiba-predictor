@@ -299,7 +299,7 @@ class _CustomPredictionBadge extends StatelessWidget {
           Icon(Icons.auto_awesome_rounded, color: Color(0xFF08736F), size: 17),
           SizedBox(width: 6),
           Text(
-            'カスタム予測',
+            'My予測',
             style: TextStyle(
               color: Color(0xFF08736F),
               fontSize: 12,
