@@ -5408,6 +5408,31 @@ def public_race_detail_api(race_path: str, date: str = "", scope_key: str = ""):
     return JSONResponse(payload, headers=_public_api_headers())
 
 
+@app.get(f"{PUBLIC_API_BASE_PATH}/custom-predictions")
+@app.get("/api/public/custom-predictions")
+def public_custom_predictions_api(scope_key: str = ""):
+    target_date = _daily_summary_jst_date_text()
+    scope_norm = normalize_scope_key(scope_key)
+    races = agent_predictions.build_custom_prediction_races(
+        BASE_DIR,
+        target_date=target_date,
+        scope_key=scope_norm,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "data": {
+                "schema_version": 1,
+                "target_date": target_date,
+                "target_date_label": _public_date_label(target_date),
+                "fallback_notice": "",
+                "races": races,
+            },
+        },
+        headers=_public_api_headers(),
+    )
+
+
 @app.get(f"{PUBLIC_BASE_PATH}/api/mobile/v1/races")
 @app.get("/api/mobile/v1/races")
 def mobile_races_api(request: Request, date: str = "", scope_key: str = ""):

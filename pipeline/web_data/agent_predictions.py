@@ -1366,3 +1366,139 @@ def build_public_races(base_dir, target_date="", scope_key="", include_detail_fi
     for row in rows:
         row.pop("_agent_sort_key", None)
     return rows
+
+
+def _custom_prediction_horse_item(horse_score, scoring_config):
+    if not isinstance(horse_score, dict):
+        return None
+    horse_no = _safe_int(horse_score.get("horse_no"), 0)
+    horse_name = _safe_text(horse_score.get("horse_name"))
+    if horse_no <= 0 or not horse_name:
+        return None
+
+    score_breakdown = dict(horse_score.get("score_breakdown") or {})
+    scores = dict(horse_score.get("scores") or {})
+    pedigree_adjustment = dict(horse_score.get("pedigree_adjustment") or {})
+    race_level_adjustment = dict(horse_score.get("race_level_adjustment") or {})
+    pace_adjustment = dict(horse_score.get("pace_adjustment") or {})
+    legacy_condition_fit = (
+        _safe_float(scores.get("distance_fit"), 0.0)
+        + _safe_float(scores.get("course_fit"), 0.0)
+        + _safe_float(scores.get("track_condition_fit"), 0.0)
+    ) / 3.0
+    has_component_scores = (
+        _safe_float(scores.get("ability_score"), 0.0) > 0
+        or _safe_float(scores.get("recent_quality_score"), 0.0) > 0
+        or _safe_float(scores.get("condition_fit_score"), 0.0) > 0
+        or _safe_float(scores.get("pace_jockey_score"), 0.0) > 0
+        or _safe_float(scores.get("trend_score"), 5.0) != 5.0
+        or _safe_float(scores.get("race_level_score"), 5.0) != 5.0
+    )
+
+    return {
+        "horse_no": horse_no,
+        "horse_name": horse_name,
+        "factors": {
+            "base": _safe_float(
+                score_breakdown.get("base_total_score"),
+                _safe_float(horse_score.get("base_total_score"), 0.0),
+            ),
+            "pedigree": _safe_float(
+                score_breakdown.get("pedigree_adjustment_raw"),
+                _safe_float(pedigree_adjustment.get("pedigree_adjustment"), 0.0),
+            ),
+            "race_level_adjustment": _safe_float(
+                score_breakdown.get("race_level_adjustment_raw"),
+                _safe_float(race_level_adjustment.get("adjustment"), 0.0),
+            ),
+            "pace_adjustment": _safe_float(
+                score_breakdown.get("pace_adjustment_raw"),
+                _safe_float(pace_adjustment.get("adjustment"), 0.0),
+            ),
+            "ability": _safe_float(scores.get("ability_score"), 0.0)
+            if has_component_scores
+            else _safe_float(scores.get("recent_form"), 0.0),
+            "recent_quality": _safe_float(scores.get("recent_quality_score"), 0.0)
+            if has_component_scores
+            else _safe_float(scores.get("recent_form"), 0.0),
+            "trend": _safe_float(scores.get("trend_score"), 5.0) if has_component_scores else 5.0,
+            "condition": _safe_float(scores.get("condition_fit_score"), 0.0)
+            if has_component_scores
+            else legacy_condition_fit,
+            "race_level": _safe_float(scores.get("race_level_score"), 5.0),
+            "pace_jockey": _safe_float(scores.get("pace_jockey_score"), 0.0)
+            if has_component_scores
+            else _safe_float(scores.get("jockey_fit"), 0.0),
+            "risk": _safe_float(scores.get("risk"), 0.0),
+        },
+        "default_weights": {
+            "pedigree": _safe_float(
+                score_breakdown.get("pedigree_weight"),
+                _safe_float(scoring_config.get("pedigree_weight"), 0.2),
+            ),
+            "race_level": _safe_float(
+                score_breakdown.get("race_level_weight"),
+                _safe_float(scoring_config.get("race_level_weight"), 1.0),
+            ),
+            "pace": _safe_float(
+                score_breakdown.get("pace_weight"),
+                _safe_float(scoring_config.get("pace_weight"), 0.2),
+            ),
+        },
+    }
+
+
+def _custom_prediction_race_item(payload):
+    race_info = dict(payload.get("race_info") or {})
+    race_id = _safe_text(payload.get("race_id")) or _safe_text(race_info.get("race_id"))
+    if not race_id:
+        return None
+    course = _safe_text(race_info.get("course"))
+    race_no_text = _race_no_text(race_id)
+    race_title = f"{course}{race_no_text}".strip() if course else (race_no_text or race_id)
+    scoring_config = dict(payload.get("scoring_config") or {})
+    horses = []
+    for horse_score in list(payload.get("horse_scores") or []):
+        item = _custom_prediction_horse_item(horse_score, scoring_config)
+        if item is not None:
+            horses.append(item)
+    horses.sort(key=lambda item: item.get("horse_no", 0))
+    if not horses:
+        return None
+    return {
+        "race_id": race_id,
+        "race_title": race_title,
+        "race_name": _safe_text(race_info.get("race_name")),
+        "course": course,
+        "surface": _safe_text(race_info.get("surface")),
+        "distance": _safe_int(race_info.get("distance"), 0),
+        "distance_label": _distance_label(race_info),
+        "track_condition": _normalize_track_condition(race_info.get("track_condition")),
+        "scope_key": _payload_scope_key(payload),
+        "prediction_stage": normalize_prediction_stage(payload.get("prediction_stage")),
+        "horses": horses,
+        "_sort_key": (_course_sort_value(course), _race_no(race_id), race_id),
+    }
+
+
+def build_custom_prediction_races(base_dir, target_date="", scope_key=""):
+    """Build the score-factor payload used by the Flutter local calculator.
+
+    Final scores, marks, betting decisions, and explanatory text are intentionally
+    excluded. The mobile client receives only the factors required to recalculate
+    a ranking on-device.
+    """
+    target = _safe_text(target_date)
+    if not target:
+        return []
+    rows = []
+    for payload in _prediction_payloads_for_date(base_dir, target):
+        if not _scope_matches(payload, scope_key):
+            continue
+        row = _custom_prediction_race_item(payload)
+        if row is not None:
+            rows.append(row)
+    rows.sort(key=lambda item: item.get("_sort_key") or (999, 999, ""))
+    for row in rows:
+        row.pop("_sort_key", None)
+    return rows
