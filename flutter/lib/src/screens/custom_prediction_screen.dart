@@ -7,6 +7,7 @@ import '../models/custom_prediction.dart';
 import '../services/custom_prediction_access.dart';
 import '../services/custom_prediction_service.dart';
 import '../services/custom_prediction_settings.dart';
+import '../services/reward_ad_requirement.dart';
 import 'custom_prediction_settings_screen.dart';
 
 class CustomPredictionScreen extends StatefulWidget {
@@ -15,6 +16,7 @@ class CustomPredictionScreen extends StatefulWidget {
     this.settingsStore,
     this.accessStore,
     this.rewardedGateway,
+    this.rewardAdRequirement,
     this.now,
     this.calculationDuration,
     super.key,
@@ -24,6 +26,7 @@ class CustomPredictionScreen extends StatefulWidget {
   final CustomPredictionSettingsStore? settingsStore;
   final CustomPredictionAccessStore? accessStore;
   final CustomPredictionRewardedGateway? rewardedGateway;
+  final RewardAdRequirement? rewardAdRequirement;
   final DateTime Function()? now;
   final Duration Function()? calculationDuration;
 
@@ -46,6 +49,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   late final CustomPredictionSettingsStore _settingsStore;
   late final CustomPredictionAccessStore _accessStore;
   late final CustomPredictionRewardedGateway _rewardedGateway;
+  late final RewardAdRequirement _rewardAdRequirement;
   late final DateTime Function() _now;
   late final Duration Function() _calculationDuration;
   final math.Random _random = math.Random();
@@ -60,6 +64,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   bool _loading = false;
   bool _unlocking = false;
   bool _calculatingPrediction = false;
+  bool _rewardAdRequiredForSession = true;
   int _calculationPhase = 0;
   int _calculationSerial = 0;
   DateTime? _unlockedUntil;
@@ -79,6 +84,8 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     _accessStore = widget.accessStore ?? CustomPredictionAccessRepository();
     _rewardedGateway =
         widget.rewardedGateway ?? GoogleCustomPredictionRewardedGateway();
+    _rewardAdRequirement =
+        widget.rewardAdRequirement ?? RemoteConfigRewardAdRequirement.instance;
     _now = widget.now ?? DateTime.now;
     _calculationDuration =
         widget.calculationDuration ??
@@ -106,6 +113,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   Future<void> _initialize() async {
     final settingsFuture = _settingsStore.load();
     final accessFuture = _accessStore.loadUnlockedUntil();
+    final rewardRequirementFuture = _rewardAdRequirement.refresh();
     CustomPredictionSettingsSnapshot? savedSettings;
     DateTime? unlockedUntil;
     try {
@@ -118,6 +126,11 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     } catch (_) {
       unlockedUntil = null;
     }
+    try {
+      await rewardRequirementFuture;
+    } catch (_) {
+      // Remote Config の実装側が保持する安全な既定値を使用する。
+    }
     if (!mounted) return;
     setState(() {
       _parameters =
@@ -126,6 +139,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
       _settingsLoading = false;
       _unlockedUntil = unlockedUntil?.toUtc();
       _accessLoading = false;
+      _rewardAdRequiredForSession = _rewardAdRequirement.isRequired;
     });
     _scheduleAccessExpiry();
     if (_configured && _hasAccess) {
@@ -135,11 +149,15 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   bool get _hasAccess {
     if (_accessLoading) return false;
+    if (!_rewardAdRequiredForSession) return true;
     final unlockedUntil = _unlockedUntil;
     return unlockedUntil != null && unlockedUntil.isAfter(_now().toUtc());
   }
 
   String get _accessUntilLabel {
+    if (!_rewardAdRequiredForSession) {
+      return 'リワード広告なしで利用できます';
+    }
     final local = _unlockedUntil?.toLocal();
     if (local == null) return '';
     final hour = local.hour.toString().padLeft(2, '0');
@@ -149,6 +167,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   void _scheduleAccessExpiry() {
     _accessExpiryTimer?.cancel();
+    if (!_rewardAdRequiredForSession) return;
     final unlockedUntil = _unlockedUntil;
     if (unlockedUntil == null) return;
     final remaining = unlockedUntil.difference(_now().toUtc());
@@ -161,6 +180,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   void _refreshAccessState() {
     if (!mounted) return;
+    if (!_rewardAdRequiredForSession) return;
     final unlockedUntil = _unlockedUntil;
     if (unlockedUntil == null) return;
     if (!unlockedUntil.isAfter(_now().toUtc())) {

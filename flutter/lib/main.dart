@@ -10,11 +10,13 @@ import 'src/app.dart';
 import 'src/services/ad_consent_service.dart';
 import 'src/services/native_platform_bridge.dart';
 import 'src/services/push_notification_service.dart';
+import 'src/services/reward_ad_requirement.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NativePlatformBridge.initialize();
   await Firebase.initializeApp();
+  await RemoteConfigRewardAdRequirement.instance.initialize();
 
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
@@ -33,6 +35,7 @@ Future<void> main() async {
       ],
     ),
   );
+  unawaited(RemoteConfigRewardAdRequirement.instance.refresh());
   unawaited(_initializePostLaunchPrivacyAndPermissions());
 }
 
