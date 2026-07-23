@@ -346,6 +346,76 @@ class NtfyNotifierTests(unittest.TestCase):
         self.assertEqual(message.kwargs["data"]["scope_key"], "local")
         self.assertEqual(message.kwargs["data"]["notification_scope"], "local")
 
+    def test_daily_complete_notification_targets_my_prediction(self) -> None:
+        notification = ntfy_notifier.build_fcm_daily_early_prediction_complete_notification(
+            target_date="2026-07-23",
+            race_count=24,
+        )
+
+        self.assertEqual(notification["destination"], "my_prediction")
+        self.assertEqual(notification["notification_scope"], "general")
+        self.assertEqual(notification["target_date"], "2026-07-23")
+        self.assertEqual(notification["race_count"], "24")
+        self.assertIn("My予測", notification["title"])
+        self.assertIn("すべて完了", notification["body"])
+
+    def test_device_test_notification_uses_registration_token(self) -> None:
+        captured = {}
+
+        class FakeMessaging:
+            class AndroidConfig:
+                def __init__(self, priority=""):
+                    self.priority = priority
+
+            class ApsAlert:
+                def __init__(self, title="", body=""):
+                    self.title = title
+                    self.body = body
+
+            class Aps:
+                def __init__(self, alert=None, sound=None):
+                    self.alert = alert
+                    self.sound = sound
+
+            class APNSPayload:
+                def __init__(self, aps=None):
+                    self.aps = aps
+
+            class APNSConfig:
+                def __init__(self, headers=None, payload=None):
+                    self.headers = headers
+                    self.payload = payload
+
+            class Message:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            @staticmethod
+            def send(message, app=None):
+                captured["message"] = message
+                captured["app"] = app
+                return "device-message-1"
+
+        registration_token = "test-device-registration-token-1234567890"
+        fake_firebase_admin = types.SimpleNamespace(messaging=FakeMessaging)
+        with (
+            patch.dict(sys.modules, {"firebase_admin": fake_firebase_admin}),
+            patch.object(ntfy_notifier, "_get_firebase_app", return_value="fake-app"),
+        ):
+            result = ntfy_notifier.publish_fcm_device_test_notification(
+                registration_token,
+                notification_kind="daily_early_prediction_complete",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["destination"], "my_prediction")
+        self.assertNotIn(registration_token, result.values())
+        message = captured["message"]
+        self.assertEqual(message.kwargs["token"], registration_token)
+        self.assertNotIn("topic", message.kwargs)
+        self.assertEqual(message.kwargs["data"]["destination"], "my_prediction")
+        self.assertEqual(captured["app"], "fake-app")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,17 @@ class PushNotificationService {
 
   Stream<NotificationDestination> get destinations => _destinations.stream;
 
+  Future<String?> getRegistrationToken() async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      final normalized = token?.trim() ?? '';
+      return normalized.isEmpty ? null : normalized;
+    } catch (error) {
+      debugPrint('FCM token could not be loaded: $error');
+      return null;
+    }
+  }
+
   NotificationDestination? takePendingDestination() {
     final value = _pendingDestination;
     _pendingDestination = null;

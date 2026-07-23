@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
 import '../services/ad_consent_service.dart';
@@ -55,6 +56,7 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
   NotificationAuthorizationStatus _authorizationStatus =
       NotificationAuthorizationStatus.unknown;
   bool _privacyOptionsBusy = false;
+  bool _fcmTokenCopyBusy = false;
 
   AdConsentService get _adConsentService =>
       widget.adConsentService ?? AdConsentService.instance;
@@ -128,6 +130,25 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('端末の通知設定を開けませんでした。')));
+  }
+
+  Future<void> _copyFcmRegistrationToken() async {
+    if (_fcmTokenCopyBusy) return;
+    setState(() => _fcmTokenCopyBusy = true);
+    final token = await PushNotificationService.instance.getRegistrationToken();
+    if (!mounted) return;
+    setState(() => _fcmTokenCopyBusy = false);
+    if (token == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('FCMトークンを取得できませんでした。')));
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: token));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('FCMトークンをコピーしました。')));
   }
 
   void _openPage(_MoreEntry page) {
@@ -266,6 +287,26 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ],
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  key: const Key('copy-fcm-token-button'),
+                  onPressed: _fcmTokenCopyBusy
+                      ? null
+                      : _copyFcmRegistrationToken,
+                  icon: _fcmTokenCopyBusy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.copy, size: 18),
+                  label: Text(
+                    _fcmTokenCopyBusy ? 'FCMトークンを取得中...' : 'テスト用FCMトークンをコピー',
+                  ),
+                ),
+              ),
             ],
           ],
         ),

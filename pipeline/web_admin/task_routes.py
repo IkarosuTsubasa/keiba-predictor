@@ -1682,6 +1682,7 @@ def _compact_run_due_summary(summary):
     cleanup = dict(row.get("cleanup", {}) or {})
     auto_discovery = dict(row.get("auto_discovery", {}) or {})
     daily_report = dict(row.get("daily_report", {}) or {})
+    daily_early_notification = dict(row.get("daily_early_prediction_notification", {}) or {})
     return {
         "auto_discovery": {
             "enabled": bool(auto_discovery.get("enabled")),
@@ -1754,6 +1755,18 @@ def _compact_run_due_summary(summary):
             "fallback_reason": str(daily_report.get("fallback_reason", "") or "").strip(),
             "public_url": str(daily_report.get("public_url", "") or "").strip(),
             "error": str(daily_report.get("error", "") or "").strip(),
+        },
+        "daily_early_prediction_notification": {
+            "ok": bool(daily_early_notification.get("ok")),
+            "skipped": bool(daily_early_notification.get("skipped")),
+            "reason": str(daily_early_notification.get("reason", "") or "").strip(),
+            "status": str(daily_early_notification.get("status", "") or "").strip(),
+            "target_date": str(daily_early_notification.get("target_date", "") or "").strip(),
+            "race_count": int(daily_early_notification.get("race_count", 0) or 0),
+            "topic": str(daily_early_notification.get("topic", "") or "").strip(),
+            "message_id": str(daily_early_notification.get("message_id", "") or "").strip(),
+            "destination": str(daily_early_notification.get("destination", "") or "").strip(),
+            "error": str(daily_early_notification.get("error", "") or "").strip(),
         },
         "errors": list(row.get("errors", []) or [])[:5],
     }
@@ -2421,6 +2434,53 @@ def run_due_jobs_once(
             flush=True,
         )
 
+    daily_early_prediction_notification = {}
+    try:
+        from daily_early_prediction_notifier import (
+            maybe_send_daily_early_prediction_complete_notification,
+        )
+
+        daily_early_prediction_notification = (
+            maybe_send_daily_early_prediction_complete_notification(
+                base_dir,
+                load_race_jobs,
+                target_date=str(auto_discovery_summary.get("target_date", "") or "").strip(),
+            )
+        )
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_daily_early_prediction_notification",
+                    "notification": daily_early_prediction_notification,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    except Exception as exc:
+        daily_early_prediction_notification = {
+            "ok": False,
+            "skipped": False,
+            "reason": "notification_check_failed",
+            "target_date": str(auto_discovery_summary.get("target_date", "") or "").strip(),
+            "error": str(exc),
+        }
+        print(
+            "[web_app] "
+            + json.dumps(
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "event": "run_due_daily_early_prediction_notification_error",
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
     summary = {
         "auto_discovery": auto_discovery_summary,
         "autofill_count": len(autofilled_jobs),
@@ -2471,6 +2531,7 @@ def run_due_jobs_once(
         "auto_settle_skipped": auto_settle_skipped,
         "cleanup": cleanup_summary,
         "daily_report": daily_report_summary,
+        "daily_early_prediction_notification": daily_early_prediction_notification,
         "errors": errors,
     }
     safe_append_run_due_history(base_dir, summary, source=history_source)

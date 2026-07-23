@@ -44,12 +44,19 @@
 - `PIPELINE_NTFY_NOTIFY_ENABLED`: 使用 ntfy 时设为 `1/true/yes/on`。
 - `PIPELINE_NTFY_TOPIC`: 使用 ntfy 时必填。
 - `PIPELINE_FCM_NOTIFY_ENABLED`: 使用 App 推送时设为 `1/true/yes/on`。
+- `PIPELINE_DAILY_EARLY_PREDICTION_NOTIFY_ENABLED`: 可选，默认开启。当天自动发现完整且所有早期预测均已保存后，通过通用 FCM topic 每天只发送一次“My予測数据已就绪”通知；设为 `0/false/no/off` 可关闭。Console 中保存过开关后，以 `data/_shared/daily_early_prediction_notification_settings.json` 的运行时设置为准。
 - `PIPELINE_FCM_TOPIC`: 可选，默认 `keiba-public-updates`，基础 topic 需要与 Android App 订阅 topic 一致。
 - `PIPELINE_FCM_CENTRAL_TOPIC`: 可选，默认 `${PIPELINE_FCM_TOPIC}-central`，中央通知 topic。
 - `PIPELINE_FCM_LOCAL_TOPIC`: 可选，默认 `${PIPELINE_FCM_TOPIC}-local`，地方通知 topic。
 - `PIPELINE_FCM_SERVICE_ACCOUNT_JSON` 或 `PIPELINE_FCM_SERVICE_ACCOUNT_FILE`: 使用 App 推送时配置 Firebase Admin 凭证。
 
 FCM 发送端对 Android 使用 data-only message，让 App 先按用户的通知设置过滤，再由 App 自己展示通知；对 iOS 使用 APNs alert，并保留相同 data payload 供通知点击后跳转。
+
+Console 的“FCM通知”面板支持：
+
+- 立即开启或停止面向所有已订阅用户的每日“My予測准备完成”通知，无需重启服务。
+- 粘贴 App“その他”页面复制的 FCM registration token，仅向指定设备发送普通测试或“My予測准备完成”测试。
+- 单设备测试不受用户广播开关影响，不会写入每日已发送状态；完整 token 不会出现在 API 响应中。
 
 如果线上已经配置过 v5 remote predictor，通常只需要确认旧变量仍然存在。预测和结果默认会写入 Render persistent disk，所以不额外配置 `KEIBA_AGENT_PREDICTIONS_DIR` 与 `KEIBA_AGENT_RESULTS_DIR` 也可以。
 

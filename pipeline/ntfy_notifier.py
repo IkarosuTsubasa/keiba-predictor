@@ -834,6 +834,23 @@ def build_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", pay
     }
 
 
+def build_fcm_daily_early_prediction_complete_notification(target_date="", race_count=0):
+    return {
+        "engine": "daily_early_prediction_complete",
+        "title": "本日のMy予測データが揃いました！",
+        "body": (
+            "本日のデータ読み込みがすべて完了しました。"
+            "My予測をフルにお楽しみいただけます。今すぐ試してみましょう！"
+        ),
+        "public_url": "",
+        "destination": "my_prediction",
+        "scope_key": "general",
+        "notification_scope": "general",
+        "target_date": str(target_date or "").strip(),
+        "race_count": str(max(0, int(race_count or 0))),
+    }
+
+
 def publish_ntfy_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
     if not ntfy_notify_enabled():
         return {
@@ -1011,7 +1028,7 @@ def publish_agent_prediction_notifications(base_dir, job_id="", race_id=""):
     }
 
 
-def _build_fcm_prediction_message(messaging, topic, notification):
+def _build_fcm_prediction_message(messaging, topic, notification, token=""):
     data = {
         "title": notification["title"],
         "body": notification["body"],
@@ -1019,8 +1036,17 @@ def _build_fcm_prediction_message(messaging, topic, notification):
         "scope_key": notification["scope_key"],
         "notification_scope": notification["notification_scope"],
     }
+    for key in ("destination", "target_date", "race_count"):
+        value = str(notification.get(key, "") or "").strip()
+        if value:
+            data[key] = value
+    target_token = str(token or "").strip()
+    target_topic = str(topic or "").strip()
+    if not target_token and not target_topic:
+        raise ValueError("FCM topic or registration token is required")
+    target = {"token": target_token} if target_token else {"topic": target_topic}
     return messaging.Message(
-        topic=topic,
+        **target,
         # Android remains data-only so the app can apply its local scope settings
         # before displaying a notification.
         android=messaging.AndroidConfig(priority="high"),
@@ -1043,6 +1069,96 @@ def _build_fcm_prediction_message(messaging, topic, notification):
         ),
         data=data,
     )
+
+
+def publish_fcm_device_test_notification(
+    registration_token,
+    notification_kind="daily_early_prediction_complete",
+):
+    token = str(registration_token or "").strip()
+    if len(token) < 20 or len(token) > 4096 or any(char.isspace() for char in token):
+        raise ValueError("invalid FCM registration token")
+
+    kind = str(notification_kind or "").strip().lower()
+    if kind == "daily_early_prediction_complete":
+        notification = build_fcm_daily_early_prediction_complete_notification()
+    elif kind == "general":
+        notification = {
+            "engine": "fcm_device_test",
+            "title": "FCMテスト通知",
+            "body": "端末への通知送信テストです。",
+            "public_url": "",
+            "destination": "",
+            "scope_key": "general",
+            "notification_scope": "general",
+        }
+    else:
+        raise ValueError("invalid notification kind")
+
+    try:
+        from firebase_admin import messaging
+    except ImportError as exc:
+        raise RuntimeError("firebase-admin is not installed") from exc
+
+    app = _get_firebase_app()
+    message = _build_fcm_prediction_message(
+        messaging,
+        "",
+        notification,
+        token=token,
+    )
+    message_id = str(messaging.send(message, app=app) or "").strip()
+    return {
+        "ok": True,
+        "engine": str(notification.get("engine", "") or "").strip(),
+        "notification_kind": kind,
+        "title": str(notification.get("title", "") or "").strip(),
+        "body": str(notification.get("body", "") or "").strip(),
+        "destination": str(notification.get("destination", "") or "").strip(),
+        "message_id": message_id,
+        "token_masked": f"{token[:6]}…{token[-6:]}",
+    }
+
+
+def publish_fcm_daily_early_prediction_complete_notification(target_date="", race_count=0):
+    if not fcm_notify_enabled():
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "disabled",
+        }
+
+    topic = fcm_topic()
+    if not topic:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "missing_topic",
+        }
+
+    try:
+        from firebase_admin import messaging
+    except ImportError as exc:
+        raise RuntimeError("firebase-admin is not installed") from exc
+
+    notification = build_fcm_daily_early_prediction_complete_notification(
+        target_date=target_date,
+        race_count=race_count,
+    )
+    app = _get_firebase_app()
+    message = _build_fcm_prediction_message(messaging, topic, notification)
+    message_id = str(messaging.send(message, app=app) or "").strip()
+    return {
+        "ok": True,
+        "engine": notification["engine"],
+        "title": notification["title"],
+        "body": notification["body"],
+        "topic": topic,
+        "message_id": message_id,
+        "destination": notification["destination"],
+        "target_date": notification["target_date"],
+        "race_count": int(notification["race_count"] or 0),
+    }
 
 
 def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):

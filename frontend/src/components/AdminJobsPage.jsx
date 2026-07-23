@@ -952,6 +952,90 @@ function JobCard({ job, onAction, busyAction }) {
   );
 }
 
+function NotificationTestPanel({ state, busyAction, onToggle, onTest }) {
+  const [registrationToken, setRegistrationToken] = useState("");
+  const [notificationKind, setNotificationKind] = useState("daily_early_prediction_complete");
+  const settings = state?.data?.settings || {};
+  const fcm = state?.data?.fcm || {};
+  const loading = Boolean(state?.loading);
+  const actionBusy = busyAction === "notification_settings" || busyAction === "fcm_test";
+
+  return (
+    <section className={`admin-health-panel${state?.error ? " admin-health-panel--danger" : ""}`}>
+      <div className="admin-health-panel__head">
+        <div>
+          <span className="admin-tool-panel__eyebrow">FCM通知</span>
+          <h2>ユーザー通知と端末テスト</h2>
+          <p>My予測の準備完了通知を管理し、FCM登録トークンを指定して1台だけにテスト送信できます。</p>
+        </div>
+        <HealthStatusPill ok={Boolean(fcm.enabled)} />
+      </div>
+
+      {state?.error ? <div className="admin-health-panel__warnings"><span>{state.error}</span></div> : null}
+
+      <div className="admin-health-panel__details">
+        <div>
+          <strong>ユーザー向け自動通知</strong>
+          <p>{settings.enabled ? "送信する" : "送信しない"}</p>
+          <small>
+            {settings.source === "console" ? "Console設定" : "環境変数の既定値"}
+            {settings.updated_at ? ` / 更新 ${settings.updated_at}` : ""}
+          </small>
+        </div>
+        <div>
+          <strong>FCM送信設定</strong>
+          <p>{fcm.enabled ? "有効" : "無効"}</p>
+          <small>トピック: {fcm.topic || "-"}</small>
+        </div>
+      </div>
+
+      <form
+        className="admin-inline-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onTest({
+            registration_token: registrationToken.trim(),
+            notification_kind: notificationKind,
+          });
+        }}
+      >
+        <label className="admin-inline-form__checkbox">
+          <input
+            type="checkbox"
+            checked={Boolean(settings.enabled)}
+            disabled={loading || actionBusy || !state?.data}
+            onChange={(event) => onToggle(event.target.checked)}
+          />
+          <span>My予測準備完了通知をユーザーへ送信する</span>
+        </label>
+        <label>
+          <span>テスト通知</span>
+          <select value={notificationKind} onChange={(event) => setNotificationKind(event.target.value)}>
+            <option value="daily_early_prediction_complete">My予測準備完了</option>
+            <option value="general">通常テスト</option>
+          </select>
+        </label>
+        <label className="admin-inline-form__wide">
+          <span>FCM登録トークン</span>
+          <textarea
+            rows={3}
+            value={registrationToken}
+            onChange={(event) => setRegistrationToken(event.target.value)}
+            placeholder="アプリの「その他」からコピーしたFCMトークンを貼り付け"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <div className="admin-inline-form__actions">
+          <button type="submit" disabled={actionBusy || !registrationToken.trim()}>
+            {busyAction === "fcm_test" ? "送信中..." : "指定端末へテスト送信"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export default function AdminJobsPage({ appBasePath = "/keiba" }) {
   const [token, setToken] = useState(() => window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
   const [showSettled, setShowSettled] = useState(false);
@@ -969,6 +1053,11 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     error: "",
     data: null,
   });
+  const [notificationState, setNotificationState] = useState({
+    loading: false,
+    error: "",
+    data: null,
+  });
   const busyActionRef = useRef("");
 
   useEffect(() => {
@@ -979,12 +1068,14 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
     if (!token.trim()) {
       setState({ loading: false, error: "", data: null });
       setHealthState({ loading: false, error: "", data: null });
+      setNotificationState({ loading: false, error: "", data: null });
       return;
     }
 
     let alive = true;
     setState((prev) => ({ ...prev, loading: !prev.data, error: "" }));
     setHealthState((prev) => ({ ...prev, loading: !prev.data, error: "" }));
+    setNotificationState((prev) => ({ ...prev, loading: !prev.data, error: "" }));
     fetch(`${appBasePath}/api/admin/jobs?show_settled=${showSettled ? "1" : "0"}`, {
       headers: {
         Accept: "application/json",
@@ -1041,6 +1132,34 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
         setHealthState((prev) => ({
           loading: false,
           error: error?.message || "ヘルスチェックの読み込みに失敗しました。",
+          data: prev.data,
+        }));
+      });
+
+    fetch(`${appBasePath}/api/admin/notifications/settings`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token.trim()}`,
+      },
+    })
+      .then((response) => {
+        if (response.status === 403) {
+          throw new Error("管理トークンが無効です。");
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!alive) return;
+        setNotificationState({ loading: false, error: "", data });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setNotificationState((prev) => ({
+          loading: false,
+          error: error?.message || "通知設定の読み込みに失敗しました。",
           data: prev.data,
         }));
       });
@@ -1180,6 +1299,15 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
           }
         }
         setFlashMessage(`${data.target_date_label || data.target_date || "対象日"} の日報を保存しました。`);
+      } else if (kind === "notification_settings") {
+        setNotificationState((prev) => ({
+          loading: false,
+          error: "",
+          data: { ...(prev.data || {}), settings: data.settings || {} },
+        }));
+        setFlashMessage(data.settings?.enabled ? "ユーザー向け通知を有効にしました。" : "ユーザー向け通知を停止しました。");
+      } else if (kind === "fcm_test") {
+        setFlashMessage(`テスト通知を送信しました。端末 ${data.token_masked || "-"} / message ${data.message_id || "-"}`);
       } else if (kind === "create") {
         setFlashMessage(`タスク ${data.job_id || ""} を作成しました。`);
         const createdCount = Number(data?.created_count || 0);
@@ -1289,6 +1417,21 @@ export default function AdminJobsPage({ appBasePath = "/keiba" }) {
 
         {flashMessage ? <section className="notice-strip">{flashMessage}</section> : null}
         {state.error ? <section className="notice-strip">{state.error}</section> : null}
+
+        <NotificationTestPanel
+          state={notificationState}
+          busyAction={busyAction}
+          onToggle={(enabled) =>
+            runToolbarAction("notification_settings", () =>
+              postJson("/api/admin/notifications/settings", {
+                daily_early_prediction_enabled: enabled,
+              }),
+            )
+          }
+          onTest={(payload) =>
+            runToolbarAction("fcm_test", () => postJson("/api/admin/notifications/test", payload))
+          }
+        />
 
         <AgentHealthPanel
           health={healthState.data}

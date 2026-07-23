@@ -5505,6 +5505,81 @@ def admin_agent_health_api(request: Request, token: str = ""):
     return JSONResponse(_build_agent_health_payload())
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/api/admin/notifications/settings")
+def admin_notification_settings_api(request: Request, token: str = ""):
+    supplied = _admin_supplied_token(request, token)
+    if not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+
+    from daily_early_prediction_notifier import (
+        load_daily_early_prediction_notification_settings,
+    )
+    from ntfy_notifier import fcm_notify_enabled, fcm_topic
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "settings": load_daily_early_prediction_notification_settings(BASE_DIR),
+            "fcm": {
+                "enabled": fcm_notify_enabled(),
+                "topic": fcm_topic(),
+            },
+        }
+    )
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/notifications/settings")
+async def admin_notification_settings_update_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    enabled_value = (payload or {}).get("daily_early_prediction_enabled")
+    if not isinstance(enabled_value, bool):
+        return JSONResponse(
+            {"ok": False, "error": "daily_early_prediction_enabled must be boolean"},
+            status_code=400,
+        )
+
+    from daily_early_prediction_notifier import (
+        save_daily_early_prediction_notification_settings,
+    )
+
+    settings = save_daily_early_prediction_notification_settings(
+        BASE_DIR,
+        enabled=enabled_value,
+    )
+    return JSONResponse({"ok": True, "settings": settings})
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/api/admin/notifications/test")
+async def admin_notification_test_api(request: Request):
+    supplied = _admin_supplied_token(request)
+    if not _admin_token_valid(supplied):
+        return JSONResponse({"ok": False, "error": "admin token invalid"}, status_code=403)
+    payload = await request.json()
+    registration_token = str((payload or {}).get("registration_token", "") or "").strip()
+    notification_kind = str(
+        (payload or {}).get("notification_kind", "daily_early_prediction_complete")
+        or "daily_early_prediction_complete"
+    ).strip()
+    if not registration_token:
+        return JSONResponse({"ok": False, "error": "registration_token required"}, status_code=400)
+
+    from ntfy_notifier import publish_fcm_device_test_notification
+
+    try:
+        result = publish_fcm_device_test_notification(
+            registration_token,
+            notification_kind=notification_kind,
+        )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse(result)
+
+
 @app.get(f"{PUBLIC_BASE_PATH}/api/admin/runs")
 def admin_runs_api(request: Request, token: str = "", scope_key: str = "central_dirt", limit: int = DEFAULT_RUN_LIMIT, q: str = ""):
     supplied = _admin_supplied_token(request, token)
@@ -6781,6 +6856,47 @@ async def internal_v5_task_callback(task_id: str, request: Request):
                     job_id,
                     str(saved.get("race_id", "") or ""),
                 )
+                if task_prediction_stage == "early":
+                    try:
+                        from daily_early_prediction_notifier import (
+                            maybe_send_daily_early_prediction_complete_notification,
+                        )
+
+                        daily_notification = (
+                            maybe_send_daily_early_prediction_complete_notification(
+                                BASE_DIR,
+                                load_race_jobs,
+                            )
+                        )
+                        print(
+                            "[web_app] "
+                            + json.dumps(
+                                {
+                                    "ts": datetime.now().isoformat(timespec="seconds"),
+                                    "event": "agent_prediction_daily_complete_notification",
+                                    "job_id": job_id,
+                                    "race_id": str(saved.get("race_id", "") or ""),
+                                    "notification": daily_notification,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        print(
+                            "[web_app] "
+                            + json.dumps(
+                                {
+                                    "ts": datetime.now().isoformat(timespec="seconds"),
+                                    "event": "agent_prediction_daily_complete_notification_error",
+                                    "job_id": job_id,
+                                    "race_id": str(saved.get("race_id", "") or ""),
+                                    "error": str(exc),
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
             return JSONResponse({"ok": True, "status": "succeeded", "task_id": task_id, "job_id": job_id, **saved})
 
         try:
