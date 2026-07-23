@@ -1,6 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+enum NotificationAuthorizationStatus {
+  authorized,
+  denied,
+  notDetermined,
+  provisional,
+  ephemeral,
+  unknown,
+}
+
 class NativeRuntimeConfig {
   const NativeRuntimeConfig({
     required this.baseWebUrl,
@@ -121,6 +130,36 @@ class NativePlatformBridge {
       // 権限ダイアログ自体は OS が管理するため続行する。
     } on MissingPluginException {
       // Widget test や未対応プラットフォームでは何もしない。
+    }
+  }
+
+  static Future<NotificationAuthorizationStatus>
+  getNotificationAuthorizationStatus() async {
+    if (!isSupported) return NotificationAuthorizationStatus.unknown;
+    try {
+      final value = await _channel.invokeMethod<String>(
+        'getNotificationAuthorizationStatus',
+      );
+      return NotificationAuthorizationStatus.values.firstWhere(
+        (status) => status.name == value,
+        orElse: () => NotificationAuthorizationStatus.unknown,
+      );
+    } on PlatformException {
+      return NotificationAuthorizationStatus.unknown;
+    } on MissingPluginException {
+      return NotificationAuthorizationStatus.unknown;
+    }
+  }
+
+  static Future<bool> openNotificationSettings() async {
+    if (!isSupported) return false;
+    try {
+      return await _channel.invokeMethod<bool>('openNotificationSettings') ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
     }
   }
 }

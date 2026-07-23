@@ -49,7 +49,7 @@
 - `PIPELINE_FCM_LOCAL_TOPIC`: 可选，默认 `${PIPELINE_FCM_TOPIC}-local`，地方通知 topic。
 - `PIPELINE_FCM_SERVICE_ACCOUNT_JSON` 或 `PIPELINE_FCM_SERVICE_ACCOUNT_FILE`: 使用 App 推送时配置 Firebase Admin 凭证。
 
-FCM 发送端使用 data-only message，让 Android App 先按用户的通知设置过滤，再由 App 自己展示通知。
+FCM 发送端对 Android 使用 data-only message，让 App 先按用户的通知设置过滤，再由 App 自己展示通知；对 iOS 使用 APNs alert，并保留相同 data payload 供通知点击后跳转。
 
 如果线上已经配置过 v5 remote predictor，通常只需要确认旧变量仍然存在。预测和结果默认会写入 Render persistent disk，所以不额外配置 `KEIBA_AGENT_PREDICTIONS_DIR` 与 `KEIBA_AGENT_RESULTS_DIR` 也可以。
 

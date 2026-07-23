@@ -61,7 +61,13 @@ class NotificationSettings {
   }
 }
 
-class NotificationSettingsRepository {
+abstract interface class NotificationSettingsStore {
+  Future<NotificationSettings> load();
+
+  Future<void> save(NotificationSettings settings);
+}
+
+class NotificationSettingsRepository implements NotificationSettingsStore {
   NotificationSettingsRepository({SharedPreferencesAsync? preferences})
     : _preferences = preferences ?? SharedPreferencesAsync();
 
@@ -74,6 +80,7 @@ class NotificationSettingsRepository {
 
   final SharedPreferencesAsync _preferences;
 
+  @override
   Future<NotificationSettings> load() async {
     final legacy = await NativePlatformBridge.getNotificationSettings();
     if (legacy != null) {
@@ -101,6 +108,7 @@ class NotificationSettingsRepository {
     );
   }
 
+  @override
   Future<void> save(NotificationSettings settings) async {
     await _saveMirror(settings);
     await NativePlatformBridge.setNotificationSettings(

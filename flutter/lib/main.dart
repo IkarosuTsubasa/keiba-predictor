@@ -27,7 +27,7 @@ Future<void> main() async {
     return true;
   };
 
-  await PushNotificationService.instance.initialize();
+  await _initializePushNotifications();
   runApp(
     KeibaApp(
       navigatorObservers: [
@@ -40,7 +40,30 @@ Future<void> main() async {
 }
 
 Future<void> _initializePostLaunchPrivacyAndPermissions() async {
-  await AdConsentService.instance.initialize();
+  try {
+    await AdConsentService.instance.initialize();
+  } catch (error, stack) {
+    await FirebaseCrashlytics.instance.recordError(
+      error,
+      stack,
+      reason: 'Ad consent initialization failed',
+      fatal: false,
+    );
+  }
   await Future<void>.delayed(const Duration(milliseconds: 350));
+  await _initializePushNotifications();
   await PushNotificationService.instance.requestPermissionOnFirstLaunch();
+}
+
+Future<void> _initializePushNotifications() async {
+  try {
+    await PushNotificationService.instance.initialize();
+  } catch (error, stack) {
+    await FirebaseCrashlytics.instance.recordError(
+      error,
+      stack,
+      reason: 'Push notification initialization failed',
+      fatal: false,
+    );
+  }
 }

@@ -114,6 +114,9 @@ class _HomeShellState extends State<HomeShell> {
     final index = switch (destination.destination) {
       'history' => 1,
       'reports' => 2,
+      'customPrediction' ||
+      'custom_prediction' ||
+      'my_prediction' => _customPredictionIndex,
       'more' => _moreIndex,
       _ => 0,
     };

@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ikaimo_keiba/src/screens/more_screen.dart';
 import 'package:ikaimo_keiba/src/services/ad_consent_service.dart';
+import 'package:ikaimo_keiba/src/services/notification_settings.dart';
 
 void main() {
   testWidgets('更多页面沿用现有日语入口文案', (tester) async {
@@ -39,4 +42,66 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     consentService.dispose();
   });
+
+  testWidgets('端末側で通知が拒否されている場合は設定への導線を表示する', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    const channel = MethodChannel('com.ikaimo.keiba.app/platform');
+    var openedSettings = false;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      return switch (call.method) {
+        'getNotificationSettings' => <String, bool>{
+          'enabled': true,
+          'central_enabled': true,
+          'local_enabled': true,
+        },
+        'getNotificationAuthorizationStatus' => 'denied',
+        'openNotificationSettings' => openedSettings = true,
+        _ => null,
+      };
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MoreScreen(
+            showNotificationSettings: true,
+            notificationSettingsStore: _MemoryNotificationSettingsStore(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('notification-permission-warning')),
+      findsOneWidget,
+    );
+    expect(find.text('端末側で通知がオフになっています'), findsOneWidget);
+
+    await tester.tap(find.text('設定を開く'));
+    await tester.pump();
+    expect(openedSettings, isTrue);
+    debugDefaultTargetPlatformOverride = null;
+  });
+}
+
+class _MemoryNotificationSettingsStore implements NotificationSettingsStore {
+  NotificationSettings value = const NotificationSettings();
+
+  @override
+  Future<NotificationSettings> load() async => value;
+
+  @override
+  Future<void> save(NotificationSettings settings) async {
+    value = settings;
+  }
 }

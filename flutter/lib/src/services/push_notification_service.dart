@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'
     hide NotificationSettings;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'native_platform_bridge.dart';
@@ -63,11 +64,26 @@ class PushNotificationService {
   PushNotificationService._();
 
   static final instance = PushNotificationService._();
+  static const _topicRetryDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 20),
+    Duration(seconds: 30),
+  ];
 
   final _notifications = FlutterLocalNotificationsPlugin();
   final _destinations = StreamController<NotificationDestination>.broadcast();
   StreamSubscription<NotificationSettings>? _settingsSubscription;
+  StreamSubscription<String>? _tokenRefreshSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
+  StreamSubscription<RemoteMessage>? _openedAppSubscription;
   NotificationDestination? _pendingDestination;
+  NotificationSettings _latestSettings = const NotificationSettings();
+  Future<void> _topicSyncTail = Future<void>.value();
+  Future<void>? _initializationInProgress;
+  Timer? _topicRetryTimer;
+  int _topicRetryAttempt = 0;
   bool _initialized = false;
 
   Stream<NotificationDestination> get destinations => _destinations.stream;
@@ -78,10 +94,24 @@ class PushNotificationService {
     return value;
   }
 
-  Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+  Future<void> initialize() {
+    if (_initialized) return Future<void>.value();
+    final existing = _initializationInProgress;
+    if (existing != null) return existing;
 
+    late final Future<void> operation;
+    operation = _initializeOnce().then((_) => _initialized = true).whenComplete(
+      () {
+        if (identical(_initializationInProgress, operation)) {
+          _initializationInProgress = null;
+        }
+      },
+    );
+    _initializationInProgress = operation;
+    return operation;
+  }
+
+  Future<void> _initializeOnce() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await _initializeLocalNotifications(
       _notifications,
@@ -89,30 +119,56 @@ class PushNotificationService {
     );
 
     final settingsRepository = NotificationSettingsRepository();
-    final settings = await settingsRepository.load();
+    NotificationSettings settings;
+    try {
+      settings = await settingsRepository.load();
+    } catch (error) {
+      debugPrint('Notification settings could not be loaded: $error');
+      settings = const NotificationSettings();
+    }
+    _latestSettings = settings;
     await _syncTopics(settings);
     _settingsSubscription = NotificationSettingsRepository.changes.listen(
       (value) => unawaited(_syncTopics(value)),
     );
+    _tokenRefreshSubscription = FirebaseMessaging.instance.onTokenRefresh
+        .listen(
+          (_) => unawaited(_syncTopics(_latestSettings)),
+          onError: (Object error) {
+            debugPrint('FCM token refresh failed: $error');
+            _scheduleTopicRetry();
+          },
+        );
 
-    FirebaseMessaging.onMessage.listen(
+    _foregroundMessageSubscription = FirebaseMessaging.onMessage.listen(
       (message) => unawaited(_handleForegroundMessage(message)),
     );
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleRemoteMessageTap);
+    _openedAppSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
+      _handleRemoteMessageTap,
+    );
 
-    final initialRemoteMessage = await FirebaseMessaging.instance
-        .getInitialMessage();
-    if (initialRemoteMessage != null) {
-      _setPendingDestination(
-        NotificationDestination.fromData(initialRemoteMessage.data),
-      );
+    try {
+      final initialRemoteMessage = await FirebaseMessaging.instance
+          .getInitialMessage();
+      if (initialRemoteMessage != null) {
+        _setPendingDestination(
+          NotificationDestination.fromData(initialRemoteMessage.data),
+        );
+      }
+    } catch (error) {
+      debugPrint('Initial FCM message could not be read: $error');
     }
 
-    final localLaunch = await _notifications.getNotificationAppLaunchDetails();
-    final localPayload = localLaunch?.notificationResponse?.payload;
-    if ((localLaunch?.didNotificationLaunchApp ?? false) &&
-        localPayload != null) {
-      _setPendingDestination(_decodePayload(localPayload));
+    try {
+      final localLaunch = await _notifications
+          .getNotificationAppLaunchDetails();
+      final localPayload = localLaunch?.notificationResponse?.payload;
+      if ((localLaunch?.didNotificationLaunchApp ?? false) &&
+          localPayload != null) {
+        _setPendingDestination(_decodePayload(localPayload));
+      }
+    } catch (error) {
+      debugPrint('Initial local notification could not be read: $error');
     }
   }
 
@@ -120,30 +176,32 @@ class PushNotificationService {
     if (!await NativePlatformBridge.shouldRequestNotificationPermission()) {
       return;
     }
-    await NativePlatformBridge.markNotificationPermissionPrompted();
-    await requestPermissionFromSettings();
+    final requestCompleted = await requestPermissionFromSettings();
+    if (requestCompleted) {
+      await NativePlatformBridge.markNotificationPermissionPrompted();
+    }
   }
 
-  Future<void> requestPermissionFromSettings() async {
-    await _notifications
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.requestNotificationsPermission();
-    await _notifications
-        .resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin
-        >()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
+  Future<bool> requestPermissionFromSettings() async {
     try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await _notifications
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+            ?.requestNotificationsPermission();
+      }
       await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
       await _syncTopics(await NotificationSettingsRepository().loadMirror());
-    } on FirebaseException {
-      // APNs/FCM の準備前なら、次回起動または設定変更時に再同期する。
+      return true;
+    } catch (error) {
+      debugPrint('Notification permission request failed: $error');
+      _scheduleTopicRetry();
+      return false;
     }
   }
 
@@ -181,10 +239,32 @@ class PushNotificationService {
     if (destination.hasTarget) _destinations.add(destination);
   }
 
-  Future<void> _syncTopics(NotificationSettings settings) async {
+  Future<void> _syncTopics(
+    NotificationSettings settings, {
+    bool resetRetry = true,
+  }) {
+    _latestSettings = settings;
+    if (resetRetry) {
+      _topicRetryTimer?.cancel();
+      _topicRetryTimer = null;
+      _topicRetryAttempt = 0;
+    }
+    final operation = _topicSyncTail.then((_) => _syncLatestTopics());
+    _topicSyncTail = operation;
+    return operation;
+  }
+
+  Future<void> _syncLatestTopics() async {
     final config = NativePlatformBridge.runtimeConfig;
     if (config == null) return;
-    await Future.wait([
+
+    if (!await _isMessagingReady()) {
+      _scheduleTopicRetry();
+      return;
+    }
+
+    final settings = _latestSettings;
+    final results = await Future.wait([
       _syncTopic(config.fcmTopic, settings.enabled),
       _syncTopic(
         config.fcmCentralTopic,
@@ -195,23 +275,69 @@ class PushNotificationService {
         settings.enabled && settings.localEnabled,
       ),
     ]);
+    if (results.every((result) => result)) {
+      _topicRetryTimer?.cancel();
+      _topicRetryTimer = null;
+      _topicRetryAttempt = 0;
+      return;
+    }
+    _scheduleTopicRetry();
   }
 
-  Future<void> _syncTopic(String topic, bool subscribe) async {
-    if (topic.trim().isEmpty) return;
+  Future<bool> _isMessagingReady() async {
+    try {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        final permission = await FirebaseMessaging.instance
+            .getNotificationSettings();
+        if (permission.authorizationStatus ==
+            AuthorizationStatus.notDetermined) {
+          return false;
+        }
+        final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        if (apnsToken == null || apnsToken.trim().isEmpty) return false;
+      }
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      return fcmToken != null && fcmToken.trim().isNotEmpty;
+    } catch (error) {
+      debugPrint('FCM token is not ready: $error');
+      return false;
+    }
+  }
+
+  Future<bool> _syncTopic(String topic, bool subscribe) async {
+    if (topic.trim().isEmpty) return true;
     try {
       if (subscribe) {
         await FirebaseMessaging.instance.subscribeToTopic(topic.trim());
       } else {
         await FirebaseMessaging.instance.unsubscribeFromTopic(topic.trim());
       }
-    } on FirebaseException {
-      // 通信が戻った後、次回起動または設定変更時に再同期する。
+      return true;
+    } catch (error) {
+      debugPrint('FCM topic sync failed for ${topic.trim()}: $error');
+      return false;
     }
   }
 
+  void _scheduleTopicRetry() {
+    if (_topicRetryTimer != null ||
+        _topicRetryAttempt >= _topicRetryDelays.length) {
+      return;
+    }
+    final delay = _topicRetryDelays[_topicRetryAttempt];
+    _topicRetryAttempt += 1;
+    _topicRetryTimer = Timer(delay, () {
+      _topicRetryTimer = null;
+      unawaited(_syncTopics(_latestSettings, resetRetry: false));
+    });
+  }
+
   Future<void> dispose() async {
+    _topicRetryTimer?.cancel();
     await _settingsSubscription?.cancel();
+    await _tokenRefreshSubscription?.cancel();
+    await _foregroundMessageSubscription?.cancel();
+    await _openedAppSubscription?.cancel();
     await _destinations.close();
   }
 }

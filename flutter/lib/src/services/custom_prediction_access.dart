@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,6 +56,7 @@ class GoogleCustomPredictionRewardedGateway
     String Function()? adUnitId,
     Future<RewardedAd?> Function(String adUnitId)? loadAd,
     Future<void> Function(bool muted)? setAppMuted,
+    bool Function()? muteRewardedAd,
   }) : _consentService = consentService ?? AdConsentService.instance,
        _adsEnabled = adsEnabled ?? (() => AppConfig.adsEnabled),
        _adUnitId =
@@ -66,13 +68,15 @@ class GoogleCustomPredictionRewardedGateway
                  '';
            }),
        _loadAd = loadAd ?? _defaultLoadAd,
-       _setAppMuted = setAppMuted ?? MobileAds.instance.setAppMuted;
+       _setAppMuted = setAppMuted ?? MobileAds.instance.setAppMuted,
+       _muteRewardedAd = muteRewardedAd ?? _defaultMuteRewardedAd;
 
   final AdConsentService _consentService;
   final bool Function() _adsEnabled;
   final String Function() _adUnitId;
   final _RewardedAdLoader _loadAd;
   final _AppMuteSetter _setAppMuted;
+  final bool Function() _muteRewardedAd;
 
   @override
   Future<CustomPredictionRewardResult> showRewardedAd() async {
@@ -92,8 +96,10 @@ class GoogleCustomPredictionRewardedGateway
 
     var appMuted = false;
     try {
-      await _setAppMuted(true);
-      appMuted = true;
+      if (_muteRewardedAd()) {
+        await _setAppMuted(true);
+        appMuted = true;
+      }
 
       RewardedAd? ad;
       try {
@@ -177,5 +183,9 @@ class GoogleCustomPredictionRewardedGateway
       ),
     );
     return result.future;
+  }
+
+  static bool _defaultMuteRewardedAd() {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   }
 }

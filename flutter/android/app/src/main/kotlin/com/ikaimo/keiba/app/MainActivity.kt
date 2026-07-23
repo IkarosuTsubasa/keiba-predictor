@@ -2,8 +2,10 @@ package com.ikaimo.keiba.app
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.webkit.WebSettings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -39,6 +41,15 @@ class MainActivity : FlutterActivity() {
                     getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
                         .edit().putBoolean(KEY_PROMPTED, true).apply()
                     result.success(null)
+                }
+                "getNotificationAuthorizationStatus" ->
+                    result.success(notificationAuthorizationStatus())
+                "openNotificationSettings" -> {
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    runCatching { startActivity(intent) }
+                        .onSuccess { result.success(true) }
+                        .onFailure { result.success(false) }
                 }
                 else -> result.notImplemented()
             }
@@ -79,6 +90,16 @@ class MainActivity : FlutterActivity() {
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return false
         return !getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_PROMPTED, false)
+    }
+
+    private fun notificationAuthorizationStatus(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return "authorized"
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            return "authorized"
+        }
+        val prompted = getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PROMPTED, false)
+        return if (prompted) "denied" else "notDetermined"
     }
 
     private companion object {

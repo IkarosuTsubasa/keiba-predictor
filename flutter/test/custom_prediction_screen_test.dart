@@ -205,9 +205,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('動画を見て1時間使う'), findsNothing);
+    expect(find.byKey(const Key('unlock-custom-prediction')), findsNothing);
     expect(find.text('リワード広告なしで利用できます'), findsOneWidget);
-    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsOneWidget);
     expect(dataSource.fetchCount, 1);
     expect(rewardedGateway.showCalls, 0);
     expect(accessStore.unlockedUntil, isNull);

@@ -2,7 +2,7 @@ import argparse
 import json
 from datetime import datetime
 
-from ntfy_notifier import fcm_topic
+from ntfy_notifier import _build_fcm_prediction_message, fcm_topic
 
 
 def parse_args():
@@ -10,6 +10,11 @@ def parse_args():
     parser.add_argument("--topic", default="", help="Override FCM topic.")
     parser.add_argument("--title", default="🐴予測が完了しました", help="Notification title.")
     parser.add_argument("--body", default="", help="Notification body.")
+    parser.add_argument(
+        "--url",
+        default="https://www.ikaimo-ai.com/keiba",
+        help="Deep link opened when the notification is tapped.",
+    )
     return parser.parse_args()
 
 
@@ -26,13 +31,17 @@ def main():
     from ntfy_notifier import _get_firebase_app
 
     app = _get_firebase_app()
-    message = messaging.Message(
-        topic=topic,
-        notification=messaging.Notification(
-            title=str(args.title or "").strip(),
-            body=body,
-        ),
-        android=messaging.AndroidConfig(priority="high"),
+    title = str(args.title or "").strip()
+    message = _build_fcm_prediction_message(
+        messaging,
+        topic,
+        {
+            "title": title,
+            "body": body,
+            "public_url": str(args.url or "").strip(),
+            "scope_key": "general",
+            "notification_scope": "general",
+        },
     )
     message_id = str(messaging.send(message, app=app) or "").strip()
     print(
@@ -40,8 +49,9 @@ def main():
             {
                 "ok": True,
                 "topic": topic,
-                "title": str(args.title or "").strip(),
+                "title": title,
                 "body": body,
+                "url": str(args.url or "").strip(),
                 "message_id": message_id,
             },
             ensure_ascii=False,

@@ -92,4 +92,4 @@ cd android
 ./gradlew :app:validateReleaseConfiguration
 ```
 
-実機では通知権限、FCM の三つのトピック、通知タップ、バナー広告、ネイティブ広告、外部リンク、ダウンロード、WebView のログイン Cookie を両 OS で確認します。iOS の APNs/FCM は Simulator ではなく実機で最終確認します。
+実機では通知権限、FCM の三つのトピック、通知タップ、バナー広告、ネイティブ広告、外部リンク、ダウンロード、WebView のログイン Cookie を両 OS で確認します。iOS の APNs/FCM は Simulator ではなく実機を使い、前面・背面・終了状態からの表示とタップ遷移を最終確認します。

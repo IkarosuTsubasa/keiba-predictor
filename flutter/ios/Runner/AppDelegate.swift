@@ -73,6 +73,18 @@ import WebKit
     case "markNotificationPermissionPrompted":
       notificationDefaults.set(true, forKey: PreferenceKey.permissionPrompted)
       result(nil)
+    case "getNotificationAuthorizationStatus":
+      notificationAuthorizationStatus(result: result)
+    case "openNotificationSettings":
+      guard let url = URL(string: UIApplication.openSettingsURLString) else {
+        result(false)
+        return
+      }
+      UIApplication.shared.open(url, options: [:]) { opened in
+        DispatchQueue.main.async {
+          result(opened)
+        }
+      }
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -149,6 +161,29 @@ import WebKit
     UNUserNotificationCenter.current().getNotificationSettings { settings in
       DispatchQueue.main.async {
         result(settings.authorizationStatus == .notDetermined)
+      }
+    }
+  }
+
+  private func notificationAuthorizationStatus(result: @escaping FlutterResult) {
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+      let value: String
+      switch settings.authorizationStatus {
+      case .authorized:
+        value = "authorized"
+      case .denied:
+        value = "denied"
+      case .notDetermined:
+        value = "notDetermined"
+      case .provisional:
+        value = "provisional"
+      case .ephemeral:
+        value = "ephemeral"
+      @unknown default:
+        value = "unknown"
+      }
+      DispatchQueue.main.async {
+        result(value)
       }
     }
   }

@@ -10,11 +10,11 @@ class AppConfig {
     'KEIBA_BASE_WEB_URL',
   );
 
-  static bool get notificationsEnabled =>
+  static bool get notificationsEnabled => NativePlatformBridge.isSupported;
+
+  static bool get adsEnabled =>
       NativePlatformBridge.isSupported &&
       NativePlatformBridge.runtimeConfig != null;
-
-  static bool get adsEnabled => notificationsEnabled;
 
   static String get baseWebUrl {
     if (_baseWebUrlOverride.trim().isNotEmpty) {

@@ -1011,6 +1011,40 @@ def publish_agent_prediction_notifications(base_dir, job_id="", race_id=""):
     }
 
 
+def _build_fcm_prediction_message(messaging, topic, notification):
+    data = {
+        "title": notification["title"],
+        "body": notification["body"],
+        "url": notification["public_url"],
+        "scope_key": notification["scope_key"],
+        "notification_scope": notification["notification_scope"],
+    }
+    return messaging.Message(
+        topic=topic,
+        # Android remains data-only so the app can apply its local scope settings
+        # before displaying a notification.
+        android=messaging.AndroidConfig(priority="high"),
+        # Apple receives a visible alert from APNs in background/terminated
+        # states. Keep the shared data payload so notification taps can deep-link.
+        apns=messaging.APNSConfig(
+            headers={
+                "apns-priority": "10",
+                "apns-push-type": "alert",
+            },
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(
+                        title=notification["title"],
+                        body=notification["body"],
+                    ),
+                    sound="default",
+                )
+            ),
+        ),
+        data=data,
+    )
+
+
 def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", payload=None, job=None, evaluation=None):
     if not fcm_notify_enabled():
         return {
@@ -1052,19 +1086,7 @@ def publish_fcm_agent_prediction_notification(base_dir, job_id="", race_id="", p
         raise RuntimeError("firebase-admin is not installed") from exc
 
     app = _get_firebase_app()
-    message = messaging.Message(
-        topic=topic,
-        android=messaging.AndroidConfig(
-            priority="high",
-        ),
-        data={
-            "title": notification["title"],
-            "body": notification["body"],
-            "url": notification["public_url"],
-            "scope_key": notification["scope_key"],
-            "notification_scope": notification["notification_scope"],
-        },
-    )
+    message = _build_fcm_prediction_message(messaging, topic, notification)
     message_id = str(messaging.send(message, app=app) or "").strip()
     return {
         "ok": True,
@@ -1103,19 +1125,7 @@ def publish_fcm_prediction_notification(scope_key, run_id):
         raise RuntimeError("firebase-admin is not installed") from exc
 
     app = _get_firebase_app()
-    message = messaging.Message(
-        topic=topic,
-        android=messaging.AndroidConfig(
-            priority="high",
-        ),
-        data={
-            "title": notification["title"],
-            "body": notification["body"],
-            "url": notification["public_url"],
-            "scope_key": notification["scope_key"],
-            "notification_scope": notification["notification_scope"],
-        },
-    )
+    message = _build_fcm_prediction_message(messaging, topic, notification)
     message_id = str(messaging.send(message, app=app) or "").strip()
     return {
         "ok": True,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../services/ad_consent_service.dart';
+import '../services/native_platform_bridge.dart';
 import '../services/notification_settings.dart';
 import '../services/push_notification_service.dart';
 import '../web/app_web.dart';
@@ -13,17 +14,19 @@ class MoreScreen extends StatefulWidget {
   const MoreScreen({
     this.showNotificationSettings,
     this.adConsentService,
+    this.notificationSettingsStore,
     super.key,
   });
 
   final bool? showNotificationSettings;
   final AdConsentService? adConsentService;
+  final NotificationSettingsStore? notificationSettingsStore;
 
   @override
   State<MoreScreen> createState() => _MoreScreenState();
 }
 
-class _MoreScreenState extends State<MoreScreen> {
+class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
   static const _pages = [
     _MoreEntry(
       title: 'プライバシーポリシー',
@@ -47,8 +50,10 @@ class _MoreScreenState extends State<MoreScreen> {
     ),
   ];
 
-  NotificationSettingsRepository? _settingsRepository;
+  NotificationSettingsStore? _settingsRepository;
   NotificationSettings? _settings;
+  NotificationAuthorizationStatus _authorizationStatus =
+      NotificationAuthorizationStatus.unknown;
   bool _privacyOptionsBusy = false;
 
   AdConsentService get _adConsentService =>
@@ -58,20 +63,41 @@ class _MoreScreenState extends State<MoreScreen> {
   void initState() {
     super.initState();
     if (widget.showNotificationSettings ?? AppConfig.notificationsEnabled) {
-      _settingsRepository = NotificationSettingsRepository();
+      WidgetsBinding.instance.addObserver(this);
+      _settingsRepository =
+          widget.notificationSettingsStore ?? NotificationSettingsRepository();
       unawaited(_loadSettings());
     }
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _settingsRepository != null) {
+      unawaited(_loadAuthorizationStatus());
+    }
+  }
+
   Future<void> _loadSettings() async {
+    final authorizationFuture =
+        NativePlatformBridge.getNotificationAuthorizationStatus();
     NotificationSettings settings;
     try {
       settings = await _settingsRepository!.load();
     } catch (_) {
       settings = const NotificationSettings();
     }
+    final authorizationStatus = await authorizationFuture;
     if (!mounted) return;
-    setState(() => _settings = settings);
+    setState(() {
+      _settings = settings;
+      _authorizationStatus = authorizationStatus;
+    });
   }
 
   void _updateSettings(NotificationSettings settings) {
@@ -80,10 +106,28 @@ class _MoreScreenState extends State<MoreScreen> {
     setState(() => _settings = settings);
     unawaited(_settingsRepository!.save(settings));
     if (shouldRequestPermission) {
-      unawaited(
-        PushNotificationService.instance.requestPermissionFromSettings(),
-      );
+      unawaited(_requestPermissionAndRefreshStatus());
     }
+  }
+
+  Future<void> _requestPermissionAndRefreshStatus() async {
+    await PushNotificationService.instance.requestPermissionFromSettings();
+    await _loadAuthorizationStatus();
+  }
+
+  Future<void> _loadAuthorizationStatus() async {
+    final status =
+        await NativePlatformBridge.getNotificationAuthorizationStatus();
+    if (!mounted) return;
+    setState(() => _authorizationStatus = status);
+  }
+
+  Future<void> _openNotificationSettings() async {
+    final opened = await NativePlatformBridge.openNotificationSettings();
+    if (!mounted || opened) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('端末の通知設定を開けませんでした。')));
   }
 
   void _openPage(_MoreEntry page) {
@@ -192,6 +236,36 @@ class _MoreScreenState extends State<MoreScreen> {
                 onChanged: (value) =>
                     _updateSettings(settings.copyWith(localEnabled: value)),
               ),
+              if (_authorizationStatus ==
+                  NotificationAuthorizationStatus.denied) ...[
+                const SizedBox(height: 10),
+                Container(
+                  key: const Key('notification-permission-warning'),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4E5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '端末側で通知がオフになっています',
+                          style: TextStyle(
+                            color: Color(0xFF7A4B00),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _openNotificationSettings,
+                        child: const Text('設定を開く'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ],
         ),

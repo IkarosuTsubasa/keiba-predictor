@@ -209,6 +209,25 @@ class NtfyNotifierTests(unittest.TestCase):
                 def __init__(self, priority=""):
                     self.priority = priority
 
+            class ApsAlert:
+                def __init__(self, title="", body=""):
+                    self.title = title
+                    self.body = body
+
+            class Aps:
+                def __init__(self, alert=None, sound=None):
+                    self.alert = alert
+                    self.sound = sound
+
+            class APNSPayload:
+                def __init__(self, aps=None):
+                    self.aps = aps
+
+            class APNSConfig:
+                def __init__(self, headers=None, payload=None):
+                    self.headers = headers
+                    self.payload = payload
+
             class Message:
                 def __init__(self, **kwargs):
                     self.kwargs = kwargs
@@ -239,6 +258,13 @@ class NtfyNotifierTests(unittest.TestCase):
         message = captured["message"]
         self.assertEqual(message.kwargs["topic"], "keiba-public-updates-central")
         self.assertNotIn("notification", message.kwargs)
+        self.assertEqual(message.kwargs["android"].priority, "high")
+        apns = message.kwargs["apns"]
+        self.assertEqual(apns.headers["apns-push-type"], "alert")
+        self.assertEqual(apns.headers["apns-priority"], "10")
+        self.assertEqual(apns.payload.aps.alert.title, message.kwargs["data"]["title"])
+        self.assertEqual(apns.payload.aps.alert.body, message.kwargs["data"]["body"])
+        self.assertEqual(apns.payload.aps.sound, "default")
         self.assertIn(f"/race/{race_id}", message.kwargs["data"]["url"])
         self.assertEqual(message.kwargs["data"]["scope_key"], "central_dirt")
         self.assertEqual(message.kwargs["data"]["notification_scope"], "central")
@@ -263,6 +289,25 @@ class NtfyNotifierTests(unittest.TestCase):
             class AndroidConfig:
                 def __init__(self, priority=""):
                     self.priority = priority
+
+            class ApsAlert:
+                def __init__(self, title="", body=""):
+                    self.title = title
+                    self.body = body
+
+            class Aps:
+                def __init__(self, alert=None, sound=None):
+                    self.alert = alert
+                    self.sound = sound
+
+            class APNSPayload:
+                def __init__(self, aps=None):
+                    self.aps = aps
+
+            class APNSConfig:
+                def __init__(self, headers=None, payload=None):
+                    self.headers = headers
+                    self.payload = payload
 
             class Message:
                 def __init__(self, **kwargs):
@@ -294,6 +339,10 @@ class NtfyNotifierTests(unittest.TestCase):
         message = captured["message"]
         self.assertEqual(message.kwargs["topic"], "keiba-public-updates-local")
         self.assertNotIn("notification", message.kwargs)
+        self.assertEqual(
+            message.kwargs["apns"].payload.aps.alert.title,
+            message.kwargs["data"]["title"],
+        )
         self.assertEqual(message.kwargs["data"]["scope_key"], "local")
         self.assertEqual(message.kwargs["data"]["notification_scope"], "local")
 
