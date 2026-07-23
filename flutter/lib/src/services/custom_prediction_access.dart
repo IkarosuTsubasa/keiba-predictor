@@ -45,6 +45,7 @@ abstract interface class CustomPredictionRewardedGateway {
 }
 
 typedef _RewardedAdLoader = Future<RewardedAd?> Function(String adUnitId);
+typedef _AppMuteSetter = Future<void> Function(bool muted);
 
 class GoogleCustomPredictionRewardedGateway
     implements CustomPredictionRewardedGateway {
@@ -53,6 +54,7 @@ class GoogleCustomPredictionRewardedGateway
     bool Function()? adsEnabled,
     String Function()? adUnitId,
     Future<RewardedAd?> Function(String adUnitId)? loadAd,
+    Future<void> Function(bool muted)? setAppMuted,
   }) : _consentService = consentService ?? AdConsentService.instance,
        _adsEnabled = adsEnabled ?? (() => AppConfig.adsEnabled),
        _adUnitId =
@@ -63,12 +65,14 @@ class GoogleCustomPredictionRewardedGateway
                      ?.customPredictionRewardedAdUnitId ??
                  '';
            }),
-       _loadAd = loadAd ?? _defaultLoadAd;
+       _loadAd = loadAd ?? _defaultLoadAd,
+       _setAppMuted = setAppMuted ?? MobileAds.instance.setAppMuted;
 
   final AdConsentService _consentService;
   final bool Function() _adsEnabled;
   final String Function() _adUnitId;
   final _RewardedAdLoader _loadAd;
+  final _AppMuteSetter _setAppMuted;
 
   @override
   Future<CustomPredictionRewardResult> showRewardedAd() async {
@@ -86,55 +90,72 @@ class GoogleCustomPredictionRewardedGateway
     final unitId = _adUnitId().trim();
     if (unitId.isEmpty) return CustomPredictionRewardResult.unavailable;
 
-    RewardedAd? ad;
+    var appMuted = false;
     try {
-      ad = await _loadAd(unitId).timeout(const Duration(seconds: 20));
-    } catch (_) {
-      return CustomPredictionRewardResult.failed;
-    }
-    final loadedAd = ad;
-    if (loadedAd == null) return CustomPredictionRewardResult.failed;
+      await _setAppMuted(true);
+      appMuted = true;
 
-    final result = Completer<CustomPredictionRewardResult>();
-    var rewardEarned = false;
+      RewardedAd? ad;
+      try {
+        ad = await _loadAd(unitId).timeout(const Duration(seconds: 20));
+      } catch (_) {
+        return CustomPredictionRewardResult.failed;
+      }
+      final loadedAd = ad;
+      if (loadedAd == null) return CustomPredictionRewardResult.failed;
 
-    void complete(CustomPredictionRewardResult value) {
-      if (!result.isCompleted) result.complete(value);
-    }
+      final result = Completer<CustomPredictionRewardResult>();
+      var rewardEarned = false;
 
-    loadedAd.fullScreenContentCallback = FullScreenContentCallback<RewardedAd>(
-      onAdDismissedFullScreenContent: (dismissedAd) {
-        dismissedAd.dispose();
-        complete(
-          rewardEarned
-              ? CustomPredictionRewardResult.rewarded
-              : CustomPredictionRewardResult.dismissed,
+      void complete(CustomPredictionRewardResult value) {
+        if (!result.isCompleted) result.complete(value);
+      }
+
+      loadedAd.fullScreenContentCallback =
+          FullScreenContentCallback<RewardedAd>(
+            onAdDismissedFullScreenContent: (dismissedAd) {
+              dismissedAd.dispose();
+              complete(
+                rewardEarned
+                    ? CustomPredictionRewardResult.rewarded
+                    : CustomPredictionRewardResult.dismissed,
+              );
+            },
+            onAdFailedToShowFullScreenContent: (failedAd, _) {
+              failedAd.dispose();
+              complete(CustomPredictionRewardResult.failed);
+            },
+          );
+
+      try {
+        await loadedAd.show(
+          onUserEarnedReward: (_, _) {
+            rewardEarned = true;
+          },
         );
-      },
-      onAdFailedToShowFullScreenContent: (failedAd, _) {
-        failedAd.dispose();
+      } catch (_) {
+        loadedAd.dispose();
         complete(CustomPredictionRewardResult.failed);
-      },
-    );
+      }
 
-    try {
-      await loadedAd.show(
-        onUserEarnedReward: (_, _) {
-          rewardEarned = true;
+      return await result.future.timeout(
+        const Duration(minutes: 5),
+        onTimeout: () {
+          loadedAd.dispose();
+          return CustomPredictionRewardResult.failed;
         },
       );
     } catch (_) {
-      loadedAd.dispose();
-      complete(CustomPredictionRewardResult.failed);
+      return CustomPredictionRewardResult.failed;
+    } finally {
+      if (appMuted) {
+        try {
+          await _setAppMuted(false);
+        } catch (_) {
+          // 広告結果を優先し、音量状態の復元失敗では上書きしない。
+        }
+      }
     }
-
-    return result.future.timeout(
-      const Duration(minutes: 5),
-      onTimeout: () {
-        loadedAd.dispose();
-        return CustomPredictionRewardResult.failed;
-      },
-    );
   }
 
   static Future<RewardedAd?> _defaultLoadAd(String adUnitId) {

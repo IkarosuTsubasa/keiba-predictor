@@ -40,12 +40,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('My予測を利用中'), findsOneWidget);
+    expect(find.text('あなたの予測スタイル'), findsOneWidget);
     expect(
       find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
       findsOneWidget,
     );
-    expect(find.text('今日の予測を\n自分の基準で'), findsOneWidget);
+    expect(find.text('自分の読みを\n勝負の印へ'), findsOneWidget);
     expect(find.text('設定を変更'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
     expect(find.text('日付を選ぶ'), findsNothing);
@@ -53,11 +53,11 @@ void main() {
     expect(find.text('99.9'), findsNothing);
 
     await tester.scrollUntilVisible(
-      find.text('My予測結果'),
+      find.text('My予測の結論'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsOneWidget);
     expect(find.text('ホースA'), findsOneWidget);
     expect(find.text('◎'), findsOneWidget);
     expect(find.text('99.9'), findsNothing);
@@ -85,19 +85,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('予測設定がまだ保存されていません'), findsOneWidget);
-    expect(find.text('設定を始める'), findsOneWidget);
-    expect(find.text('My予測結果'), findsNothing);
+    expect(find.text('まずは、あなたの勝負基準を'), findsOneWidget);
+    expect(find.text('勝負基準をつくる'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsNothing);
     expect(dataSource.fetchCount, 0);
 
-    await tester.tap(find.text('設定を始める'));
+    await tester.tap(find.text('勝負基準をつくる'));
     await tester.pumpAndSettle();
 
     expect(find.text('予測設定'), findsOneWidget);
     expect(find.text('現在のバランスプロフィール'), findsNothing);
     expect(find.text('My予測'), findsOneWidget);
     expect(find.byType(Slider), findsNWidgets(7));
-    expect(find.text('My予測結果'), findsNothing);
+    expect(find.text('My予測の結論'), findsNothing);
 
     await tester.drag(find.byType(Slider).first, const Offset(220, 0));
     await tester.pumpAndSettle();
@@ -107,8 +107,8 @@ void main() {
     expect(settingsStore.isConfigured, isTrue);
     expect(settingsStore.parameters.abilityLevel, 2);
     expect(dataSource.fetchCount, 1);
-    expect(find.text('My予測を利用中'), findsOneWidget);
-    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('あなたの予測スタイル'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
   });
 
@@ -130,9 +130,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('日付を選ぶ'), findsNothing);
-    expect(find.text('本日のレース情報はまだ準備できていません。しばらくお待ちください。'), findsOneWidget);
-    expect(find.text('今日の予測はもうすぐ'), findsOneWidget);
-    expect(find.text('最新情報を確認'), findsOneWidget);
+    expect(
+      find.text('予測できるレース情報はまだ公開されていません。情報が揃うまで、予測バランスを整えてお待ちください。'),
+      findsOneWidget,
+    );
+    expect(find.text('次の勝負に備えましょう'), findsOneWidget);
+    expect(find.text('レース情報を更新'), findsOneWidget);
   });
 
   testWidgets('リワード獲得後に1時間解锁并开始获取预测', (tester) async {
@@ -159,11 +162,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('動画を見て1時間使う'), findsOneWidget);
-    expect(find.text('My予測結果'), findsNothing);
+    expect(find.text('動画を見てMy予測を解放'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsNothing);
     expect(dataSource.fetchCount, 0);
 
-    await tester.tap(find.text('動画を見て1時間使う'));
+    await tester.tap(find.text('動画を見てMy予測を解放'));
     await tester.pumpAndSettle();
 
     expect(accessStore.unlockedUntil, now.add(const Duration(hours: 1)));
@@ -171,7 +174,7 @@ void main() {
       find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
       findsOneWidget,
     );
-    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsOneWidget);
     expect(dataSource.fetchCount, 1);
   });
 
@@ -244,20 +247,28 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('あなたの基準で再予測中'), findsOneWidget);
-    expect(find.text('レース条件を読み解いています'), findsOneWidget);
-    expect(find.text('My予測結果'), findsNothing);
+    expect(find.text('あなたの読みを反映中'), findsOneWidget);
+    expect(find.text('My予測の結論'), findsNothing);
+    final calculationMessage = find.descendant(
+      of: find.byKey(const Key('prediction-calculation-message')),
+      matching: find.byType(Text),
+    );
+    final firstMessage = tester.widget<Text>(calculationMessage).data;
 
     await tester.pump(const Duration(milliseconds: 1100));
-    expect(find.text('あなたの予測バランスを反映しています'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 250));
+    final secondMessage = tester.widget<Text>(calculationMessage).data;
+    expect(secondMessage, isNot(firstMessage));
 
-    await tester.pump(const Duration(milliseconds: 1400));
-    expect(find.text('各馬を比較し、最終順位を導いています'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump(const Duration(milliseconds: 250));
+    final thirdMessage = tester.widget<Text>(calculationMessage).data;
+    expect(thirdMessage, isNot(secondMessage));
 
-    await tester.pump(const Duration(milliseconds: 1300));
+    await tester.pump(const Duration(milliseconds: 1000));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('あなたの基準で再予測中'), findsNothing);
-    expect(find.text('My予測結果'), findsOneWidget);
+    expect(find.text('あなたの読みを反映中'), findsNothing);
+    expect(find.text('My予測の結論'), findsOneWidget);
     expect(find.text('ホースC'), findsOneWidget);
   });
 
@@ -285,13 +296,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('動画を見て1時間使う'));
+    await tester.tap(find.text('動画を見てMy予測を解放'));
     await tester.pumpAndSettle();
 
     expect(accessStore.unlockedUntil, isNull);
     expect(dataSource.fetchCount, 0);
-    expect(find.text('動画を最後まで見ると、1時間利用できます。'), findsOneWidget);
-    expect(find.text('動画を見て1時間使う'), findsOneWidget);
+    expect(find.text('最後まで視聴すると、My予測を1時間解放できます。'), findsOneWidget);
+    expect(find.text('動画を見てMy予測を解放'), findsOneWidget);
   });
 }
 

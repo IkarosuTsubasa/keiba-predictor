@@ -39,10 +39,14 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   static const _navy = Color(0xFF07111F);
   static const _accent = Color(0xFF0D6E6E);
   static const _muted = Color(0xFF66746F);
-  static const _calculationMessages = [
-    'レース条件を読み解いています',
-    'あなたの予測バランスを反映しています',
-    '各馬を比較し、最終順位を導いています',
+  static const _calculationMessageSets = <List<String>>[
+    ['レース条件を丁寧に読み解いています', 'あなたの予測バランスを重ねています', '各馬の差を見極め、順位を整えています'],
+    ['馬場状態に隠れたヒントを探しています', 'あなたが重視する条件を一頭ずつ反映しています', '最後の決め手を照らし合わせています'],
+    ['スタート後のレース展開を組み立てています', 'あなたらしい勝ち筋へ評価を寄せています', 'ゴール前の攻防までじっくり比較しています'],
+    ['人気だけでは見えない材料を拾っています', 'あなたのこだわりで評価を磨いています', '意外な一頭まで最終確認しています'],
+    ['距離と馬場の相性を探っています', '7つの基準を一頭ずつ組み合わせています', '本命候補のわずかな差を見極めています'],
+    ['勝負を分ける一瞬を探っています', 'あなたの感覚を予測へ変換しています', '伏兵を含めて、最後の結論を導いています'],
+    ['各馬の強みと不安材料を整理しています', '重視する要素から評価を組み直しています', 'あなただけの印を慎重に選んでいます'],
   ];
 
   late final CustomPredictionDataSource _dataSource;
@@ -67,6 +71,8 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   bool _rewardAdRequiredForSession = true;
   int _calculationPhase = 0;
   int _calculationSerial = 0;
+  int _lastCalculationMessageSetIndex = -1;
+  List<String> _activeCalculationMessages = _calculationMessageSets.first;
   DateTime? _unlockedUntil;
   Timer? _accessExpiryTimer;
   Timer? _calculationPhaseTimer;
@@ -231,7 +237,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
         _unlocking = false;
       });
       _scheduleAccessExpiry();
-      _showMessage('My予測を1時間利用できます。');
+      _showMessage('My予測が解放されました。1時間自由にお楽しみください。');
       await _loadDay();
       return;
     }
@@ -239,7 +245,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     setState(() => _unlocking = false);
     switch (result) {
       case CustomPredictionRewardResult.dismissed:
-        _showMessage('動画を最後まで見ると、1時間利用できます。');
+        _showMessage('最後まで視聴すると、My予測を1時間解放できます。');
         break;
       case CustomPredictionRewardResult.unavailable:
         _showMessage('現在、動画を準備できません。しばらくしてからお試しください。');
@@ -304,6 +310,16 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     _calculationProgressController.stop();
   }
 
+  List<String> _pickCalculationMessages() {
+    final setCount = _calculationMessageSets.length;
+    var index = _random.nextInt(setCount);
+    if (setCount > 1 && index == _lastCalculationMessageSetIndex) {
+      index = (index + 1 + _random.nextInt(setCount - 1)) % setCount;
+    }
+    _lastCalculationMessageSetIndex = index;
+    return _calculationMessageSets[index];
+  }
+
   void _beginPredictionCalculation({
     required String? course,
     required String? raceId,
@@ -324,11 +340,12 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
     final duration = requestedDuration > Duration.zero
         ? requestedDuration
         : const Duration(milliseconds: 1);
+    final calculationMessages = _pickCalculationMessages();
     final calculationSerial = ++_calculationSerial;
     final phaseInterval = Duration(
       milliseconds: math.max(
         1,
-        duration.inMilliseconds ~/ _calculationMessages.length,
+        duration.inMilliseconds ~/ calculationMessages.length,
       ),
     );
     setState(() {
@@ -336,6 +353,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
       _selectedRaceId = raceId;
       _calculatingPrediction = true;
       _calculationPhase = 0;
+      _activeCalculationMessages = calculationMessages;
     });
     _calculationProgressController.duration = duration;
     unawaited(_calculationProgressController.forward(from: 0));
@@ -345,7 +363,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
         timer.cancel();
         return;
       }
-      if (_calculationPhase >= _calculationMessages.length - 1) {
+      if (_calculationPhase >= _activeCalculationMessages.length - 1) {
         timer.cancel();
         return;
       }
@@ -520,7 +538,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 _HeroStatusBadge(label: 'My予測'),
                 const Spacer(),
                 Text(
-                  ready ? '今日の予測を\n自分の基準で' : '自分だけの予測を\n始めよう',
+                  ready ? '自分の読みを\n勝負の印へ' : '自分の読みで\n勝負を組み立てる',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
@@ -531,7 +549,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  ready ? 'あなたの感覚から、今日だけの答えを導き出します' : 'あなたの感覚を映した、特別な予測体験へ',
+                  ready ? '重視する材料から、狙いたい一頭を導き出します' : '7つの基準から、あなただけの印をつくります',
                   style: const TextStyle(
                     color: Color(0xFFD5E2EA),
                     fontSize: 12,
@@ -554,7 +572,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           children: [
             CircularProgressIndicator(color: _accent),
             SizedBox(height: 14),
-            Text('予測設定を読み込んでいます'),
+            Text('あなたの予測スタイルを読み込んでいます'),
           ],
         ),
       ),
@@ -574,7 +592,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 SizedBox(width: 13),
                 Expanded(
                   child: Text(
-                    '予測設定がまだ保存されていません',
+                    'まずは、あなたの勝負基準を',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -582,7 +600,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
             ),
             const SizedBox(height: 18),
             const Text(
-              '最初に7つの要素を設定すると、保存した内容で本日のMy予測を作成します。',
+              '地力・近走・適性など7つの要素にあなたの読みを反映し、レースごとのMy予測を組み立てます。',
               style: TextStyle(color: _muted, height: 1.55, fontSize: 14),
             ),
             const SizedBox(height: 20),
@@ -592,7 +610,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 key: const Key('start-custom-prediction-settings'),
                 onPressed: _openSettings,
                 icon: const Icon(Icons.tune_rounded),
-                label: const Text('設定を始める'),
+                label: const Text('勝負基準をつくる'),
                 style: FilledButton.styleFrom(
                   backgroundColor: _accent,
                   minimumSize: const Size.fromHeight(50),
@@ -629,7 +647,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _hasAccess ? 'My予測を利用中' : '予測バランスを保存済み',
+                        _hasAccess ? 'あなたの予測スタイル' : '予測スタイルを保存済み',
                         style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
@@ -637,7 +655,9 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _hasAccess ? _accessUntilLabel : 'いつでも同じ設定から再開できます',
+                        _hasAccess
+                            ? _accessUntilLabel
+                            : '保存した基準は、次の予測にもそのまま使えます',
                         style: const TextStyle(color: _muted, fontSize: 12),
                       ),
                     ],
@@ -670,7 +690,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    '現在の予測バランス',
+                    'あなたが重視するポイント',
                     style: TextStyle(
                       color: _muted,
                       fontSize: 11,
@@ -721,17 +741,17 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               children: [
                 _FeatureIcon(icon: Icons.play_circle_outline_rounded),
                 SizedBox(width: 12),
-                _StatusPill(label: '1時間アクセス'),
+                _StatusPill(label: '1時間フリー'),
               ],
             ),
             const SizedBox(height: 18),
             const Text(
-              '動画を見て、予測をひらく',
+              'My予測を解放する',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 9),
             const Text(
-              '短い動画を最後まで見ると、My予測を1時間自由に利用できます。',
+              '動画を最後まで見ると、1時間、気になるレースを自分の基準で何度でも予測できます。',
               style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
             ),
             const SizedBox(height: 18),
@@ -751,7 +771,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                       )
                     : const Icon(Icons.play_arrow_rounded),
                 label: Text(
-                  _unlocking ? '動画を準備しています' : '動画を見て1時間使う',
+                  _unlocking ? '動画を準備中' : '動画を見てMy予測を解放',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 style: FilledButton.styleFrom(
@@ -787,7 +807,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           children: [
             CircularProgressIndicator(color: _accent),
             SizedBox(height: 14),
-            Text('レースデータを読み込んでいます'),
+            Text('勝負材料を集めています'),
           ],
         ),
       ),
@@ -802,7 +822,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           children: [
             const Icon(Icons.cloud_off_outlined, color: _muted, size: 34),
             const SizedBox(height: 10),
-            Text(_errorMessage ?? '予測データを取得できませんでした。'),
+            Text(_errorMessage ?? 'レース情報を取得できませんでした。'),
             const SizedBox(height: 14),
             FilledButton.icon(
               onPressed: _loadDay,
@@ -826,17 +846,17 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               children: [
                 _FeatureIcon(icon: Icons.schedule_rounded),
                 SizedBox(width: 12),
-                _StatusPill(label: '本日分を準備中'),
+                _StatusPill(label: 'レース情報を確認中'),
               ],
             ),
             const SizedBox(height: 20),
             const Text(
-              '今日の予測はもうすぐ',
+              '次の勝負に備えましょう',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 9),
             const Text(
-              '本日のレース情報はまだ準備できていません。しばらくお待ちください。',
+              '予測できるレース情報はまだ公開されていません。情報が揃うまで、予測バランスを整えてお待ちください。',
               style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
             ),
             const SizedBox(height: 14),
@@ -846,7 +866,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '準備が整い次第、あなただけの予測が完成します',
+                    '公開され次第、あなたの基準でMy予測を組み立てられます',
                     style: TextStyle(color: _accent, fontSize: 12),
                   ),
                 ),
@@ -859,7 +879,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                 onPressed: _loadDay,
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text(
-                  '最新情報を確認',
+                  'レース情報を更新',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 style: OutlinedButton.styleFrom(
@@ -919,7 +939,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '本日のレースを選択',
+              '狙うレースを選ぶ',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             if (courses.length > 1) ...[
@@ -947,7 +967,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               initialValue: selectedRace?.raceId,
               isExpanded: true,
               decoration: const InputDecoration(
-                labelText: '対象レース',
+                labelText: 'レースを選択',
                 border: OutlineInputBorder(),
               ),
               items: [
@@ -991,19 +1011,20 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               children: [
                 _FeatureIcon(icon: Icons.psychology_alt_rounded),
                 SizedBox(width: 12),
-                _StatusPill(label: 'カスタム演算'),
+                _StatusPill(label: 'My予測分析中'),
               ],
             ),
             const SizedBox(height: 17),
             const Text(
-              'あなたの基準で再予測中',
+              'あなたの読みを反映中',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             AnimatedSwitcher(
+              key: const Key('prediction-calculation-message'),
               duration: const Duration(milliseconds: 220),
               child: Text(
-                _calculationMessages[_calculationPhase],
+                _activeCalculationMessages[_calculationPhase],
                 key: ValueKey(_calculationPhase),
                 style: const TextStyle(
                   color: _muted,
@@ -1032,7 +1053,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               children: [
                 for (
                   var index = 0;
-                  index < _calculationMessages.length;
+                  index < _activeCalculationMessages.length;
                   index++
                 ) ...[
                   AnimatedContainer(
@@ -1046,13 +1067,13 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                       borderRadius: BorderRadius.circular(4),
                     ),
                   ),
-                  if (index < _calculationMessages.length - 1)
+                  if (index < _activeCalculationMessages.length - 1)
                     const SizedBox(width: 6),
                 ],
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text(
-                    'まもなく、あなただけの予測が完成します',
+                    '狙いを一頭ずつ絞り込んでいます',
                     style: TextStyle(color: _accent, fontSize: 11),
                   ),
                 ),
@@ -1076,17 +1097,17 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'My予測結果',
+              'My予測の結論',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             const Text(
-              'あなたの予測バランスから導き出した結果です',
+              'あなたが重視した勝負材料から導いた注目馬です',
               style: TextStyle(color: _muted, fontSize: 13),
             ),
             const SizedBox(height: 14),
             if (picks.isEmpty)
-              const Text('表示できる出走馬がありません。')
+              const Text('予測できる出走馬がありません。')
             else
               for (var index = 0; index < picks.length; index++) ...[
                 _PredictionPickRow(pick: picks[index]),
@@ -1095,7 +1116,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               ],
             const SizedBox(height: 14),
             const Text(
-              'この結果は設定した条件による参考情報です。投票はご自身の判断で行ってください。',
+              'オッズや直前情報も見ながら、最後の買い目はご自身でご判断ください。',
               style: TextStyle(color: _muted, fontSize: 12, height: 1.45),
             ),
           ],
