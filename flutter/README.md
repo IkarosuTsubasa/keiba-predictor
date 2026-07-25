@@ -56,9 +56,9 @@ AdMob の「プライバシーとメッセージ」で配信地域に必要な�
 
 現在の iOS 実装は IDFA / ATT を要求しません。AdMob 側で IDFA メッセージを有効にする場合は、先に `NSUserTrackingUsageDescription` と ATT の実装を追加し、App Store Connect のプライバシー回答も実際の動作に合わせて更新してください。
 
-### iOS の My予測リワード制御
+### My予測のリワード広告
 
-Firebase Remote Config の Boolean パラメータ `iOSRewardAD` で、iOS の My予測にリワード広告を必須とするかを制御します。`false` の場合は広告なしで利用でき、`true` の場合は動画を最後まで視聴すると1時間利用できます。アプリ内の既定値および Remote Config の取得失敗時は `false` です。Android はこのパラメータを参照せず、従来どおりリワード広告を必須とします。
+iOS・Android ともに My予測の利用にはリワード広告の視聴が必要です。動画を最後まで視聴すると、My予測を1時間利用できます。
 
 ## ローカル実行
 

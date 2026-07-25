@@ -80,6 +80,55 @@ void main() {
     expect(service.canRequestAds.value, isFalse);
     service.dispose();
   });
+
+  test('初回のネットワーク失敗後は復帰時に同意情報と広告初期化を再試行する', () async {
+    final consentInformation = _FakeConsentInformation(
+      updateSucceeds: false,
+      canRequestAdsValue: false,
+    );
+    var mobileAdsInitializationCount = 0;
+    final service = AdConsentService(
+      consentInformation: consentInformation,
+      loadRequiredConsentForm: () async => null,
+      initializeMobileAds: () async {
+        mobileAdsInitializationCount += 1;
+      },
+      adsEnabled: () => true,
+    );
+
+    await service.initialize();
+
+    expect(service.canRequestAds.value, isFalse);
+    expect(consentInformation.updateCount, 1);
+
+    consentInformation
+      ..updateSucceeds = true
+      ..canRequestAdsValue = true;
+    await service.retryAfterNetworkRecovery();
+
+    expect(consentInformation.updateCount, 2);
+    expect(mobileAdsInitializationCount, 1);
+    expect(service.canRequestAds.value, isTrue);
+    service.dispose();
+  });
+
+  test('広告が利用可能な場合はネットワーク復帰処理で UMP を再取得しない', () async {
+    final consentInformation = _FakeConsentInformation(
+      canRequestAdsValue: true,
+    );
+    final service = AdConsentService(
+      consentInformation: consentInformation,
+      loadRequiredConsentForm: () async => null,
+      initializeMobileAds: () async {},
+      adsEnabled: () => true,
+    );
+
+    await service.initialize();
+    await service.retryAfterNetworkRecovery();
+
+    expect(consentInformation.updateCount, 1);
+    service.dispose();
+  });
 }
 
 class _FakeConsentInformation implements ConsentInformation {
@@ -90,8 +139,8 @@ class _FakeConsentInformation implements ConsentInformation {
         PrivacyOptionsRequirementStatus.notRequired,
   });
 
-  final bool updateSucceeds;
-  final bool canRequestAdsValue;
+  bool updateSucceeds;
+  bool canRequestAdsValue;
   final PrivacyOptionsRequirementStatus privacyOptionsRequirementStatus;
   int updateCount = 0;
 

@@ -69,9 +69,8 @@ class NativePlatformBridge {
       runtimeConfig = values == null
           ? null
           : NativeRuntimeConfig.fromMap(values);
-    } on PlatformException {
-      runtimeConfig = null;
-    } on MissingPluginException {
+    } on Object catch (error) {
+      debugPrint('Native runtime configuration is unavailable: $error');
       runtimeConfig = null;
     }
   }

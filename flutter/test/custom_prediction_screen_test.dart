@@ -5,7 +5,6 @@ import 'package:ikaimo_keiba/src/screens/custom_prediction_screen.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_access.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_service.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_settings.dart';
-import 'package:ikaimo_keiba/src/services/reward_ad_requirement.dart';
 
 void main() {
   final now = DateTime.utc(2026, 7, 20, 12);
@@ -154,7 +153,6 @@ void main() {
             rewardedGateway: const _FakeRewardedGateway(
               CustomPredictionRewardResult.rewarded,
             ),
-            rewardAdRequirement: const _FakeRewardAdRequirement(true),
             now: () => now,
           ),
         ),
@@ -176,42 +174,6 @@ void main() {
     );
     expect(find.text('My予測の結論'), findsOneWidget);
     expect(dataSource.fetchCount, 1);
-  });
-
-  testWidgets('iOSRewardAD=false时无需广告即可使用My预测', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(430, 1100));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final dataSource = _FakeDataSource();
-    final accessStore = _MemoryAccessStore();
-    final rewardedGateway = _CountingRewardedGateway();
-    final rewardAdRequirement = _RefreshingRewardAdRequirement(
-      initialValue: true,
-      refreshedValue: false,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CustomPredictionScreen(
-            dataSource: dataSource,
-            settingsStore: _MemorySettingsStore(isConfigured: true),
-            accessStore: accessStore,
-            rewardedGateway: rewardedGateway,
-            rewardAdRequirement: rewardAdRequirement,
-            now: () => now,
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('unlock-custom-prediction')), findsNothing);
-    expect(find.text('リワード広告なしで利用できます'), findsOneWidget);
-    expect(find.text('My予測の結論'), findsOneWidget);
-    expect(dataSource.fetchCount, 1);
-    expect(rewardedGateway.showCalls, 0);
-    expect(accessStore.unlockedUntil, isNull);
-    expect(rewardAdRequirement.refreshCalls, 1);
   });
 
   testWidgets('レース选择后分阶段演算并在完成后显示对应结果', (tester) async {
@@ -288,7 +250,6 @@ void main() {
             rewardedGateway: const _FakeRewardedGateway(
               CustomPredictionRewardResult.dismissed,
             ),
-            rewardAdRequirement: const _FakeRewardAdRequirement(true),
             now: () => now,
           ),
         ),
@@ -443,43 +404,4 @@ class _FakeRewardedGateway implements CustomPredictionRewardedGateway {
 
   @override
   Future<CustomPredictionRewardResult> showRewardedAd() async => result;
-}
-
-class _CountingRewardedGateway implements CustomPredictionRewardedGateway {
-  int showCalls = 0;
-
-  @override
-  Future<CustomPredictionRewardResult> showRewardedAd() async {
-    showCalls += 1;
-    return CustomPredictionRewardResult.rewarded;
-  }
-}
-
-class _FakeRewardAdRequirement implements RewardAdRequirement {
-  const _FakeRewardAdRequirement(this.isRequired);
-
-  @override
-  final bool isRequired;
-
-  @override
-  Future<void> refresh() async {}
-}
-
-class _RefreshingRewardAdRequirement implements RewardAdRequirement {
-  _RefreshingRewardAdRequirement({
-    required bool initialValue,
-    required this.refreshedValue,
-  }) : isRequired = initialValue;
-
-  final bool refreshedValue;
-  int refreshCalls = 0;
-
-  @override
-  bool isRequired;
-
-  @override
-  Future<void> refresh() async {
-    refreshCalls += 1;
-    isRequired = refreshedValue;
-  }
 }

@@ -30,6 +30,9 @@ class AppConfig {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8000/keiba';
     }
-    return 'http://localhost:8000/keiba';
+    // iOS normally receives its URL from AppDelegate. If that bridge is ever
+    // unavailable on a physical device, fail safe to production instead of
+    // trying to reach localhost on the phone itself.
+    return productionBaseWebUrl;
   }
 }

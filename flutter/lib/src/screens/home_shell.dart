@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
+import '../services/ad_consent_service.dart';
 import '../services/push_notification_service.dart';
 import '../web/app_web.dart';
 import '../web/web_content_view.dart';
@@ -20,7 +21,7 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   static const _webDestinationCount = 3;
   static const _customPredictionIndex = 3;
   static const _moreIndex = 4;
@@ -65,10 +66,12 @@ class _HomeShellState extends State<HomeShell> {
   int _lastWebIndex = 0;
   bool _customPredictionActivated = false;
   StreamSubscription<NotificationDestination>? _notificationSubscription;
+  Future<void>? _networkRecoveryInProgress;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _baseUri = Uri.parse(AppConfig.baseWebUrl);
     _webChrome = AppWeb.chromeFor(
       AppWeb.topLevelUri(AppConfig.baseWebUrl, AppSection.races),
@@ -89,8 +92,45 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notificationSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(_recoverAfterNetworkPermission());
+      }
+    });
+  }
+
+  Future<void> _recoverAfterNetworkPermission() {
+    final existing = _networkRecoveryInProgress;
+    if (existing != null) return existing;
+
+    late final Future<void> operation;
+    operation = _performNetworkRecovery().whenComplete(() {
+      if (identical(_networkRecoveryInProgress, operation)) {
+        _networkRecoveryInProgress = null;
+      }
+    });
+    _networkRecoveryInProgress = operation;
+    return operation;
+  }
+
+  Future<void> _performNetworkRecovery() async {
+    final web = _webKey.currentState;
+    try {
+      await Future.wait([
+        AdConsentService.instance.retryAfterNetworkRecovery(),
+        if (web != null) web.retryAfterNetworkInterruption(),
+      ]);
+    } catch (error) {
+      debugPrint('Network recovery retry failed: $error');
+    }
   }
 
   Future<void> _openNotification(NotificationDestination destination) async {

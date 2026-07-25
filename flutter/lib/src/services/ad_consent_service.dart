@@ -36,26 +36,57 @@ class AdConsentService {
   final privacyOptionsRequired = ValueNotifier<bool>(false);
 
   Future<void>? _startupInitialization;
+  Future<void>? _consentFlowInProgress;
   Future<void>? _mobileAdsInitialization;
+  bool _needsNetworkRecovery = true;
 
   Future<void> initialize() {
     if (!_adsEnabled()) return Future.value();
-    return _startupInitialization ??= _initializeConsentFlow();
+    return _startupInitialization ??= _runConsentFlow();
+  }
+
+  /// Re-runs UMP only when its previous attempt could not establish whether
+  /// ads may be requested. This is used after iOS returns from its first-use
+  /// network permission alert.
+  Future<void> retryAfterNetworkRecovery() {
+    if (!_adsEnabled()) return Future.value();
+    final existing = _consentFlowInProgress;
+    if (existing != null) return existing;
+    if (canRequestAds.value || !_needsNetworkRecovery) {
+      return Future.value();
+    }
+    return _runConsentFlow();
+  }
+
+  Future<void> _runConsentFlow() {
+    final existing = _consentFlowInProgress;
+    if (existing != null) return existing;
+
+    late final Future<void> operation;
+    operation = _initializeConsentFlow().whenComplete(() {
+      if (identical(_consentFlowInProgress, operation)) {
+        _consentFlowInProgress = null;
+      }
+    });
+    _consentFlowInProgress = operation;
+    return operation;
   }
 
   Future<void> _initializeConsentFlow() async {
     final consentInfoUpdated = await _requestConsentInfoUpdate();
+    FormError? formError;
     if (consentInfoUpdated) {
-      final formError = await _guardedFormPresentation(
-        _loadRequiredConsentForm,
-      );
+      formError = await _guardedFormPresentation(_loadRequiredConsentForm);
       if (formError != null) {
         debugPrint(
           'Ad consent form could not be presented: ${formError.message}',
         );
       }
     }
-    await _refreshEligibility();
+    final eligibilityChecked = await _refreshEligibility();
+    _needsNetworkRecovery =
+        !eligibilityChecked ||
+        (!canRequestAds.value && (!consentInfoUpdated || formError != null));
   }
 
   Future<bool> _requestConsentInfoUpdate() async {
@@ -91,7 +122,7 @@ class AdConsentService {
     }
   }
 
-  Future<void> _refreshEligibility() async {
+  Future<bool> _refreshEligibility() async {
     try {
       final requirement = await _consentInformation
           .getPrivacyOptionsRequirementStatus();
@@ -105,13 +136,15 @@ class AdConsentService {
     try {
       if (!await _consentInformation.canRequestAds()) {
         canRequestAds.value = false;
-        return;
+        return true;
       }
       await _ensureMobileAdsInitialized();
       canRequestAds.value = true;
+      return true;
     } catch (error) {
       debugPrint('Ads remain disabled because consent is unavailable: $error');
       canRequestAds.value = false;
+      return false;
     }
   }
 
