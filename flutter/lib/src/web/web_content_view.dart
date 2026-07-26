@@ -27,9 +27,17 @@ class WebContentView extends StatefulWidget {
 
 class WebContentViewState extends State<WebContentView> {
   static const _pullThreshold = 76.0;
+  static const _automaticRetryDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+  ];
 
   late final WebViewController _controller;
+  late Uri _lastRequestedUri;
   Timer? _slowLoadTimer;
+  Timer? _automaticRetryTimer;
+  int _automaticRetryAttempt = 0;
   int _progress = 0;
   bool _firstPageFinished = false;
   bool _showSlowLoadActions = false;
@@ -40,6 +48,7 @@ class WebContentViewState extends State<WebContentView> {
   @override
   void initState() {
     super.initState();
+    _lastRequestedUri = AppWeb.withAppMarker(widget.initialUri);
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFFF3F6F8))
@@ -72,20 +81,64 @@ class WebContentViewState extends State<WebContentView> {
         );
       }
     }
-    await _controller.loadRequest(AppWeb.withAppMarker(widget.initialUri));
+    await _controller.loadRequest(_lastRequestedUri);
   }
 
   @override
   void dispose() {
     _slowLoadTimer?.cancel();
+    _automaticRetryTimer?.cancel();
     super.dispose();
   }
 
   Future<void> load(Uri uri) async {
-    await _controller.loadRequest(AppWeb.withAppMarker(uri));
+    _lastRequestedUri = AppWeb.withAppMarker(uri);
+    await _controller.loadRequest(_lastRequestedUri);
   }
 
-  Future<void> reload() => _controller.reload();
+  Future<void> reload() {
+    if (_mainFrameError != null) {
+      return retryAfterNetworkInterruption();
+    }
+    return _controller.reload();
+  }
+
+  /// Retries only when the current page never completed or its main request
+  /// failed. iOS temporarily suspends networking while its first-use network
+  /// permission alert is visible, but WebKit does not automatically replay the
+  /// request after the user allows access.
+  Future<void> retryAfterNetworkInterruption({bool resetBackoff = true}) async {
+    if (_mainFrameError == null && _firstPageFinished) return;
+
+    _automaticRetryTimer?.cancel();
+    _automaticRetryTimer = null;
+    if (resetBackoff) {
+      _automaticRetryAttempt = 0;
+    }
+    if (mounted) {
+      setState(() {
+        _mainFrameError = null;
+        _firstPageFinished = false;
+        _showSlowLoadActions = false;
+        _progress = 1;
+      });
+    }
+    _scheduleSlowLoadActions();
+    try {
+      await _controller.loadRequest(_lastRequestedUri);
+    } catch (error) {
+      _slowLoadTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _firstPageFinished = true;
+          _showSlowLoadActions = false;
+          _mainFrameError = error.toString();
+          _progress = 100;
+        });
+      }
+      _scheduleAutomaticRetry();
+    }
+  }
 
   Future<bool> canGoBack() => _controller.canGoBack();
 
@@ -99,6 +152,10 @@ class WebContentViewState extends State<WebContentView> {
   }
 
   void _onPageStarted(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri != null && AppWeb.isInternalUri(uri, widget.baseUri)) {
+      _lastRequestedUri = uri;
+    }
     _scheduleSlowLoadActions();
     if (!mounted) return;
     setState(() {
@@ -110,6 +167,9 @@ class WebContentViewState extends State<WebContentView> {
 
   void _onPageFinished(String url) {
     _slowLoadTimer?.cancel();
+    _automaticRetryTimer?.cancel();
+    _automaticRetryTimer = null;
+    _automaticRetryAttempt = 0;
     if (!mounted) return;
     setState(() {
       _firstPageFinished = true;
@@ -128,6 +188,7 @@ class WebContentViewState extends State<WebContentView> {
       _mainFrameError = error.description;
       _progress = 100;
     });
+    _scheduleAutomaticRetry();
   }
 
   NavigationDecision _onNavigationRequest(NavigationRequest request) {
@@ -144,7 +205,8 @@ class WebContentViewState extends State<WebContentView> {
     if (AppWeb.isInternalUri(uri, widget.baseUri)) {
       final marked = AppWeb.withAppMarker(uri);
       if (marked != uri) {
-        unawaited(_controller.loadRequest(marked));
+        _lastRequestedUri = marked;
+        unawaited(_controller.loadRequest(_lastRequestedUri));
         return NavigationDecision.prevent;
       }
       return NavigationDecision.navigate;
@@ -174,6 +236,21 @@ class WebContentViewState extends State<WebContentView> {
     _slowLoadTimer = Timer(const Duration(seconds: 10), () {
       if (!mounted || _firstPageFinished) return;
       setState(() => _showSlowLoadActions = true);
+    });
+  }
+
+  void _scheduleAutomaticRetry() {
+    if (!mounted ||
+        _automaticRetryTimer != null ||
+        _automaticRetryAttempt >= _automaticRetryDelays.length) {
+      return;
+    }
+    final delay = _automaticRetryDelays[_automaticRetryAttempt];
+    _automaticRetryAttempt += 1;
+    _automaticRetryTimer = Timer(delay, () {
+      _automaticRetryTimer = null;
+      if (!mounted || _mainFrameError == null) return;
+      unawaited(retryAfterNetworkInterruption(resetBackoff: false));
     });
   }
 

@@ -91,7 +91,7 @@ import WebKit
   }
 
   private func runtimeConfig(result: @escaping FlutterResult) {
-    #if DEBUG
+    #if DEBUG && targetEnvironment(simulator)
       let baseWebURL = "http://localhost:8000/keiba"
     #else
       let baseWebURL = "https://www.ikaimo-ai.com/keiba"
