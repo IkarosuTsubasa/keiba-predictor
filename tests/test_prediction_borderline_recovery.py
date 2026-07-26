@@ -131,6 +131,10 @@ class PredictionBorderlineRecoveryTests(unittest.TestCase):
         ]
 
         with (
+            patch.dict(
+                "os.environ",
+                {"KEIBA_SCOPE_RERANKER_ENABLED": "0"},
+            ),
             patch("keiba_llm_agent.scoring.recent_run_scorer.score_horse_by_recent_runs", side_effect=lambda horse, race_info, lessons=None, **kwargs: mock_scores[horse.horse_no]),
             patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_race_level_for_race", return_value=race_level),
             patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_pace_for_race", return_value=(pace_analyses, projection)),

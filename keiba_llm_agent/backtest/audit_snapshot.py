@@ -149,6 +149,7 @@ def build_backtest_audit_payload_from_dicts(
             "scoring_config": prediction_payload.get("scoring_config") or {},
             "market_signal_config": prediction_payload.get("market_signal_config") or {},
             "borderline_recovery_config": prediction_payload.get("borderline_recovery_config") or {},
+            "scope_reranker_config": prediction_payload.get("scope_reranker_config") or {},
             "horse_scores": list(prediction_payload.get("horse_scores") or []),
             "marks": dict(prediction_payload.get("marks") or {}),
         },
@@ -160,6 +161,7 @@ def build_backtest_audit_payload_from_dicts(
             "race_pace_projection": prediction_payload.get("race_pace_projection"),
             "race_simulation": prediction_payload.get("race_simulation"),
             "borderline_recovery_result": prediction_payload.get("borderline_recovery_result") or {},
+            "scope_reranker_result": prediction_payload.get("scope_reranker_result") or {},
         },
         "outcomes": {
             "result": result_payload,

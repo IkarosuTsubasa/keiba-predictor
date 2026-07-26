@@ -114,6 +114,8 @@ import WebKit
         "fcmCentralTopic": self.infoValue(ConfigKey.fcmCentralTopic),
         "fcmLocalTopic": self.infoValue(ConfigKey.fcmLocalTopic),
         "userAgent": userAgent,
+        "appVersionName": self.infoValue("CFBundleShortVersionString"),
+        "appVersionCode": self.infoValue("CFBundleVersion"),
       ])
     }
   }

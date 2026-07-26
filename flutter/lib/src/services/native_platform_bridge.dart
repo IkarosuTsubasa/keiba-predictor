@@ -20,6 +20,8 @@ class NativeRuntimeConfig {
     required this.fcmCentralTopic,
     required this.fcmLocalTopic,
     required this.userAgent,
+    required this.appVersionName,
+    required this.appVersionCode,
   });
 
   factory NativeRuntimeConfig.fromMap(Map<Object?, Object?> values) {
@@ -35,6 +37,8 @@ class NativeRuntimeConfig {
       fcmCentralTopic: value('fcmCentralTopic'),
       fcmLocalTopic: value('fcmLocalTopic'),
       userAgent: value('userAgent'),
+      appVersionName: value('appVersionName'),
+      appVersionCode: value('appVersionCode'),
     );
   }
 
@@ -46,6 +50,8 @@ class NativeRuntimeConfig {
   final String fcmCentralTopic;
   final String fcmLocalTopic;
   final String userAgent;
+  final String appVersionName;
+  final String appVersionCode;
 }
 
 class NativePlatformBridge {

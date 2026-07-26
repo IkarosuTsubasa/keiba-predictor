@@ -29,6 +29,7 @@ __pycache__/
 htmlcov/
 
 # Runtime logs / temp files
+output/
 *.log
 *.tmp
 *.bak

@@ -43,6 +43,28 @@ void main() {
     consentService.dispose();
   });
 
+  testWidgets('FCMトークン入口はバージョンを7回押すまで表示しない', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: MoreScreen(showNotificationSettings: false)),
+      ),
+    );
+
+    expect(find.byKey(const Key('copy-fcm-token-button')), findsNothing);
+    for (var index = 0; index < 6; index += 1) {
+      await tester.tap(find.byKey(const Key('app-version-label')));
+    }
+    await tester.pump();
+    expect(find.byKey(const Key('copy-fcm-token-button')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('app-version-label')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('developer-tools-card')), findsOneWidget);
+    expect(find.byKey(const Key('copy-fcm-token-button')), findsOneWidget);
+    expect(find.text('テスト機能を有効にしました。'), findsOneWidget);
+  });
+
   testWidgets('端末側で通知が拒否されている場合は設定への導線を表示する', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);

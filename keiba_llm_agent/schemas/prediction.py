@@ -90,6 +90,31 @@ class BorderlineRecoveryResult(BaseModel):
     recovery_cases: list[BorderlineRecoveryCase] = Field(default_factory=list)
 
 
+class ScopeRerankerConfigSnapshot(BaseModel):
+    enabled: bool = False
+    model_version: str = ""
+    enabled_scopes: list[str] = Field(default_factory=list)
+    blend_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class HorseScopeRerankerResult(BaseModel):
+    applied: bool = False
+    original_rank: int | None = None
+    new_rank: int | None = None
+    model_score: float | None = None
+    blended_rank_score: float | None = None
+    score_adjustment: float = 0.0
+
+
+class ScopeRerankerResult(BaseModel):
+    applied: bool = False
+    scope: str = ""
+    model_version: str = ""
+    reason_code: str = ""
+    original_ranking: list[int] = Field(default_factory=list)
+    reranked_ranking: list[int] = Field(default_factory=list)
+
+
 class TotalScoreBreakdown(BaseModel):
     base_total_score: float = 0.0
     pedigree_adjustment_raw: float = 0.0
@@ -103,9 +128,11 @@ class TotalScoreBreakdown(BaseModel):
     pace_adjustment_weighted: float = 0.0
     borderline_recovery_bonus: float = 0.0
     top_choice_refinement_bonus: float = 0.0
+    scope_reranker_adjustment: float = 0.0
     total_score: float = 0.0
     total_score_after_recovery: float = 0.0
     total_score_after_refinement: float = 0.0
+    total_score_after_reranker: float = 0.0
 
 
 class HorseScore(BaseModel):
@@ -120,6 +147,7 @@ class HorseScore(BaseModel):
     odds: float | None = None
     popularity: int | None = None
     borderline_recovery: HorseBorderlineRecovery = Field(default_factory=HorseBorderlineRecovery)
+    scope_reranker: HorseScopeRerankerResult = Field(default_factory=HorseScopeRerankerResult)
     total_score: float
     reason: str
 
@@ -154,6 +182,7 @@ class Prediction(BaseModel):
     scoring_config: ScoringConfigSnapshot = Field(default_factory=ScoringConfigSnapshot)
     market_signal_config: MarketSignalConfigSnapshot = Field(default_factory=MarketSignalConfigSnapshot)
     borderline_recovery_config: BorderlineRecoveryConfigSnapshot = Field(default_factory=BorderlineRecoveryConfigSnapshot)
+    scope_reranker_config: ScopeRerankerConfigSnapshot = Field(default_factory=ScopeRerankerConfigSnapshot)
     marks: dict[str, int]
     horse_scores: list[HorseScore] = Field(default_factory=list)
     bets: list[BetSuggestion] = Field(default_factory=list)
@@ -169,6 +198,7 @@ class Prediction(BaseModel):
     race_pace_projection: RacePaceProjection | None = None
     race_simulation: RaceSimulation | None = None
     borderline_recovery_result: BorderlineRecoveryResult = Field(default_factory=BorderlineRecoveryResult)
+    scope_reranker_result: ScopeRerankerResult = Field(default_factory=ScopeRerankerResult)
     strategy: StrategyDecision | None = None
 
     @field_validator("marks")

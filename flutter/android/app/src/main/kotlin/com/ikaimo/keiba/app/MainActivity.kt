@@ -71,6 +71,8 @@ class MainActivity : FlutterActivity() {
             "fcmCentralTopic" to BuildConfig.FCM_CENTRAL_TOPIC,
             "fcmLocalTopic" to BuildConfig.FCM_LOCAL_TOPIC,
             "userAgent" to "${WebSettings.getDefaultUserAgent(this)} IkaimoKeibaAndroid/0.1",
+            "appVersionName" to BuildConfig.VERSION_NAME,
+            "appVersionCode" to BuildConfig.VERSION_CODE.toString(),
         )
 
     private fun notificationSettings(): Map<String, Boolean> =

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from keiba_llm_agent.config.scoring_config import (
@@ -43,6 +44,11 @@ NO_MARKET_COPY_TERMS = (
     "市場評価",
     "配当",
 )
+
+
+def _scope_reranker_enabled() -> bool:
+    value = os.getenv("KEIBA_SCOPE_RERANKER_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def _is_public_prediction_copy_allowed(text: str, *, market_data_available: bool) -> bool:
@@ -127,6 +133,7 @@ class RaceAnalysisAgent:
         scoring_profile: str = DEFAULT_SCORING_PROFILE,
         scoring_config: ScoringConfigSnapshot | None = None,
         borderline_recovery_enabled: bool = False,
+        scope_reranker_enabled: bool | None = None,
     ) -> Prediction:
         if scoring_config is None:
             resolved_profile, _ = resolve_scoring_profile_config(scoring_profile=scoring_profile)
@@ -140,6 +147,8 @@ class RaceAnalysisAgent:
             race_data.race_info,
             current_race_id=race_data.race_info.race_id,
         )
+        if scope_reranker_enabled is None:
+            scope_reranker_enabled = _scope_reranker_enabled()
         if has_recent_runs_data(race_data):
             prediction = build_prediction_from_recent_runs_with_scoring_config(
                 race_data,
@@ -147,6 +156,7 @@ class RaceAnalysisAgent:
                 scoring_profile=scoring_profile,
                 scoring_config=scoring_config,
                 borderline_recovery_enabled=borderline_recovery_enabled,
+                scope_reranker_enabled=scope_reranker_enabled,
             )
             prediction.race_simulation = simulate_race(
                 race_info=race_data.race_info,

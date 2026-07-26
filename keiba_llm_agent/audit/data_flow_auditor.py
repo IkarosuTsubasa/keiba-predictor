@@ -186,9 +186,16 @@ def _audit_prediction(
             + breakdown.race_level_adjustment_weighted
             + breakdown.pace_adjustment_weighted
             + breakdown.borderline_recovery_bonus
+            + breakdown.top_choice_refinement_bonus
+            + breakdown.scope_reranker_adjustment
         )
         actual_total = _round(horse.total_score)
-        breakdown_total = _round(breakdown.total_score_after_recovery or breakdown.total_score)
+        breakdown_total = _round(
+            breakdown.total_score_after_reranker
+            or breakdown.total_score_after_refinement
+            or breakdown.total_score_after_recovery
+            or breakdown.total_score
+        )
         if abs(expected_total - actual_total) > 0.11 and abs(breakdown_total - actual_total) > 0.11:
             score_breakdown_mismatches.append(
                 {

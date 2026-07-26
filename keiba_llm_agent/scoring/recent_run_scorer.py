@@ -18,6 +18,7 @@ from keiba_llm_agent.scoring.analysis_adjustment_integrator import (
 )
 from keiba_llm_agent.scoring.borderline_recovery import apply_top5_borderline_recovery
 from keiba_llm_agent.scoring.pedigree_score_adjuster import calculate_pedigree_adjustment
+from keiba_llm_agent.scoring.scope_reranker import apply_scope_reranker
 from keiba_llm_agent.schemas.pedigree import PedigreeAnalysis
 from keiba_llm_agent.schemas.prediction import (
     BorderlineRecoveryConfigSnapshot,
@@ -1577,6 +1578,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
     scoring_profile: str,
     scoring_config: ScoringConfigSnapshot,
     borderline_recovery_enabled: bool = False,
+    scope_reranker_enabled: bool = False,
 ) -> Prediction:
     scoring_config_snapshot = ScoringConfigSnapshot.model_validate(scoring_config.model_dump())
     effective_weights = effective_scoring_weights(
@@ -1715,6 +1717,15 @@ def build_prediction_from_recent_runs_with_scoring_config(
     if top_choice_refinement_result_payload["refinement_applied"]:
         horse_scores = top_choice_refinement_result_payload["adjusted_horse_scores"]
         horse_scores.sort(key=lambda item: (-item.total_score, item.horse_no))
+    (
+        horse_scores,
+        scope_reranker_config,
+        scope_reranker_result,
+    ) = apply_scope_reranker(
+        race_data,
+        horse_scores,
+        enabled=scope_reranker_enabled,
+    )
     used_lessons = lessons
     marks = build_marks(horse_scores)
     marked_horse_scores = order_horse_scores_by_marks(horse_scores, marks)
@@ -1781,6 +1792,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
             market_signal_weight=scoring_config_snapshot.market_signal_weight,
         ),
         borderline_recovery_config=borderline_recovery_config,
+        scope_reranker_config=scope_reranker_config,
         marks=marks,
         horse_scores=horse_scores,
         bets=bets,
@@ -1812,6 +1824,7 @@ def build_prediction_from_recent_runs_with_scoring_config(
                 "recovery_cases": borderline_recovery_result_payload["recovery_cases"],
             }
         ),
+        scope_reranker_result=scope_reranker_result,
     )
 
 

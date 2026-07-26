@@ -1,5 +1,6 @@
 beautifulsoup4
+joblib
 lightgbm
 numpy
 pandas
-scikit-learn
+scikit-learn==1.8.0

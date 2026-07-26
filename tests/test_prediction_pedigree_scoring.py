@@ -44,7 +44,16 @@ class PredictionPedigreeScoringTests(unittest.TestCase):
                 overall_comment="父ハーツクライは芝・中長距離向き。",
             )
         ]
-        with patch("keiba_llm_agent.scoring.recent_run_scorer.build_pedigree_analyses_for_race", return_value=mock_pedigree):
+        with (
+            patch.dict(
+                "os.environ",
+                {"KEIBA_SCOPE_RERANKER_ENABLED": "0"},
+            ),
+            patch(
+                "keiba_llm_agent.scoring.recent_run_scorer.build_pedigree_analyses_for_race",
+                return_value=mock_pedigree,
+            ),
+        ):
             prediction, saved_path = run_analysis(
                 race_data_path=SAMPLE_RACE_DATA,
                 output_path=self.prediction_path,

@@ -53,6 +53,12 @@ def _prediction() -> Prediction:
             "race_info": _race_data().race_info.model_dump(),
             "scoring_profile": "accuracy_default",
             "scoring_mode": "candidate_default",
+            "scope_reranker_config": {
+                "enabled": True,
+                "model_version": "scope_reranker_test",
+                "enabled_scopes": ["central_turf", "local"],
+                "blend_weight": 0.5,
+            },
             "marks": {"◎": 1, "○": 2, "▲": 3, "△": 4, "☆": 5},
             "horse_scores": [
                 {
@@ -68,10 +74,26 @@ def _prediction() -> Prediction:
                         "risk": -1,
                     },
                     "base_total_score": 33.0,
+                    "scope_reranker": {
+                        "applied": True,
+                        "original_rank": 2,
+                        "new_rank": 1,
+                        "model_score": 0.8,
+                        "blended_rank_score": 0.9,
+                        "score_adjustment": 1.2,
+                    },
                     "total_score": 34.2,
                     "reason": "sample",
                 }
             ],
+            "scope_reranker_result": {
+                "applied": True,
+                "scope": "central_turf",
+                "model_version": "scope_reranker_test",
+                "reason_code": "applied",
+                "original_ranking": [2, 1],
+                "reranked_ranking": [1, 2],
+            },
             "summary": "sample",
         }
     )
@@ -95,6 +117,11 @@ class BacktestAuditSnapshotTests(unittest.TestCase):
         self.assertTrue(restored["backtest_capabilities"]["has_result_for_evaluation"])
         self.assertEqual(restored["inputs"]["race_data"]["horses"][0]["recent_runs"][0]["finish"], 2)
         self.assertEqual(restored["scoring"]["horse_scores"][0]["total_score"], 34.2)
+        self.assertTrue(restored["scoring"]["scope_reranker_config"]["enabled"])
+        self.assertEqual(
+            restored["analyses"]["scope_reranker_result"]["reranked_ranking"],
+            [1, 2],
+        )
 
     def test_attach_result_updates_existing_audit_capabilities(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

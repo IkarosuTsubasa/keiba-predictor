@@ -57,6 +57,9 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
       NotificationAuthorizationStatus.unknown;
   bool _privacyOptionsBusy = false;
   bool _fcmTokenCopyBusy = false;
+  bool _developerToolsVisible = false;
+  int _versionTapCount = 0;
+  Timer? _versionTapResetTimer;
 
   AdConsentService get _adConsentService =>
       widget.adConsentService ?? AdConsentService.instance;
@@ -74,6 +77,7 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _versionTapResetTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -166,6 +170,23 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _handleVersionTap() {
+    if (_developerToolsVisible) return;
+    _versionTapResetTimer?.cancel();
+    _versionTapCount += 1;
+    if (_versionTapCount >= 7) {
+      setState(() => _developerToolsVisible = true);
+      _versionTapCount = 0;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('テスト機能を有効にしました。')));
+      return;
+    }
+    _versionTapResetTimer = Timer(const Duration(seconds: 4), () {
+      _versionTapCount = 0;
+    });
+  }
+
   Future<void> _openPrivacyOptions() async {
     if (_privacyOptionsBusy) return;
     setState(() => _privacyOptionsBusy = true);
@@ -203,6 +224,11 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
           _buildPageCard(page),
           const SizedBox(height: 12),
         ],
+        if (_developerToolsVisible) ...[
+          _buildDeveloperToolsCard(),
+          const SizedBox(height: 12),
+        ],
+        _buildVersionFooter(),
       ],
     );
   }
@@ -287,28 +313,77 @@ class _MoreScreenState extends State<MoreScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ],
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  key: const Key('copy-fcm-token-button'),
-                  onPressed: _fcmTokenCopyBusy
-                      ? null
-                      : _copyFcmRegistrationToken,
-                  icon: _fcmTokenCopyBusy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.copy, size: 18),
-                  label: Text(
-                    _fcmTokenCopyBusy ? 'FCMトークンを取得中...' : 'テスト用FCMトークンをコピー',
-                  ),
-                ),
-              ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeveloperToolsCard() {
+    return Card(
+      key: const Key('developer-tools-card'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'テスト機能',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Consoleから端末へFCMテスト通知を送るために使用します',
+              style: TextStyle(color: Color(0xFF66746F), fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('copy-fcm-token-button'),
+                onPressed: _fcmTokenCopyBusy ? null : _copyFcmRegistrationToken,
+                icon: _fcmTokenCopyBusy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.copy, size: 18),
+                label: Text(
+                  _fcmTokenCopyBusy ? 'FCMトークンを取得中...' : 'テスト用FCMトークンをコピー',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVersionFooter() {
+    final config = NativePlatformBridge.runtimeConfig;
+    final versionName = config?.appVersionName.trim() ?? '';
+    final versionCode = config?.appVersionCode.trim() ?? '';
+    final details = [
+      if (versionName.isNotEmpty) versionName,
+      if (versionCode.isNotEmpty) '($versionCode)',
+    ].join(' ');
+    return Semantics(
+      label: 'アプリバージョン',
+      button: true,
+      child: GestureDetector(
+        key: const Key('app-version-label'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _handleVersionTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Center(
+            child: Text(
+              details.isEmpty ? 'バージョン' : 'バージョン $details',
+              style: const TextStyle(color: Color(0xFF8C9692), fontSize: 12),
+            ),
+          ),
         ),
       ),
     );
