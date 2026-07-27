@@ -10,6 +10,16 @@ from typing import Any
 import joblib
 import numpy as np
 
+from keiba_llm_agent.analysis.course_geometry import (
+    COURSE_GEOMETRY_FEATURE_NAMES,
+    COURSE_STYLE_FEATURE_NAMES,
+    build_course_geometry_features,
+    build_course_style_features,
+)
+from keiba_llm_agent.analysis.local_course_geometry import (
+    LOCAL_COURSE_GEOMETRY_FEATURE_NAMES,
+    build_local_course_geometry_features,
+)
 from keiba_llm_agent.analysis.race_class import (
     infer_run_race_class_level,
     infer_target_race_class_level,
@@ -24,17 +34,27 @@ from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RecentRun
 from keiba_llm_agent.utils.margin import parse_margin_value
 
 
-MODEL_VERSION = "scope_reranker_v1_20260726"
+MODEL_VERSION = "scope_reranker_v3_20260727"
 DEFAULT_BLEND_WEIGHT = 0.50
 MODEL_DIRECTORY = Path(__file__).resolve().parents[1] / "models" / "scope_reranker"
 MODEL_SPECS = {
     "central_turf": {
-        "filename": "central_turf_v1.joblib",
-        "feature_set": "base",
+        "filename": "central_turf_geometry_v1.joblib",
+        "feature_set": "course_geometry",
+        "blend_weight": 1.0,
+        "preserve_top_n": 1,
+        "baseline_filename": "central_turf_v1.joblib",
+        "baseline_feature_set": "base",
+        "baseline_blend_weight": DEFAULT_BLEND_WEIGHT,
     },
     "local": {
-        "filename": "local_v1.joblib",
-        "feature_set": "extended",
+        "filename": "local_geometry_v1.joblib",
+        "feature_set": "local_course_geometry",
+        "blend_weight": 1.0,
+        "preserve_top_n": 2,
+        "baseline_filename": "local_v1.joblib",
+        "baseline_feature_set": "extended",
+        "baseline_blend_weight": DEFAULT_BLEND_WEIGHT,
     },
 }
 
@@ -373,6 +393,8 @@ def build_scope_reranker_feature_matrix(
     horse_numbers: list[int] = []
     base_rows: list[list[float]] = []
     run_rows: list[list[float]] = []
+    geometry_rows: list[list[float]] = []
+    local_geometry_rows: list[list[float]] = []
     for horse in race_data.horses:
         score = scores_by_horse.get(horse.horse_no)
         if score is None:
@@ -381,17 +403,66 @@ def build_scope_reranker_feature_matrix(
             )
         base = _base_features(score, race_data, horse, scope)
         run = build_run_features(horse, race_data)
+        geometry = build_course_geometry_features(
+            horse, race_data.race_info
+        )
+        style = build_course_style_features(
+            horse, race_data.race_info
+        )
+        local_geometry = build_local_course_geometry_features(
+            horse, race_data.race_info
+        )
         horse_numbers.append(score.horse_no)
         base_rows.append([base[name] for name in BASE_FEATURE_NAMES])
         run_rows.append([run[name] for name in RUN_FEATURE_NAMES])
+        geometry_rows.append(
+            [
+                geometry[name]
+                for name in COURSE_GEOMETRY_FEATURE_NAMES
+            ]
+            + [style[name] for name in COURSE_STYLE_FEATURE_NAMES]
+        )
+        local_geometry_rows.append(
+            [
+                local_geometry[name]
+                for name in LOCAL_COURSE_GEOMETRY_FEATURE_NAMES
+            ]
+        )
 
     base_matrix = _normalize(np.asarray(base_rows, dtype=float))
     if feature_set == "base":
         return base_matrix, horse_numbers
-    if feature_set != "extended":
-        raise ValueError(f"unsupported feature_set: {feature_set}")
-    run_matrix = _normalize(np.asarray(run_rows, dtype=float))
-    return np.concatenate((base_matrix, run_matrix), axis=1), horse_numbers
+    if feature_set == "extended":
+        run_matrix = _normalize(np.asarray(run_rows, dtype=float))
+        return (
+            np.concatenate((base_matrix, run_matrix), axis=1),
+            horse_numbers,
+        )
+    if feature_set == "course_geometry":
+        geometry_matrix = _normalize(
+            np.asarray(geometry_rows, dtype=float)
+        )
+        return (
+            np.concatenate((base_matrix, geometry_matrix), axis=1),
+            horse_numbers,
+        )
+    if feature_set == "local_course_geometry":
+        run_matrix = _normalize(np.asarray(run_rows, dtype=float))
+        local_geometry_matrix = _normalize(
+            np.asarray(local_geometry_rows, dtype=float)
+        )
+        return (
+            np.concatenate(
+                (
+                    base_matrix,
+                    run_matrix,
+                    local_geometry_matrix,
+                ),
+                axis=1,
+            ),
+            horse_numbers,
+        )
+    raise ValueError(f"unsupported feature_set: {feature_set}")
 
 
 @lru_cache(maxsize=4)
@@ -418,17 +489,22 @@ def clear_scope_reranker_caches() -> None:
 
 def scope_reranker_config_snapshot(
     enabled: bool,
+    scope: str | None = None,
 ) -> ScopeRerankerConfigSnapshot:
     metadata = _load_metadata(
         str(_model_directory() / "metadata.json")
     )
+    model_spec = MODEL_SPECS.get(scope or "", {})
     return ScopeRerankerConfigSnapshot(
         enabled=enabled,
         model_version=str(
             metadata.get("model_version") or MODEL_VERSION
         ),
         enabled_scopes=list(MODEL_SPECS),
-        blend_weight=DEFAULT_BLEND_WEIGHT,
+        blend_weight=float(
+            model_spec.get("blend_weight", DEFAULT_BLEND_WEIGHT)
+        ),
+        preserve_top_n=int(model_spec.get("preserve_top_n", 0)),
     )
 
 
@@ -463,8 +539,57 @@ def _fallback(
         model_version=model_version,
         reason_code=reason_code,
         original_ranking=ranking,
+        baseline_ranking=ranking,
         reranked_ranking=ranking,
     )
+
+
+def _blend_model_ranking(
+    base_ranking: list[int],
+    model_scores: dict[int, float],
+    *,
+    blend_weight: float,
+    preserve_top_n: int = 0,
+) -> tuple[list[int], dict[int, float]]:
+    protected_count = min(
+        preserve_top_n,
+        max(len(base_ranking) - 1, 0),
+    )
+    protected_ranking = base_ranking[:protected_count]
+    candidate_pool = base_ranking[protected_count:]
+    learned_rank_scores = _rank_scores(
+        {
+            horse_no: model_scores[horse_no]
+            for horse_no in candidate_pool
+        }
+    )
+    original_rank_scores = _rank_scores(
+        {
+            horse_no: float(len(candidate_pool) - rank)
+            for rank, horse_no in enumerate(candidate_pool)
+        }
+    )
+    blended_scores = {
+        horse_no: (
+            (1.0 - blend_weight) * original_rank_scores[horse_no]
+            + blend_weight * learned_rank_scores[horse_no]
+        )
+        for horse_no in candidate_pool
+    }
+    overall_base_scores = {
+        horse_no: (
+            len(base_ranking) - rank - 1
+        )
+        / max(len(base_ranking) - 1, 1)
+        for rank, horse_no in enumerate(base_ranking)
+    }
+    for horse_no in protected_ranking:
+        blended_scores[horse_no] = overall_base_scores[horse_no]
+    reranked = protected_ranking + sorted(
+        candidate_pool,
+        key=lambda horse_no: (-blended_scores[horse_no], horse_no),
+    )
+    return reranked, blended_scores
 
 
 def apply_scope_reranker(
@@ -477,8 +602,8 @@ def apply_scope_reranker(
     ScopeRerankerConfigSnapshot,
     ScopeRerankerResult,
 ]:
-    config = scope_reranker_config_snapshot(enabled)
     scope = _scope_key(race_data)
+    config = scope_reranker_config_snapshot(enabled, scope)
     if not enabled:
         scores, result = _fallback(
             horse_scores,
@@ -513,6 +638,14 @@ def apply_scope_reranker(
     model_path = _model_directory() / str(model_spec["filename"])
     try:
         model = _load_model(str(model_path))
+        baseline_model = None
+        if model_spec.get("baseline_filename"):
+            baseline_model = _load_model(
+                str(
+                    _model_directory()
+                    / str(model_spec["baseline_filename"])
+                )
+            )
     except Exception:
         scores, result = _fallback(
             horse_scores,
@@ -523,6 +656,47 @@ def apply_scope_reranker(
         return scores, config, result
 
     try:
+        baseline_ranking = list(original_ranking)
+        if baseline_model is not None:
+            baseline_matrix, baseline_horse_numbers = (
+                build_scope_reranker_feature_matrix(
+                    race_data,
+                    original_scores,
+                    str(model_spec["baseline_feature_set"]),
+                )
+            )
+            baseline_expected_features = getattr(
+                baseline_model,
+                "n_features_in_",
+                baseline_matrix.shape[1],
+            )
+            if (
+                int(baseline_expected_features)
+                != baseline_matrix.shape[1]
+            ):
+                raise ValueError(
+                    "baseline feature count mismatch: "
+                    f"expected={baseline_expected_features}, "
+                    f"actual={baseline_matrix.shape[1]}"
+                )
+            baseline_probabilities = baseline_model.predict_proba(
+                baseline_matrix
+            )[:, 1]
+            baseline_scores = {
+                horse_no: float(probability)
+                for horse_no, probability in zip(
+                    baseline_horse_numbers,
+                    baseline_probabilities,
+                    strict=True,
+                )
+            }
+            baseline_ranking, _ = _blend_model_ranking(
+                original_ranking,
+                baseline_scores,
+                blend_weight=float(
+                    model_spec["baseline_blend_weight"]
+                ),
+            )
         matrix, horse_numbers = build_scope_reranker_feature_matrix(
             race_data,
             original_scores,
@@ -552,28 +726,11 @@ def apply_scope_reranker(
             strict=True,
         )
     }
-    original_rank_scores = {
-        horse_no: (
-            len(original_ranking) - rank - 1
-        )
-        / max(len(original_ranking) - 1, 1)
-        for rank, horse_no in enumerate(original_ranking)
-    }
-    learned_rank_scores = _rank_scores(model_scores)
-    blended_scores = {
-        horse_no: (
-            (1.0 - config.blend_weight)
-            * original_rank_scores[horse_no]
-            + config.blend_weight * learned_rank_scores[horse_no]
-        )
-        for horse_no in original_ranking
-    }
-    reranked_ranking = sorted(
-        original_ranking,
-        key=lambda horse_no: (
-            -blended_scores[horse_no],
-            horse_no,
-        ),
+    reranked_ranking, blended_scores = _blend_model_ranking(
+        baseline_ranking,
+        model_scores,
+        blend_weight=config.blend_weight,
+        preserve_top_n=config.preserve_top_n,
     )
 
     original_by_horse = {
@@ -640,6 +797,7 @@ def apply_scope_reranker(
             model_version=config.model_version,
             reason_code="applied",
             original_ranking=original_ranking,
+            baseline_ranking=baseline_ranking,
             reranked_ranking=reranked_ranking,
         ),
     )

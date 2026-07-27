@@ -60,15 +60,25 @@ from keiba_llm_agent.scoring.scope_reranker import (
 TRAINING_CONFIG = {
     "central_turf": {
         "training_end": "2026-05-24",
-        "feature_set": "base",
-        "filename": "central_turf_v1.joblib",
+        "feature_set": "course_geometry",
+        "filename": "central_turf_geometry_v1.joblib",
         "min_samples_leaf": 40,
+        "blend_weight": 1.0,
+        "preserve_top_n": 1,
+        "baseline_filename": "central_turf_v1.joblib",
+        "baseline_feature_set": "base",
+        "baseline_blend_weight": 0.5,
     },
     "local": {
         "training_end": "2026-07-11",
-        "feature_set": "extended",
-        "filename": "local_v1.joblib",
+        "feature_set": "local_course_geometry",
+        "filename": "local_geometry_v1.joblib",
         "min_samples_leaf": 40,
+        "blend_weight": 1.0,
+        "preserve_top_n": 2,
+        "baseline_filename": "local_v1.joblib",
+        "baseline_feature_set": "extended",
+        "baseline_blend_weight": 0.5,
     },
 }
 
@@ -410,15 +420,35 @@ def train(snapshot: Path, output_dir: Path) -> dict[str, Any]:
             "training_races": len(race_ids),
             "training_horses": int(features.shape[0]),
             "feature_count": int(features.shape[1]),
+            "blend_weight": float(config["blend_weight"]),
+            "preserve_top_n": int(config["preserve_top_n"]),
             "race_ids_sha256": hashlib.sha256(
                 "\n".join(race_ids).encode("utf-8")
             ).hexdigest(),
             "artifact_sha256": sha256(output_path),
         }
+        for key in (
+            "baseline_filename",
+            "baseline_feature_set",
+            "baseline_blend_weight",
+        ):
+            if key in config:
+                metadata["models"][scope][key] = config[key]
+        baseline_filename = config.get("baseline_filename")
+        if baseline_filename:
+            baseline_path = output_dir / str(baseline_filename)
+            if not baseline_path.exists():
+                raise FileNotFoundError(
+                    f"baseline model not found: {baseline_path}"
+                )
+            metadata["models"][scope][
+                "baseline_artifact_sha256"
+            ] = sha256(baseline_path)
     metadata_path = output_dir / "metadata.json"
     metadata_path.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return metadata
 

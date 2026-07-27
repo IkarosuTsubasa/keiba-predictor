@@ -1,28 +1,40 @@
 {
-  "model_version": "scope_reranker_v1_20260726",
+  "model_version": "scope_reranker_v3_20260727",
   "scikit_learn_version": "1.8.0",
   "market_features_used": false,
-  "source_snapshot": "render_agent_snapshot_20260726_optimizer",
+  "source_snapshot": "render_agent_snapshot_20260727_120545",
   "models": {
     "central_turf": {
-      "filename": "central_turf_v1.joblib",
-      "feature_set": "base",
+      "filename": "central_turf_geometry_v1.joblib",
+      "feature_set": "course_geometry",
       "training_end": "2026-05-24",
       "training_races": 85,
       "training_horses": 1235,
-      "feature_count": 13,
+      "feature_count": 28,
+      "blend_weight": 1.0,
+      "preserve_top_n": 1,
       "race_ids_sha256": "13dfe3667d681f3081e6828ecbd0c861eaa85f9a439d94bf7779a26d147ff1d3",
-      "artifact_sha256": "f7df0ab1d3a4d76c2b48df1652a2448e9630ce23dea6badcb9b8617ebea488d2"
+      "artifact_sha256": "2ef9d6685e370432cdd0a332f6d394c1409807962ca2a3e0a395a2f99b20bb1f",
+      "baseline_filename": "central_turf_v1.joblib",
+      "baseline_feature_set": "base",
+      "baseline_blend_weight": 0.5,
+      "baseline_artifact_sha256": "f7df0ab1d3a4d76c2b48df1652a2448e9630ce23dea6badcb9b8617ebea488d2"
     },
     "local": {
-      "filename": "local_v1.joblib",
-      "feature_set": "extended",
+      "filename": "local_geometry_v1.joblib",
+      "feature_set": "local_course_geometry",
       "training_end": "2026-07-11",
       "training_races": 188,
       "training_horses": 1877,
-      "feature_count": 35,
+      "feature_count": 48,
+      "blend_weight": 1.0,
+      "preserve_top_n": 2,
       "race_ids_sha256": "26e814cca03366aff40ed171cce675ad4f01d0ead0c492f40b5af77a3062bf9e",
-      "artifact_sha256": "90639d4ba3860c3ab3f72ea1d5b775b01ec717b4ccd6d0361d00fccc57e1d410"
+      "artifact_sha256": "e908496d0b8ebc9ab1a65da65ddd313b932318add080fccac5ac2999350f0293",
+      "baseline_filename": "local_v1.joblib",
+      "baseline_feature_set": "extended",
+      "baseline_blend_weight": 0.5,
+      "baseline_artifact_sha256": "90639d4ba3860c3ab3f72ea1d5b775b01ec717b4ccd6d0361d00fccc57e1d410"
     }
   }
 }

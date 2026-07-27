@@ -95,6 +95,7 @@ class ScopeRerankerConfigSnapshot(BaseModel):
     model_version: str = ""
     enabled_scopes: list[str] = Field(default_factory=list)
     blend_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    preserve_top_n: int = Field(default=0, ge=0)
 
 
 class HorseScopeRerankerResult(BaseModel):
@@ -112,6 +113,7 @@ class ScopeRerankerResult(BaseModel):
     model_version: str = ""
     reason_code: str = ""
     original_ranking: list[int] = Field(default_factory=list)
+    baseline_ranking: list[int] = Field(default_factory=list)
     reranked_ranking: list[int] = Field(default_factory=list)
 
 
