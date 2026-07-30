@@ -1,20 +1,13 @@
 ﻿import React, { useEffect, useState } from "react";
-import AdminJobsPage from "./components/AdminJobsPage";
-import AdminWorkspacePage from "./components/AdminWorkspacePage";
 import AppHeader from "./components/AppHeader";
 import BeginnerGuideSection from "./components/BeginnerGuideSection";
-import DailyReportDetailPage from "./components/DailyReportDetailPage";
-import DailyReportsPage from "./components/DailyReportsPage";
 import FeaturedContentSection from "./components/FeaturedContentSection";
 import FilterBar from "./components/FilterBar";
-import HistoryPage from "./components/HistoryPage";
 import HomeHeroSection from "./components/HomeHeroSection";
 import MethodSummarySection from "./components/MethodSummarySection";
 import MorningPreviewSection from "./components/MorningPreviewSection";
 import PageSectionHeader from "./components/PageSectionHeader";
 import PublicSideNav from "./components/PublicSideNav";
-import PublicStaticPage from "./components/PublicStaticPage";
-import RaceDetailPage from "./components/RaceDetailPage";
 import SecondaryStatsPanel from "./components/SecondaryStatsPanel";
 import SiteFooter from "./components/SiteFooter";
 import TodayBoardContent from "./components/TodayBoardContent";
@@ -28,10 +21,23 @@ const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
 const PUBLIC_RACE_DETAIL_API_PATH = `${APP_BASE_PATH}/api/public/races`;
-const { useMemo } = React;
+const { lazy, Suspense, useMemo } = React;
+const AdminJobsPage = lazy(() => import("./components/AdminJobsPage"));
+const AdminWorkspacePage = lazy(() => import("./components/AdminWorkspacePage"));
+const DailyReportDetailPage = lazy(() => import("./components/DailyReportDetailPage"));
+const DailyReportsPage = lazy(() => import("./components/DailyReportsPage"));
+const HistoryPage = lazy(() => import("./components/HistoryPage"));
+const PublicStaticPage = lazy(() => import("./components/PublicStaticPage"));
+const RaceDetailPage = lazy(() => import("./components/RaceDetailPage"));
 
 function buildQuery(search) {
   return search ? `?${search}` : "";
+}
+
+function buildBoardQuery(search, includeHistoryDetail) {
+  const params = new URLSearchParams(String(search || ""));
+  params.set("history_detail", includeHistoryDetail ? "1" : "0");
+  return `?${params.toString()}`;
 }
 
 function readInitialBoardData(search) {
@@ -325,7 +331,7 @@ function extractReportSlug(pathname) {
   }
 }
 
-function useBoardData(search, enabled = true) {
+function useBoardData(search, enabled = true, includeHistoryDetail = false) {
   const [state, setState] = useState(() => {
     const initialData = enabled ? readInitialBoardData(search) : null;
     return {
@@ -348,34 +354,52 @@ function useBoardData(search, enabled = true) {
     }
 
     let alive = true;
+    let retryTimer = 0;
+    let retryCount = 0;
     setState({ loading: true, error: "", data: null });
 
-    fetch(`${PUBLIC_BOARD_API_PATH}${buildQuery(search)}`, {
-      headers: { Accept: "application/json" },
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json();
+    const loadBoard = () => {
+      fetch(`${PUBLIC_BOARD_API_PATH}${buildBoardQuery(search, includeHistoryDetail)}`, {
+        headers: { Accept: "application/json" },
+        cache: retryCount > 0 ? "reload" : "default",
       })
-      .then((data) => {
-        if (!alive) return;
-        setState({ loading: false, error: "", data });
-      })
-      .catch((error) => {
-        if (!alive) return;
-        setState({
-          loading: false,
-          error: error?.message || "公開データの読み込みに失敗しました。",
-          data: null,
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return {
+            data: await response.json(),
+            isStale: response.headers.get("X-Keiba-Data-Cache") === "stale",
+            retryAfter: Number(response.headers.get("Retry-After") || 20),
+          };
+        })
+        .then(({ data, isStale, retryAfter }) => {
+          if (!alive) return;
+          setState({ loading: false, error: "", data });
+          if (isStale && retryCount < 2) {
+            retryCount += 1;
+            retryTimer = window.setTimeout(
+              loadBoard,
+              Math.max(5, Math.min(30, retryAfter)) * 1000,
+            );
+          }
+        })
+        .catch((error) => {
+          if (!alive) return;
+          setState({
+            loading: false,
+            error: error?.message || "公開データの読み込みに失敗しました。",
+            data: null,
+          });
         });
-      });
+    };
+    loadBoard();
 
     return () => {
       alive = false;
+      window.clearTimeout(retryTimer);
     };
-  }, [enabled, search]);
+  }, [enabled, includeHistoryDetail, search]);
 
   return state;
 }
@@ -516,7 +540,7 @@ function resolvePublicSideNavMode({
   return "home";
 }
 
-export default function App() {
+function AppContent() {
   const [pathname, setPathname] = useState(window.location.pathname);
   const [search, setSearch] = useState(window.location.search.replace(/^\?/, ""));
 
@@ -584,10 +608,16 @@ export default function App() {
     !isAdminWorkspace &&
     !isAppShell &&
     (Boolean(staticPage) || isReportsPage || isReportDetail);
-  const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData);
+  const { data: headerData } = useBoardData("", shouldLoadPublicHeaderData, false);
   const { loading, error, data } = useBoardData(
     search,
-    !isAdminConsole && !isAdminWorkspace && !staticPage && !isReportsPage && !isReportDetail,
+    !isAdminConsole &&
+      !isAdminWorkspace &&
+      !staticPage &&
+      !isReportsPage &&
+      !isReportDetail &&
+      !isRaceDetail,
+    isHistoryPage,
   );
   const {
     loading: detailLoading,
@@ -947,5 +977,13 @@ export default function App() {
         {!isAppShell && !isDateFocusedHome && !isAgentPredictionBoard ? <BeginnerGuideSection /> : null}
       </div>
     </PublicFrame>
+  );
+}
+
+export default function App() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <AppContent />
+    </Suspense>
   );
 }

@@ -1,5 +1,6 @@
 ﻿import csv
 import asyncio
+import hashlib
 import html
 import json
 import math
@@ -259,6 +260,27 @@ async def add_public_cache_headers(request: Request, call_next):
     path = str(request.url.path or "")
     if path.startswith(f"{PUBLIC_BASE_PATH}/assets/") or path.startswith("/assets/"):
         response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    elif (
+        path.startswith(f"{PUBLIC_BASE_PATH}/affiliate/")
+        or path.startswith("/affiliate/")
+        or path
+        in {
+            f"{PUBLIC_BASE_PATH}/site-icon.png",
+            f"{PUBLIC_BASE_PATH}/favicon.ico",
+            f"{PUBLIC_BASE_PATH}/apple-touch-icon.png",
+            f"{PUBLIC_BASE_PATH}/og.png",
+            f"{PUBLIC_BASE_PATH}/GetItOnGooglePlay_Badge_Web_color_Japanese.png",
+            "/site-icon.png",
+            "/favicon.ico",
+            "/apple-touch-icon.png",
+            "/og.png",
+            "/GetItOnGooglePlay_Badge_Web_color_Japanese.png",
+        }
+    ):
+        response.headers.setdefault(
+            "Cache-Control",
+            "public, max-age=604800, stale-while-revalidate=86400",
+        )
     return response
 
 
@@ -3213,6 +3235,15 @@ def _public_race_detail_payload(race_path, date_text="", scope_key=""):
 
 def _public_board_api_race_item(row):
     item = dict(row or {})
+    compact_top5 = [
+        {
+            "horse_no": str(entry.get("horse_no", "") or "").strip(),
+            "horse_name": str(entry.get("horse_name", "") or "").strip(),
+            "support_score": int(to_float(entry.get("support_score", 0))),
+        }
+        for entry in list(item.get("top5", []) or [])
+        if isinstance(entry, dict)
+    ]
     return {
         "source_type": str(item.get("source_type", "") or "").strip(),
         "prediction_stage": str(item.get("prediction_stage", "") or "").strip(),
@@ -3225,14 +3256,12 @@ def _public_board_api_race_item(row):
         "scheduled_off_time": str(item.get("scheduled_off_time", "") or "").strip(),
         "distance_label": str(item.get("distance_label", "") or "").strip(),
         "track_condition": str(item.get("track_condition", "") or "").strip(),
-        "predictor_compare_cards": [dict(card or {}) for card in list(item.get("predictor_compare_cards", []) or []) if isinstance(card, dict)],
         "display_order": int(item.get("display_order", 0) or 0),
         "display_variant": str(item.get("display_variant", "") or "").strip(),
         "display_status": dict((item.get("display_status") or {}) or {}),
         "display_header": dict((item.get("display_header") or {}) or {}),
         "display_body": dict((item.get("display_body") or {}) or {}),
-        "top5": [dict(entry or {}) for entry in list(item.get("top5", []) or []) if isinstance(entry, dict)],
-        "predictor_top5": dict((item.get("predictor_top5") or {}) or {}),
+        "top5": compact_top5,
         "confidence_score": float(item.get("confidence_score", 0.0) or 0.0),
         "agreement_score": float(item.get("agreement_score", 0.0) or 0.0),
     }
@@ -3303,10 +3332,18 @@ def _public_board_api_predictor_summary(item):
     }
 
 
-def _public_board_api_history_payload(item):
+def _public_board_api_history_payload(item, include_detail_rows=True):
     history = dict(item or {})
     predictor = dict((history.get("predictor") or {}) or {})
     agent_prediction = dict((history.get("agent_prediction") or {}) or {})
+    if not include_detail_rows:
+        compact_periods = {}
+        for period_key, period_value in dict((agent_prediction.get("periods") or {}) or {}).items():
+            period = dict(period_value or {})
+            period.pop("daily_rows", None)
+            period.pop("course_rows", None)
+            compact_periods[str(period_key)] = period
+        agent_prediction["periods"] = compact_periods
     return {
         "predictor": {
             "periods": dict((predictor.get("periods") or {}) or {}),
@@ -3338,7 +3375,7 @@ def _empty_public_morning_preview_payload(target_date=""):
     }
 
 
-def _public_board_api_payload(payload):
+def _public_board_api_payload(payload, include_history_detail=True):
     board = dict(payload or {})
     totals = dict((board.get("totals") or {}) or {})
     hero = dict((board.get("hero") or {}) or {})
@@ -3357,14 +3394,20 @@ def _public_board_api_payload(payload):
             "lead_race": _public_board_api_race_item(hero.get("lead_race", {})),
             "leader": dict((hero.get("leader") or {}) or {}),
         },
-        "history": _public_board_api_history_payload(board.get("history")),
+        "history": _public_board_api_history_payload(
+            board.get("history"),
+            include_detail_rows=include_history_detail,
+        ),
         "daily_report": _public_board_api_daily_report(board.get("daily_report")),
         "morning_preview": _public_board_api_morning_preview_payload(board.get("morning_preview")),
     }
 
 
 _PUBLIC_BOARD_PAYLOAD_CACHE = {}
-_PUBLIC_BOARD_PAYLOAD_CACHE_LOCK = threading.Lock()
+_PUBLIC_BOARD_PAYLOAD_CACHE_LOCK = threading.RLock()
+_PUBLIC_BOARD_PAYLOAD_REFRESHING = set()
+_PUBLIC_BOARD_DISK_CACHE_SCHEMA_VERSION = 1
+_PUBLIC_BOARD_STALE_MARKER = "_public_board_cache_stale"
 
 
 def _public_board_cache_ttl_seconds():
@@ -3380,6 +3423,118 @@ def _public_board_cache_key(date_text="", scope_key="", include_detail_fields=Fa
         normalize_scope_key(scope_key),
         bool(include_detail_fields),
     )
+
+
+def _public_board_disk_cache_path(key):
+    cache_key_text = json.dumps(
+        {
+            "schema_version": _PUBLIC_BOARD_DISK_CACHE_SCHEMA_VERSION,
+            "key": list(key),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(cache_key_text.encode("utf-8")).hexdigest()[:24]
+    return BASE_DIR / "data" / "_shared" / "public_board_cache" / f"{digest}.json"
+
+
+def _load_public_board_disk_cache(key):
+    path = _public_board_disk_cache_path(key)
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if int(record.get("schema_version", 0) or 0) != _PUBLIC_BOARD_DISK_CACHE_SCHEMA_VERSION:
+        return None
+    if list(record.get("key") or []) != list(key):
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "created_at": float(record.get("created_at", 0.0) or 0.0),
+        "payload": payload,
+    }
+
+
+def _save_public_board_disk_cache(key, entry):
+    path = _public_board_disk_cache_path(key)
+    temp_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": _PUBLIC_BOARD_DISK_CACHE_SCHEMA_VERSION,
+            "key": list(key),
+            "created_at": float(entry.get("created_at", 0.0) or 0.0),
+            "payload": dict(entry.get("payload") or {}),
+        }
+        temp_path.write_text(
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+    except (OSError, TypeError, ValueError):
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _cached_public_board_entry(key):
+    cached = _PUBLIC_BOARD_PAYLOAD_CACHE.get(key)
+    if cached:
+        return cached
+    disk_cached = _load_public_board_disk_cache(key)
+    if not disk_cached:
+        return None
+    with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+        return _PUBLIC_BOARD_PAYLOAD_CACHE.setdefault(key, disk_cached)
+
+
+def _refresh_public_board_payload(key, date_text="", scope_key="", include_detail_fields=False):
+    try:
+        payload = _build_public_board_payload_uncached(
+            date_text=date_text,
+            scope_key=scope_key,
+            include_detail_fields=include_detail_fields,
+        )
+        entry = {"created_at": time.time(), "payload": payload}
+        with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+            _PUBLIC_BOARD_PAYLOAD_CACHE[key] = entry
+        _save_public_board_disk_cache(key, entry)
+    except Exception:
+        traceback.print_exc()
+    finally:
+        with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+            _PUBLIC_BOARD_PAYLOAD_REFRESHING.discard(key)
+
+
+def _schedule_public_board_refresh(key, date_text="", scope_key="", include_detail_fields=False):
+    with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+        if key in _PUBLIC_BOARD_PAYLOAD_REFRESHING:
+            return
+        _PUBLIC_BOARD_PAYLOAD_REFRESHING.add(key)
+    thread = threading.Thread(
+        target=_refresh_public_board_payload,
+        kwargs={
+            "key": key,
+            "date_text": date_text,
+            "scope_key": scope_key,
+            "include_detail_fields": include_detail_fields,
+        },
+        name="public-board-refresh",
+        daemon=True,
+    )
+    try:
+        thread.start()
+    except RuntimeError:
+        with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
+            _PUBLIC_BOARD_PAYLOAD_REFRESHING.discard(key)
 
 
 def _build_public_board_payload_uncached(date_text="", scope_key="", include_detail_fields=False):
@@ -3444,26 +3599,54 @@ def build_public_board_payload(date_text="", scope_key="", include_detail_fields
 
     key = _public_board_cache_key(date_text, scope_key, include_detail_fields)
     now = time.time()
-    cached = _PUBLIC_BOARD_PAYLOAD_CACHE.get(key)
-    if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
-        return cached.get("payload") or {}
+    cached = _cached_public_board_entry(key)
+    if cached:
+        payload = cached.get("payload") or {}
+        if now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+            return payload
+        _schedule_public_board_refresh(
+            key,
+            date_text=date_text,
+            scope_key=scope_key,
+            include_detail_fields=include_detail_fields,
+        )
+        return {**payload, _PUBLIC_BOARD_STALE_MARKER: True}
 
+    entry = None
     with _PUBLIC_BOARD_PAYLOAD_CACHE_LOCK:
         cached = _PUBLIC_BOARD_PAYLOAD_CACHE.get(key)
-        if cached and now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
-            return cached.get("payload") or {}
+        if cached:
+            payload = cached.get("payload") or {}
+            if now - float(cached.get("created_at", 0.0) or 0.0) <= ttl_seconds:
+                return payload
+            _schedule_public_board_refresh(
+                key,
+                date_text=date_text,
+                scope_key=scope_key,
+                include_detail_fields=include_detail_fields,
+            )
+            return {**payload, _PUBLIC_BOARD_STALE_MARKER: True}
         payload = _build_public_board_payload_uncached(
             date_text=date_text,
             scope_key=scope_key,
             include_detail_fields=include_detail_fields,
         )
-        _PUBLIC_BOARD_PAYLOAD_CACHE[key] = {"created_at": time.time(), "payload": payload}
-        return payload
+        entry = {"created_at": time.time(), "payload": payload}
+        _PUBLIC_BOARD_PAYLOAD_CACHE[key] = entry
+    _save_public_board_disk_cache(key, entry)
+    return payload
 
 
-def _public_api_headers():
+def _public_api_headers(stale=False):
+    if stale:
+        return {
+            "Cache-Control": "no-store",
+            "Retry-After": "20",
+            "X-Keiba-Data-Cache": "stale",
+        }
     return {
         "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+        "X-Keiba-Data-Cache": "fresh",
     }
 
 
@@ -5383,9 +5566,18 @@ def sitemap_xml():
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
 @app.get("/api/public/board")
-def public_board_api(date: str = "", scope_key: str = "", history_scope_key: str = ""):
+def public_board_api(
+    date: str = "",
+    scope_key: str = "",
+    history_scope_key: str = "",
+    history_detail: bool = True,
+):
     payload = build_public_board_payload(date_text=date, scope_key=scope_key)
-    response_payload = _public_board_api_payload(payload)
+    stale = bool(payload.get(_PUBLIC_BOARD_STALE_MARKER))
+    response_payload = _public_board_api_payload(
+        payload,
+        include_history_detail=bool(history_detail),
+    )
     if str(history_scope_key or "").strip():
         target_date = str(payload.get("target_date", "") or "").strip()
         response_payload["history"]["agent_prediction"] = agent_predictions.build_history_payload(
@@ -5395,7 +5587,7 @@ def public_board_api(date: str = "", scope_key: str = "", history_scope_key: str
         )
     return JSONResponse(
         response_payload,
-        headers=_public_api_headers(),
+        headers=_public_api_headers(stale=stale),
     )
 
 
