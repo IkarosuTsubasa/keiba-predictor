@@ -21,7 +21,7 @@ BET_TYPE_LABELS = {
     "三連単": "三連単",
 }
 
-RESULT_UNAVAILABLE_MARKERS = ("取り止め", "取止", "中止", "不成立")
+RESULT_UNAVAILABLE_MARKERS = ("取り止め", "取りやめ", "取止", "中止", "不成立")
 
 
 class NetkeibaResultUnavailableError(ValueError):
@@ -73,6 +73,20 @@ def _extract_result_unavailable_reason(soup: BeautifulSoup) -> str:
     for text in candidate_texts:
         if any(marker in text for marker in RESULT_UNAVAILABLE_MARKERS):
             return text
+
+    # Some cancelled local races do not include an explicit cancellation
+    # sentence.  Their result table is empty and the payout table returns every
+    # ticket type instead.  This is terminal, not a result that is still pending.
+    refund_rows = 0
+    for table in soup.find_all("table"):
+        for row in table.find_all("tr"):
+            header_cell = row.find("th")
+            if header_cell is None or _normalize_bet_type_label(header_cell.get_text(" ", strip=True)) is None:
+                continue
+            if "返還" in normalize_text(row.get_text(" ", strip=True)):
+                refund_rows += 1
+    if refund_rows >= 2:
+        return "全券種返還のためレース結果はありません。"
     return ""
 
 

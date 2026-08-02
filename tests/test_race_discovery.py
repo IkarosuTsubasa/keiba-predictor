@@ -75,6 +75,15 @@ LOCAL_INVALID_RACE_PAGE_HTML = """
 
 
 class RaceDiscoveryTests(unittest.TestCase):
+    def test_local_unavailable_page_recognizes_hiragana_wording(self):
+        html = local_shutuba_page_html("テスト", "17:50", "1500", "金沢").replace(
+            "</div>\n",
+            "<p>悪天候のため取りやめとなりました。</p>\n</div>\n",
+            1,
+        )
+
+        self.assertTrue(race_discovery._is_unavailable_race_page(html))
+
     def test_central_discovery_uses_constructed_race_list_sub_url(self):
         requested = []
 

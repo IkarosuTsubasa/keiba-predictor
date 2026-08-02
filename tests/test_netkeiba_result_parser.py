@@ -60,6 +60,44 @@ class NetkeibaResultParserTests(unittest.TestCase):
         self.assertEqual(ctx.exception.race_id, "202655062509")
         self.assertIn("取り止め", ctx.exception.reason)
 
+    def test_cancelled_result_page_recognizes_hiragana_wording(self) -> None:
+        html = """
+        <html>
+          <head>
+            <link rel="canonical" href="https://nar.netkeiba.com/race/result.html?race_id=202646072805" />
+          </head>
+          <body>
+            <div class="ResultTableWrap">悪天候のため取りやめとなりました。</div>
+          </body>
+        </html>
+        """
+
+        with self.assertRaises(NetkeibaResultUnavailableError) as ctx:
+            parse_netkeiba_result_html(html)
+
+        self.assertIn("取りやめ", ctx.exception.reason)
+
+    def test_cancelled_result_page_recognizes_refund_only_payouts(self) -> None:
+        html = """
+        <html>
+          <head>
+            <link rel="canonical" href="https://nar.netkeiba.com/race/result.html?race_id=202646072804" />
+          </head>
+          <body>
+            <table class="Payout_Detail_Table">
+              <tr><th>単勝</th><td class="Result">返還</td><td class="Payout">100円</td></tr>
+              <tr><th>複勝</th><td class="Result">返還</td><td class="Payout">100円</td></tr>
+              <tr><th>馬連</th><td class="Result">返還</td><td class="Payout">100円</td></tr>
+            </table>
+          </body>
+        </html>
+        """
+
+        with self.assertRaises(NetkeibaResultUnavailableError) as ctx:
+            parse_netkeiba_result_html(html)
+
+        self.assertIn("全券種返還", ctx.exception.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

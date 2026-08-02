@@ -8,6 +8,26 @@ import urllib.error
 import urllib.request
 
 
+def _format_http_error_detail(detail, limit=2000):
+    text = str(detail or "").strip()
+    try:
+        payload = json.loads(text or "{}")
+    except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        errors = list(payload.get("errors", []) or [])
+        if errors:
+            diagnostic = {
+                "ok": payload.get("ok"),
+                "errors": errors[:5],
+                "auto_discovery_error_count": int(
+                    dict(payload.get("auto_discovery", {}) or {}).get("error_count", 0) or 0
+                ),
+            }
+            text = json.dumps(diagnostic, ensure_ascii=False, separators=(",", ":"))
+    return " ".join(text.split())[: max(1, int(limit))]
+
+
 def main():
     trigger_url = str(os.environ.get("RUN_DUE_TRIGGER_URL", "") or "").strip()
     admin_token = str(os.environ.get("ADMIN_TOKEN", "") or "").strip()
@@ -45,7 +65,7 @@ def main():
                 return
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            detail_preview = " ".join(str(detail or "").split())[:400]
+            detail_preview = _format_http_error_detail(detail)
             last_error = RuntimeError(f"run_due trigger failed: http {exc.code} {detail_preview}".strip())
             if exc.code not in (502, 503, 504) or attempt >= max_attempts:
                 raise last_error from exc

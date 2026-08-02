@@ -20,7 +20,7 @@ CENTRAL_RACE_LIST_URL = "https://race.netkeiba.com/top/race_list_sub.html"
 LOCAL_TOP_URL = "https://nar.netkeiba.com/top/?rf=navi"
 LOCAL_RACE_LIST_URL = "https://nar.netkeiba.com/top/race_list_sub.html"
 LOCAL_DIRECT_PROBE_MAX_RACE_NO = 12
-LOCAL_UNAVAILABLE_RACE_MARKERS = ("取止", "取り止め", "開催中止")
+LOCAL_UNAVAILABLE_RACE_MARKERS = ("取止", "取り止め", "取りやめ", "開催中止", "不成立")
 
 
 def _jst_today_text():
