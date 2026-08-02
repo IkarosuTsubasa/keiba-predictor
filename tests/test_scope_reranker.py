@@ -246,15 +246,15 @@ class ScopeRerankerTests(unittest.TestCase):
             enabled=True,
         )
 
-        self.assertEqual(config.blend_weight, 1.0)
+        self.assertEqual(config.blend_weight, 0.5)
         self.assertEqual(config.preserve_top_n, 1)
         self.assertTrue(result.applied)
         self.assertEqual(result.original_ranking, [1, 2, 3, 4])
         self.assertEqual(result.baseline_ranking, [1, 2, 3, 4])
-        self.assertEqual(result.reranked_ranking, [1, 3, 4, 2])
+        self.assertEqual(result.reranked_ranking, [1, 3, 2, 4])
         self.assertEqual(
             [score.horse_no for score in adjusted],
-            [1, 3, 4, 2],
+            [1, 3, 2, 4],
         )
 
     def test_disabled_reranker_is_unchanged(self) -> None:

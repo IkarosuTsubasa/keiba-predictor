@@ -59,20 +59,24 @@ from keiba_llm_agent.scoring.scope_reranker import (
 
 TRAINING_CONFIG = {
     "central_turf": {
-        "training_end": "2026-05-24",
+        "training_end": None,
+        "training_target": "top3",
+        "winner_weight_multiplier": 1.0,
         "feature_set": "course_geometry",
-        "filename": "central_turf_geometry_v1.joblib",
+        "filename": "central_turf_place_v1.joblib",
         "min_samples_leaf": 40,
-        "blend_weight": 1.0,
+        "blend_weight": 0.5,
         "preserve_top_n": 1,
         "baseline_filename": "central_turf_v1.joblib",
         "baseline_feature_set": "base",
         "baseline_blend_weight": 0.5,
     },
     "local": {
-        "training_end": "2026-07-11",
+        "training_end": None,
+        "training_target": "top3",
+        "winner_weight_multiplier": 2.0,
         "feature_set": "local_course_geometry",
-        "filename": "local_geometry_v1.joblib",
+        "filename": "local_place_v1.joblib",
         "min_samples_leaf": 40,
         "blend_weight": 1.0,
         "preserve_top_n": 2,
@@ -122,6 +126,31 @@ def winner_from_audit(payload: dict[str, Any]) -> int | None:
             if winner is not None:
                 return winner
     return None
+
+
+def top3_from_audit(payload: dict[str, Any]) -> set[int]:
+    def horse_number(value: Any) -> int | None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    result_payload = (payload.get("outcomes") or {}).get("result") or {}
+    direct = result_payload.get("result") or {}
+    top3 = {
+        horse_no
+        for position in ("1st", "2nd", "3rd")
+        if (horse_no := horse_number(direct.get(position))) is not None
+    }
+    if len(top3) == 3:
+        return top3
+    for row in result_payload.get("finish_order") or []:
+        finish = horse_number(row.get("finish"))
+        horse_no = horse_number(row.get("horse_no"))
+        if finish is not None and finish <= 3 and horse_no is not None:
+            top3.add(horse_no)
+    return top3
 
 
 def scope_key(race_data: RaceData) -> str:
@@ -286,26 +315,33 @@ def training_rows(
     audits: dict[str, dict[str, Any]],
     scope: str,
     config: dict[str, Any],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], list[str]]:
     feature_rows: list[np.ndarray] = []
     labels: list[int] = []
     weights: list[float] = []
     race_ids: list[str] = []
+    race_dates: list[str] = []
     eligible_races: list[
-        tuple[str, str, RaceData, Prediction, int]
+        tuple[str, str, RaceData, Prediction, int, set[int]]
     ] = []
     for payload in audits.values():
         if payload.get("audit_kind") != "full":
             continue
         race_data_payload = (payload.get("inputs") or {}).get("race_data")
         winner = winner_from_audit(payload)
+        top3 = top3_from_audit(payload)
         if not race_data_payload or winner is None:
+            continue
+        if config.get("training_target") == "top3" and len(top3) != 3:
             continue
         race_data = RaceData.model_validate(race_data_payload)
         if scope_key(race_data) != scope:
             continue
         race_date = str(race_data.race_info.race_date or "")
-        if not race_date or race_date > str(config["training_end"]):
+        training_end = config.get("training_end")
+        if not race_date or (
+            training_end and race_date > str(training_end)
+        ):
             continue
         prediction_payload = (payload.get("outputs") or {}).get(
             "prediction"
@@ -320,13 +356,21 @@ def training_rows(
                 race_data,
                 saved_prediction,
                 winner,
+                top3,
             )
         )
 
-    for _, race_id, race_data, saved_prediction, winner in sorted(
-        eligible_races,
-        key=lambda item: (item[0], item[1]),
-    ):
+    ordered_races = sorted(
+        eligible_races, key=lambda item: (item[0], item[1])
+    )
+    for (
+        race_date,
+        race_id,
+        race_data,
+        saved_prediction,
+        winner,
+        top3,
+    ) in ordered_races:
         scoring_config = scoring_config_for_scope(scope)
         horse_scores = recompute_horse_scores(
             race_data,
@@ -346,17 +390,28 @@ def training_rows(
                 strict=True,
             )
         }
-        positive_weight = max(len(horse_numbers) - 1, 1)
+        training_target = str(config.get("training_target") or "winner")
+        positive_horses = top3 if training_target == "top3" else {winner}
+        positive_count = len(positive_horses)
+        negative_count = max(len(horse_numbers) - positive_count, 1)
+        positive_weight = negative_count / max(positive_count, 1)
+        winner_weight_multiplier = float(
+            config.get("winner_weight_multiplier", 1.0)
+        )
         for horse in race_data.horses:
             horse_no = horse.horse_no
             feature_row = features_by_horse[horse_no]
-            is_winner = horse_no == winner
+            is_positive = horse_no in positive_horses
+            sample_weight = positive_weight
+            if training_target == "top3" and horse_no == winner:
+                sample_weight *= winner_weight_multiplier
             feature_rows.append(feature_row)
-            labels.append(int(is_winner))
+            labels.append(int(is_positive))
             weights.append(
-                float(positive_weight if is_winner else 1.0)
+                float(sample_weight if is_positive else 1.0)
             )
         race_ids.append(race_id)
+        race_dates.append(race_date)
 
     if not race_ids:
         raise RuntimeError(f"no training races found for scope={scope}")
@@ -365,6 +420,7 @@ def training_rows(
         np.asarray(labels, dtype=int),
         np.asarray(weights, dtype=float),
         sorted(race_ids),
+        sorted(race_dates),
     )
 
 
@@ -405,7 +461,7 @@ def train(snapshot: Path, output_dir: Path) -> dict[str, Any]:
         "models": {},
     }
     for scope, config in TRAINING_CONFIG.items():
-        features, labels, weights, race_ids = training_rows(
+        features, labels, weights, race_ids, race_dates = training_rows(
             audits,
             scope,
             config,
@@ -416,7 +472,14 @@ def train(snapshot: Path, output_dir: Path) -> dict[str, Any]:
         metadata["models"][scope] = {
             "filename": output_path.name,
             "feature_set": config["feature_set"],
-            "training_end": config["training_end"],
+            "training_target": str(
+                config.get("training_target") or "winner"
+            ),
+            "winner_weight_multiplier": float(
+                config.get("winner_weight_multiplier", 1.0)
+            ),
+            "training_start": min(race_dates),
+            "training_end": max(race_dates),
             "training_races": len(race_ids),
             "training_horses": int(features.shape[0]),
             "feature_count": int(features.shape[1]),

@@ -98,11 +98,19 @@ Audit interpretation:
 - `audit_kind=prediction_only`: only saved prediction scores exist, so use it for coefficient/weight replay only.
 - Always report sample counts, settled result coverage, central/local split, and missing inputs before recommending changes.
 - Do not delete or overwrite `pipeline/data/agent_predictions`, `pipeline/data/agent_results`, `pipeline/data/agent_backtest_audit`, `keiba_llm_agent/data/backtest_audit`, or `analysis_outputs/` snapshots during optimization.
+- Scoring-model optimization uses every settled `full` audit through grouped or repeated cross-validation. A recent-week slice is diagnostic only and does not independently select or reject a model.
+- The primary reranker KPI is predicted Top5 coverage of the actual Top3: covered podium slots/recall, all three covered, and at least two covered. Winner-rank metrics are secondary guardrails.
+- Odds and popularity are excluded from model features and candidate selection.
 
 Personal Codex skill shortcut:
 ```
 Use $keiba-agent-optimizer to download Render Agent data and run a safe scoring backtest review.
 ```
+
+The current place-coverage rerankers are trained with:
+- `central_turf`: every settled full race, actual Top3 target, equal podium weights, preserve Top1, blend `0.5`.
+- `local`: every settled full race, actual Top3 target, winner weight `2.0`, preserve Top2, blend `1.0`.
+- `central_dirt`: no reranker is enabled until all-full repeated validation becomes stable.
 
 ### Record race results
 ```

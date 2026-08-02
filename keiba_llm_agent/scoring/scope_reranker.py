@@ -34,21 +34,21 @@ from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RecentRun
 from keiba_llm_agent.utils.margin import parse_margin_value
 
 
-MODEL_VERSION = "scope_reranker_v3_20260727"
+MODEL_VERSION = "scope_reranker_v4_20260803_place"
 DEFAULT_BLEND_WEIGHT = 0.50
 MODEL_DIRECTORY = Path(__file__).resolve().parents[1] / "models" / "scope_reranker"
 MODEL_SPECS = {
     "central_turf": {
-        "filename": "central_turf_geometry_v1.joblib",
+        "filename": "central_turf_place_v1.joblib",
         "feature_set": "course_geometry",
-        "blend_weight": 1.0,
+        "blend_weight": 0.5,
         "preserve_top_n": 1,
         "baseline_filename": "central_turf_v1.joblib",
         "baseline_feature_set": "base",
         "baseline_blend_weight": DEFAULT_BLEND_WEIGHT,
     },
     "local": {
-        "filename": "local_geometry_v1.joblib",
+        "filename": "local_place_v1.joblib",
         "feature_set": "local_course_geometry",
         "blend_weight": 1.0,
         "preserve_top_n": 2,
