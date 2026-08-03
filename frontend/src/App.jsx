@@ -21,6 +21,8 @@ const ADMIN_CONSOLE_PATH = `${APP_BASE_PATH}/console`;
 const ADMIN_WORKSPACE_PATH = `${ADMIN_CONSOLE_PATH}/workspace`;
 const PUBLIC_BOARD_API_PATH = `${APP_BASE_PATH}/api/public/board`;
 const PUBLIC_RACE_DETAIL_API_PATH = `${APP_BASE_PATH}/api/public/races`;
+const PUBLIC_BOARD_REFRESH_INTERVAL_MS = 150 * 1000;
+const PUBLIC_BOARD_ERROR_RETRY_INTERVAL_MS = 60 * 1000;
 const { lazy, Suspense, useMemo } = React;
 const AdminJobsPage = lazy(() => import("./components/AdminJobsPage"));
 const AdminWorkspacePage = lazy(() => import("./components/AdminWorkspacePage"));
@@ -347,21 +349,24 @@ function useBoardData(search, enabled = true, includeHistoryDetail = false) {
       return;
     }
 
-    const initialData = readInitialBoardData(search);
-    if (initialData) {
-      setState({ loading: false, error: "", data: initialData });
-      return;
-    }
-
     let alive = true;
     let retryTimer = 0;
     let retryCount = 0;
-    setState({ loading: true, error: "", data: null });
+    let requestInFlight = false;
+    const initialData = readInitialBoardData(search);
+    setState({ loading: !initialData, error: "", data: initialData });
+
+    const scheduleLoad = (delayMs) => {
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(loadBoard, delayMs);
+    };
 
     const loadBoard = () => {
+      if (!alive || requestInFlight) return;
+      requestInFlight = true;
       fetch(`${PUBLIC_BOARD_API_PATH}${buildBoardQuery(search, includeHistoryDetail)}`, {
         headers: { Accept: "application/json" },
-        cache: retryCount > 0 ? "reload" : "default",
+        cache: "no-store",
       })
         .then(async (response) => {
           if (!response.ok) {
@@ -376,28 +381,50 @@ function useBoardData(search, enabled = true, includeHistoryDetail = false) {
         .then(({ data, isStale, retryAfter }) => {
           if (!alive) return;
           setState({ loading: false, error: "", data });
-          if (isStale && retryCount < 2) {
+          if (isStale) {
             retryCount += 1;
-            retryTimer = window.setTimeout(
-              loadBoard,
-              Math.max(5, Math.min(30, retryAfter)) * 1000,
+            scheduleLoad(
+              retryCount <= 3
+                ? Math.max(5, Math.min(30, retryAfter)) * 1000
+                : PUBLIC_BOARD_ERROR_RETRY_INTERVAL_MS,
             );
+            return;
           }
+          retryCount = 0;
+          scheduleLoad(PUBLIC_BOARD_REFRESH_INTERVAL_MS);
         })
         .catch((error) => {
           if (!alive) return;
-          setState({
-            loading: false,
-            error: error?.message || "公開データの読み込みに失敗しました。",
-            data: null,
-          });
+          setState((current) =>
+            current.data
+              ? { loading: false, error: "", data: current.data }
+              : {
+                  loading: false,
+                  error: error?.message || "公開データの読み込みに失敗しました。",
+                  data: null,
+                },
+          );
+          scheduleLoad(PUBLIC_BOARD_ERROR_RETRY_INTERVAL_MS);
+        })
+        .finally(() => {
+          requestInFlight = false;
         });
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        window.clearTimeout(retryTimer);
+        loadBoard();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     loadBoard();
 
     return () => {
       alive = false;
       window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, includeHistoryDetail, search]);
 
@@ -422,6 +449,7 @@ function useRaceDetailData(raceId, search, enabled = true) {
 
     fetch(`${PUBLIC_RACE_DETAIL_API_PATH}/${encodeURIComponent(raceId)}${buildQuery(search)}`, {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     })
       .then(async (response) => {
         if (response.status === 404) {

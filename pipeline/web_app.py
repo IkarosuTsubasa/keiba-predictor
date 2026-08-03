@@ -3638,16 +3638,15 @@ def build_public_board_payload(date_text="", scope_key="", include_detail_fields
 
 
 def _public_api_headers(stale=False):
-    if stale:
-        return {
-            "Cache-Control": "no-store",
-            "Retry-After": "20",
-            "X-Keiba-Data-Cache": "stale",
-        }
-    return {
-        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
-        "X-Keiba-Data-Cache": "fresh",
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Keiba-Data-Cache": "stale" if stale else "fresh",
     }
+    if stale:
+        headers["Retry-After"] = "10"
+    return headers
 
 
 def _mobile_app_token_expected():

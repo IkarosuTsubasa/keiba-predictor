@@ -112,6 +112,21 @@ class PublicBoardPerformanceTest(unittest.TestCase):
         self.assertNotIn("course_rows", period)
         self.assertEqual(period["predicted_races"], 12)
 
+    def test_public_api_headers_prevent_browser_caching(self):
+        fresh_headers = web_app._public_api_headers()
+        stale_headers = web_app._public_api_headers(stale=True)
+
+        for headers in (fresh_headers, stale_headers):
+            self.assertIn("no-store", headers["Cache-Control"])
+            self.assertIn("no-cache", headers["Cache-Control"])
+            self.assertEqual(headers["Pragma"], "no-cache")
+            self.assertEqual(headers["Expires"], "0")
+
+        self.assertEqual(fresh_headers["X-Keiba-Data-Cache"], "fresh")
+        self.assertNotIn("Retry-After", fresh_headers)
+        self.assertEqual(stale_headers["X-Keiba-Data-Cache"], "stale")
+        self.assertEqual(stale_headers["Retry-After"], "10")
+
 
 if __name__ == "__main__":
     unittest.main()
