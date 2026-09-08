@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import date
@@ -37,7 +38,18 @@ from keiba_llm_agent.utils.margin import parse_margin_value
 MODEL_VERSION = "scope_reranker_v4_20260803_place"
 DEFAULT_BLEND_WEIGHT = 0.50
 MODEL_DIRECTORY = Path(__file__).resolve().parents[1] / "models" / "scope_reranker"
+DIRT_MODEL_VERSION = "central_dirt_place_context_v1_20260908"
 MODEL_SPECS = {
+    "central_dirt": {
+        "filename": f"{DIRT_MODEL_VERSION}.joblib",
+        "metadata_filename": f"{DIRT_MODEL_VERSION}.json",
+        "model_version": DIRT_MODEL_VERSION,
+        "feature_set": "place_context_v1",
+        "training_target": "actual_top3_equal_runner_weight",
+        "min_field_size": 13,
+        "blend_weight": 1.0,
+        "preserve_top_n": 0,
+    },
     "central_turf": {
         "filename": "central_turf_place_v1.joblib",
         "feature_set": "course_geometry",
@@ -386,6 +398,13 @@ def build_scope_reranker_feature_matrix(
     horse_scores: list[HorseScore],
     feature_set: str,
 ) -> tuple[np.ndarray, list[int]]:
+    if feature_set == "place_context_v1":
+        from keiba_llm_agent.scoring.place_context import build_place_context_matrix
+
+        native, numbers = build_scope_reranker_feature_matrix(
+            race_data, horse_scores, "course_geometry",
+        )
+        return build_place_context_matrix(race_data, horse_scores, native), numbers
     scope = _scope_key(race_data)
     scores_by_horse = {
         score.horse_no: score for score in horse_scores
@@ -470,6 +489,26 @@ def _load_model(path_text: str) -> Any:
     return joblib.load(path_text)
 
 
+@lru_cache(maxsize=4)
+def _load_dirt_model(path_text: str) -> Any:
+    path = Path(path_text)
+    spec = MODEL_SPECS["central_dirt"]
+    metadata = json.loads(path.with_name(spec["metadata_filename"]).read_text(encoding="utf-8"))
+    for key in ("model_version", "feature_set", "training_target", "min_field_size", "blend_weight", "preserve_top_n"):
+        if metadata.get(key) != spec[key]:
+            raise ValueError(f"dirt model metadata mismatch: {key}")
+    if metadata.get("market_features_used") is not False or metadata.get("n_features") != 65:
+        raise ValueError("dirt model feature contract mismatch")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != metadata.get("model_sha256"):
+        raise ValueError("dirt model checksum mismatch")
+    return _load_model(path_text)
+
+
+def _dirt_place_mode() -> str:
+    value = os.getenv("KEIBA_CENTRAL_DIRT_PLACE_MODE", "active").strip().lower()
+    return value if value in {"active", "shadow", "off"} else "off"
+
+
 @lru_cache(maxsize=1)
 def _load_metadata(path_text: str) -> dict[str, Any]:
     path = Path(path_text)
@@ -484,6 +523,7 @@ def _load_metadata(path_text: str) -> dict[str, Any]:
 
 def clear_scope_reranker_caches() -> None:
     _load_model.cache_clear()
+    _load_dirt_model.cache_clear()
     _load_metadata.cache_clear()
 
 
@@ -495,16 +535,20 @@ def scope_reranker_config_snapshot(
         str(_model_directory() / "metadata.json")
     )
     model_spec = MODEL_SPECS.get(scope or "", {})
+    dirt_mode = _dirt_place_mode()
     return ScopeRerankerConfigSnapshot(
         enabled=enabled,
         model_version=str(
-            metadata.get("model_version") or MODEL_VERSION
+            model_spec.get("model_version") or metadata.get("model_version") or MODEL_VERSION
         ),
-        enabled_scopes=list(MODEL_SPECS),
+        enabled_scopes=[key for key in MODEL_SPECS if key != "central_dirt" or dirt_mode != "off"],
         blend_weight=float(
             model_spec.get("blend_weight", DEFAULT_BLEND_WEIGHT)
         ),
         preserve_top_n=int(model_spec.get("preserve_top_n", 0)),
+        mode=dirt_mode if scope == "central_dirt" else "active",
+        min_field_size=int(model_spec.get("min_field_size", 0)),
+        training_target=str(model_spec.get("training_target", "")),
     )
 
 
@@ -621,6 +665,19 @@ def apply_scope_reranker(
             "scope_not_enabled",
         )
         return scores, config, result
+    if scope == "central_dirt":
+        reason = ""
+        numbers = [horse.horse_no for horse in race_data.horses]
+        score_numbers = [score.horse_no for score in horse_scores]
+        if config.mode == "off":
+            reason = "scope_disabled"
+        elif len(numbers) != len(set(numbers)) or sorted(numbers) != sorted(score_numbers):
+            reason = "invalid_runner_roster"
+        elif len(numbers) < config.min_field_size:
+            reason = "field_size_below_minimum"
+        if reason:
+            scores, result = _fallback(horse_scores, scope, config.model_version, reason)
+            return scores, config, result
     if len(horse_scores) < 2:
         scores, result = _fallback(
             horse_scores,
@@ -637,7 +694,8 @@ def apply_scope_reranker(
     original_ranking = [score.horse_no for score in original_scores]
     model_path = _model_directory() / str(model_spec["filename"])
     try:
-        model = _load_model(str(model_path))
+        model = (_load_dirt_model(str(model_path)) if scope == "central_dirt"
+                 else _load_model(str(model_path)))
         baseline_model = None
         if model_spec.get("baseline_filename"):
             baseline_model = _load_model(
@@ -709,6 +767,12 @@ def apply_scope_reranker(
                 f"actual={matrix.shape[1]}"
             )
         probabilities = model.predict_proba(matrix)[:, 1]
+        if scope == "central_dirt" and (
+            len(probabilities) != len(horse_numbers)
+            or not np.isfinite(probabilities).all()
+            or np.any((probabilities < 0) | (probabilities > 1))
+        ):
+            raise ValueError("invalid place probabilities")
     except Exception:
         scores, result = _fallback(
             horse_scores,
@@ -732,6 +796,15 @@ def apply_scope_reranker(
         blend_weight=config.blend_weight,
         preserve_top_n=config.preserve_top_n,
     )
+    candidate_audit = {}
+    if scope == "central_dirt":
+        candidate_audit = {
+            "candidate_ranking": reranked_ranking,
+            "candidate_model_scores": model_scores,
+        }
+        if config.mode == "shadow":
+            scores, result = _fallback(horse_scores, scope, config.model_version, "shadow")
+            return scores, config, result.model_copy(update=candidate_audit)
 
     original_by_horse = {
         score.horse_no: score for score in original_scores
@@ -799,5 +872,6 @@ def apply_scope_reranker(
             original_ranking=original_ranking,
             baseline_ranking=baseline_ranking,
             reranked_ranking=reranked_ranking,
+            **candidate_audit,
         ),
     )

@@ -110,7 +110,7 @@ Use $keiba-agent-optimizer to download Render Agent data and run a safe scoring 
 The current place-coverage rerankers are trained with:
 - `central_turf`: every settled full race, actual Top3 target, equal podium weights, preserve Top1, blend `0.5`.
 - `local`: every settled full race, actual Top3 target, winner weight `2.0`, preserve Top2, blend `1.0`.
-- `central_dirt`: no reranker is enabled until all-full repeated validation becomes stable.
+- `central_dirt`：使用全部已结算完整样本训练等权前三模型，仅在 13 匹及以上启用直接重排；小头数保留原算法。部署与回退说明见 [中央泥地前三覆盖试用](docs/central_dirt_place_trial.md)。
 
 ### Record race results
 ```

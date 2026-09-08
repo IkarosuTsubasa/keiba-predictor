@@ -219,7 +219,7 @@ class ScopeRerankerTests(unittest.TestCase):
                 score.score_breakdown.scope_reranker_adjustment,
             )
 
-    def test_central_dirt_is_unchanged(self) -> None:
+    def test_small_central_dirt_field_is_unchanged(self) -> None:
         adjusted, config, result = scope_reranker.apply_scope_reranker(
             _race_data(source="central", surface="ダート"),
             _horse_scores(),
@@ -228,7 +228,7 @@ class ScopeRerankerTests(unittest.TestCase):
 
         self.assertTrue(config.enabled)
         self.assertFalse(result.applied)
-        self.assertEqual(result.reason_code, "scope_not_enabled")
+        self.assertEqual(result.reason_code, "field_size_below_minimum")
         self.assertEqual([score.horse_no for score in adjusted], [1, 2, 3, 4])
 
     @patch.object(
