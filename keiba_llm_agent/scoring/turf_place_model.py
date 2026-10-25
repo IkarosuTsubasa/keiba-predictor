@@ -15,12 +15,15 @@ import sklearn
 from threadpoolctl import threadpool_limits
 
 from keiba_llm_agent.analysis.race_class import CENTRAL_COURSES
-from keiba_llm_agent.scoring.turf_history_features import FEATURE_NAMES, FEATURE_VERSION, build_turf_history_matrix
+from keiba_llm_agent.scoring.turf_class_features import (
+    FEATURE_NAMES, FEATURE_VERSION, build_turf_class_matrix as build_turf_history_matrix,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
-MODEL_VERSION = 'central_turf_history_place_v1_20261025'
+MODEL_VERSION = 'central_turf_class_context_v1_20261025'
 MODEL_DIRECTORY = ROOT/'keiba_llm_agent/models/scope_reranker'
 SOURCE_FILES = (
+    'keiba_llm_agent/scoring/turf_class_features.py',
     'keiba_llm_agent/scoring/turf_history_features.py',
     'keiba_llm_agent/scoring/turf_place_features.py',
     'keiba_llm_agent/scoring/turf_place_model.py',

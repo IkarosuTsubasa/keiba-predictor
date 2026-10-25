@@ -14,7 +14,11 @@ from keiba_llm_agent import main
 from keiba_llm_agent.agents import race_analysis_agent as agent_module
 from keiba_llm_agent.backtest.audit_snapshot import read_backtest_audit_payload, attach_result_to_backtest_audit
 from keiba_llm_agent.scoring import turf_place_model as active, turf_shadow, scope_reranker, recent_run_scorer
-from tests.test_turf_shadow import sample, FixedModel
+from tests.test_turf_shadow import sample, FixedModel as HistoryFixedModel
+
+
+class FixedModel(HistoryFixedModel):
+    n_features_in_ = 316
 
 
 def meta():
@@ -33,13 +37,14 @@ def generate(race, prediction):
 
 
 class TurfActivationTests(unittest.TestCase):
-    def test_packaged_active_model_is_same_frozen_candidate(self):
+    def test_packaged_active_model_is_approved_class_candidate(self):
         model, metadata = active.load_bundle()
-        self.assertEqual(model.n_features_in_, 292)
+        self.assertEqual(model.n_features_in_, 316)
         self.assertEqual(metadata['training_races'], 630)
         self.assertEqual(metadata['training_end'], '2026-10-25')
-        self.assertEqual(metadata['model_sha256'], '81c5e44ef12e1abfe1f5bf495bcbb91449604c3d5f23a72f5003f95a7adcb652')
-        self.assertEqual(metadata['promoted_from']['model_sha256'], metadata['model_sha256'])
+        self.assertEqual(metadata['model_sha256'], '553777c6e9eb601f6df0b616a70581cf356cd247ebe0817f85d849433b7eddd1')
+        self.assertEqual(metadata['frozen_candidate'], 'class_context')
+        self.assertEqual(metadata['previous_model_sha256'], '81c5e44ef12e1abfe1f5bf495bcbb91449604c3d5f23a72f5003f95a7adcb652')
         self.assertEqual(scope_reranker.TURF_MODEL_VERSION, active.MODEL_VERSION)
 
     def test_new_model_controls_ranking_marks_bets_and_llm_inputs(self):

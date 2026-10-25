@@ -41,10 +41,12 @@ class _FixedLocalGeometryModel:
 
 
 class _FixedCentralTurfModel:
-    n_features_in_ = 292
+    n_features_in_ = 316
 
     def predict_proba(self, matrix: np.ndarray) -> np.ndarray:
         probabilities = np.asarray([0.1, 0.4, 0.9, 0.8])
+        if matrix.shape[1] != self.n_features_in_:
+            raise AssertionError("unexpected turf feature width")
         if matrix.shape[0] != len(probabilities):
             raise AssertionError("unexpected horse count")
         return np.column_stack((1.0 - probabilities, probabilities))

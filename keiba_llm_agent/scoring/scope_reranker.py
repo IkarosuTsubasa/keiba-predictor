@@ -39,7 +39,7 @@ MODEL_VERSION = "scope_reranker_v4_20260803_place"
 DEFAULT_BLEND_WEIGHT = 0.50
 MODEL_DIRECTORY = Path(__file__).resolve().parents[1] / "models" / "scope_reranker"
 DIRT_MODEL_VERSION = "central_dirt_place_context_v1_20260908"
-TURF_MODEL_VERSION = "central_turf_history_place_v1_20261025"
+TURF_MODEL_VERSION = "central_turf_class_context_v1_20261025"
 MODEL_SPECS = {
     "central_dirt": {
         "filename": f"{DIRT_MODEL_VERSION}.joblib",
@@ -54,7 +54,7 @@ MODEL_SPECS = {
     "central_turf": {
         "filename": f"{TURF_MODEL_VERSION}.joblib",
         "model_version": TURF_MODEL_VERSION,
-        "feature_set": "turf_history_v1",
+        "feature_set": "turf_class_context_v1",
         "training_target": "actual_top3_equal_runner_weight",
         "blend_weight": 1.0,
         "preserve_top_n": 0,
@@ -398,6 +398,12 @@ def build_scope_reranker_feature_matrix(
     horse_scores: list[HorseScore],
     feature_set: str,
 ) -> tuple[np.ndarray, list[int]]:
+    if feature_set == "turf_class_context_v1":
+        from keiba_llm_agent.scoring.turf_place_model import validate_inputs
+        from keiba_llm_agent.scoring.turf_class_features import build_turf_class_matrix
+
+        validate_inputs(race_data)
+        return build_turf_class_matrix(race_data, horse_scores)
     if feature_set == "turf_history_v1":
         from keiba_llm_agent.scoring.turf_place_model import validate_inputs
         from keiba_llm_agent.scoring.turf_history_features import build_turf_history_matrix
