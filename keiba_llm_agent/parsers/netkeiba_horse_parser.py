@@ -5,6 +5,9 @@ import re
 from bs4 import BeautifulSoup, Tag
 
 from keiba_llm_agent.schemas.race_data import RecentRun
+from keiba_llm_agent.parsers.netkeiba_performance_fields import (
+    parse_body_weight, parse_pace, parse_time_seconds,
+)
 
 
 VENUE_NAMES = (
@@ -184,7 +187,7 @@ def is_valid_result_row(cells: list[Tag], header_index: dict[str, int]) -> bool:
     return bool(date_text and finish_text and distance_text)
 
 
-def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> RecentRun:
+def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int], *, include_performance_details: bool = False) -> RecentRun:
     date_text = get_cell_text(cells, header_index, ["日付"])
     race_name_text = get_cell_text(cells, header_index, ["レース名"])
     course_text = get_cell_text(cells, header_index, ["開催"])
@@ -200,6 +203,17 @@ def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> Rece
     margin_text = get_cell_text(cells, header_index, ["着差"])
 
     surface, distance = parse_surface_and_distance(distance_text)
+    details = {}
+    if include_performance_details:
+        body, change = parse_body_weight(get_cell_text(cells, header_index, ['馬体重']))
+        first, last = parse_pace(get_cell_text(cells, header_index, ['ペース']))
+        weight = parse_float_safe(get_cell_text(cells, header_index, ['斤量']))
+        details = {
+            'time_seconds': parse_time_seconds(get_cell_text(cells, header_index, ['タイム'])),
+            'carried_weight': weight if weight is not None and 40 <= weight <= 80 else None,
+            'body_weight': body, 'body_weight_change': change,
+            'pace_first_3f': first, 'pace_last_3f': last,
+        }
     return RecentRun(
         race_id=parse_race_id_from_row(cells, header_index),
         date=parse_date(date_text),
@@ -217,10 +231,11 @@ def parse_recent_run_row(cells: list[Tag], header_index: dict[str, int]) -> Rece
         corner_positions=parse_corner_positions(passing_order_text),
         final_3f=parse_float_safe(final_3f_text),
         margin=normalize_text(margin_text) or None,
+        **details,
     )
 
 
-def parse_horse_recent_runs(html: str, limit: int | None = None) -> list[RecentRun]:
+def parse_horse_recent_runs(html: str, limit: int | None = None, *, include_performance_details: bool = False) -> list[RecentRun]:
     if limit is not None and limit <= 0:
         return []
 
@@ -240,7 +255,7 @@ def parse_horse_recent_runs(html: str, limit: int | None = None) -> list[RecentR
         cells = row.find_all("td", recursive=False)
         if not is_valid_result_row(cells, header_index):
             continue
-        runs.append(parse_recent_run_row(cells, header_index))
+        runs.append(parse_recent_run_row(cells, header_index, include_performance_details=include_performance_details))
         if limit is not None and len(runs) >= limit:
             break
     return runs

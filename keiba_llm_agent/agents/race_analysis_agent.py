@@ -220,7 +220,18 @@ class RaceAnalysisAgent:
             return prediction
 
         payload = {
-            "race_data": race_data.model_dump(),
+            # Supplementary inputs remain audit-only until their ranking policy is validated.
+            "race_data": race_data.model_dump(exclude={
+                "race_info": {"race_class", "race_class_source", "scheduled_start_at"},
+                "horses": {"__all__": {
+                    "age": True, "sex": True, "body_weight": True,
+                    "body_weight_change": True, "history_status": True,
+                    "recent_runs": {"__all__": {
+                        "time_seconds", "carried_weight", "body_weight", "body_weight_change",
+                        "pace_first_3f", "pace_last_3f",
+                    }},
+                }},
+            }),
             "lessons": [lesson.model_dump() for lesson in relevant_lessons],
         }
         response = self.llm_client.generate_analysis(self.prompt_template, payload)

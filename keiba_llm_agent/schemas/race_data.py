@@ -23,6 +23,12 @@ class RecentRun(BaseModel):
     corner_positions: list[int] | None = None
     final_3f: float | None = None
     margin: str | None = None
+    time_seconds: float | None = None
+    carried_weight: float | None = None
+    body_weight: int | None = None
+    body_weight_change: int | None = None
+    pace_first_3f: float | None = None
+    pace_last_3f: float | None = None
 
 
 class HorseEntry(BaseModel):
@@ -35,6 +41,11 @@ class HorseEntry(BaseModel):
     odds: float | None = None
     popularity: int | None = None
     recent_runs: list[RecentRun] = Field(default_factory=list)
+    age: int | None = None
+    sex: str | None = None
+    body_weight: int | None = None
+    body_weight_change: int | None = None
+    history_status: str | None = None
 
 
 class RaceInfo(BaseModel):
@@ -48,6 +59,9 @@ class RaceInfo(BaseModel):
     weather: str | None = None
     source: str | None = None
     scope_key: str | None = None
+    race_class: str | None = None
+    race_class_source: str | None = None
+    scheduled_start_at: str | None = None
 
 
 class RaceData(BaseModel):

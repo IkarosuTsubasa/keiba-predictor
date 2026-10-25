@@ -120,15 +120,20 @@ def enrich_race_data_with_recent_runs(
     enriched_horses: list[HorseEntry] = []
     target_race_date = race_data.race_info.race_date
     target_race_id = race_data.race_info.race_id
+    collect_details = race_data.race_info.scope_key == 'central_turf'
     for horse in race_data.horses:
         if not horse.horse_id:
-            enriched_horses.append(horse.model_copy(update={"recent_runs": []}))
+            update = {"recent_runs": []}
+            if collect_details:
+                update['history_status'] = 'missing_horse_id'
+            enriched_horses.append(horse.model_copy(update=update))
             continue
 
         recent_runs = []
+        status = 'fetch_failed'
         try:
             html = fetch_horse_html(horse.horse_id, force_refresh=force_refresh)
-            parsed_runs = parse_horse_recent_runs(html, limit=None)
+            parsed_runs = parse_horse_recent_runs(html, limit=None, include_performance_details=collect_details)
             recent_runs = filter_recent_runs_for_target_race(
                 parsed_runs,
                 target_race_date=target_race_date,
@@ -136,6 +141,15 @@ def enrich_race_data_with_recent_runs(
                 horse_id=horse.horse_id,
                 limit=limit,
             )
+            if collect_details:
+                if recent_runs:
+                    status = 'available'
+                elif parse_iso_date_safe(target_race_date) is None:
+                    status = 'invalid_target_date'
+                elif parsed_runs:
+                    status = 'no_prior_runs'
+                else:
+                    status = 'empty_table' if has_recent_runs_table(html) else 'missing_results_table'
             if not recent_runs:
                 warnings.warn(
                     f"no recent runs parsed: horse_id={horse.horse_id}",
@@ -146,6 +160,9 @@ def enrich_race_data_with_recent_runs(
                 f"failed to enrich horse recent runs: horse_id={horse.horse_id}: {exc}",
                 stacklevel=2,
             )
-        enriched_horses.append(horse.model_copy(update={"recent_runs": recent_runs}))
+        update = {"recent_runs": recent_runs}
+        if collect_details:
+            update['history_status'] = status
+        enriched_horses.append(horse.model_copy(update=update))
 
     return race_data.model_copy(update={"horses": enriched_horses})

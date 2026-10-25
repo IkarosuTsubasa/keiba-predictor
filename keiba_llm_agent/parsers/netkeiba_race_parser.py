@@ -5,6 +5,9 @@ import re
 from bs4 import BeautifulSoup, Tag
 
 from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo
+from keiba_llm_agent.parsers.netkeiba_performance_fields import (
+    explicit_race_class, normalized, parse_body_weight, parse_sex_age,
+)
 
 
 CENTRAL_VENUE_MAP = {
@@ -521,4 +524,22 @@ def parse_netkeiba_shutuba_html(html: str, race_id: str | None = None) -> RaceDa
     soup = BeautifulSoup(html, "html.parser")
     race_info = parse_race_info(soup, race_id=race_id)
     horses = parse_horse_rows(soup)
+    if race_info.scope_key == 'central_turf':
+        race_info.race_class, race_info.race_class_source = explicit_race_class(soup)
+        start = re.search(r'(\d{1,2}):(\d{2})発走', normalized(' '.join(
+            n.get_text(' ', strip=True) for n in soup.select('.RaceData01'))))
+        if start and race_info.race_date and int(start[1]) < 24 and int(start[2]) < 60:
+            race_info.scheduled_start_at = f'{race_info.race_date}T{int(start[1]):02d}:{start[2]}:00+09:00'
+        by_number = {h.horse_no: h for h in horses}
+        for table in find_horse_tables(soup):
+            headers = build_header_index_map(table)
+            for row in find_horse_rows(table):
+                number = parse_int_safe(select_first_text(row, ['td.Umaban', 'td[class*="Umaban"]']))
+                horse = by_number.get(number)
+                if horse is None:
+                    continue
+                sex_age = select_first_text(row, ['td.Barei', 'td.Age']) or parse_cell_by_index(row, headers, ['性齢'])
+                horse.sex, horse.age = parse_sex_age(sex_age)
+                body = parse_cell_by_index(row, headers, ['馬体重(増減)', '馬体重']) or select_first_text(row, ['td.Weight'])
+                horse.body_weight, horse.body_weight_change = parse_body_weight(body)
     return RaceData(race_info=race_info, horses=horses)
