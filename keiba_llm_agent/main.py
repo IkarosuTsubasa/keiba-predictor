@@ -45,7 +45,6 @@ from keiba_llm_agent.fetchers.netkeiba_fetcher import (
     get_html_cache_path,
     save_race_data,
 )
-from keiba_llm_agent.fetchers.netkeiba_workout_fetcher import capture_public_workout
 from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import (
     enrich_race_data_with_recent_runs,
     fetch_horse_html,
@@ -258,6 +257,33 @@ def _write_json(path: str | Path, payload: dict) -> Path:
     return output_path
 
 
+def _supports_workout_capture(race_data: RaceData) -> bool:
+    info = race_data.race_info
+    race_id = str(info.race_id)
+    return (str(info.source or "").lower() != "local"
+            and not str(info.scope_key or "").lower().startswith("local")
+            and len(race_id) == 12 and race_id.isdigit() and 1 <= int(race_id[4:6]) <= 10
+            and info.surface in ("芝", "ダート") and bool(race_data.horses))
+
+
+def capture_public_workout(race_data: RaceData) -> dict:
+    # Keep optional acquisition dependencies out of the local-race execution path.
+    from keiba_llm_agent.fetchers.netkeiba_workout_fetcher import capture_public_workout as capture
+
+    return capture(race_data)
+
+
+def _capture_prediction_supplements(race_data: RaceData) -> dict | None:
+    if not _supports_workout_capture(race_data):
+        return None
+    try:
+        return {"public_workout": capture_public_workout(race_data)}
+    except Exception as exc:
+        return {"public_workout": {"race_id": race_data.race_info.race_id,
+                "status": "capture_failed", "error_type": type(exc).__name__,
+                "used_for_scoring": False, "used_for_llm": False}}
+
+
 def _write_prediction_backtest_audit(
     *,
     race_data: RaceData,
@@ -278,12 +304,18 @@ def _write_prediction_backtest_audit(
     )
     if supplementary_observations is not None:
         payload["inputs"]["supplementary_observations"] = supplementary_observations
-        from keiba_llm_agent.scoring.workout_shadow import evaluate_workout_shadow
+    if (supplementary_observations is not None and _supports_workout_capture(race_data)
+            and race_data.race_info.surface == "芝"):
+        try:
+            from keiba_llm_agent.scoring.workout_shadow import evaluate_workout_shadow
 
-        shadow = evaluate_workout_shadow(
-            race_data.model_copy(deep=True), prediction.model_copy(deep=True),
-            supplementary_observations.get("public_workout"),
-        )
+            shadow = evaluate_workout_shadow(
+                race_data.model_copy(deep=True), prediction.model_copy(deep=True),
+                supplementary_observations.get("public_workout"),
+            )
+        except Exception as exc:
+            shadow = {"status": "failed", "authoritative": False,
+                      "reason_code": "shadow_capture_failed", "error_type": type(exc).__name__}
         if shadow is not None:
             payload.setdefault("shadow_predictions", {})["public_workout"] = shadow
     if prediction.scope_reranker_result.scope == "central_turf":
@@ -506,7 +538,7 @@ def run_analyze_url(
 
     if not dry_run:
         final_lessons_path = Path(lessons_path) if lessons_path is not None else DEFAULT_LESSONS_PATH
-        observations = {"public_workout": capture_public_workout(race_data)}
+        observations = _capture_prediction_supplements(race_data)
         _, prediction_path = run_analysis(
             race_data_path=race_data_path,
             output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
@@ -791,7 +823,7 @@ def run_predict_race(
     with _prediction_stage("save_race_data"):
         race_data_path = save_race_data(race_data)
     with _prediction_stage("capture_public_workout"):
-        observations = {"public_workout": capture_public_workout(race_data)}
+        observations = _capture_prediction_supplements(race_data)
     with _prediction_stage("run_analysis"):
         _, prediction_path = run_analysis(
             race_data_path=race_data_path,

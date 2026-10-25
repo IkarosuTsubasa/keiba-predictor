@@ -201,9 +201,15 @@ def attach_result_to_backtest_audit(path: str | Path, result_payload: dict[str, 
     audit_path = Path(path)
     payload = read_backtest_audit_payload(audit_path)
     payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
-    from pipeline.workout_shadow_metrics import attach_workout_comparison
+    if (payload.get("shadow_predictions") or {}).get("public_workout") is not None:
+        try:
+            from pipeline.workout_shadow_metrics import attach_workout_comparison
 
-    attach_workout_comparison(payload, result_payload)
+            attach_workout_comparison(payload, result_payload)
+        except Exception as exc:
+            payload["outcomes"]["public_workout_comparison"] = {
+                "status": "failed", "reason_code": "comparison_failed", "error_type": type(exc).__name__,
+            }
     payload["backtest_capabilities"] = backtest_capabilities(
         race_data_payload=(payload.get("inputs") or {}).get("race_data"),
         prediction_payload=(payload.get("outputs") or {}).get("prediction"),
