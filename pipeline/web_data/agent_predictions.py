@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from confidence_policy import AGENT_CONFIDENCE_FALLBACK_SCORE, public_decision_tone
+from workout_shadow_metrics import attach_workout_comparison
 
 
 MARK_ORDER = ("◎", "○", "▲", "△", "☆")
@@ -352,6 +353,7 @@ def attach_result_to_agent_backtest_audit(base_dir, race_id, result_payload):
         if not isinstance(payload, dict) or not payload:
             continue
         payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
+        attach_workout_comparison(payload, result_payload)
         race_data_payload = (payload.get("inputs") or {}).get("race_data")
         prediction_payload = (payload.get("outputs") or {}).get("prediction")
         payload["backtest_capabilities"] = _audit_capabilities(

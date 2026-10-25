@@ -278,6 +278,14 @@ def _write_prediction_backtest_audit(
     )
     if supplementary_observations is not None:
         payload["inputs"]["supplementary_observations"] = supplementary_observations
+        from keiba_llm_agent.scoring.workout_shadow import evaluate_workout_shadow
+
+        shadow = evaluate_workout_shadow(
+            race_data.model_copy(deep=True), prediction.model_copy(deep=True),
+            supplementary_observations.get("public_workout"),
+        )
+        if shadow is not None:
+            payload.setdefault("shadow_predictions", {})["public_workout"] = shadow
     if prediction.scope_reranker_result.scope == "central_turf":
         try:
             from keiba_llm_agent.scoring.turf_place_model import build_inference_audit

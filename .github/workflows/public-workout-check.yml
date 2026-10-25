@@ -17,6 +17,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  shadow_contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 比較モデルと結果保存の確認
+        run: python -m unittest tests.test_workout_shadow tests.test_public_workout_capture tests.test_backtest_audit_snapshot -v
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5

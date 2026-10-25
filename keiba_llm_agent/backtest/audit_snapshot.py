@@ -201,6 +201,9 @@ def attach_result_to_backtest_audit(path: str | Path, result_payload: dict[str, 
     audit_path = Path(path)
     payload = read_backtest_audit_payload(audit_path)
     payload.setdefault("outcomes", {})["result"] = dict(result_payload or {})
+    from pipeline.workout_shadow_metrics import attach_workout_comparison
+
+    attach_workout_comparison(payload, result_payload)
     payload["backtest_capabilities"] = backtest_capabilities(
         race_data_payload=(payload.get("inputs") or {}).get("race_data"),
         prediction_payload=(payload.get("outputs") or {}).get("prediction"),
