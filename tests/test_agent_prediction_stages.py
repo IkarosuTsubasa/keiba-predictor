@@ -44,6 +44,12 @@ def _callback_payload(prediction: dict) -> dict:
 
 class AgentPredictionStageTests(unittest.TestCase):
     def test_shadow_survives_remote_early_final_versions_and_settlement_without_public_change(self) -> None:
+        self.check_inference_roundtrip('shadow_predictions', False)
+
+    def test_active_inference_survives_remote_versions_and_settlement(self) -> None:
+        self.check_inference_roundtrip('model_inference', True)
+
+    def check_inference_roundtrip(self, field, authoritative) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)/'pipeline'
             base.mkdir()
@@ -52,10 +58,10 @@ class AgentPredictionStageTests(unittest.TestCase):
             with patch.object(web_app, 'BASE_DIR', base):
                 for stage, selected in [('early', 1), ('final', 2)]:
                     prediction = _payload(rid, selected)
-                    shadow = {'central_turf_history': {'status': 'predicted', 'authoritative': False,
+                    shadow = {'central_turf_history': {'status': 'predicted', 'authoritative': authoritative,
                               'candidate_top5': [6, 5, 4, 3, 2], 'stage_test_marker': stage}}
                     audit = {'race_id': rid, 'audit_kind': 'full', 'inputs': {'race_data': {'horses': []}},
-                             'outputs': {'prediction': prediction}, 'shadow_predictions': shadow}
+                             'outputs': {'prediction': prediction}, field: shadow}
                     callback = _callback_payload(prediction)
                     callback['result']['audit_content_base64'] = base64.b64encode(
                         gzip.compress(json.dumps(audit).encode('utf-8'))).decode('ascii')
@@ -64,17 +70,17 @@ class AgentPredictionStageTests(unittest.TestCase):
                     result = web_app._apply_remote_agent_prediction_result(task, callback)
                     public = json.loads(Path(result['prediction_path']).read_text(encoding='utf-8'))
                     self.assertEqual(public['marks'], prediction['marks'])
-                    self.assertNotIn('shadow_predictions', public)
+                    self.assertNotIn(field, public)
                     stored.append((Path(result['backtest_audit_path']), shadow))
                     callback['result']['audit_content_base64'] = base64.b64encode(
-                        gzip.compress(json.dumps({**audit, 'shadow_predictions': {}}).encode('utf-8'))).decode('ascii')
+                        gzip.compress(json.dumps({**audit, field: {}}).encode('utf-8'))).decode('ascii')
                     web_app._apply_remote_agent_prediction_result(task, callback)
                 agent_predictions.attach_result_to_agent_backtest_audit(
                     base, rid, {'race_id': rid, 'result': {'1st': 6, '2nd': 2, '3rd': 1}})
             self.assertNotEqual(stored[0][0], stored[1][0])
             for path, expected in stored:
                 restored = agent_predictions.read_agent_backtest_audit_payload(path)
-                self.assertEqual(restored['shadow_predictions'], expected)
+                self.assertEqual(restored[field], expected)
                 self.assertEqual(restored['outcomes']['result']['result']['1st'], 6)
 
     def test_public_status_distinguishes_early_and_final_predictions(self) -> None:

@@ -16,6 +16,7 @@ from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RaceInfo, Re
 from keiba_llm_agent.scoring import turf_shadow as shadow
 from keiba_llm_agent.scoring.turf_history_features import FEATURE_NAMES, FEATURE_VERSION, build_turf_history_matrix
 from keiba_llm_agent.scoring.turf_place_features import build_supplementary_features
+from keiba_llm_agent.scoring.scope_reranker import build_scope_reranker_feature_matrix
 from pipeline import experiment_agent_architecture as oracle
 
 
@@ -64,20 +65,21 @@ class TurfShadowTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-    def test_packaged_model_loads_with_its_declared_contract(self):
-        model, meta = shadow.load_bundle()
+    def test_historical_shadow_artifact_is_preserved_but_not_current_runtime(self):
+        path = shadow.MODEL_DIRECTORY/(shadow.MODEL_VERSION+'.joblib')
+        meta = json.loads(path.with_suffix('.json').read_text(encoding='utf-8'))
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), meta['model_sha256'])
+        model = joblib.load(path)
         self.assertEqual(model.n_features_in_, 292)
         self.assertEqual(meta['training_races'], 630)
         self.assertEqual(meta['training_end'], '2026-10-25')
-        race, prediction = sample()
-        record = shadow.evaluate_turf_shadow(race, prediction)
-        self.assertEqual(record['status'], 'predicted')
-        self.assertEqual(record['model_sha256'], meta['model_sha256'])
+        with self.assertRaisesRegex(ValueError, 'contract mismatch'):
+            shadow.load_bundle()
 
     def test_feature_contract_matches_independent_experiment(self):
         race, prediction = sample()
         matrix, numbers = build_turf_history_matrix(race, prediction.horse_scores)
-        expected = np.column_stack((oracle.e.feature_record(race, prediction, 'current')['matrix'],
+        expected = np.column_stack((build_scope_reranker_feature_matrix(race, prediction.horse_scores, 'course_geometry')[0],
                                     oracle.raw_features(race),
                                     build_supplementary_features(race)['history']))
         np.testing.assert_allclose(matrix, expected, rtol=0, atol=0, equal_nan=True)
@@ -200,29 +202,31 @@ class TurfShadowTests(unittest.TestCase):
                 else:
                     self.assertIsInstance(shadow._load_bundle(str(path), 0, 0)[0], FixedModel)
 
-    def test_main_audit_hook_isolated_from_prediction_and_survives_results(self):
+    def test_main_no_longer_runs_shadow_and_keeps_prediction_untouched(self):
         race, prediction = sample(); before = prediction.model_dump()
         with tempfile.TemporaryDirectory() as directory, patch.object(main, 'DEFAULT_BACKTEST_AUDIT_DIR', Path(directory)), \
-             patch.object(shadow, 'load_bundle', return_value=(FixedModel(), metadata())):
+             patch.object(shadow, 'evaluate_turf_shadow') as evaluate:
             path = main._write_prediction_backtest_audit(race_data=race, prediction=prediction)
             payload = read_backtest_audit_payload(path)
             self.assertEqual(payload['outputs']['prediction'], before)
             self.assertNotIn('shadow_predictions', payload['outputs']['prediction'])
-            self.assertEqual(payload['shadow_predictions']['central_turf_history']['status'], 'predicted')
+            self.assertNotIn('shadow_predictions', payload)
+            evaluate.assert_not_called()
             attach_result_to_backtest_audit(path, {'race_id': race.race_info.race_id, 'result': {'1st': 6, '2nd': 2, '3rd': 1}})
-            self.assertEqual(read_backtest_audit_payload(path)['shadow_predictions'], payload['shadow_predictions'])
+            self.assertEqual(read_backtest_audit_payload(path)['outputs']['prediction'], before)
         self.assertEqual(prediction.model_dump(), before)
 
-    def test_faulty_shadow_capture_cannot_mutate_official_inputs(self):
+    def test_shadow_capture_is_not_called_even_when_it_would_fail(self):
         race, prediction = sample(); before = prediction.model_dump(); original = race.model_dump()
         def faulty(r, p):
             p.marks.clear(); r.horses.clear()
             raise RuntimeError('failure after mutation')
         with tempfile.TemporaryDirectory() as directory, patch.object(main, 'DEFAULT_BACKTEST_AUDIT_DIR', Path(directory)), \
-             patch.object(shadow, 'evaluate_turf_shadow', side_effect=faulty):
+             patch.object(shadow, 'evaluate_turf_shadow', side_effect=faulty) as evaluate:
             path = main._write_prediction_backtest_audit(race_data=race, prediction=prediction)
             payload = read_backtest_audit_payload(path)
-            self.assertEqual(payload['shadow_predictions']['central_turf_history']['status'], 'failed')
+            self.assertNotIn('shadow_predictions', payload)
+            evaluate.assert_not_called()
             self.assertEqual(payload['outputs']['prediction'], before)
         self.assertEqual(prediction.model_dump(), before)
         self.assertEqual(race.model_dump(), original)

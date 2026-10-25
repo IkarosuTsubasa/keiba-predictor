@@ -1581,6 +1581,13 @@ def build_prediction_from_recent_runs_with_scoring_config(
     scope_reranker_enabled: bool = False,
 ) -> Prediction:
     scoring_config_snapshot = ScoringConfigSnapshot.model_validate(scoring_config.model_dump())
+    if scope_reranker_enabled:
+        from keiba_llm_agent.scoring.turf_place_model import is_central_turf, validate_inputs
+
+        if is_central_turf(race_data):
+            validate_inputs(race_data)
+            if scoring_config_snapshot.use_market_score_in_ranking:
+                raise ValueError("Active turf model does not accept market-based scoring")
     effective_weights = effective_scoring_weights(
         scoring_config_snapshot,
         surface=race_data.race_info.surface,

@@ -82,6 +82,11 @@ def production_hashes():
         'config/scoring_config.py', 'analysis/race_level_analyzer.py', 'analysis/pace_analyzer.py',
         'analysis/race_deep_analyzer.py')]
     files += model_files()
+    if reranker.MODEL_SPECS['central_turf']['feature_set'] == 'turf_history_v1':
+        from keiba_llm_agent.scoring.turf_place_model import SOURCE_FILES
+
+        files += [ROOT/name for name in SOURCE_FILES]
+        files += [reranker._model_directory()/Path(reranker.MODEL_SPECS['central_turf']['filename']).with_suffix('.json')]
     return {str(p): digest(p) for p in files}
 
 
@@ -417,7 +422,7 @@ def prepare(snapshot: Path, out: Path):
         'production_hashes':production_hashes(), 'experiment_source_sha256':digest(Path(__file__)),
         'scikit_learn_version':sklearn.__version__,
         'training_weight_policy':{
-            'central_turf':'positive weight=(runners-positive_count)/positive_count; negatives=1',
+            'central_turf':'equal runner weights with reference loss scale: sum((runners-3)+max(runners-3,1))/total_runners',
             'central_dirt':'equal runner weights with reference loss scale: sum((runners-3)+max(runners-3,1))/total_runners'},
         'market_features_used':False, 'frozen_inputs':['captured pedigree_analyses','as-of compatible used_lessons'],
         'recomputed':['deep_analyses','race_level_analyses','pace_analyses','base scoring','all adjustment terms','central top-choice refinement'],
@@ -450,7 +455,9 @@ def fit_model(training, variant, scope, template, *, winner=False):
             labels.append(y)
             weights.append(balanced if y and scope == 'central_turf' else 1.0)
     model = clone(template)
-    if scope == 'central_dirt':
+    if scope == 'central_turf' and not winner and reranker.MODEL_SPECS[scope].get('training_target') == 'actual_top3_equal_runner_weight':
+        weights = np.full(len(labels), sum((len(r['numbers'])-3)+max(len(r['numbers'])-3,1) for r in training)/len(labels))
+    elif scope == 'central_dirt':
         # Production preserves the reference loss scale so L2 regularization remains comparable.
         total = sum((len(r['numbers'])-3)+max(len(r['numbers'])-3,1) for r in training)
         weights = np.full(len(labels), total/len(labels))
@@ -464,7 +471,7 @@ def runtime_ranking(row, variant, place_signal, winner_signal=None):
     numbers = row['numbers']
     if len(numbers) < int(spec.get('min_field_size', 0)):
         return ranking
-    if winner_signal is not None:
+    if winner_signal is not None and spec.get('baseline_filename'):
         ranking, _ = reranker._blend_model_ranking(ranking, dict(zip(numbers, winner_signal, strict=True)),
             blend_weight=float(spec['baseline_blend_weight']))
     ranking, _ = reranker._blend_model_ranking(ranking, dict(zip(numbers, place_signal, strict=True)),

@@ -211,7 +211,7 @@ class SupplementTests(unittest.TestCase):
             client = Mock()
             with patch('keiba_llm_agent.agents.race_analysis_agent.has_recent_runs_data', return_value=False), \
                  patch('keiba_llm_agent.agents.race_analysis_agent.Prediction.model_validate'):
-                RaceAnalysisAgent(client).run(enriched, [])
+                RaceAnalysisAgent(client).run(enriched, [], scope_reranker_enabled=False)
             payload = client.generate_analysis.call_args.args[1]['race_data']
             self.assertNotIn('race_class', payload['race_info'])
             self.assertNotIn('age', payload['horses'][0])

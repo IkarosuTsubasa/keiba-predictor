@@ -39,6 +39,7 @@ MODEL_VERSION = "scope_reranker_v4_20260803_place"
 DEFAULT_BLEND_WEIGHT = 0.50
 MODEL_DIRECTORY = Path(__file__).resolve().parents[1] / "models" / "scope_reranker"
 DIRT_MODEL_VERSION = "central_dirt_place_context_v1_20260908"
+TURF_MODEL_VERSION = "central_turf_history_place_v1_20261025"
 MODEL_SPECS = {
     "central_dirt": {
         "filename": f"{DIRT_MODEL_VERSION}.joblib",
@@ -51,13 +52,12 @@ MODEL_SPECS = {
         "preserve_top_n": 0,
     },
     "central_turf": {
-        "filename": "central_turf_place_v1.joblib",
-        "feature_set": "course_geometry",
-        "blend_weight": 0.5,
-        "preserve_top_n": 1,
-        "baseline_filename": "central_turf_v1.joblib",
-        "baseline_feature_set": "base",
-        "baseline_blend_weight": DEFAULT_BLEND_WEIGHT,
+        "filename": f"{TURF_MODEL_VERSION}.joblib",
+        "model_version": TURF_MODEL_VERSION,
+        "feature_set": "turf_history_v1",
+        "training_target": "actual_top3_equal_runner_weight",
+        "blend_weight": 1.0,
+        "preserve_top_n": 0,
     },
     "local": {
         "filename": "local_place_v1.joblib",
@@ -398,6 +398,12 @@ def build_scope_reranker_feature_matrix(
     horse_scores: list[HorseScore],
     feature_set: str,
 ) -> tuple[np.ndarray, list[int]]:
+    if feature_set == "turf_history_v1":
+        from keiba_llm_agent.scoring.turf_place_model import validate_inputs
+        from keiba_llm_agent.scoring.turf_history_features import build_turf_history_matrix
+
+        validate_inputs(race_data)
+        return build_turf_history_matrix(race_data, horse_scores)
     if feature_set == "place_context_v1":
         from keiba_llm_agent.scoring.place_context import build_place_context_matrix
 
@@ -678,7 +684,7 @@ def apply_scope_reranker(
         if reason:
             scores, result = _fallback(horse_scores, scope, config.model_version, reason)
             return scores, config, result
-    if len(horse_scores) < 2:
+    if len(horse_scores) < 2 and scope != "central_turf":
         scores, result = _fallback(
             horse_scores,
             scope,
@@ -694,8 +700,13 @@ def apply_scope_reranker(
     original_ranking = [score.horse_no for score in original_scores]
     model_path = _model_directory() / str(model_spec["filename"])
     try:
-        model = (_load_dirt_model(str(model_path)) if scope == "central_dirt"
-                 else _load_model(str(model_path)))
+        if scope == "central_turf":
+            from keiba_llm_agent.scoring.turf_place_model import load_bundle, predict_scores
+
+            model, _ = load_bundle(model_path)
+        else:
+            model = (_load_dirt_model(str(model_path)) if scope == "central_dirt"
+                     else _load_model(str(model_path)))
         baseline_model = None
         if model_spec.get("baseline_filename"):
             baseline_model = _load_model(
@@ -705,6 +716,8 @@ def apply_scope_reranker(
                 )
             )
     except Exception:
+        if scope == "central_turf":
+            raise
         scores, result = _fallback(
             horse_scores,
             scope,
@@ -766,7 +779,8 @@ def apply_scope_reranker(
                 f"feature count mismatch: expected={expected_features}, "
                 f"actual={matrix.shape[1]}"
             )
-        probabilities = model.predict_proba(matrix)[:, 1]
+        probabilities = (predict_scores(model, matrix) if scope == "central_turf"
+                         else model.predict_proba(matrix)[:, 1])
         if scope == "central_dirt" and (
             len(probabilities) != len(horse_numbers)
             or not np.isfinite(probabilities).all()
@@ -774,6 +788,8 @@ def apply_scope_reranker(
         ):
             raise ValueError("invalid place probabilities")
     except Exception:
+        if scope == "central_turf":
+            raise
         scores, result = _fallback(
             horse_scores,
             scope,
@@ -797,7 +813,7 @@ def apply_scope_reranker(
         preserve_top_n=config.preserve_top_n,
     )
     candidate_audit = {}
-    if scope == "central_dirt":
+    if scope in ("central_dirt", "central_turf"):
         candidate_audit = {
             "candidate_ranking": reranked_ranking,
             "candidate_model_scores": model_scores,

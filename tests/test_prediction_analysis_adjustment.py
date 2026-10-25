@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from keiba_llm_agent.scoring.scope_reranker import apply_scope_reranker
 
 from keiba_llm_agent.main import run_analysis
 from keiba_llm_agent.reports.report_generator import generate_prediction_report
@@ -141,6 +142,9 @@ class PredictionAnalysisAdjustmentTests(unittest.TestCase):
         )
 
         with (
+            # Isolate additive scoring; authoritative ranking is covered by activation tests.
+            patch("keiba_llm_agent.scoring.recent_run_scorer.apply_scope_reranker",
+                  side_effect=lambda race, scores, **kwargs: apply_scope_reranker(race, scores, enabled=False)),
             patch("keiba_llm_agent.scoring.recent_run_scorer.score_horse_by_recent_runs", side_effect=lambda horse, race_info, lessons=None, **kwargs: mock_scores[horse.horse_no]),
             patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_race_level_for_race", return_value=mock_race_levels),
             patch("keiba_llm_agent.scoring.recent_run_scorer.analyze_pace_for_race", return_value=(mock_pace_analyses, mock_projection)),

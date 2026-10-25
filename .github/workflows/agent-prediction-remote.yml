@@ -64,7 +64,6 @@ jobs:
           GEMINI_MODEL: gemini-3.1-flash-lite
           GEMINI_REQUEST_TIMEOUT_SECONDS: "180"
           KEIBA_LLM_PROVIDER: gemini
-          KEIBA_CENTRAL_TURF_SHADOW_MODE: ${{ vars.KEIBA_CENTRAL_TURF_SHADOW_MODE || 'shadow' }}
           PYTHONUNBUFFERED: "1"
         run: |
           set +e

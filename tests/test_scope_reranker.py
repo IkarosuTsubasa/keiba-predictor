@@ -17,6 +17,7 @@ from keiba_llm_agent.schemas.race_data import (
     RecentRun,
 )
 from keiba_llm_agent.scoring import scope_reranker
+from keiba_llm_agent.scoring import turf_place_model
 
 
 class _FixedLocalBaselineModel:
@@ -40,29 +41,13 @@ class _FixedLocalGeometryModel:
 
 
 class _FixedCentralTurfModel:
-    n_features_in_ = 28
+    n_features_in_ = 292
 
     def predict_proba(self, matrix: np.ndarray) -> np.ndarray:
         probabilities = np.asarray([0.1, 0.4, 0.9, 0.8])
         if matrix.shape[0] != len(probabilities):
             raise AssertionError("unexpected horse count")
         return np.column_stack((1.0 - probabilities, probabilities))
-
-
-class _FixedCentralBaselineModel:
-    n_features_in_ = 13
-
-    def predict_proba(self, matrix: np.ndarray) -> np.ndarray:
-        probabilities = np.asarray([0.9, 0.4, 0.1, 0.2])
-        if matrix.shape[0] != len(probabilities):
-            raise AssertionError("unexpected horse count")
-        return np.column_stack((1.0 - probabilities, probabilities))
-
-
-def _central_model_for_path(path: str) -> object:
-    if path.endswith("central_turf_v1.joblib"):
-        return _FixedCentralBaselineModel()
-    return _FixedCentralTurfModel()
 
 
 def _local_model_for_path(path: str) -> object:
@@ -232,11 +217,11 @@ class ScopeRerankerTests(unittest.TestCase):
         self.assertEqual([score.horse_no for score in adjusted], [1, 2, 3, 4])
 
     @patch.object(
-        scope_reranker,
-        "_load_model",
-        side_effect=_central_model_for_path,
+        turf_place_model,
+        "load_bundle",
+        return_value=(_FixedCentralTurfModel(), {}),
     )
-    def test_central_turf_preserves_top1_and_reranks_the_rest(
+    def test_central_turf_directly_ranks_without_preserving_old_top1(
         self,
         _load_model: object,
     ) -> None:
@@ -246,15 +231,15 @@ class ScopeRerankerTests(unittest.TestCase):
             enabled=True,
         )
 
-        self.assertEqual(config.blend_weight, 0.5)
-        self.assertEqual(config.preserve_top_n, 1)
+        self.assertEqual(config.blend_weight, 1.0)
+        self.assertEqual(config.preserve_top_n, 0)
         self.assertTrue(result.applied)
         self.assertEqual(result.original_ranking, [1, 2, 3, 4])
         self.assertEqual(result.baseline_ranking, [1, 2, 3, 4])
-        self.assertEqual(result.reranked_ranking, [1, 3, 2, 4])
+        self.assertEqual(result.reranked_ranking, [3, 4, 2, 1])
         self.assertEqual(
             [score.horse_no for score in adjusted],
-            [1, 3, 2, 4],
+            [3, 4, 2, 1],
         )
 
     def test_disabled_reranker_is_unchanged(self) -> None:

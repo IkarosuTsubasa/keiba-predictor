@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from keiba_llm_agent.scoring.scope_reranker import apply_scope_reranker
 
 from keiba_llm_agent.main import run_analysis
 from keiba_llm_agent.schemas.deep_analysis import HorseDeepAnalysis
@@ -34,6 +35,11 @@ def _mock_score(horse_no: int, horse_name: str, total_score: float) -> HorseScor
 
 class PredictionScoringModeTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Test base scoring and refinement independently of the learned final ranking.
+        reranker = patch("keiba_llm_agent.scoring.recent_run_scorer.apply_scope_reranker",
+                         side_effect=lambda race, scores, **kwargs: apply_scope_reranker(race, scores, enabled=False))
+        reranker.start()
+        self.addCleanup(reranker.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.temp_path = Path(self.temp_dir.name)
         self.race_data_path = self.temp_path / "race_data.json"

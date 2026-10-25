@@ -108,10 +108,10 @@ Use $keiba-agent-optimizer to download Render Agent data and run a safe scoring 
 ```
 
 The current place-coverage rerankers are trained with:
-- `central_turf`: every settled full race, actual Top3 target, equal podium weights, preserve Top1, blend `0.5`.
+- `central_turf`：历史表现新模型已作为正式排序，按前三分类信号直接选择前五，不保留旧模型首位、不混合旧排名。后续生成的印记、马券和解释均使用新排序；部署和审计说明见 [中央草地正式模型](docs/central_turf_active.md)。
 - `local`: every settled full race, actual Top3 target, winner weight `2.0`, preserve Top2, blend `1.0`.
 - `central_dirt`：使用全部已结算完整样本训练等权前三模型，仅在 13 匹及以上启用直接重排；小头数保留原算法。部署与回退说明见 [中央泥地前三覆盖试用](docs/central_dirt_place_trial.md)。
-- `central_turf` 影子实验：新历史表现模型在默认评分任务中并行计算，只写审计记录，不改变现有预测、印记或马券。默认开启影子模式；版本、数据保护、关闭方式和赛前配对统计见 [中央草地影子预测](docs/central_turf_shadow.md)。
+- 中央草地已停止后台影子预测；旧影子模型文件和既有记录仅作为历史材料保留，不参与后续预测。历史预测不回写，地方与中央泥地策略不变。
 
 ### Record race results
 ```

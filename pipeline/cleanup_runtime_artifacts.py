@@ -394,8 +394,12 @@ def _cleanup_superseded_agent_early_predictions(*, dry_run: bool, data_dir: Path
             root_payload = _read_agent_payload(audit_root_path, compressed=True)
             if _agent_payload_identity(root_payload)[1] == "early":
                 early_audits.append(audit_root_path)
-        if any(_read_agent_payload(path, compressed=True).get("shadow_predictions") for path in early_audits):
+        early_payloads = [_read_agent_payload(path, compressed=True) for path in early_audits]
+        if any(payload.get("shadow_predictions") for payload in early_payloads):
             skip("shadow_audit_retained")
+            continue
+        if any(payload.get("model_inference") for payload in early_payloads):
+            skip("model_inference_audit_retained")
             continue
 
         if _promote_agent_file(final_prediction_path, prediction_root_path, dry_run=dry_run):

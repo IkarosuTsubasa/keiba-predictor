@@ -147,9 +147,12 @@ class RaceAnalysisAgent:
             race_data.race_info,
             current_race_id=race_data.race_info.race_id,
         )
+        from keiba_llm_agent.scoring.turf_place_model import is_central_turf
+
+        central_turf = is_central_turf(race_data)
         if scope_reranker_enabled is None:
-            scope_reranker_enabled = _scope_reranker_enabled()
-        if has_recent_runs_data(race_data):
+            scope_reranker_enabled = True if central_turf else _scope_reranker_enabled()
+        if has_recent_runs_data(race_data) or (central_turf and scope_reranker_enabled):
             prediction = build_prediction_from_recent_runs_with_scoring_config(
                 race_data,
                 relevant_lessons,

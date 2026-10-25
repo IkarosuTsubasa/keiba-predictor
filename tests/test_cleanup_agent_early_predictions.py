@@ -22,6 +22,12 @@ def _write_gzip_json(path: Path, payload: dict) -> None:
 
 class CleanupAgentEarlyPredictionsTests(unittest.TestCase):
     def test_shadow_early_prediction_and_audit_are_preserved_after_final(self) -> None:
+        self.check_inference_retained('shadow_predictions', 'shadow_audit_retained')
+
+    def test_active_early_prediction_and_audit_are_preserved_after_final(self) -> None:
+        self.check_inference_retained('model_inference', 'model_inference_audit_retained')
+
+    def check_inference_retained(self, field, reason) -> None:
         for status in ('predicted', 'failed', 'disabled'):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)/'data'
@@ -32,11 +38,11 @@ class CleanupAgentEarlyPredictionsTests(unittest.TestCase):
                     audit = root/'agent_backtest_audit'/'_versions'/rid/stage/'task.json.gz'
                     _write_json(prediction, {'race_id': rid, 'prediction_stage': stage})
                     _write_gzip_json(audit, {'race_id': rid, 'prediction_stage': stage,
-                        'shadow_predictions': {'central_turf_history': {'status': status}}})
+                        field: {'central_turf_history': {'status': status}}})
                     paths.extend([prediction, audit])
                 originals = {p: p.read_bytes() for p in paths}
                 summary = _cleanup_superseded_agent_early_predictions(dry_run=False, data_dir=root)
-                self.assertEqual(summary['skipped_reason_counts'], {'shadow_audit_retained': 1})
+                self.assertEqual(summary['skipped_reason_counts'], {reason: 1})
                 self.assertEqual(summary['removed_prediction_files'], [])
                 self.assertEqual(summary['removed_audit_files'], [])
                 for path in paths:

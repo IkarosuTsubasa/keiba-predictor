@@ -109,8 +109,8 @@ class CentralEvidenceTests(unittest.TestCase):
         return {'numbers':list(range(1,n+1)), 'top3':[1,2,3], 'winner':1,
                 'variants':{'current':{'matrix':np.zeros((n,2)), 'winner_matrix':np.zeros((n,2))}}}
 
-    def test_turf_training_keeps_production_positive_weights(self):
-        for winner, expected in ((False,[2,2,2,1,1,1,1,1,1]),
+    def test_turf_training_matches_current_equal_weights_and_explicit_winner_ablation(self):
+        for winner, expected in ((False,np.full(9,12/9)),
                                  (True,[8,1,1,1,1,1,1,1,1])):
             model = Mock()
             with patch.object(exp,'clone',return_value=model):
@@ -140,6 +140,7 @@ class CentralEvidenceTests(unittest.TestCase):
                 def load(path):
                     return SignalModel(winner,13) if path.endswith('central_turf_v1.joblib') else SignalModel(place,width)
                 with patch.object(exp.reranker,'_load_model',side_effect=load), \
+                     patch('keiba_llm_agent.scoring.turf_place_model.load_bundle', return_value=(SignalModel(place,width), {})), \
                      patch.object(exp.reranker,'_load_dirt_model',return_value=SignalModel(place,width)), \
                      patch.dict('os.environ',{'KEIBA_CENTRAL_DIRT_PLACE_MODE':'active'}):
                     expected = exp.reranker.apply_scope_reranker(race,scores,enabled=True)[0]
