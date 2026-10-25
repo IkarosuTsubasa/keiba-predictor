@@ -1,0 +1,68 @@
+name: 公開調教データ確認
+
+on:
+  workflow_dispatch:
+    inputs:
+      race_id:
+        description: 中央競馬の12桁のレースID
+        required: true
+        default: "202609040811"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-workout-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install requests beautifulsoup4 pydantic
+      - name: 公開ページの取得確認
+        env:
+          RACE_ID: ${{ inputs.race_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          import requests
+          from keiba_llm_agent.fetchers.netkeiba_fetcher import DEFAULT_HEADERS
+          from keiba_llm_agent.fetchers.netkeiba_workout_fetcher import capture_public_workout
+          from keiba_llm_agent.parsers.netkeiba_race_parser import parse_netkeiba_shutuba_html
+
+          race_id = os.environ['RACE_ID']
+          assert re.fullmatch(r'\d{12}', race_id) and 1 <= int(race_id[4:6]) <= 10
+          url = f'https://race.netkeiba.com/race/shutuba.html?race_id={race_id}'
+          response = requests.get(url, headers=DEFAULT_HEADERS, timeout=(3, 6), allow_redirects=False)
+          assert response.status_code == 200, response.status_code
+          response.encoding = 'utf-8'
+          race = parse_netkeiba_shutuba_html(response.text, race_id)
+          observation = capture_public_workout(race, output_dir=Path('workout_check'))
+          summary = {key: observation.get(key) for key in (
+              'schema_version', 'race_id', 'status', 'http_status', 'expected_horses',
+              'matched_horses', 'available_grades', 'received_at',
+              'received_before_scheduled_start', 'used_for_scoring', 'used_for_llm')}
+          summary['commit'] = os.environ['GITHUB_SHA']
+          summary['purpose'] = 'connectivity_only'
+          Path('workout_check').mkdir(exist_ok=True)
+          Path('workout_check/summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(json.dumps(summary, ensure_ascii=False))
+          assert observation['status'] in ('collected', 'partial'), observation['status']
+          assert observation.get('available_grades', 0) > 0
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-workout-check-${{ inputs.race_id }}
+          path: workout_check/
+          if-no-files-found: warn

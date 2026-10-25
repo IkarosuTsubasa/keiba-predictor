@@ -205,6 +205,7 @@ jobs:
             agent_prediction_output.log
             keiba_llm_agent/data/predictions/${{ inputs.race_id }}.json
             keiba_llm_agent/data/backtest_audit/${{ inputs.race_id }}.json.gz
+            keiba_llm_agent/data/workout_observations/${{ inputs.race_id }}/
 
       - name: Fail workflow on remote failure
         shell: bash

@@ -45,6 +45,7 @@ from keiba_llm_agent.fetchers.netkeiba_fetcher import (
     get_html_cache_path,
     save_race_data,
 )
+from keiba_llm_agent.fetchers.netkeiba_workout_fetcher import capture_public_workout
 from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import (
     enrich_race_data_with_recent_runs,
     fetch_horse_html,
@@ -263,6 +264,7 @@ def _write_prediction_backtest_audit(
     prediction: Prediction,
     race_data_path: str | Path | None = None,
     prediction_path: str | Path | None = None,
+    supplementary_observations: dict | None = None,
 ) -> Path:
     source_paths: dict[str, str] = {}
     if race_data_path is not None:
@@ -274,6 +276,8 @@ def _write_prediction_backtest_audit(
         prediction=prediction,
         source_paths=source_paths,
     )
+    if supplementary_observations is not None:
+        payload["inputs"]["supplementary_observations"] = supplementary_observations
     if prediction.scope_reranker_result.scope == "central_turf":
         try:
             from keiba_llm_agent.scoring.turf_place_model import build_inference_audit
@@ -317,6 +321,7 @@ def run_analysis(
     race_level_weight: float | None = None,
     pace_weight: float | None = None,
     borderline_recovery_enabled: bool | None = None,
+    supplementary_observations: dict | None = None,
 ) -> tuple[Prediction, Path]:
     race_data = RaceData.from_json_file(race_data_path)
     lesson_store = LessonStore(lessons_path)
@@ -347,6 +352,7 @@ def run_analysis(
         prediction=prediction,
         race_data_path=race_data_path,
         prediction_path=saved_path,
+        supplementary_observations=supplementary_observations,
     )
     return prediction, saved_path
 
@@ -492,6 +498,7 @@ def run_analyze_url(
 
     if not dry_run:
         final_lessons_path = Path(lessons_path) if lessons_path is not None else DEFAULT_LESSONS_PATH
+        observations = {"public_workout": capture_public_workout(race_data)}
         _, prediction_path = run_analysis(
             race_data_path=race_data_path,
             output_path=DEFAULT_PREDICTIONS_DIR / f"{race_data.race_info.race_id}.json",
@@ -503,6 +510,7 @@ def run_analyze_url(
             race_level_weight=race_level_weight,
             pace_weight=pace_weight,
             borderline_recovery_enabled=borderline_recovery_enabled,
+            supplementary_observations=observations,
         )
         expected_audit_path = audit_path_for_race(DEFAULT_BACKTEST_AUDIT_DIR, race_data.race_info.race_id)
         if expected_audit_path.exists():
@@ -774,6 +782,8 @@ def run_predict_race(
 
     with _prediction_stage("save_race_data"):
         race_data_path = save_race_data(race_data)
+    with _prediction_stage("capture_public_workout"):
+        observations = {"public_workout": capture_public_workout(race_data)}
     with _prediction_stage("run_analysis"):
         _, prediction_path = run_analysis(
             race_data_path=race_data_path,
@@ -786,6 +796,7 @@ def run_predict_race(
             race_level_weight=race_level_weight,
             pace_weight=pace_weight,
             borderline_recovery_enabled=borderline_recovery_enabled,
+            supplementary_observations=observations,
         )
     expected_audit_path = audit_path_for_race(DEFAULT_BACKTEST_AUDIT_DIR, race_data.race_info.race_id)
     backtest_audit_path = expected_audit_path if expected_audit_path.exists() else None
