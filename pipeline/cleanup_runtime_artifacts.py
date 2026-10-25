@@ -389,6 +389,15 @@ def _cleanup_superseded_agent_early_predictions(*, dry_run: bool, data_dir: Path
             skip("final_audit_missing_or_invalid")
             continue
 
+        early_audits = list((audit_versions_root / race_id / "early").glob("*.json.gz"))
+        if audit_root_path.exists():
+            root_payload = _read_agent_payload(audit_root_path, compressed=True)
+            if _agent_payload_identity(root_payload)[1] == "early":
+                early_audits.append(audit_root_path)
+        if any(_read_agent_payload(path, compressed=True).get("shadow_predictions") for path in early_audits):
+            skip("shadow_audit_retained")
+            continue
+
         if _promote_agent_file(final_prediction_path, prediction_root_path, dry_run=dry_run):
             promoted_prediction_files.append(str(prediction_root_path))
             final_prediction_path = prediction_root_path

@@ -111,6 +111,7 @@ The current place-coverage rerankers are trained with:
 - `central_turf`: every settled full race, actual Top3 target, equal podium weights, preserve Top1, blend `0.5`.
 - `local`: every settled full race, actual Top3 target, winner weight `2.0`, preserve Top2, blend `1.0`.
 - `central_dirt`：使用全部已结算完整样本训练等权前三模型，仅在 13 匹及以上启用直接重排；小头数保留原算法。部署与回退说明见 [中央泥地前三覆盖试用](docs/central_dirt_place_trial.md)。
+- `central_turf` 影子实验：新历史表现模型在默认评分任务中并行计算，只写审计记录，不改变现有预测、印记或马券。默认开启影子模式；版本、数据保护、关闭方式和赛前配对统计见 [中央草地影子预测](docs/central_turf_shadow.md)。
 
 ### Record race results
 ```
@@ -150,6 +151,7 @@ python cleanup_runtime_artifacts.py
 ```
 - Keeps web-facing run history and race snapshots
 - Removes superseded early Agent prediction/audit files only after matching final prediction and final audit files both validate successfully
+- 含影子预测记录的早期版本及对应预测不参与上述清理，保留早期/最终两个阶段的实验数据。
 - Add `--skip-agent-early-prediction-cleanup` to keep early Agent versions during a manual cleanup run
 - Archives settled/failed/deleted jobs older than 3 days out of the active queue and cleans their stale artifacts, caches, and old experimental files
 - Add `--include-offline-research` to also remove old `offline_eval.csv`, `context_dataset.csv`, `context_summary.csv`, and `history_races.csv`

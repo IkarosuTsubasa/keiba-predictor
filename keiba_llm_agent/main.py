@@ -274,6 +274,17 @@ def _write_prediction_backtest_audit(
         prediction=prediction,
         source_paths=source_paths,
     )
+    if race_data.race_info.scope_key == "central_turf":
+        try:
+            from keiba_llm_agent.scoring.turf_shadow import evaluate_turf_shadow
+
+            shadow = evaluate_turf_shadow(race_data.model_copy(deep=True), prediction.model_copy(deep=True))
+        except Exception as exc:
+            shadow = {"schema_version": "central_turf_shadow_v1", "authoritative": False,
+                      "status": "failed", "reason_code": "shadow_capture_failed",
+                      "error_type": type(exc).__name__}
+        if shadow is not None:
+            payload["shadow_predictions"] = {"central_turf_history": shadow}
     return write_backtest_audit_payload(DEFAULT_BACKTEST_AUDIT_DIR, payload)
 
 
