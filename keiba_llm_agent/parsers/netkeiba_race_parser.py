@@ -507,6 +507,7 @@ def parse_horse_rows(soup: BeautifulSoup) -> list[HorseEntry]:
         horses.append(
             HorseEntry(
                 horse_no=horse_no,
+                entry_status="scratched" if "取消" in row.get_text() else "excluded" if "除外" in row.get_text() else "active",
                 frame_no=frame_no,
                 horse_id=parse_horse_id_from_link(horse_link.get("href") if horse_link else None),
                 horse_name=horse_name,

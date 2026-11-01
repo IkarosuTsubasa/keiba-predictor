@@ -33,6 +33,7 @@ class RecentRun(BaseModel):
 
 class HorseEntry(BaseModel):
     horse_no: int
+    entry_status: str = "active"
     frame_no: int | None = None
     horse_id: str | None = None
     horse_name: str

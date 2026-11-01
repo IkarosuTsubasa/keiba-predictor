@@ -150,4 +150,10 @@ def save_race_data(race_data: RaceData) -> Path:
         json.dumps(race_data.model_dump(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    try:
+        from keiba_llm_agent.fetchers.simulator_publisher import publish_collected_race
+        publish_collected_race(race_data)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Simulator input publication failed; source data was saved", exc_info=True)
     return output_path

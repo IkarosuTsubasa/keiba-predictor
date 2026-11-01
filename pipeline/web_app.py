@@ -100,6 +100,9 @@ from web_admin import operations as web_admin_ops
 from web_admin import remote_predictors as web_remote_predictors
 from web_admin import task_routes as web_admin_tasks
 from web_data import agent_predictions, odds_service, run_resolver, run_store, summary_service, view_data
+from web_data import simulator_inputs
+from web_data import simulator_links
+from simulator_input_store import publish_race as publish_simulator_race
 from web_helpers import (
     extract_section,
     format_path_mtime,
@@ -3220,6 +3223,7 @@ def _public_race_detail_payload(race_path, date_text="", scope_key=""):
     if not race:
         return {}
     race.setdefault("condition_predictor_ranking", {})
+    race["simulator"] = {"enabled": simulator_inputs.enabled()}
     race.setdefault("actual_result", {"is_settled": False, "top3": []})
     return {
         "ok": True,
@@ -3379,12 +3383,16 @@ def _public_board_api_payload(payload, include_history_detail=True):
     board = dict(payload or {})
     totals = dict((board.get("totals") or {}) or {})
     hero = dict((board.get("hero") or {}) or {})
+    simulation_states = simulator_inputs.lightweight_states(BASE_DIR, str(board.get("target_date") or ""))
+    compact_races = [_public_board_api_race_item(row) for row in list(board.get("races", []) or []) if isinstance(row, dict)]
+    for row in compact_races:
+        row["simulator"] = {"enabled": simulator_inputs.enabled(), **simulation_states.get(row["race_id"], {"availability": "preparing"})}
     return {
         "target_date": str(board.get("target_date", "") or "").strip(),
         "target_date_label": str(board.get("target_date_label", "") or "").strip(),
         "fallback_notice": str(board.get("fallback_notice", "") or "").strip(),
         "agent_mode": bool(board.get("agent_mode", True)),
-        "races": [_public_board_api_race_item(row) for row in list(board.get("races", []) or []) if isinstance(row, dict)],
+        "races": compact_races,
         "totals": {
             "race_count": int(totals.get("race_count", 0) or 0),
             "settled_count": int(totals.get("settled_count", 0) or 0),
@@ -5489,6 +5497,13 @@ def public_reports_spa():
     return build_public_index_response(f"{PUBLIC_BASE_PATH}/reports")
 
 
+@app.get(f"{PUBLIC_BASE_PATH}/simulator", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/simulator/embed", response_class=HTMLResponse)
+@app.get(f"{PUBLIC_BASE_PATH}/open/simulator/{{race_id}}", response_class=HTMLResponse)
+def public_simulator_spa():
+    return build_public_index_response(f"{PUBLIC_BASE_PATH}/simulator")
+
+
 @app.get(f"{PUBLIC_BASE_PATH}/reports/{{report_slug}}", response_class=HTMLResponse)
 def public_report_detail_spa(report_slug: str):
     normalized = re.sub(r"[^a-zA-Z0-9_-]+", "", str(report_slug or "").strip())
@@ -5561,6 +5576,65 @@ def sitemap_xml():
         )
     body.append("</urlset>")
     return Response(content="\n".join(body), media_type="application/xml; charset=utf-8")
+
+
+simulator_inputs.register_routes(app, BASE_DIR, lambda: load_race_jobs(BASE_DIR))
+simulator_links.register_routes(app)
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/internal/simulator-input")
+async def internal_simulator_collection(request: Request):
+    body = await request.body()
+    if len(body) > 4_000_000:
+        raise HTTPException(status_code=413, detail="input too large")
+    if not _verify_callback_hmac(body, request.headers.get("X-Hub-Signature-256", "")):
+        raise HTTPException(status_code=403, detail="callback signature invalid")
+    try:
+        data = json.loads(body)
+        if "default_run" in data:
+            from simulator_input_store import _write, read_race, MODEL_VERSION
+            record = data["default_run"]
+            original = read_race(BASE_DIR, record["race_id"], record["race_date"], record["input_version"])
+            if not original or original["input_hash"] != record["input_hash"] or record["model_version"] != MODEL_VERSION or record["settings"]["seed"] != original["default_seed"] or record["batch_count"] != 200:
+                raise ValueError("record mismatch")
+            seed = original["default_seed"]
+            output = Path(BASE_DIR) / "data/simulator_runs" / original["race_date"] / original["race_id"] / original["input_version"] / f"{MODEL_VERSION}-{seed}.json"
+            _write(output, record, immutable=True)
+            return {"ok": True}
+        if "schedule" in data:
+            from simulator_input_store import _write, race_identity
+            day = simulator_inputs.day_text(data["race_date"])
+            rows = []
+            for row in data["schedule"]:
+                rid, _ = race_identity(row["race_id"], day)
+                rows.append({"race_id": rid, "race_date": day, **{k: row.get(k) for k in ("course", "location", "race_name", "race_title", "scope_key", "scheduled_off_time")}})
+            _write(Path(BASE_DIR) / "data/simulator_schedule" / f"{day}.json", rows)
+            return {"ok": True, "count": len(rows)}
+        saved = publish_simulator_race(BASE_DIR, data["race_data"], source="schedule_collector", source_as_of=data.get("source_as_of"))
+        return {"ok": True, "input_version": saved["input_version"]}
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=400, detail="invalid simulator input")
+
+
+@app.post(f"{PUBLIC_BASE_PATH}/internal/v5_tasks/{{task_id}}/callback/simulator-input")
+async def internal_simulator_input(task_id: str, request: Request):
+    task = get_v5_remote_task(BASE_DIR, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    body = await request.body()
+    if len(body) > 4_000_000:
+        raise HTTPException(status_code=413, detail="input too large")
+    if not _verify_callback_hmac(body, request.headers.get("X-Hub-Signature-256", "")):
+        raise HTTPException(status_code=403, detail="callback signature invalid")
+    try:
+        data = json.loads(body)
+        raw = data["race_data"]
+        if raw["race_info"]["race_id"] != task.get("race_id"):
+            raise ValueError("race mismatch")
+        saved = publish_simulator_race(BASE_DIR, raw, source="remote_collector", source_as_of=data.get("source_as_of"))
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=400, detail="invalid simulator input")
+    return {"ok": True, "input_version": saved["input_version"]}
 
 
 @app.get(f"{PUBLIC_API_BASE_PATH}/board")
@@ -6722,6 +6796,12 @@ def _apply_remote_agent_prediction_result(task, payload):
         except Exception as exc:
             raise ValueError(f"invalid agent backtest audit payload: {exc}") from exc
         audit_payload["prediction_stage"] = prediction_stage
+        try:
+            raw_simulator_input = (audit_payload.get("inputs") or {}).get("race_data")
+            if raw_simulator_input and (raw_simulator_input.get("race_info") or {}).get("race_id") == race_id:
+                publish_simulator_race(BASE_DIR, raw_simulator_input, source="full_agent_audit", source_as_of=None)
+        except ValueError:
+            pass
         audit_payload["prediction_stage_label"] = prediction_stage_label
         audit_payload["prediction_version_id"] = version_id
         audit_payload.setdefault("outputs", {})["prediction"] = prediction_payload

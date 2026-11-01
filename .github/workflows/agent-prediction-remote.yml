@@ -65,6 +65,8 @@ jobs:
           GEMINI_REQUEST_TIMEOUT_SECONDS: "180"
           KEIBA_LLM_PROVIDER: gemini
           PYTHONUNBUFFERED: "1"
+          SIMULATOR_INPUT_CALLBACK_URL: ${{ inputs.callback_url }}/simulator-input
+          PIPELINE_CALLBACK_SECRET: ${{ secrets.PIPELINE_CALLBACK_SECRET }}
         run: |
           set +e
           timeout --signal=TERM --kill-after=30s "${AGENT_PREDICTION_TIMEOUT_MINUTES}m" \

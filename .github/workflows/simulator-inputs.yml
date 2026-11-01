@@ -1,0 +1,46 @@
+name: simulator-inputs
+on:
+  workflow_dispatch:
+    inputs:
+      race_date:
+        description: 'レース日（YYYY-MM-DD、空欄の場合は日本時間の当日）'
+        required: false
+        type: string
+  schedule:
+    - cron: '*/20 20-23,0-11 * * *'
+concurrency:
+  group: simulator-collection
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.event_name == 'workflow_dispatch' || vars.SIMULATOR_COLLECTION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SIMULATOR_COLLECTION_CALLBACK_URL: ${{ vars.SIMULATOR_COLLECTION_CALLBACK_URL }}
+      PIPELINE_CALLBACK_SECRET: ${{ secrets.PIPELINE_CALLBACK_SECRET }}
+      REQUESTED_DATE: ${{ inputs.race_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements.txt
+      - name: 出馬表の収集と標準設定での試走
+        shell: bash
+        run: |
+          DAY="${REQUESTED_DATE:-$(TZ=Asia/Tokyo date +%F)}"
+          python scripts/collect_simulator_inputs.py --date "$DAY" --workers 2 --force-refresh
+          node scripts/record_simulator_defaults.mjs --date "$DAY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-inputs-${{ github.run_id }}
+          path: |
+            pipeline/data/simulator_inputs/
+            pipeline/data/simulator_runs/
+            pipeline/data/simulator_schedule/
+          retention-days: 90
