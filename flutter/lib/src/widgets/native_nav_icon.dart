@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
-enum NativeNavIconKind { races, history, reports, customPrediction, more }
+enum NativeNavIconKind {
+  races,
+  history,
+  reports,
+  simulation,
+  customPrediction,
+  more,
+}
 
 class NativeNavIcon extends StatelessWidget {
   const NativeNavIcon(this.kind, {super.key});
@@ -35,6 +42,22 @@ class _NativeNavIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     switch (kind) {
+      case NativeNavIconKind.simulation:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTRB(2, 5, 22, 19),
+            const Radius.circular(7),
+          ),
+          _stroke,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(10, 8)
+            ..lineTo(16, 12)
+            ..lineTo(10, 16)
+            ..close(),
+          _stroke,
+        );
       case NativeNavIconKind.races:
         canvas.drawOval(const Rect.fromLTRB(4.5, 8, 19.5, 20.5), _stroke);
         canvas.drawOval(

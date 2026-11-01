@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_shell.dart';
+import 'services/simulation_link_service.dart';
 
-class KeibaApp extends StatelessWidget {
+class KeibaApp extends StatefulWidget {
   const KeibaApp({this.navigatorObservers = const [], super.key});
 
   final List<NavigatorObserver> navigatorObservers;
@@ -65,13 +65,25 @@ class KeibaApp extends StatelessWidget {
   }
 
   @override
+  State<KeibaApp> createState() => _KeibaAppState();
+}
+
+class _KeibaAppState extends State<KeibaApp> {
+  late final _router = SimulationRouter(widget.navigatorObservers);
+  @override
+  void dispose() {
+    _router.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'いかいもAI競馬',
       debugShowCheckedModeBanner: false,
-      navigatorObservers: navigatorObservers,
-      theme: theme,
-      home: const HomeShell(),
+      theme: KeibaApp.theme,
+      routerDelegate: _router,
+      routeInformationParser: const SimulationRouteParser(),
     );
   }
 }

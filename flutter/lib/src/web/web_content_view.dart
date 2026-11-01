@@ -14,12 +14,14 @@ class WebContentView extends StatefulWidget {
     required this.initialUri,
     required this.baseUri,
     this.onLocationChanged,
+    this.onNavigationRequested,
     super.key,
   });
 
   final Uri initialUri;
   final Uri baseUri;
   final ValueChanged<Uri>? onLocationChanged;
+  final bool Function(Uri)? onNavigationRequested;
 
   @override
   State<WebContentView> createState() => WebContentViewState();
@@ -197,6 +199,9 @@ class WebContentViewState extends State<WebContentView> {
     }
     final uri = Uri.tryParse(request.url);
     if (uri == null) {
+      return NavigationDecision.prevent;
+    }
+    if (widget.onNavigationRequested?.call(uri) == true) {
       return NavigationDecision.prevent;
     }
     if (uri.scheme == 'about') {
