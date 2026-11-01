@@ -1,0 +1,4195 @@
+{
+  "schema_version": 1,
+  "races": [
+    {
+      "race_info": {
+        "race_id": "202604010201",
+        "race_name": "3歳未勝利",
+        "race_date": "2026-05-03",
+        "course": "新潟",
+        "surface": "芝",
+        "distance": 2000,
+        "track_condition": "稍",
+        "weather": "晴"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "オートカリテ",
+          "jockey": "富田",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                3,
+                2,
+                2
+              ],
+              "final_3f": 35.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 17,
+              "corner_positions": [
+                12,
+                12,
+                10,
+                9
+              ],
+              "final_3f": 36.1,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 1,
+          "horse_name": "トレンドラド",
+          "jockey": "▲石田",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-03-01",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                11,
+                11,
+                11,
+                10
+              ],
+              "final_3f": 41.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-15",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                14,
+                16
+              ],
+              "final_3f": 39.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 2,
+          "horse_name": "サウンドファミリエ",
+          "jockey": "石川",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-15",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 15,
+              "corner_positions": [
+                14,
+                13,
+                9,
+                7
+              ],
+              "final_3f": 36.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                15,
+                15,
+                16,
+                15
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 2,
+          "horse_name": "フィールライクユー",
+          "jockey": "△舟山",
+          "carried_weight": 53.0,
+          "recent_runs": [],
+          "running_style": "不明",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 3,
+          "horse_name": "ティンブロポップ",
+          "jockey": "ゴンサルベ",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-01-25",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 14,
+              "corner_positions": [
+                13,
+                13,
+                13,
+                11
+              ],
+              "final_3f": 41.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-12",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 16,
+              "corner_positions": [
+                15,
+                14,
+                10,
+                8
+              ],
+              "final_3f": 41.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-13",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 17,
+              "corner_positions": [
+                14,
+                13
+              ],
+              "final_3f": 34.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 6,
+          "frame_no": 3,
+          "horse_name": "ピアス",
+          "jockey": "丸山",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 16,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "final_3f": 36.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-14",
+              "course": "中京",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 18,
+              "corner_positions": [
+                2,
+                2,
+                2,
+                2
+              ],
+              "final_3f": 35.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-18",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                2,
+                1,
+                1
+              ],
+              "final_3f": 43.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-09",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 14,
+              "corner_positions": [
+                3,
+                4,
+                2
+              ],
+              "final_3f": 35.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-19",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 18,
+              "corner_positions": [
+                1,
+                1,
+                1
+              ],
+              "final_3f": 34.5,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "逃げ",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 7,
+          "frame_no": 4,
+          "horse_name": "リベルタアーラ",
+          "jockey": "▲石神道",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-03-08",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 14,
+              "field_size": 16,
+              "corner_positions": [
+                10,
+                10,
+                12,
+                12
+              ],
+              "final_3f": 42.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 16,
+              "corner_positions": [
+                11,
+                10,
+                9,
+                9
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 8,
+          "frame_no": 4,
+          "horse_name": "ワイドバヴァール",
+          "jockey": "亀田",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-19",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                10,
+                11,
+                8,
+                9
+              ],
+              "final_3f": 35.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-25",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 12,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 39.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-05",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 14,
+              "corner_positions": [
+                13,
+                13,
+                12,
+                14
+              ],
+              "final_3f": 39.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-09-21",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 9,
+              "corner_positions": [
+                4,
+                4,
+                6,
+                6
+              ],
+              "final_3f": 38.4,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 9,
+          "frame_no": 5,
+          "horse_name": "コスモエーヴィヒ",
+          "jockey": "菊沢",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2025-12-14",
+              "course": "中京",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "稍",
+              "finish": 9,
+              "field_size": 13,
+              "corner_positions": [
+                3,
+                3,
+                4,
+                5
+              ],
+              "final_3f": 36.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-16",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 18,
+              "corner_positions": [
+                15,
+                15,
+                16
+              ],
+              "final_3f": 35.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-07-19",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 10,
+              "corner_positions": [
+                6,
+                6,
+                5,
+                6
+              ],
+              "final_3f": 37.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-07-05",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 5,
+              "field_size": 9,
+              "corner_positions": [
+                6,
+                5,
+                5,
+                6
+              ],
+              "final_3f": 36.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-06-14",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 11,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 10,
+          "frame_no": 5,
+          "horse_name": "マサハヤルージュ",
+          "jockey": "▲和田陽",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-26",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 18,
+              "corner_positions": [
+                8,
+                10
+              ],
+              "final_3f": 34.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-14",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                7
+              ],
+              "final_3f": 38.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-31",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 16,
+              "corner_positions": [
+                9,
+                8
+              ],
+              "final_3f": 36.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-10",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 18,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 37.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-13",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 38.1,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 11,
+          "frame_no": 6,
+          "horse_name": "チョコスコーン",
+          "jockey": "△田山",
+          "carried_weight": 53.0,
+          "recent_runs": [
+            {
+              "date": "2026-03-07",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "稍",
+              "finish": 9,
+              "field_size": 18,
+              "corner_positions": [
+                10,
+                8,
+                11,
+                11
+              ],
+              "final_3f": 36.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                8,
+                7,
+                8
+              ],
+              "final_3f": 35.7,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 12,
+          "frame_no": 6,
+          "horse_name": "キコリータ",
+          "jockey": "小沢",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-14",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 16,
+              "corner_positions": [
+                16,
+                16,
+                16
+              ],
+              "final_3f": 33.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-14",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "稍",
+              "finish": 7,
+              "field_size": 16,
+              "corner_positions": [
+                13,
+                11,
+                10
+              ],
+              "final_3f": 35.7,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 13,
+          "frame_no": 7,
+          "horse_name": "ソフィア",
+          "jockey": "丹内",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2025-12-28",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 18,
+              "corner_positions": [
+                10,
+                9,
+                7,
+                9
+              ],
+              "final_3f": 36.4,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 14,
+          "frame_no": 7,
+          "horse_name": "フロンテアムーン",
+          "jockey": "▲上里",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-01-25",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                5,
+                6
+              ],
+              "final_3f": 36.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-09",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 16,
+              "corner_positions": [
+                6,
+                5
+              ],
+              "final_3f": 35.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-13",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 17,
+              "corner_positions": [
+                6,
+                4
+              ],
+              "final_3f": 34.8,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 15,
+          "frame_no": 8,
+          "horse_name": "ミズノミヤコ",
+          "jockey": "★河原田",
+          "carried_weight": 51.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-19",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                3
+              ],
+              "final_3f": 38.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-14",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                1,
+                1,
+                1
+              ],
+              "final_3f": 35.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-25",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 2,
+              "field_size": 18,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "final_3f": 35.1,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "逃げ",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 16,
+          "frame_no": 8,
+          "horse_name": "オモイヲノセテ",
+          "jockey": "横山琉",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-03-15",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 16,
+              "corner_positions": [
+                14,
+                13,
+                13,
+                14
+              ],
+              "final_3f": 35.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-08",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 9,
+              "corner_positions": [
+                8,
+                8,
+                8,
+                6
+              ],
+              "final_3f": 36.4,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "安定"
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "race_data": "keiba_llm_agent/data/race_data/202604010201.json",
+        "pace_analysis": "pipeline/data/agent_predictions/202604010201.json",
+        "excluded_runs": 0,
+        "uses_results": false,
+        "uses_market": false
+      }
+    },
+    {
+      "race_info": {
+        "race_id": "202604010202",
+        "race_name": "3歳未勝利",
+        "race_date": "2026-05-03",
+        "course": "新潟",
+        "surface": "ダート",
+        "distance": 1200,
+        "track_condition": "稍",
+        "weather": "晴"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "オセアフェアモント",
+          "jockey": "黛",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-10",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": null,
+              "field_size": 15,
+              "corner_positions": null,
+              "final_3f": null,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-13",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                2,
+                3,
+                5
+              ],
+              "final_3f": 43.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-12",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 12,
+              "corner_positions": [
+                8,
+                7,
+                9
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 2,
+          "horse_name": "ブレイシオン",
+          "jockey": "野中",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-25",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1150,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                9,
+                10
+              ],
+              "final_3f": 38.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-28",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "重",
+              "finish": 14,
+              "field_size": 15,
+              "corner_positions": [
+                3,
+                3,
+                7,
+                11
+              ],
+              "final_3f": 47.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-14",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                11,
+                10
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 2,
+          "horse_name": "ニシノアオニヨシ",
+          "jockey": "▲水沼",
+          "carried_weight": 52.0,
+          "recent_runs": [],
+          "running_style": "不明",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 3,
+          "horse_name": "クイーンオブハート",
+          "jockey": "★河原田",
+          "carried_weight": 51.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-10",
+              "course": "高知",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 12,
+              "corner_positions": [
+                6,
+                6,
+                7,
+                9
+              ],
+              "final_3f": 43.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-01",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 11,
+              "field_size": 12,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 34.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-11",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 10,
+              "corner_positions": [
+                3,
+                5
+              ],
+              "final_3f": 35.9,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-09-15",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 16,
+              "corner_positions": [
+                12,
+                11
+              ],
+              "final_3f": 39.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-08-17",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 11,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 36.5,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 3,
+          "horse_name": "ウイングラナート",
+          "jockey": "▲遠藤",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-10",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "稍",
+              "finish": 16,
+              "field_size": 16,
+              "corner_positions": [
+                14,
+                14
+              ],
+              "final_3f": 45.2,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 6,
+          "frame_no": 4,
+          "horse_name": "スカット",
+          "jockey": "▲上里",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 3,
+              "field_size": 16,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 37.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-29",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 6,
+              "field_size": 16,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 38.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-24",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 16,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 38.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-12",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 37.6,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 7,
+          "frame_no": 4,
+          "horse_name": "ビスケットアソート",
+          "jockey": "富田",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-14",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 2,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                2
+              ],
+              "final_3f": 37.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-01",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 2,
+              "field_size": 15,
+              "corner_positions": [
+                5,
+                5
+              ],
+              "final_3f": 36.9,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-04",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 2,
+              "field_size": 16,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 36.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-21",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 4,
+              "field_size": 11,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 35.0,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 8,
+          "frame_no": 5,
+          "horse_name": "ナムラソラン",
+          "jockey": "△柴田裕",
+          "carried_weight": 53.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-12",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                7,
+                8
+              ],
+              "final_3f": 36.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-22",
+              "course": "中京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                12,
+                14,
+                16
+              ],
+              "final_3f": 35.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-12",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                3
+              ],
+              "final_3f": 39.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-13",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 15,
+              "corner_positions": [
+                9,
+                10
+              ],
+              "final_3f": 38.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-12",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 12,
+              "corner_positions": [
+                6,
+                6
+              ],
+              "final_3f": 38.9,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 9,
+          "frame_no": 5,
+          "horse_name": "トーセンシーギリヤ",
+          "jockey": "原田和",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-28",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                5,
+                6
+              ],
+              "final_3f": 38.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-04",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 10,
+              "field_size": 13,
+              "corner_positions": [
+                6,
+                6,
+                4,
+                3
+              ],
+              "final_3f": 41.9,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-07-19",
+              "course": "函館",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 11,
+              "corner_positions": [
+                7,
+                7,
+                6,
+                6
+              ],
+              "final_3f": 36.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-06-28",
+              "course": "函館",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 12,
+              "field_size": 16,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 36.4,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 10,
+          "frame_no": 6,
+          "horse_name": "ミスタートントン",
+          "jockey": "▲石神道",
+          "carried_weight": 54.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-05",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "不",
+              "finish": 2,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                2
+              ],
+              "final_3f": 37.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-15",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 38.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-10",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 2,
+              "field_size": 16,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 37.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-24",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 18,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 35.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-26",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 4,
+              "field_size": 18,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 34.7,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "逃げ",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 11,
+          "frame_no": 6,
+          "horse_name": "キタノレクレドール",
+          "jockey": "▲川端",
+          "carried_weight": 52.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-05",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 13,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                10
+              ],
+              "final_3f": 38.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-28",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 14,
+              "field_size": 16,
+              "corner_positions": [
+                7,
+                8
+              ],
+              "final_3f": 40.6,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "安定"
+        },
+        {
+          "horse_no": 12,
+          "frame_no": 7,
+          "horse_name": "ヘヴンズドライブ",
+          "jockey": "ゴンサルベ",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-03-01",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 7,
+              "field_size": 16,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 39.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-13",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 14,
+              "corner_positions": [
+                4,
+                6
+              ],
+              "final_3f": 39.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-07",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 13,
+          "frame_no": 7,
+          "horse_name": "エコロボルト",
+          "jockey": "丸山",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-12",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 2,
+              "field_size": 14,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 37.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-22",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 40.1,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-09",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 15,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 39.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-06-22",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 10,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 35.9,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 14,
+          "frame_no": 8,
+          "horse_name": "ナムラステラ",
+          "jockey": "丹内",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-18",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                5,
+                5
+              ],
+              "final_3f": 37.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-22",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 13,
+              "corner_positions": [
+                3,
+                4
+              ],
+              "final_3f": 37.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-21",
+              "course": "小倉",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 14,
+              "corner_positions": [
+                4,
+                4,
+                5,
+                5
+              ],
+              "final_3f": 41.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-08",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 14,
+              "corner_positions": [
+                12,
+                11,
+                11,
+                11
+              ],
+              "final_3f": 40.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-19",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 17,
+              "field_size": 18,
+              "corner_positions": [
+                16,
+                16
+              ],
+              "final_3f": 36.9,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 15,
+          "frame_no": 8,
+          "horse_name": "ポッドスモーカー",
+          "jockey": "▲大久保",
+          "carried_weight": 54.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-14",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 16,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                4
+              ],
+              "final_3f": 41.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-25",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "稍",
+              "finish": 13,
+              "field_size": 16,
+              "corner_positions": [
+                10,
+                9
+              ],
+              "final_3f": 38.1,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "race_data": "keiba_llm_agent/data/race_data/202604010202.json",
+        "pace_analysis": "pipeline/data/agent_predictions/202604010202.json",
+        "excluded_runs": 0,
+        "uses_results": false,
+        "uses_market": false
+      }
+    },
+    {
+      "race_info": {
+        "race_id": "202604010203",
+        "race_name": "3歳未勝利",
+        "race_date": "2026-05-03",
+        "course": "新潟",
+        "surface": "ダート",
+        "distance": 1800,
+        "track_condition": "稍",
+        "weather": "晴"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "シーンオブドリーム",
+          "jockey": "斎藤",
+          "carried_weight": 57.0,
+          "recent_runs": [],
+          "running_style": "不明",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 2,
+          "horse_name": "レジェルテ",
+          "jockey": "▲和田陽",
+          "carried_weight": 54.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 15,
+              "corner_positions": [
+                3,
+                3,
+                4,
+                4
+              ],
+              "final_3f": 38.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-21",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 13,
+              "corner_positions": [
+                7,
+                8,
+                10,
+                9
+              ],
+              "final_3f": 38.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-08",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 16,
+              "corner_positions": [
+                9,
+                9,
+                12,
+                12
+              ],
+              "final_3f": 35.9,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-28",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 16,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 36.5,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 3,
+          "horse_name": "タロ",
+          "jockey": "△田山",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-12",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 2,
+              "field_size": 14,
+              "corner_positions": [
+                3,
+                3,
+                3,
+                1
+              ],
+              "final_3f": 38.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-28",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 4,
+              "field_size": 14,
+              "corner_positions": [
+                2,
+                2,
+                1,
+                1
+              ],
+              "final_3f": 39.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-28",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 14,
+              "corner_positions": [
+                4,
+                3,
+                4,
+                4
+              ],
+              "final_3f": 38.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-10",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1900,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 14,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "final_3f": 38.8,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-28",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 18,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "final_3f": 36.8,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 3,
+          "horse_name": "リュウゴピュア",
+          "jockey": "▲大久保",
+          "carried_weight": 54.0,
+          "recent_runs": [
+            {
+              "date": "2025-12-28",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                16,
+                16,
+                14,
+                13
+              ],
+              "final_3f": 41.5,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 4,
+          "horse_name": "ユイアンゴロー",
+          "jockey": "原田和",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-10",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 2100,
+              "track_condition": "稍",
+              "finish": 12,
+              "field_size": 13,
+              "corner_positions": [
+                4,
+                6,
+                7,
+                11
+              ],
+              "final_3f": 45.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-15",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 13,
+              "corner_positions": [
+                3,
+                3,
+                4
+              ],
+              "final_3f": 35.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-02",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 10,
+              "corner_positions": [
+                7,
+                6,
+                6
+              ],
+              "final_3f": 35.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-19",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 14,
+              "field_size": 18,
+              "corner_positions": [
+                6,
+                9,
+                9
+              ],
+              "final_3f": 34.5,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 6,
+          "frame_no": 4,
+          "horse_name": "コイオステソーロ",
+          "jockey": "丹内",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-01-24",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 15,
+              "corner_positions": [
+                4,
+                4,
+                3,
+                3
+              ],
+              "final_3f": 39.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-04",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 5,
+              "field_size": 12,
+              "corner_positions": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "final_3f": 41.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 13,
+              "corner_positions": [
+                10,
+                10,
+                7,
+                9
+              ],
+              "final_3f": 39.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "先行",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 7,
+          "frame_no": 5,
+          "horse_name": "ブリックアブラック",
+          "jockey": "武藤",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-02-22",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 13,
+              "corner_positions": [
+                4,
+                3,
+                4,
+                6
+              ],
+              "final_3f": 37.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-07",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "稍",
+              "finish": 9,
+              "field_size": 18,
+              "corner_positions": [
+                10,
+                10,
+                11,
+                9
+              ],
+              "final_3f": 36.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-24",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 16,
+              "corner_positions": [
+                15,
+                15,
+                14,
+                14
+              ],
+              "final_3f": 35.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-08",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 13,
+              "corner_positions": [
+                6,
+                6
+              ],
+              "final_3f": 34.4,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 8,
+          "frame_no": 5,
+          "horse_name": "トコトコクマチ",
+          "jockey": "△柴田裕",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "重",
+              "finish": 5,
+              "field_size": 13,
+              "corner_positions": [
+                11,
+                11,
+                9,
+                9
+              ],
+              "final_3f": 38.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-07",
+              "course": "阪神",
+              "surface": "芝",
+              "distance": 2400,
+              "track_condition": "稍",
+              "finish": 13,
+              "field_size": 13,
+              "corner_positions": [
+                7,
+                6,
+                8,
+                6
+              ],
+              "final_3f": 37.7,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-05",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1900,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 16,
+              "corner_positions": [
+                14,
+                15,
+                13,
+                12
+              ],
+              "final_3f": 39.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-14",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 7,
+              "field_size": 13,
+              "corner_positions": [
+                8,
+                8,
+                6,
+                8
+              ],
+              "final_3f": 40.7,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 9,
+          "frame_no": 6,
+          "horse_name": "ファフロツキーズ",
+          "jockey": "富田",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2025-11-15",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 11,
+              "corner_positions": [
+                8,
+                10
+              ],
+              "final_3f": 40.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-10-25",
+              "course": "京都",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 14,
+              "corner_positions": [
+                6,
+                6
+              ],
+              "final_3f": 37.6,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 10,
+          "frame_no": 6,
+          "horse_name": "サマーナジュム",
+          "jockey": "中井",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-01-04",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 16,
+              "corner_positions": [
+                7,
+                8,
+                13,
+                15
+              ],
+              "final_3f": 39.6,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-20",
+              "course": "阪神",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 16,
+              "corner_positions": [
+                5,
+                5,
+                6,
+                9
+              ],
+              "final_3f": 39.6,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 11,
+          "frame_no": 7,
+          "horse_name": "ボールドタワー",
+          "jockey": "横山琉",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-18",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 15,
+              "corner_positions": [
+                3,
+                5,
+                4,
+                4
+              ],
+              "final_3f": 37.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-01",
+              "course": "小倉",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "稍",
+              "finish": 5,
+              "field_size": 15,
+              "corner_positions": [
+                8,
+                9,
+                9,
+                10
+              ],
+              "final_3f": 39.0,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-21",
+              "course": "小倉",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 14,
+              "corner_positions": [
+                6,
+                5,
+                4,
+                4
+              ],
+              "final_3f": 39.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-15",
+              "course": "小倉",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "稍",
+              "finish": 6,
+              "field_size": 16,
+              "corner_positions": [
+                4,
+                4,
+                5,
+                5
+              ],
+              "final_3f": 38.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-11-22",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 15,
+              "corner_positions": [
+                5,
+                4,
+                4,
+                3
+              ],
+              "final_3f": 40.3,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 12,
+          "frame_no": 7,
+          "horse_name": "サルサブラヴァ",
+          "jockey": "石川",
+          "carried_weight": 57.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-11",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "重",
+              "finish": 2,
+              "field_size": 13,
+              "corner_positions": [
+                2,
+                2,
+                2,
+                2
+              ],
+              "final_3f": 39.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-15",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 16,
+              "corner_positions": [
+                6,
+                6,
+                4,
+                4
+              ],
+              "final_3f": 40.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-01-11",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                10,
+                9,
+                7,
+                5
+              ],
+              "final_3f": 40.9,
+              "time_seconds": null
+            },
+            {
+              "date": "2025-12-28",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 16,
+              "corner_positions": [
+                12,
+                12,
+                9,
+                6
+              ],
+              "final_3f": 41.2,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        },
+        {
+          "horse_no": 13,
+          "frame_no": 8,
+          "horse_name": "モアザンファイア",
+          "jockey": "◇今村",
+          "carried_weight": 55.0,
+          "recent_runs": [
+            {
+              "date": "2025-08-03",
+              "course": "新潟",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 15,
+              "field_size": 15,
+              "corner_positions": [
+                12,
+                12,
+                14,
+                14
+              ],
+              "final_3f": 43.8,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "追込",
+          "position_stability": "unknown"
+        },
+        {
+          "horse_no": 14,
+          "frame_no": 8,
+          "horse_name": "カシノスパーク",
+          "jockey": "▲石神道",
+          "carried_weight": 54.0,
+          "recent_runs": [
+            {
+              "date": "2026-04-05",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "不",
+              "finish": 3,
+              "field_size": 16,
+              "corner_positions": [
+                6,
+                6,
+                5,
+                4
+              ],
+              "final_3f": 39.5,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-29",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1900,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 14,
+              "corner_positions": [
+                3,
+                3,
+                5,
+                5
+              ],
+              "final_3f": 38.3,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-03-15",
+              "course": "中京",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 13,
+              "corner_positions": [
+                3,
+                3,
+                4,
+                3
+              ],
+              "final_3f": 38.4,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-14",
+              "course": "京都",
+              "surface": "ダート",
+              "distance": 1900,
+              "track_condition": "稍",
+              "finish": 8,
+              "field_size": 11,
+              "corner_positions": [
+                7,
+                7,
+                7,
+                8
+              ],
+              "final_3f": 39.2,
+              "time_seconds": null
+            },
+            {
+              "date": "2026-02-01",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 18,
+              "corner_positions": [
+                14,
+                14,
+                15,
+                13
+              ],
+              "final_3f": 34.9,
+              "time_seconds": null
+            }
+          ],
+          "running_style": "差し",
+          "position_stability": "不安定"
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "race_data": "keiba_llm_agent/data/race_data/202604010203.json",
+        "pace_analysis": "pipeline/data/agent_predictions/202604010203.json",
+        "excluded_runs": 0,
+        "uses_results": false,
+        "uses_market": false
+      }
+    },
+    {
+      "race_info": {
+        "race_id": "202605041101",
+        "race_date": "2026-11-01",
+        "race_name": "2歳未勝利",
+        "course": "東京",
+        "surface": "芝",
+        "distance": 1400,
+        "track_condition": null,
+        "weather": null,
+        "course_layout": null,
+        "layout": null,
+        "source": "central",
+        "scope_key": "central_turf"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "インサイドエッジ",
+          "jockey": "ルメール",
+          "carried_weight": 55.0,
+          "horse_id": "2024107186",
+          "recent_runs": [
+            {
+              "race_id": "202604020801",
+              "date": "2026-08-16",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 13,
+              "corner_positions": [
+                5,
+                6
+              ],
+              "final_3f": 33.9,
+              "time_seconds": 94.3
+            },
+            {
+              "race_id": "202605030504",
+              "date": "2026-06-20",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 2,
+              "field_size": 11,
+              "corner_positions": [
+                5,
+                5
+              ],
+              "final_3f": 33.6,
+              "time_seconds": 82.7
+            }
+          ]
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 2,
+          "horse_name": "シュネーバレン",
+          "jockey": "木幡巧",
+          "carried_weight": 55.0,
+          "horse_id": "2024100076",
+          "recent_runs": [
+            {
+              "race_id": "202605040703",
+              "date": "2026-10-18",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 12,
+              "corner_positions": [
+                7,
+                7
+              ],
+              "final_3f": 35.2,
+              "time_seconds": 83.5
+            },
+            {
+              "race_id": "202604020801",
+              "date": "2026-08-16",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 13,
+              "corner_positions": [
+                7,
+                9
+              ],
+              "final_3f": 34.1,
+              "time_seconds": 94.7
+            },
+            {
+              "race_id": "202604020401",
+              "date": "2026-08-02",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 12,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 34.2,
+              "time_seconds": 94.8
+            },
+            {
+              "race_id": "202603020701",
+              "date": "2026-07-18",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 3,
+              "field_size": 12,
+              "corner_positions": [
+                4,
+                5
+              ],
+              "final_3f": 35.7,
+              "time_seconds": 70.0
+            },
+            {
+              "race_id": "202603020406",
+              "date": "2026-07-05",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 2,
+              "field_size": 13,
+              "corner_positions": [
+                4,
+                3
+              ],
+              "final_3f": 36.2,
+              "time_seconds": 70.2
+            }
+          ]
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 2,
+          "horse_name": "ミエルモーサ",
+          "jockey": "Ｃデムーロ",
+          "carried_weight": 55.0,
+          "horse_id": "2024106629",
+          "recent_runs": [
+            {
+              "race_id": "202610020501",
+              "date": "2026-07-11",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 12,
+              "corner_positions": [
+                2,
+                2
+              ],
+              "final_3f": 37.5,
+              "time_seconds": 70.3
+            },
+            {
+              "race_id": "202605030604",
+              "date": "2026-06-21",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 2,
+              "field_size": 10,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 33.7,
+              "time_seconds": 85.5
+            }
+          ]
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 3,
+          "horse_name": "ナナレイ",
+          "jockey": "丸山",
+          "carried_weight": 55.0,
+          "horse_id": "2024101227",
+          "recent_runs": [
+            {
+              "race_id": "202604040201",
+              "date": "2026-10-18",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 13,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 36.1,
+              "time_seconds": 70.4
+            },
+            {
+              "race_id": "202606040702",
+              "date": "2026-09-22",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 4,
+              "field_size": 14,
+              "corner_positions": [
+                8,
+                7
+              ],
+              "final_3f": 35.9,
+              "time_seconds": 71.7
+            },
+            {
+              "race_id": "202605030505",
+              "date": "2026-06-20",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "稍",
+              "finish": 9,
+              "field_size": 10,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 35.3,
+              "time_seconds": 98.9
+            }
+          ]
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 3,
+          "horse_name": "オオルリ",
+          "jockey": "武藤",
+          "carried_weight": 55.0,
+          "horse_id": "2024103646",
+          "recent_runs": [
+            {
+              "race_id": "202604040203",
+              "date": "2026-10-18",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 11,
+              "field_size": 13,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 36.1,
+              "time_seconds": 109.4
+            },
+            {
+              "race_id": "202606040603",
+              "date": "2026-09-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 2000,
+              "track_condition": "重",
+              "finish": null,
+              "field_size": 13,
+              "corner_positions": [
+                13,
+                13,
+                13,
+                13
+              ],
+              "final_3f": null,
+              "time_seconds": null
+            },
+            {
+              "race_id": "202604030404",
+              "date": "2026-08-30",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 11,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 35.3,
+              "time_seconds": 111.7
+            }
+          ]
+        },
+        {
+          "horse_no": 6,
+          "frame_no": 4,
+          "horse_name": "ステラガーネット",
+          "jockey": "田辺",
+          "carried_weight": 55.0,
+          "horse_id": "2024106348",
+          "recent_runs": [
+            {
+              "race_id": "202605040401",
+              "date": "2026-10-11",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 15,
+              "corner_positions": [
+                8,
+                7
+              ],
+              "final_3f": 38.1,
+              "time_seconds": 102.3
+            },
+            {
+              "race_id": "202604020402",
+              "date": "2026-08-02",
+              "course": "新潟",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 12,
+              "corner_positions": [
+                7,
+                5,
+                3,
+                2
+              ],
+              "final_3f": 40.9,
+              "time_seconds": 117.7
+            }
+          ]
+        },
+        {
+          "horse_no": 7,
+          "frame_no": 4,
+          "horse_name": "コスモオルト",
+          "jockey": "柴田大",
+          "carried_weight": 55.0,
+          "horse_id": "2024103653",
+          "recent_runs": [
+            {
+              "race_id": "202605040505",
+              "date": "2026-10-12",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 12,
+              "corner_positions": [
+                4,
+                3
+              ],
+              "final_3f": 35.1,
+              "time_seconds": 97.4
+            }
+          ]
+        },
+        {
+          "horse_no": 8,
+          "frame_no": 5,
+          "horse_name": "レミニシング",
+          "jockey": "△石田",
+          "carried_weight": 53.0,
+          "horse_id": "2024103545",
+          "recent_runs": [
+            {
+              "race_id": "202605040604",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 18,
+              "corner_positions": [
+                13,
+                11
+              ],
+              "final_3f": 35.9,
+              "time_seconds": 86.3
+            }
+          ]
+        },
+        {
+          "horse_no": 9,
+          "frame_no": 5,
+          "horse_name": "アニーリング",
+          "jockey": "岩田望",
+          "carried_weight": 55.0,
+          "horse_id": "2024104155",
+          "recent_runs": [
+            {
+              "race_id": "202606040605",
+              "date": "2026-09-20",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "重",
+              "finish": 3,
+              "field_size": 16,
+              "corner_positions": [
+                8,
+                5,
+                3
+              ],
+              "final_3f": 36.4,
+              "time_seconds": 99.3
+            }
+          ]
+        },
+        {
+          "horse_no": 10,
+          "frame_no": 6,
+          "horse_name": "チャジャッタ",
+          "jockey": "▲遠藤",
+          "carried_weight": 52.0,
+          "horse_id": "2024102210",
+          "recent_runs": [
+            {
+              "race_id": "202605040906",
+              "date": "2026-10-25",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                16,
+                16
+              ],
+              "final_3f": 34.0,
+              "time_seconds": 84.1
+            }
+          ]
+        },
+        {
+          "horse_no": 11,
+          "frame_no": 6,
+          "horse_name": "ウインリスノアール",
+          "jockey": "△石神道",
+          "carried_weight": 53.0,
+          "horse_id": "2024107129",
+          "recent_runs": [
+            {
+              "race_id": "202605040703",
+              "date": "2026-10-18",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 12,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 35.4,
+              "time_seconds": 83.5
+            },
+            {
+              "race_id": "202604020501",
+              "date": "2026-08-08",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 13,
+              "corner_positions": [
+                5,
+                5
+              ],
+              "final_3f": 35.8,
+              "time_seconds": 82.5
+            },
+            {
+              "race_id": "202603020701",
+              "date": "2026-07-18",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 12,
+              "corner_positions": [
+                8,
+                7
+              ],
+              "final_3f": 35.2,
+              "time_seconds": 70.0
+            },
+            {
+              "race_id": "202603020204",
+              "date": "2026-06-28",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 14,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 35.0,
+              "time_seconds": 70.6
+            }
+          ]
+        },
+        {
+          "horse_no": 12,
+          "frame_no": 7,
+          "horse_name": "ローズファミリー",
+          "jockey": "岩田康",
+          "carried_weight": 55.0,
+          "horse_id": "2024101760",
+          "recent_runs": [
+            {
+              "race_id": "202605040302",
+              "date": "2026-10-10",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 13,
+              "corner_positions": [
+                1,
+                1
+              ],
+              "final_3f": 35.7,
+              "time_seconds": 94.7
+            },
+            {
+              "race_id": "202601020505",
+              "date": "2026-09-05",
+              "course": "札幌",
+              "surface": "芝",
+              "distance": 1500,
+              "track_condition": "稍",
+              "finish": 3,
+              "field_size": 14,
+              "corner_positions": [
+                3,
+                4,
+                5
+              ],
+              "final_3f": 36.2,
+              "time_seconds": 91.8
+            }
+          ]
+        },
+        {
+          "horse_no": 13,
+          "frame_no": 7,
+          "horse_name": "ユリア",
+          "jockey": "荻野極",
+          "carried_weight": 55.0,
+          "horse_id": "2024105183",
+          "recent_runs": [
+            {
+              "race_id": "202605030504",
+              "date": "2026-06-20",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "稍",
+              "finish": 3,
+              "field_size": 11,
+              "corner_positions": [
+                2,
+                2
+              ],
+              "final_3f": 34.2,
+              "time_seconds": 82.7
+            }
+          ]
+        },
+        {
+          "horse_no": 14,
+          "frame_no": 8,
+          "horse_name": "テリオスブギ",
+          "jockey": "戸崎圭",
+          "carried_weight": 55.0,
+          "horse_id": "2024106551",
+          "recent_runs": [
+            {
+              "race_id": "202604020702",
+              "date": "2026-08-15",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 15,
+              "corner_positions": [
+                7,
+                9
+              ],
+              "final_3f": 36.2,
+              "time_seconds": 83.5
+            }
+          ]
+        },
+        {
+          "horse_no": 15,
+          "frame_no": 8,
+          "horse_name": "ココニイルヨ",
+          "jockey": "▲上里",
+          "carried_weight": 52.0,
+          "horse_id": "2024108121",
+          "recent_runs": [
+            {
+              "race_id": "202605040601",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 12,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 38.8,
+              "time_seconds": 88.9
+            },
+            {
+              "race_id": "202603020801",
+              "date": "2026-07-19",
+              "course": "福島",
+              "surface": "ダート",
+              "distance": 1150,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 10,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 39.5,
+              "time_seconds": 72.7
+            },
+            {
+              "race_id": "202610020402",
+              "date": "2026-07-05",
+              "course": "小倉",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "重",
+              "finish": 9,
+              "field_size": 16,
+              "corner_positions": [
+                12,
+                11
+              ],
+              "final_3f": 36.7,
+              "time_seconds": 72.2
+            },
+            {
+              "race_id": "202605030306",
+              "date": "2026-06-13",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 9,
+              "corner_positions": [
+                5,
+                4
+              ],
+              "final_3f": 35.0,
+              "time_seconds": 84.2
+            }
+          ]
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "uses_results": false,
+        "uses_market": false,
+        "validation_role": "unseen_date_input_only"
+      }
+    },
+    {
+      "race_info": {
+        "race_id": "202605041102",
+        "race_date": "2026-11-01",
+        "race_name": "2歳未勝利",
+        "course": "東京",
+        "surface": "ダート",
+        "distance": 1400,
+        "track_condition": null,
+        "weather": null,
+        "course_layout": null,
+        "layout": null,
+        "source": "central",
+        "scope_key": "central_dirt"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "カリメラ",
+          "jockey": "黛",
+          "carried_weight": 56.0,
+          "horse_id": "2024103063",
+          "recent_runs": []
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 1,
+          "horse_name": "タマモキャスケット",
+          "jockey": "武藤",
+          "carried_weight": 56.0,
+          "horse_id": "2024104556",
+          "recent_runs": [
+            {
+              "race_id": "202604040105",
+              "date": "2026-10-17",
+              "course": "新潟",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 15,
+              "corner_positions": [
+                12,
+                11
+              ],
+              "final_3f": 36.7,
+              "time_seconds": 74.1
+            }
+          ]
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 2,
+          "horse_name": "イチゴワタアメ",
+          "jockey": "▲佐藤",
+          "carried_weight": 52.0,
+          "horse_id": "2024107000",
+          "recent_runs": [
+            {
+              "race_id": "202605040601",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 12,
+              "corner_positions": [
+                10,
+                11
+              ],
+              "final_3f": 37.3,
+              "time_seconds": 87.7
+            },
+            {
+              "race_id": "202601010601",
+              "date": "2026-08-09",
+              "course": "札幌",
+              "surface": "ダート",
+              "distance": 1700,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 12,
+              "corner_positions": [
+                7,
+                7,
+                8,
+                10
+              ],
+              "final_3f": 44.6,
+              "time_seconds": 113.3
+            },
+            {
+              "race_id": "202602010701",
+              "date": "2026-07-04",
+              "course": "函館",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 9,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 35.2,
+              "time_seconds": null
+            },
+            {
+              "race_id": "202602010306",
+              "date": "2026-06-20",
+              "course": "函館",
+              "surface": "ダート",
+              "distance": 1000,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 11,
+              "corner_positions": [
+                11,
+                10
+              ],
+              "final_3f": 37.0,
+              "time_seconds": null
+            }
+          ]
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 2,
+          "horse_name": "キミヘノメロディー",
+          "jockey": "▲上里",
+          "carried_weight": 53.0,
+          "horse_id": "2024105225",
+          "recent_runs": [
+            {
+              "race_id": "202604020401",
+              "date": "2026-08-02",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 12,
+              "field_size": 12,
+              "corner_positions": [
+                10,
+                10
+              ],
+              "final_3f": 34.9,
+              "time_seconds": 96.3
+            },
+            {
+              "race_id": "202603020806",
+              "date": "2026-07-19",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 10,
+              "field_size": 16,
+              "corner_positions": [
+                13,
+                11
+              ],
+              "final_3f": 35.9,
+              "time_seconds": 72.4
+            }
+          ]
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 3,
+          "horse_name": "アブリコース",
+          "jockey": "田辺",
+          "carried_weight": 55.0,
+          "horse_id": "2024103284",
+          "recent_runs": [
+            {
+              "race_id": "202605040601",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 12,
+              "corner_positions": [
+                11,
+                9
+              ],
+              "final_3f": 37.4,
+              "time_seconds": 87.6
+            },
+            {
+              "race_id": "202601010605",
+              "date": "2026-08-09",
+              "course": "札幌",
+              "surface": "芝",
+              "distance": 1500,
+              "track_condition": "良",
+              "finish": 13,
+              "field_size": 13,
+              "corner_positions": [
+                12,
+                13,
+                13
+              ],
+              "final_3f": 41.5,
+              "time_seconds": 99.5
+            }
+          ]
+        },
+        {
+          "horse_no": 6,
+          "frame_no": 3,
+          "horse_name": "ナムラアラバイ",
+          "jockey": "丸田",
+          "carried_weight": 56.0,
+          "horse_id": "2024100828",
+          "recent_runs": [
+            {
+              "race_id": "202605040303",
+              "date": "2026-10-10",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 16,
+              "corner_positions": [
+                2,
+                3
+              ],
+              "final_3f": 37.6,
+              "time_seconds": 99.1
+            },
+            {
+              "race_id": "202606040903",
+              "date": "2026-09-27",
+              "course": "中山",
+              "surface": "ダート",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 7,
+              "field_size": 9,
+              "corner_positions": [
+                8,
+                6,
+                8,
+                8
+              ],
+              "final_3f": 39.2,
+              "time_seconds": 116.2
+            },
+            {
+              "race_id": "202604020502",
+              "date": "2026-08-08",
+              "course": "新潟",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 6,
+              "field_size": 10,
+              "corner_positions": [
+                8,
+                8
+              ],
+              "final_3f": 38.2,
+              "time_seconds": 75.2
+            }
+          ]
+        },
+        {
+          "horse_no": 7,
+          "frame_no": 4,
+          "horse_name": "クールランナー",
+          "jockey": "原",
+          "carried_weight": 55.0,
+          "horse_id": "2024106992",
+          "recent_runs": [
+            {
+              "race_id": "202605040304",
+              "date": "2026-10-10",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 16,
+              "corner_positions": [
+                15,
+                15
+              ],
+              "final_3f": 36.5,
+              "time_seconds": 87.5
+            }
+          ]
+        },
+        {
+          "horse_no": 8,
+          "frame_no": 4,
+          "horse_name": "アイデアルカット",
+          "jockey": "嶋田",
+          "carried_weight": 56.0,
+          "horse_id": "2024102830",
+          "recent_runs": [
+            {
+              "race_id": "202604040302",
+              "date": "2026-10-24",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 18,
+              "corner_positions": [
+                8,
+                7
+              ],
+              "final_3f": 35.7,
+              "time_seconds": 82.8
+            },
+            {
+              "race_id": "202604030207",
+              "date": "2026-08-23",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 10,
+              "corner_positions": [
+                9,
+                9
+              ],
+              "final_3f": 34.5,
+              "time_seconds": 97.0
+            },
+            {
+              "race_id": "202603020701",
+              "date": "2026-07-18",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 12,
+              "corner_positions": [
+                7,
+                6
+              ],
+              "final_3f": 35.6,
+              "time_seconds": 70.2
+            },
+            {
+              "race_id": "202603020105",
+              "date": "2026-06-27",
+              "course": "福島",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 11,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 35.8,
+              "time_seconds": null
+            }
+          ]
+        },
+        {
+          "horse_no": 9,
+          "frame_no": 5,
+          "horse_name": "ホウフクゼットウ",
+          "jockey": "▲土田",
+          "carried_weight": 53.0,
+          "horse_id": "2024104571",
+          "recent_runs": [
+            {
+              "race_id": "202606040405",
+              "date": "2026-09-13",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1800,
+              "track_condition": "稍",
+              "finish": 11,
+              "field_size": 11,
+              "corner_positions": [
+                10,
+                10,
+                10,
+                10
+              ],
+              "final_3f": 38.7,
+              "time_seconds": 118.4
+            }
+          ]
+        },
+        {
+          "horse_no": 10,
+          "frame_no": 5,
+          "horse_name": "ライヴバーボン",
+          "jockey": "丹内",
+          "carried_weight": 55.0,
+          "horse_id": "2024102446",
+          "recent_runs": [
+            {
+              "race_id": "202605040601",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 4,
+              "field_size": 12,
+              "corner_positions": [
+                7,
+                6
+              ],
+              "final_3f": 38.1,
+              "time_seconds": 87.4
+            },
+            {
+              "race_id": "202604020102",
+              "date": "2026-07-25",
+              "course": "新潟",
+              "surface": "ダート",
+              "distance": 1200,
+              "track_condition": "稍",
+              "finish": 12,
+              "field_size": 14,
+              "corner_positions": [
+                12,
+                12
+              ],
+              "final_3f": 38.4,
+              "time_seconds": 75.2
+            }
+          ]
+        },
+        {
+          "horse_no": 11,
+          "frame_no": 6,
+          "horse_name": "サザンマキシム",
+          "jockey": "横山武",
+          "carried_weight": 56.0,
+          "horse_id": "2024100402",
+          "recent_runs": [
+            {
+              "race_id": "202605040604",
+              "date": "2026-10-17",
+              "course": "東京",
+              "surface": "芝",
+              "distance": 1400,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 18,
+              "corner_positions": [
+                4,
+                4
+              ],
+              "final_3f": 34.8,
+              "time_seconds": 83.8
+            },
+            {
+              "race_id": "202630071605",
+              "date": "2026-07-16",
+              "course": "門別",
+              "surface": "ダート",
+              "distance": 1000,
+              "track_condition": "重",
+              "finish": null,
+              "field_size": 8,
+              "corner_positions": null,
+              "final_3f": null,
+              "time_seconds": null
+            }
+          ]
+        },
+        {
+          "horse_no": 12,
+          "frame_no": 6,
+          "horse_name": "カンタベリーアップ",
+          "jockey": "野中",
+          "carried_weight": 55.0,
+          "horse_id": "2024104998",
+          "recent_runs": [
+            {
+              "race_id": "202605040506",
+              "date": "2026-10-12",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1300,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 16,
+              "corner_positions": [
+                16,
+                15
+              ],
+              "final_3f": 37.2,
+              "time_seconds": 82.8
+            }
+          ]
+        },
+        {
+          "horse_no": 13,
+          "frame_no": 7,
+          "horse_name": "パープルタウン",
+          "jockey": "津村",
+          "carried_weight": 55.0,
+          "horse_id": "2024102097",
+          "recent_runs": [
+            {
+              "race_id": "202604030303",
+              "date": "2026-08-29",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 5,
+              "field_size": 11,
+              "corner_positions": [
+                2,
+                2
+              ],
+              "final_3f": 36.1,
+              "time_seconds": 95.5
+            },
+            {
+              "race_id": "202604020804",
+              "date": "2026-08-16",
+              "course": "新潟",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "良",
+              "finish": 7,
+              "field_size": 13,
+              "corner_positions": [
+                10,
+                10
+              ],
+              "final_3f": 33.8,
+              "time_seconds": 95.8
+            }
+          ]
+        },
+        {
+          "horse_no": 14,
+          "frame_no": 7,
+          "horse_name": "ツジベン",
+          "jockey": "石橋脩",
+          "carried_weight": 55.0,
+          "horse_id": "2024102662",
+          "recent_runs": [
+            {
+              "race_id": "202605040506",
+              "date": "2026-10-12",
+              "course": "東京",
+              "surface": "ダート",
+              "distance": 1300,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 16,
+              "corner_positions": [
+                3,
+                3
+              ],
+              "final_3f": 38.9,
+              "time_seconds": 82.7
+            }
+          ]
+        },
+        {
+          "horse_no": 15,
+          "frame_no": 8,
+          "horse_name": "タワーレイヴン",
+          "jockey": "木幡巧",
+          "carried_weight": 56.0,
+          "horse_id": "2024109022",
+          "recent_runs": [
+            {
+              "race_id": "202601010705",
+              "date": "2026-08-15",
+              "course": "札幌",
+              "surface": "芝",
+              "distance": 1200,
+              "track_condition": "良",
+              "finish": 9,
+              "field_size": 12,
+              "corner_positions": [
+                11,
+                11
+              ],
+              "final_3f": 34.8,
+              "time_seconds": 72.2
+            }
+          ]
+        },
+        {
+          "horse_no": 16,
+          "frame_no": 8,
+          "horse_name": "スピカテソーロ",
+          "jockey": "佐々木",
+          "carried_weight": 56.0,
+          "horse_id": "2024101273",
+          "recent_runs": [
+            {
+              "race_id": "202606040302",
+              "date": "2026-09-12",
+              "course": "中山",
+              "surface": "芝",
+              "distance": 1600,
+              "track_condition": "重",
+              "finish": 6,
+              "field_size": 12,
+              "corner_positions": [
+                6,
+                4,
+                4
+              ],
+              "final_3f": 36.3,
+              "time_seconds": 97.9
+            },
+            {
+              "race_id": "202601020105",
+              "date": "2026-08-22",
+              "course": "札幌",
+              "surface": "芝",
+              "distance": 1500,
+              "track_condition": "良",
+              "finish": 8,
+              "field_size": 14,
+              "corner_positions": [
+                7,
+                8,
+                12
+              ],
+              "final_3f": 36.3,
+              "time_seconds": 91.0
+            }
+          ]
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "uses_results": false,
+        "uses_market": false,
+        "validation_role": "unseen_date_input_only"
+      }
+    },
+    {
+      "race_info": {
+        "race_id": "202635110101",
+        "race_date": "2026-11-01",
+        "race_name": "ファーストステップ 2歳 新馬戦",
+        "course": "盛岡",
+        "surface": "ダート",
+        "distance": 1000,
+        "track_condition": "稍",
+        "weather": "晴",
+        "course_layout": null,
+        "layout": null,
+        "source": "local",
+        "scope_key": "local"
+      },
+      "horses": [
+        {
+          "horse_no": 1,
+          "frame_no": 1,
+          "horse_name": "ヒアウィーゴー",
+          "jockey": "高松亮",
+          "carried_weight": 55.0,
+          "horse_id": "2024100548",
+          "recent_runs": []
+        },
+        {
+          "horse_no": 2,
+          "frame_no": 2,
+          "horse_name": "アクティブクラウン",
+          "jockey": "鈴木祐",
+          "carried_weight": 54.0,
+          "horse_id": "2024104082",
+          "recent_runs": []
+        },
+        {
+          "horse_no": 3,
+          "frame_no": 3,
+          "horse_name": "レオーネ",
+          "jockey": "阿部英俊",
+          "carried_weight": 54.0,
+          "horse_id": "2024101751",
+          "recent_runs": []
+        },
+        {
+          "horse_no": 4,
+          "frame_no": 4,
+          "horse_name": "ドタート",
+          "jockey": "山本聡紀",
+          "carried_weight": 55.0,
+          "horse_id": "2024102277",
+          "recent_runs": []
+        },
+        {
+          "horse_no": 5,
+          "frame_no": 5,
+          "horse_name": "ラブゴート",
+          "jockey": "山本聡哉",
+          "carried_weight": 54.0,
+          "horse_id": "2024107406",
+          "recent_runs": []
+        }
+      ],
+      "provenance": {
+        "source": "saved_agent_inputs",
+        "uses_results": false,
+        "uses_market": false,
+        "validation_role": "unseen_date_input_only"
+      }
+    }
+  ]
+}

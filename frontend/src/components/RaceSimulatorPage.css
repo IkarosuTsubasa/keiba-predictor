@@ -1,0 +1,1734 @@
+.sim-page {
+  --sim-bg:#101b1b;
+  --sim-panel:#172322;
+  --sim-line:#30403a;
+  --sim-text:#ecece2;
+  --sim-muted:#99aaa0;
+  --sim-gold:#dbc18b;
+  min-height:100vh;
+  background:radial-gradient(ellipse at 45% 0,#21332a66,transparent 52%),var(--sim-bg);
+  color:var(--sim-text);
+  font-family:"Noto Sans JP","Yu Gothic UI",sans-serif;
+  font-size:14px;
+  line-height:1.6;
+}
+.sim-page * {
+  box-sizing:border-box;
+}
+.sim-page button,.sim-page input,.sim-page select {
+  font:inherit;
+}
+.sim-page button,.sim-page a,.sim-page summary,.sim-page select {
+  cursor:pointer;
+}
+.sim-page button:focus-visible,.sim-page a:focus-visible,.sim-page select:focus-visible,.sim-page summary:focus-visible,.sim-page input:focus-visible,.sim-runner:focus-visible {
+  outline:2px solid var(--sim-gold);
+  outline-offset:4px;
+}
+.sim-page button {
+  color:inherit;
+}
+.sim-page button:disabled {
+  opacity:.6;
+  cursor:wait;
+}
+.sim-page a {
+  color:inherit;
+  text-decoration:none;
+}
+.sim-page h1,.sim-page h2,.sim-page h3,.sim-page p {
+  margin:0;
+}
+.sim-page h2 {
+  font-size:15px;
+  font-weight:600;
+}
+.sim-shell {
+  max-width:1456px;
+  margin:0 auto;
+  padding:0 44px;
+}
+.sim-header {
+  height:84px;
+  border-bottom:1px solid var(--sim-line);
+  display:flex;
+  align-items:center;
+  gap:20px;
+}
+.sim-brand {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:15px;
+  font-weight:600;
+  letter-spacing:.04em;
+}
+.sim-brand>span:last-child {
+  display:flex;
+  align-items:center;
+}
+.sim-brand-mark {
+  height:36px;
+  width:36px;
+  display:grid;
+  place-items:center;
+  color:var(--sim-gold);
+  border:1px solid #62705a;
+  border-radius:50%;
+}
+.sim-brand-divider {
+  width:1px;
+  height:15px;
+  background:#52604e;
+  margin:0 15px;
+}
+.sim-prototype {
+  font-size:11px;
+  border:1px solid #5b6046;
+  color:var(--sim-gold);
+  padding:3px 9px;
+  border-radius:5px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.sim-prototype i,.sim-input-badge i,.sim-live>i,.sim-event-dot {
+  width:5px;
+  height:5px;
+  display:inline-block;
+  border-radius:50%;
+  background:var(--sim-gold);
+}
+.sim-back {
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  font-size:12px;
+  color:var(--sim-muted)!important;
+}
+.sim-intro {
+  padding:43px 0 32px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:25px;
+}
+.sim-eyebrow {
+  font-size:11px;
+  letter-spacing:.15em;
+  color:var(--sim-gold);
+  margin-bottom:10px!important;
+}
+.sim-intro h1 {
+  font-size:clamp(28px,3.2vw,42px);
+  font-weight:500;
+  letter-spacing:.05em;
+  line-height:1.4;
+}
+.sim-intro h1>span {
+  color:var(--sim-gold);
+}
+.sim-intro-copy {
+  color:var(--sim-muted);
+  font-size:12px;
+  margin-top:12px!important;
+  letter-spacing:.03em;
+}
+.sim-intro-note {
+  display:flex;
+  gap:10px;
+  color:#a5b2a4;
+  font-size:11px;
+  line-height:1.9;
+  align-items:center;
+  margin-bottom:2px;
+}
+.sim-intro-note svg {
+  color:#b59f73;
+  flex-shrink:0;
+}
+.sim-racebar {
+  display:flex;
+  align-items:center;
+  gap:28px;
+  padding:18px 22px;
+  border:1px solid var(--sim-line);
+  border-radius:12px;
+  background:#1b2a25;
+  margin-bottom:20px;
+}
+.sim-section-label {
+  font-size:10px;
+  color:var(--sim-gold);
+  letter-spacing:.09em;
+  display:block;
+  margin-bottom:6px;
+}
+.sim-select-label select {
+  font-size:17px;
+  font-weight:600;
+  letter-spacing:.04em;
+  background:transparent;
+  color:var(--sim-text);
+  border:0;
+  padding:0 25px 0 0;
+  max-width:100%;
+}
+.sim-page option {
+  background:#172722;
+  color:var(--sim-text);
+}
+.sim-race-meta {
+  border-left:1px solid #3c4c40;
+  padding-left:28px;
+}
+.sim-race-meta strong {
+  font-size:12px;
+  font-weight:500;
+}
+.sim-race-meta>span {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--sim-muted);
+  font-size:11px;
+  margin-top:3px;
+}
+.sim-race-meta i,.sim-selected-horse p i,.sim-footer i {
+  width:3px;
+  height:3px;
+  display:inline-block;
+  border-radius:50%;
+  background:#677764;
+}
+.sim-input-badge {
+  margin-left:auto;
+  font-size:10px;
+  color:#c2cdb9;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  white-space:nowrap;
+}
+.sim-input-badge i {
+  background:#94bda0;
+}
+.sim-workspace {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 314px;
+  gap:20px;
+  align-items:stretch;
+}
+.sim-stage-panel,.sim-order-panel,.sim-settings-panel,.sim-horse-panel,.sim-batch-panel {
+  border:1px solid var(--sim-line);
+  border-radius:13px;
+  background:var(--sim-panel);
+  overflow:hidden;
+}
+.sim-stage-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:17px 22px;
+  border-bottom:1px solid #2a3c31;
+  font-size:11px;
+  color:var(--sim-muted);
+}
+.sim-live {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:#cbd6c3;
+}
+.sim-live>i {
+  background:#8aab85;
+}
+.sim-live>i.is-running {
+  box-shadow:0 0 0 4px #8aab851c;
+}
+.sim-stage-time b {
+  font-size:14px;
+  font-weight:500;
+  color:var(--sim-text);
+  margin-left:8px;
+  font-variant-numeric:tabular-nums;
+}
+.sim-track-area {
+  position:relative;
+  background:radial-gradient(ellipse at center,#223c2966,transparent 70%),#14241e;
+  padding:35px 10px 4px;
+}
+.sim-track {
+  width:100%;
+  display:block;
+  overflow:visible;
+}
+.sim-remaining {
+  position:absolute;
+  top:18px;
+  left:24px;
+  z-index:1;
+}
+.sim-remaining>span {
+  display:block;
+  font-size:10px;
+  color:#9bad97;
+  letter-spacing:.04em;
+}
+.sim-remaining strong {
+  display:block;
+  font-family:"Inter",sans-serif;
+  font-weight:500;
+  font-size:29px;
+  line-height:1.5;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.03em;
+}
+.sim-remaining small {
+  font-size:12px;
+  font-family:inherit;
+  font-weight:400;
+  color:#a7b39d;
+  margin-left:4px;
+}
+.sim-track-caption {
+  position:absolute;
+  right:22px;
+  top:25px;
+  font-size:9px;
+  color:#9cab98;
+}
+.sim-map-label {
+  fill:#a6b49b;
+  font-size:10px;
+  letter-spacing:1px;
+}
+.sim-map-kicker {
+  fill:#b8c69e;
+  font-size:12px;
+  letter-spacing:4px;
+}
+.sim-map-phase {
+  fill:#e8e7cd;
+  font-size:32px;
+  letter-spacing:4px;
+  font-weight:500;
+}
+.sim-map-sub {
+  fill:#acb89e;
+  font-size:13px;
+  letter-spacing:1px;
+}
+.sim-map-small {
+  fill:#849a80;
+  font-size:9px;
+  letter-spacing:1px;
+}
+.sim-runner {
+  cursor:pointer;
+  outline:none;
+}
+.sim-runner:focus-visible>circle:last-of-type {
+  stroke:#fff;
+  stroke-width:3;
+}
+.sim-current-event {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 22px;
+  min-height:44px;
+  background:#1c2d25;
+  font-size:10px;
+  color:#c2cbb7;
+  border-top:1px solid #2a3c31;
+}
+.sim-event-dot {
+  flex-shrink:0;
+  width:4px;
+  height:4px;
+}
+.sim-transport {
+  padding:17px 22px 19px;
+}
+.sim-timeline-labels {
+  display:flex;
+  justify-content:space-between;
+  font-size:9px;
+  color:#b0bbac;
+  letter-spacing:.04em;
+}
+.sim-seek {
+  display:block;
+  appearance:none;
+  -webkit-appearance:none;
+  width:100%;
+  height:4px;
+  background:linear-gradient(to right,var(--sim-gold) var(--progress),#36453c var(--progress));
+  border:0;
+  border-radius:5px;
+  margin:12px 0 22px;
+  cursor:ew-resize;
+}
+.sim-seek::-webkit-slider-thumb {
+  appearance:none;
+  -webkit-appearance:none;
+  width:11px;
+  height:11px;
+  border:2px solid #f0d9a7;
+  border-radius:50%;
+  background:#dfc78e;
+  box-shadow:0 0 0 4px #ddc58b14;
+}
+.sim-seek::-moz-range-thumb {
+  width:9px;
+  height:9px;
+  border:2px solid #f0d9a7;
+  border-radius:50%;
+  background:#dfc78e;
+}
+.sim-controls,.sim-play-group,.sim-speed-group {
+  display:flex;
+  align-items:center;
+}
+.sim-controls {
+  justify-content:space-between;
+  gap:15px;
+}
+.sim-play-group {
+  gap:10px;
+}
+.sim-play {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid #e4cb96;
+  color:#1c2b22!important;
+  background:#ddc38b;
+  padding:10px 16px;
+  border-radius:6px;
+  font-size:11px!important;
+  min-width:135px;
+  font-weight:600;
+  white-space:nowrap;
+}
+.sim-play:hover {
+  background:#efdaa8;
+}
+.sim-icon-button {
+  width:36px;
+  height:36px;
+  display:grid;
+  place-items:center;
+  border:1px solid #405041;
+  border-radius:6px;
+  background:transparent;
+  color:#b7c3aa!important;
+}
+.sim-icon-button:hover {
+  background:#2a3c2c;
+}
+.sim-speed-group {
+  gap:3px;
+}
+.sim-speed-group>span {
+  font-size:9px;
+  color:#a4b09a;
+  margin-right:9px;
+}
+.sim-speed-group>button {
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:#a6b29d;
+  font-size:10px;
+  padding:6px 8px;
+  white-space:nowrap;
+}
+.sim-speed-group>button.is-active {
+  background:#384536;
+  color:#f2e0b4;
+}
+.sim-order-panel {
+  display:flex;
+  flex-direction:column;
+}
+.sim-panel-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:20px 20px 15px;
+}
+.sim-panel-heading>span {
+  font-size:9px;
+  color:var(--sim-muted);
+  white-space:nowrap;
+}
+.sim-order-panel .sim-panel-heading h2 {
+  font-size:13px;
+}
+.sim-order-table {
+  flex:1;
+}
+.sim-order-columns {
+  display:grid;
+  grid-template-columns:24px 1fr 59px;
+  gap:9px;
+  color:#a0ac9c;
+  font-size:9px;
+  padding:0 18px 9px;
+  border-bottom:1px solid #2b3c31;
+}
+.sim-order-columns>span:last-child {
+  text-align:right;
+}
+.sim-order-row {
+  display:grid;
+  grid-template-columns:16px 22px minmax(0,1fr) 52px;
+  gap:8px;
+  align-items:center;
+  border:0;
+  border-bottom:1px solid #27382f;
+  background:transparent;
+  width:100%;
+  padding:7px 16px;
+  text-align:left;
+  min-height:44px;
+}
+.sim-order-row:hover {
+  background:#22382b;
+}
+.sim-order-row.is-selected {
+  background:#c9b07812;
+  box-shadow:inset 2px 0 var(--sim-gold);
+}
+.sim-rank {
+  font-family:Inter,sans-serif;
+  font-size:10px;
+  color:#8a9b89;
+  font-variant-numeric:tabular-nums;
+  text-align:center;
+}
+.sim-rank--top {
+  color:var(--sim-gold);
+  font-weight:600;
+}
+.sim-number {
+  --silk:#fff;
+  --ink:#222;
+  display:inline-grid;
+  place-items:center;
+  flex-shrink:0;
+  background:var(--silk);
+  color:var(--ink);
+  width:36px;
+  height:36px;
+  border-radius:7px;
+  font-family:Inter,sans-serif;
+  font-size:17px;
+  font-weight:700;
+  border:1px solid #ffffff1c;
+  font-variant-numeric:tabular-nums;
+}
+.sim-number--small {
+  width:22px;
+  height:23px;
+  border-radius:4px;
+  font-size:11px;
+}
+.sim-horse-copy {
+  display:grid;
+  gap:0;
+  min-width:0;
+}
+.sim-horse-copy>strong {
+  font-size:10px;
+  font-weight:500;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.sim-horse-copy>span {
+  font-size:8px;
+  color:#a3b09c;
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+.sim-horse-copy em {
+  font-style:normal;
+  color:#d9c18e;
+  font-size:8px;
+}
+.sim-gap {
+  font-family:Inter,"Noto Sans JP",sans-serif;
+  font-size:9px;
+  color:#c2ccb8;
+  text-align:right;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+.sim-order-foot {
+  font-size:9px;
+  color:#a1ad9c;
+  padding:12px 15px;
+  text-align:center;
+  background:#1b2a23;
+}
+.sim-detail-grid {
+  display:grid;
+  grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);
+  gap:20px;
+  margin:20px 0;
+}
+.sim-settings-panel,.sim-horse-panel {
+  padding:0 22px 20px;
+}
+.sim-detail-grid .sim-panel-heading {
+  padding:20px 0 18px;
+}
+.sim-field-label {
+  font-size:11px;
+  color:#b9c6ad;
+  display:block;
+  margin-bottom:10px;
+}
+.sim-pace-buttons {
+  display:flex;
+  gap:8px;
+}
+.sim-pace-buttons>button {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  flex:1;
+  background:#1b2b24;
+  border:1px solid #3b4b3e;
+  border-radius:6px;
+  padding:9px 8px;
+  font-size:11px;
+}
+.sim-pace-buttons>button.is-active {
+  color:#eed5a1;
+  border-color:#b39d6c;
+  background:#bba06412;
+}
+.sim-pace-mark {
+  height:13px;
+  display:flex;
+  gap:2px;
+  align-items:flex-end;
+}
+.sim-pace-mark i {
+  display:block;
+  width:3px;
+  background:#a4b396;
+  border-radius:1px;
+}
+.sim-pace-mark i:nth-child(1) {
+  height:5px;
+}
+.sim-pace-mark i:nth-child(2) {
+  height:9px;
+}
+.sim-pace-mark i:nth-child(3) {
+  height:13px;
+}
+.sim-pace-mark--slow i:nth-child(n+2) {
+  opacity:.2;
+}
+.sim-pace-mark--average i:last-child {
+  opacity:.2;
+}
+.is-active .sim-pace-mark i {
+  background:#d7bd83;
+}
+.sim-setting-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:15px;
+  padding:18px 0;
+  border-bottom:1px solid #2b3c30;
+}
+.sim-setting-row label {
+  font-size:11px;
+  display:block;
+}
+.sim-setting-row span {
+  color:#9eae97;
+  font-size:9px;
+  display:block;
+  margin-top:3px;
+}
+.sim-setting-row select {
+  background:#1e3027;
+  color:#d0dac4;
+  border:1px solid #3a4e3d;
+  border-radius:5px;
+  font-size:11px;
+  padding:7px 9px;
+}
+.sim-rerun {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  margin-top:16px;
+  width:100%;
+  background:transparent;
+  border:1px solid #6b7256;
+  border-radius:6px;
+  padding:10px 13px;
+  font-size:11px;
+  color:#dfd3ac!important;
+}
+.sim-rerun>span {
+  margin-left:auto;
+  font-size:17px;
+  line-height:1;
+}
+.sim-rerun:hover {
+  background:#394434;
+}
+.sim-setting-note {
+  color:#a1b097;
+  font-size:9px;
+  margin-top:9px!important;
+  line-height:1.8;
+}
+.sim-selected-horse {
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.sim-selected-horse h3 {
+  font-size:15px;
+  font-weight:500;
+  letter-spacing:.03em;
+}
+.sim-selected-horse p {
+  display:flex;
+  gap:9px;
+  align-items:center;
+  font-size:9px;
+  color:#a2b197;
+  margin-top:3px;
+}
+.sim-profile-quality {
+  margin-left:auto;
+  font-size:9px;
+  color:#c7c19f;
+  background:#3a413326;
+  padding:4px 7px;
+  border:1px solid #586044;
+  border-radius:4px;
+  white-space:nowrap;
+}
+.sim-capability-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px 24px;
+  margin:22px 0;
+}
+.sim-capability {
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+.sim-capability>span {
+  width:61px;
+  font-size:10px;
+  white-space:nowrap;
+  color:#b7c4ab;
+}
+.sim-capability>div {
+  flex:1;
+  height:3px;
+  border-radius:4px;
+  background:#394a3b;
+  overflow:hidden;
+}
+.sim-capability i {
+  height:100%;
+  display:block;
+  background:#a8b895;
+  border-radius:4px;
+}
+.sim-capability b {
+  font:10px Inter,sans-serif;
+  font-variant-numeric:tabular-nums;
+  color:#dce3cc;
+  width:20px;
+  text-align:right;
+}
+.sim-energy {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:10px;
+  color:#b2c0a6;
+  border-top:1px solid #2d3c31;
+  padding-top:13px;
+}
+.sim-energy>div {
+  flex:1;
+  height:4px;
+  background:#344736;
+  overflow:hidden;
+  border-radius:4px;
+}
+.sim-energy i {
+  height:100%;
+  display:block;
+  background:linear-gradient(90deg,#749f83,#b9d49c);
+}
+.sim-energy b {
+  font-size:11px;
+  font-weight:500;
+  font-variant-numeric:tabular-nums;
+  min-width:33px;
+  text-align:right;
+}
+.sim-profile-note {
+  font-size:9px;
+  line-height:1.9;
+  color:#a6b39b;
+  margin-top:13px!important;
+}
+.sim-batch-panel {
+  padding:25px 24px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  flex-wrap:wrap;
+  background:linear-gradient(105deg,#223126,#192720);
+}
+.sim-batch-intro h2 {
+  font-size:20px;
+  letter-spacing:.03em;
+  font-weight:500;
+}
+.sim-batch-intro p {
+  color:#b0bca5;
+  font-size:10px;
+  margin-top:7px;
+}
+.sim-batch-button {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:11px 16px;
+  background:#d5bc8612;
+  color:#e8d5ac!important;
+  border:1px solid #a59064;
+  border-radius:6px;
+  font-size:11px;
+  white-space:nowrap;
+}
+.sim-batch-button:hover {
+  background:#4d5137;
+}
+.sim-batch-results {
+  border-top:1px solid #3a4938;
+  padding-top:20px;
+  margin-top:5px;
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:22px;
+  width:100%;
+}
+.sim-batch-horse {
+  border:0;
+  background:transparent;
+  padding:0;
+  text-align:left;
+  min-width:0;
+}
+.sim-batch-horse>div:first-child {
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.sim-batch-horse strong {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:10px;
+  font-weight:500;
+}
+.sim-batch-horse b {
+  margin-left:auto;
+  font:16px Inter,sans-serif;
+  white-space:nowrap;
+}
+.sim-batch-horse b small {
+  font-size:9px;
+  color:#c2cbb1;
+  margin-left:2px;
+}
+.sim-batch-bar {
+  height:4px;
+  margin:12px 0 6px;
+  background:#40513d;
+  border-radius:4px;
+  overflow:hidden;
+}
+.sim-batch-bar i {
+  display:block;
+  height:100%;
+  background:#cdb27b;
+}
+.sim-batch-horse>span {
+  font-size:9px;
+  color:#a9b89f;
+}
+.sim-batch-caveat {
+  grid-column:1/-1;
+  font-size:10px;
+  color:#bdc5a9;
+}
+.sim-method {
+  margin-top:22px;
+  border-top:1px solid #33432f;
+  border-bottom:1px solid #33432f;
+  color:#acb99d;
+  font-size:11px;
+}
+.sim-method summary {
+  padding:17px 2px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  list-style:none;
+}
+.sim-method summary::-webkit-details-marker {
+  display:none;
+}
+.sim-method summary>span {
+  margin-left:auto;
+  color:#d6c18b;
+}
+.sim-method[open] summary>span {
+  transform:rotate(45deg);
+}
+.sim-method-body {
+  padding:4px 0 22px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:45px;
+}
+.sim-method h3 {
+  font-size:12px;
+  color:#d4dcc8;
+  margin-bottom:9px;
+}
+.sim-method p,.sim-method li {
+  font-size:11px;
+  line-height:1.9;
+}
+.sim-method p+p {
+  margin-top:10px;
+}
+.sim-method ul {
+  margin:10px 0 0;
+  padding-left:18px;
+}
+.sim-footer {
+  display:flex;
+  justify-content:space-between;
+  padding:23px 0 30px;
+  color:#97a68c;
+  font-size:10px;
+}
+.sim-footer>span {
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.sim-sr {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+.sim-order-panel {
+  min-height:0;
+  contain:size;
+}
+.sim-order-table {
+  min-height:0;
+  height:0;
+  overflow-y:auto;
+  scrollbar-color:#52614c #1a2a21;
+  scrollbar-width:thin;
+}
+.sim-order-columns {
+  position:sticky;
+  top:0;
+  background:var(--sim-panel);
+  z-index:2;
+}
+.sim-horse-copy>strong {
+  font-size:11px;
+}
+.sim-horse-copy>span {
+  font-size:9px;
+}
+.sim-gap {
+  font-size:10px;
+}
+@media(min-width:1500px) {
+  .sim-workspace {
+    grid-template-columns:minmax(0,1fr) 330px;
+  }
+  .sim-order-row {
+    min-height:47px;
+    padding-top:8px;
+    padding-bottom:8px;
+  }
+  .sim-horse-copy>strong {
+    font-size:11px;
+  }
+  .sim-horse-copy>span {
+    font-size:9px;
+  }
+  .sim-gap {
+    font-size:10px;
+  }
+}
+@media(max-width:1100px) {
+  .sim-shell {
+    padding:0 24px;
+  }
+  .sim-workspace {
+    grid-template-columns:minmax(0,1fr) 272px;
+    gap:14px;
+  }
+  .sim-order-row {
+    padding:6px 10px;
+    gap:6px;
+    grid-template-columns:14px 22px minmax(0,1fr) 45px;
+    min-height:39px;
+  }
+  .sim-stage-heading {
+    padding:16px;
+  }
+  .sim-transport {
+    padding:16px;
+  }
+  .sim-track-area {
+    padding-top:55px;
+  }
+  .sim-controls {
+    gap:8px;
+  }
+  .sim-speed-group>span {
+    display:none;
+  }
+  .sim-speed-group>button {
+    padding:5px 6px;
+  }
+  .sim-play {
+    padding:10px 12px;
+    min-width:125px;
+  }
+  .sim-detail-grid {
+    gap:14px;
+  }
+  .sim-settings-panel,.sim-horse-panel {
+    padding:0 18px 18px;
+  }
+  .sim-profile-quality {
+    display:none;
+  }
+  .sim-batch-results {
+    gap:15px;
+  }
+  .sim-batch-horse>div:first-child {
+    flex-wrap:wrap;
+  }
+  .sim-batch-horse strong {
+    max-width:calc(100% - 30px);
+  }
+  .sim-batch-horse b {
+    display:block;
+    width:100%;
+    margin-top:6px;
+  }
+  .sim-panel-heading>span {
+    font-size:8px;
+  }
+}
+@media(max-width:800px) {
+  .sim-order-panel {
+    contain:none;
+  }
+  .sim-shell {
+    padding:0 18px;
+  }
+  .sim-header {
+    height:68px;
+    gap:12px;
+  }
+  .sim-brand {
+    font-size:12px;
+    gap:8px;
+  }
+  .sim-brand-divider {
+    margin:0 10px;
+  }
+  .sim-back {
+    font-size:10px;
+  }
+  .sim-prototype {
+    font-size:9px;
+    padding:2px 6px;
+  }
+  .sim-intro {
+    padding:30px 0 24px;
+    align-items:flex-start;
+    flex-direction:column;
+    gap:15px;
+  }
+  .sim-intro-note {
+    font-size:10px;
+  }
+  .sim-intro-note br {
+    display:none;
+  }
+  .sim-racebar {
+    padding:15px;
+    gap:15px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+  .sim-race-label {
+    flex:1;
+    min-width:240px;
+  }
+  .sim-select-label select {
+    font-size:16px;
+  }
+  .sim-race-meta {
+    padding-left:15px;
+  }
+  .sim-input-badge {
+    margin-left:0;
+  }
+  .sim-workspace {
+    grid-template-columns:1fr;
+    gap:14px;
+  }
+  .sim-track-area {
+    padding-top:35px;
+  }
+  .sim-track {
+    max-height:470px;
+  }
+  .sim-order-panel .sim-panel-heading {
+    padding:16px;
+  }
+  .sim-order-table {
+    height:auto;
+    flex:auto;
+    max-height:345px;
+    overflow-y:auto;
+    scrollbar-color:#52614c #1a2a21;
+    scrollbar-width:thin;
+  }
+  .sim-order-row {
+    grid-template-columns:24px 26px 1fr 65px;
+    gap:10px;
+    padding:9px 20px;
+    min-height:45px;
+  }
+  .sim-horse-copy>strong {
+    font-size:12px;
+  }
+  .sim-horse-copy>span {
+    font-size:10px;
+  }
+  .sim-gap {
+    font-size:11px;
+  }
+  .sim-order-columns {
+    grid-template-columns:40px 1fr 65px;
+    padding:0 20px 10px;
+    position:sticky;
+    top:0;
+    background:var(--sim-panel);
+    z-index:2;
+  }
+  .sim-detail-grid {
+    grid-template-columns:1fr;
+    margin-top:14px;
+  }
+  .sim-panel-heading>span {
+    font-size:9px;
+  }
+  .sim-selected-horse h3 {
+    font-size:16px;
+  }
+  .sim-profile-quality {
+    display:inline-block;
+  }
+  .sim-selected-horse p {
+    font-size:10px;
+  }
+  .sim-capability>span {
+    font-size:11px;
+    width:68px;
+  }
+  .sim-capability b {
+    font-size:11px;
+  }
+  .sim-profile-note,.sim-setting-note {
+    font-size:10px;
+  }
+  .sim-field-label,.sim-setting-row label,.sim-pace-buttons>button,.sim-rerun {
+    font-size:12px;
+  }
+  .sim-setting-row span {
+    font-size:10px;
+  }
+  .sim-controls {
+    gap:20px;
+  }
+  .sim-speed-group>span {
+    display:block;
+  }
+  .sim-batch-panel {
+    padding:21px 18px;
+  }
+  .sim-batch-intro p {
+    font-size:11px;
+    line-height:1.9;
+  }
+  .sim-batch-results {
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+  .sim-method-body {
+    gap:25px;
+  }
+  .sim-footer {
+    font-size:9px;
+  }
+}
+@media(max-width:480px) {
+  .sim-shell {
+    padding:0 12px;
+  }
+  .sim-brand-mark {
+    width:30px;
+    height:30px;
+  }
+  .sim-brand {
+    font-size:11px;
+  }
+  .sim-brand-divider {
+    margin:0 8px;
+  }
+  .sim-back {
+    font-size:0;
+    gap:0;
+  }
+  .sim-back svg {
+    width:20px;
+    height:20px;
+  }
+  .sim-prototype {
+    margin-left:auto;
+  }
+  .sim-intro h1 {
+    font-size:29px;
+  }
+  .sim-eyebrow {
+    font-size:10px;
+  }
+  .sim-intro-copy {
+    font-size:11px;
+  }
+  .sim-intro-note {
+    align-items:flex-start;
+  }
+  .sim-intro-note svg {
+    width:14px;
+    height:14px;
+    margin-top:3px;
+  }
+  .sim-racebar {
+    gap:13px;
+  }
+  .sim-race-meta {
+    padding:0;
+    border:0;
+  }
+  .sim-input-badge {
+    font-size:9px;
+    margin-left:auto;
+  }
+  .sim-track-area {
+    padding:62px 0 7px;
+  }
+  .sim-remaining {
+    top:14px;
+    left:15px;
+  }
+  .sim-remaining strong {
+    font-size:25px;
+  }
+  .sim-track-caption {
+    right:13px;
+    top:22px;
+    font-size:8px;
+    max-width:130px;
+    text-align:right;
+  }
+  .sim-track {
+    min-height:225px;
+  }
+  .sim-stage-heading {
+    padding:12px 15px;
+  }
+  .sim-stage-time {
+    font-size:10px;
+  }
+  .sim-stage-time b {
+    font-size:12px;
+  }
+  .sim-current-event {
+    padding:10px 15px;
+    font-size:10px;
+    min-height:52px;
+  }
+  .sim-transport {
+    padding:15px;
+  }
+  .sim-timeline-labels {
+    font-size:8px;
+  }
+  .sim-controls {
+    gap:7px;
+  }
+  .sim-play-group {
+    gap:6px;
+  }
+  .sim-play {
+    font-size:10px!important;
+    min-width:115px;
+    padding:10px 9px;
+    gap:4px;
+  }
+  .sim-icon-button {
+    width:32px;
+    height:34px;
+  }
+  .sim-speed-group {
+    gap:0;
+  }
+  .sim-speed-group>span {
+    display:none;
+  }
+  .sim-speed-group>button {
+    padding:5px 6px;
+    font-size:10px;
+  }
+  .sim-detail-grid .sim-panel-heading {
+    gap:10px;
+    align-items:baseline;
+  }
+  .sim-detail-grid .sim-panel-heading>span {
+    font-size:8px;
+  }
+  .sim-page h2 {
+    font-size:14px;
+  }
+  .sim-profile-quality {
+    display:none;
+  }
+  .sim-selected-horse h3 {
+    font-size:14px;
+  }
+  .sim-selected-horse p {
+    font-size:9px;
+    gap:7px;
+  }
+  .sim-capability-grid {
+    gap:13px 17px;
+  }
+  .sim-capability {
+    gap:7px;
+  }
+  .sim-capability>span {
+    width:59px;
+    font-size:10px;
+  }
+  .sim-capability b {
+    font-size:10px;
+    width:16px;
+  }
+  .sim-batch-results {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:20px;
+  }
+  .sim-batch-horse>div:first-child {
+    flex-wrap:nowrap;
+  }
+  .sim-batch-horse b {
+    width:auto;
+    margin-left:auto;
+    display:inline;
+    margin-top:0;
+  }
+  .sim-batch-horse strong {
+    max-width:75px;
+  }
+  .sim-method-body {
+    grid-template-columns:1fr;
+    gap:18px;
+  }
+  .sim-footer {
+    align-items:flex-start;
+    gap:16px;
+    font-size:8px;
+  }
+  .sim-footer>span {
+    gap:6px;
+    flex-wrap:wrap;
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  .sim-page * {
+    scroll-behavior:auto;
+    transition:none!important;
+  }
+}
+.sim-track-area {
+  padding-top:86px;
+}
+.sim-view-switch {
+  position:absolute;
+  top:19px;
+  right:22px;
+  display:flex;
+  padding:3px;
+  gap:3px;
+  background:#10251c;
+  border:1px solid #4c6046;
+  border-radius:6px;
+}
+.sim-view-switch button {
+  background:transparent;
+  border:0;
+  border-radius:3px;
+  padding:5px 10px;
+  color:#aabc9d;
+  font-size:10px;
+}
+.sim-view-switch button.is-active {
+  background:#45533b;
+  color:#f1d79f;
+}
+.sim-track-caption {
+  top:58px;
+}
+.sim-pack-host {
+  margin:0 10px;
+}
+.sim-pack {
+  display:block;
+  width:100%;
+  overflow:visible;
+}
+.sim-pack-phase {
+  fill:#e3dfc6;
+  font-size:15px;
+  letter-spacing:2px;
+}
+.sim-pack-direction,.sim-pack-caption {
+  fill:#b2c29c;
+  font-size:10px;
+}
+.sim-pack-runner {
+  cursor:pointer;
+}
+.sim-pack-runner:focus-visible {
+  outline:2px solid var(--sim-gold);
+  outline-offset:4px;
+}
+.sim-pack-runner text {
+  pointer-events:none;
+  user-select:none;
+}
+.sim-pack-gap {
+  fill:#d1dcc0;
+  font-size:9px;
+  font-variant-numeric:tabular-nums;
+}
+.sim-pack-runner.is-selected .sim-pack-gap {
+  fill:#f5dba3;
+}
+.sim-course-controls {
+  padding:18px 22px;
+  margin:0 0 20px;
+  background:#1a2923;
+  border:1px solid var(--sim-line);
+  border-radius:12px;
+}
+.sim-course-control-heading {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:15px;
+}
+.sim-course-control-heading>span {
+  color:#a4b59c;
+  font-size:10px;
+}
+.sim-course-control-heading>button {
+  margin-left:auto;
+  border:1px solid #4a5941;
+  background:transparent;
+  border-radius:5px;
+  padding:4px 9px;
+  font-size:10px;
+  color:#d7c49b;
+}
+.sim-course-fields {
+  display:flex;
+  align-items:flex-end;
+  gap:18px;
+  flex-wrap:wrap;
+}
+.sim-course-fields>label>span {
+  display:block;
+  margin-bottom:5px;
+  color:#b5c4aa;
+  font-size:10px;
+}
+.sim-course-fields select {
+  max-width:100%;
+  border:1px solid #485b40;
+  border-radius:5px;
+  color:#ece5cf;
+  background:#203226;
+  padding:7px 12px;
+  font-size:12px;
+}
+.sim-course-fields .sim-slope-toggle {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:8px 0;
+}
+.sim-slope-toggle input {
+  accent-color:#dbc18b;
+  width:15px;
+  height:15px;
+  margin:0;
+}
+.sim-course-fields .sim-slope-toggle>span {
+  margin:0;
+  font-size:11px;
+}
+.sim-course-facts {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 19px;
+  margin-top:14px;
+  font-size:11px;
+  color:#d3d9bd;
+}
+.sim-course-facts>a {
+  color:#d9bf88;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  margin-left:auto;
+}
+.sim-course-disclosure {
+  margin-top:10px!important;
+  color:#e3c88e;
+  font-size:10px;
+  line-height:1.8;
+}
+.sim-course-source-note {
+  margin-top:9px!important;
+  color:#a5b49a;
+  font-size:9px;
+  line-height:1.9;
+}
+.sim-real-course {
+  width:100%;
+  display:block;
+}
+.sim-real-phase {
+  fill:#ede4c5;
+  font-size:28px;
+  letter-spacing:3px;
+}
+.sim-terrain-legend text {
+  fill:#c9d2b6;
+  font-size:11px;
+}
+.sim-course-empty {
+  padding:80px 30px;
+  font-size:12px;
+  color:#b9c6a9;
+}
+.sim-elevation {
+  border-top:1px solid #354332;
+  padding:14px 20px 13px;
+  background:#14231d;
+}
+.sim-elevation-heading {
+  display:flex;
+  gap:12px;
+  align-items:center;
+}
+.sim-elevation-heading strong {
+  font-size:11px;
+  font-weight:500;
+}
+.sim-elevation-horse {
+  color:#d6c08c;
+  font-size:10px;
+  font-weight:500;
+}
+.sim-elevation-heading>span {
+  border:1px solid #4a5c42;
+  color:#c3cdb0;
+  background:#293a27;
+  border-radius:4px;
+  font-size:10px;
+  padding:2px 7px;
+  white-space:nowrap;
+}
+.sim-elevation-heading .is-uphill {
+  color:#f0c180;
+  border-color:#826241;
+  background:#60432933;
+}
+.sim-elevation-heading .is-downhill {
+  color:#99ccd5;
+  border-color:#42676b;
+  background:#2d5d6333;
+}
+.sim-elevation-heading small {
+  margin-left:auto;
+  color:#a6b49a;
+  font-size:9px;
+}
+.sim-elevation svg {
+  display:block;
+  width:100%;
+  margin-top:7px;
+  max-height:160px;
+}
+.sim-elevation svg text {
+  font-size:10px;
+  fill:#bdc8aa;
+}
+.sim-elevation>p {
+  color:#b9c4a6;
+  font-size:9px;
+  line-height:1.8;
+  margin-top:5px;
+}
+.sim-elevation-unknown {
+  color:#c8b993;
+  border:1px dashed #566447;
+  padding:20px;
+  font-size:11px;
+  line-height:1.9;
+  margin:14px 0;
+}
+.sim-pack-terrain {
+  fill:#bbcaab;
+  font-size:10px;
+}
+.sim-pack-terrain.is-uphill {
+  fill:#edba7a;
+}
+.sim-pack-terrain.is-downhill {
+  fill:#92c7d2;
+}
+@media(max-width:480px) {
+  .sim-course-controls {
+    padding:15px;
+    margin-bottom:14px;
+  }
+  .sim-course-control-heading {
+    flex-wrap:wrap;
+    gap:7px 10px;
+  }
+  .sim-course-control-heading>span {
+    font-size:8px;
+  }
+  .sim-course-control-heading>button {
+    font-size:9px;
+    padding:3px 6px;
+  }
+  .sim-course-fields {
+    gap:12px;
+  }
+  .sim-course-fields>label:first-child {
+    width:100%;
+  }
+  .sim-course-fields>label:first-child select {
+    width:100%;
+  }
+  .sim-course-facts {
+    gap:8px 12px;
+    font-size:10px;
+  }
+  .sim-course-facts>a {
+    margin-left:0;
+  }
+  .sim-course-source-note {
+    font-size:9px;
+  }
+  .sim-elevation {
+    padding:13px 12px;
+  }
+  .sim-elevation-heading {
+    flex-wrap:wrap;
+    gap:6px 10px;
+  }
+  .sim-elevation-heading small {
+    font-size:8px;
+  }
+  .sim-elevation svg text {
+    font-size:10px;
+  }
+  .sim-elevation svg {
+    min-height:90px;
+  }
+  .sim-track-area {
+    padding-top:86px;
+  }
+  .sim-view-switch {
+    top:17px;
+    right:13px;
+  }
+  .sim-view-switch button {
+    padding:5px 8px;
+  }
+  .sim-track-caption {
+    top:57px;
+    max-width:170px;
+  }
+  .sim-pack-host {
+    margin:0 5px;
+  }
+}
