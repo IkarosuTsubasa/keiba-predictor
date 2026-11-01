@@ -1,4 +1,6 @@
 import React, { useMemo } from "react";
+import RaceSimulatorPreview from "./RaceSimulatorPreview";
+import { ACTIVE_MODEL, appLink } from "../lib/simulatorClient";
 import AutoFitLine from "./AutoFitLine";
 import { resolvePublicDecision } from "../lib/confidencePolicy";
 import { resolveCourseAccent } from "../lib/courseAccents";
@@ -862,7 +864,7 @@ function PredictorCompareRow({ card }) {
   );
 }
 
-export default function RaceDetailPage({ race, races = [], search = "", appShell = false }) {
+export default function RaceDetailPage({ race, races = [], search = "", appShell = false, raceDate = "" }) {
   const predictorCompareCards = Array.isArray(race?.predictor_compare_cards)
     ? race.predictor_compare_cards.filter(Boolean)
     : [];
@@ -948,6 +950,8 @@ export default function RaceDetailPage({ race, races = [], search = "", appShell
       </div>
 
       <RaceDetailNavigation navigation={detailNavigation} search={search} />
+
+      {race?.simulator?.enabled !== false && (appShell ? <a className="sim-app-link" href={appLink({ raceId: race.race_id, date: raceDate || race.race_date, modelVersion: ACTIVE_MODEL, source: "app_race_detail" })}>シミュレーションでこのレースを開く</a> : <RaceSimulatorPreview key={`${race.race_id}:${raceDate}`} context={{ raceId: race.race_id, date: raceDate || race.race_date || new URLSearchParams(search).get("date") || "", modelVersion: ACTIVE_MODEL, source: "web_detail" }} />)}
 
       {agentPrediction ? (
         <AgentMarksPanel

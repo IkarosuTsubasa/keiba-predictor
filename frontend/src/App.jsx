@@ -906,6 +906,7 @@ function AppContent() {
       >
         <div className="public-content-stack">
           <RaceDetailPage
+            raceDate={data?.target_date}
             race={selectedRace}
             races={boardRaces}
             search={search}
