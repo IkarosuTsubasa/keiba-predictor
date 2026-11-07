@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { sampleSimulation, simulateRace, formatTime } from "../lib/raceSimulator";
+import { sampleSimulation, simulateRace, formatTime, FRAME_COLORS } from "../lib/raceSimulator";
+import { ArrowCounterClockwise, CaretRight, DeviceMobile, Pause, Play } from "@phosphor-icons/react";
 import { COURSE_PROFILES } from "../lib/raceCourses";
 import { ACTIVE_MODEL, appLink, engineRace, validateSettings } from "../lib/simulatorClient";
 import { trackEvent } from "../lib/analytics";
@@ -47,11 +48,14 @@ export default function RaceSimulationExperience({ payload, context, embedded = 
     return () => cancelAnimationFrame(id);
   }, [running, active, simulation, settings.speed]);
   useEffect(() => {
-    if (time >= simulation.duration) {
-      setRunning(false);
-      if (!finished.current) { finished.current = true; event(embedded ? "sim_app_complete" : "sim_preview_complete"); emit("complete", { finishOrder: simulation.finishOrder }); }
+    if (!running || time < simulation.duration) return;
+    setRunning(false);
+    if (!finished.current) {
+      finished.current = true;
+      event(embedded ? "sim_app_complete" : "sim_preview_complete");
+      emit("complete", { finishOrder: simulation.finishOrder });
     }
-  }, [time, simulation, event, emit, embedded]);
+  }, [running, time, simulation, event, emit, embedded]);
   const play = () => { if (!active) return; if (time >= simulation.duration) setTime(0); setRunning(true); if (!started.current) { started.current = true; event(embedded ? "sim_app_start" : "sim_preview_start"); } };
   const runBatch = requestId => {
     cancelBatch(); setBatch(null); setCompleted(1);
@@ -112,16 +116,53 @@ export default function RaceSimulationExperience({ payload, context, embedded = 
     const now = performance.now();
     if (now - lastState.current > 220 || !running) { lastState.current = now; emit("state", { time, running, duration: simulation.duration, settings, selected: selectedNo, horses: frame.horses, order: frame.order, profiles: simulation.profiles }); }
   }, [time, running, settings, selectedNo, embedded, simulation, emit]);
+  const selectHorse = no => { setSelected(no); if (embedded) emit("selected", { horseNo: no }); };
+  // The engine uses floating-point ticks. An integer range makes End reach its exact duration.
+  const progressMax = Math.round(simulation.duration * 10);
+  const runningOrder = !embedded && <aside className="sim-preview-order" aria-label="走行順">
+    <h3>{time === 0 ? "出走馬" : "走行順"}</h3>
+    <ol>
+      {frame.order.slice(0, 5).map((state, index) => {
+        const horse = simulation.profiles.find(h => h.horse_no === state.horse_no);
+        return <li key={horse.horse_no}>
+          <button type="button" aria-pressed={selectedNo === horse.horse_no} aria-label={`${horse.horse_no}番 ${horse.horse_name}を選択`} onClick={() => selectHorse(horse.horse_no)}>
+            <span className="sim-order-place">{time === 0 ? "–" : index + 1}</span>
+            <span className={`sim-horse-number sim-horse-number--${horse.frame}`} style={{ backgroundColor: FRAME_COLORS[horse.frame - 1] }}>{horse.horse_no}</span>
+            <span className="sim-order-name">{horse.horse_name}</span>
+          </button>
+        </li>;
+      })}
+    </ol>
+  </aside>;
   return <div className={`sim-experience${embedded ? " sim-experience--embed" : ""}`}>
-    {!embedded && <div className="sim-preview-heading"><div><span className="sim-section-label">展開シミュレーション</span><h2>{payload.race_info.course} {Number(payload.race_id.slice(-2))}R · {payload.race_info.surface} {payload.race_info.distance}m</h2></div><span className="sim-version">{payload.availability === "partial" ? "一部のデータを推定" : "データ取得済み"}</span></div>}
-    <RaceSimulationRenderer simulation={simulation} frame={frame} time={time} selected={selectedNo} onSelect={no => { setSelected(no); if (embedded) emit("selected", { horseNo: no }); }} view={settings.view} />
+    {!embedded && <div className="sim-preview-heading"><h2><span>{payload.race_info.course} {Number(payload.race_id.slice(-2))}R</span>{payload.race_info.race_name && <span>{payload.race_info.race_name}</span>}<span className="sim-race-conditions">{payload.race_info.surface} {payload.race_info.distance.toLocaleString("ja-JP")}m・{race.horses.length}頭</span></h2><span className="sim-version">{payload.availability === "partial" ? "一部のデータを推定" : "データ取得済み"}</span></div>}
+    <RaceSimulationRenderer simulation={simulation} frame={frame} time={time} selected={selectedNo} onSelect={selectHorse} view={settings.view} companion={runningOrder} presentation={!embedded} />
     {!embedded && <>
-      <div className="sim-preview-transport"><button className="sim-play" onClick={() => running ? setRunning(false) : play()}>{running ? "一時停止" : time >= simulation.duration ? "もう一度再生" : "レースを再生"}</button><button className="sim-secondary" onClick={reset}>最初に戻す</button><span>{formatTime(time)} / {formatTime(simulation.duration)}</span></div>
+      <div className="sim-preview-transport">
+        <button type="button" className="sim-preview-play" onClick={() => running ? setRunning(false) : play()}>{running ? <Pause size={20} weight="fill" aria-hidden="true" /> : <Play size={20} weight="fill" aria-hidden="true" />}{running ? "一時停止" : time >= simulation.duration ? "もう一度再生" : "レースを再生"}</button>
+        <button type="button" className="sim-secondary" onClick={reset}><ArrowCounterClockwise size={18} aria-hidden="true" />最初に戻す</button>
+        <input
+          className="sim-preview-progress"
+          type="range"
+          min={0}
+          max={progressMax}
+          step={1}
+          value={Math.round(time * 10)}
+          aria-label="再生位置"
+          aria-valuetext={formatTime(time)}
+          onChange={event => {
+            const position = event.currentTarget.valueAsNumber;
+            setRunning(false);
+            setTime(position === progressMax ? simulation.duration : position / 10);
+          }}
+        />
+        <span className="sim-preview-clock">{formatTime(time)} / {formatTime(simulation.duration)}</span>
+      </div>
       {time >= simulation.duration && <div className="sim-preview-finish"><strong>模擬レースの入線順</strong><ol>{simulation.finishOrder.slice(0, 3).map(h => <li key={h.horse_no}>{h.horse_no}番 {race.horses.find(p => p.horse_no === h.horse_no)?.horse_name} · {formatTime(h.finishTime)}</li>)}</ol></div>}
       <p className="sim-preview-note">近走データを基にした模擬レースです。位置取りやスタミナは推定値です。実際の結果とは異なる場合があります。</p>
-      <a className="sim-app-link" href={appLink({ ...context, ...identity, seed: settings.seed })} onClick={() => event("sim_app_cta_click")}>アプリで展開を変える <span>ペースの変更・馬ごとの状態・200回の試走</span></a>
-      <p className="sim-version">{payload.source_as_of ? "データ取得" : "取得時刻不明・データ公開"} {new Date(payload.source_as_of || payload.published_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })} · {payload.input_version.slice(0, 8)}</p>
-      {onUpdate && <button className="sim-secondary" onClick={onUpdate}>最新のデータを確認</button>}
+      <a className="sim-app-link" href={appLink({ ...context, ...identity, seed: settings.seed })} onClick={() => event("sim_app_cta_click")}><DeviceMobile size={30} aria-hidden="true" /><div>アプリで展開を変える <span>ペースの変更・馬ごとの状態・200回の試走</span></div><CaretRight size={20} aria-hidden="true" /></a>
+      <div className="sim-preview-source"><p className="sim-version">{payload.source_as_of ? "データ取得" : "取得時刻不明・データ公開"} {new Date(payload.source_as_of || payload.published_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })} · {payload.input_version.slice(0, 8)}</p>
+      {onUpdate && <button type="button" className="sim-source-refresh" onClick={onUpdate}>最新のデータを確認</button>}</div>
     </>}
   </div>;
 }

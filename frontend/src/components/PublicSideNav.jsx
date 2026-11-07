@@ -93,7 +93,9 @@ export default function PublicSideNav({
       : [];
 
   const currentPageLabel =
-    mode === "detail"
+    mode === "simulator"
+      ? "シミュレーション"
+    : mode === "detail"
       ? detailTitle || "レース詳細"
     : mode === "history"
         ? "履歴分析"
@@ -104,7 +106,9 @@ export default function PublicSideNav({
           : "トップページ";
 
   const focusText =
-    mode === "detail"
+    mode === "simulator"
+      ? "近走データを基にした模擬レースです。位置取りやスタミナは推定値です。"
+    : mode === "detail"
       ? "このレースの予測印、上位馬評価、判断理由、結果を一つの流れで確認できます。"
       : mode === "history"
         ? "過去日付の予測と結果をレース単位で確認できます。"

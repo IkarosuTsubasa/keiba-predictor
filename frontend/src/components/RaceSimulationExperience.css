@@ -1,3 +1,145 @@
-.sim-experience{--sim-ink:#20352e;--sim-accent:#16745b;--sim-muted:#65756c;background:#faf9f5;border:1px solid #e1e5dc;border-radius:20px;padding:24px;color:var(--sim-ink);margin:24px 0;overflow:hidden}.sim-preview-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}.sim-preview-heading h2{font-size:20px;margin:7px 0}.sim-version,.sim-preview-note{font-size:12px;line-height:1.8;color:#65756c}.sim-preview-transport{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:20px 0 12px}.sim-secondary{border:1px solid #cdd8ce;border-radius:9px;padding:10px 14px;background:white;color:#315043;cursor:pointer}.sim-app-link{display:block;background:#e7f1e9;color:#155b44;padding:17px 20px;border-radius:12px;text-decoration:none;font-weight:700;margin-top:20px}.sim-app-link span{display:block;font-size:12px;font-weight:400;margin-top:5px}.sim-experience--embed{border:0;border-radius:0;margin:0;padding:4px}.sim-load-state{padding:32px;border:1px solid #dce5dd;border-radius:16px;background:#fafbf9;line-height:1.8;margin:24px 0}.sim-load-state button{margin-top:12px}.sim-production-page{max-width:1040px;margin:auto;padding:24px}.sim-production-page a{color:#16745b}.sim-store-links{display:flex;gap:14px;flex-wrap:wrap;padding:20px 0}.sim-store-links a{padding:14px;background:#173e31;color:white;border-radius:10px;text-decoration:none}.sim-update-notice{background:#fff3ce;padding:12px;border-radius:8px;margin-bottom:14px}@media(max-width:600px){.sim-experience{padding:12px;border-radius:14px}.sim-preview-heading{display:block}.sim-preview-heading h2{font-size:17px}.sim-preview-transport{gap:8px}.sim-production-page{padding:12px}.sim-experience--embed{padding:0}.sim-experience .sim-track-area{min-height:220px}}
-.sim-experience{--sim-panel:#172322;--sim-line:#30403a;--sim-text:#ecece2;--sim-gold:#dbc18b}.sim-experience .sim-stage-panel{color:#ecece2}.sim-experience .sim-stage-heading{gap:10px;font-size:12px}.sim-experience button,.sim-experience input{font:inherit}.sim-experience *{box-sizing:border-box}
-.sim-experience .sim-section-label{color:#456e5d}.sim-experience .sim-stage-panel{--sim-muted:#a7b9ad}.sim-preview-finish{padding:16px;background:white;border-radius:12px;line-height:1.9}
+.sim-experience {
+  --sim-ink:#101e30; --sim-accent:#0d6e6e; --sim-muted:#68788b;
+  --sim-panel:#132e24; --sim-line:#e2e8ed; --sim-text:#edf4ed; --sim-gold:#dbc18b;
+  box-sizing:border-box; margin:24px 0; padding:18px; border:1px solid #e2e8ed;
+  border-radius:12px; background:#fff; color:var(--sim-ink); overflow:hidden;
+}
+.sim-experience * { box-sizing:border-box; }
+.sim-experience button,.sim-experience input { font:inherit; }
+.sim-experience button { cursor:pointer; }
+.sim-experience button:focus-visible,.sim-experience a:focus-visible,.sim-experience input:focus-visible,.sim-back-link:focus-visible { outline:3px solid #0d6e6e; outline-offset:3px; }
+.sim-production-page { min-height:100vh; }
+.sim-production-page .racing-intel-page__main { display:block; padding-top:0; }
+.sim-back-link { display:inline-flex; align-items:center; gap:8px; color:#0d6e6e; font-size:14px; font-weight:600; text-decoration:none; }
+.sim-back-link:hover { text-decoration:underline; }
+.sim-production-title { display:flex; align-items:baseline; gap:28px; margin:10px 0 12px; }
+.sim-production-title h1 { margin:0; color:#101e30; font-size:clamp(26px,2.5vw,36px); line-height:1.35; font-weight:900; letter-spacing:.02em; }
+.sim-production-title time { color:#344357; font-size:16px; }
+.sim-production-page .sim-experience { margin:0; }
+.sim-production-page .site-footer { margin-top:28px; }
+.sim-preview-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:0 4px 14px; }
+.sim-preview-heading h2 { display:flex; align-items:center; flex-wrap:wrap; gap:10px 18px; margin:0; color:var(--sim-ink); font-size:19px; line-height:1.5; font-weight:800; }
+.sim-preview-heading h2>span+span { padding-left:18px; border-left:1px solid #d9e1e8; }
+.sim-race-conditions { font-size:16px; }
+.sim-version,.sim-preview-note { margin:0; color:#68788b; font-size:12px; line-height:1.8; }
+.sim-preview-heading>.sim-version { flex-shrink:0; }
+.sim-experience .sim-stage-panel { border:0; border-radius:0; background:transparent; color:#edf4ed; overflow:visible; }
+.sim-experience .sim-stage-visual { display:grid; grid-template-columns:minmax(0,1fr) 266px; align-items:stretch; gap:18px; }
+.sim-experience .sim-course-panel { min-width:0; border:1px solid #183a2e; border-radius:8px; background:#132e24; overflow:hidden; }
+.sim-experience .sim-stage-heading { position:relative; z-index:1; padding:15px 18px 0; gap:12px; border:0; color:#c1d0c5; font-size:12px; line-height:1.6; }
+.sim-experience .sim-stage-heading strong { color:#f1f5ee; font-size:18px; font-weight:700; }
+.sim-stage-clock { display:flex; align-items:center; gap:14px; }
+.sim-stage-clock b { color:#edf4ed; font-size:18px; font-weight:700; }
+.sim-experience .sim-track-area { min-height:0; padding:0 4px; background:transparent; }
+.sim-experience .sim-map-kicker { fill:#d1decb; font-size:15px; letter-spacing:2px; }
+.sim-experience .sim-map-sub { fill:#bcccb7; font-size:13px; }
+.sim-experience .sim-map-small { fill:#a1b79f; font-size:10px; }
+.sim-experience .sim-map-label { fill:#cbd7c1; }
+.sim-experience .sim-terrain-legend text { font-size:12px; }
+.sim-preview-order { min-width:0; color:var(--sim-ink); padding-left:16px; border-left:1px solid #e9edf1; }
+.sim-preview-order h3 { margin:0; padding:12px 4px; border-top:1px solid #e2e8ed; border-bottom:1px solid #e2e8ed; font-size:18px; font-weight:800; }
+.sim-preview-order ol { margin:0; padding:0; list-style:none; }
+.sim-preview-order li { margin:0; border-bottom:1px solid #e2e8ed; }
+.sim-preview-order button { display:grid; grid-template-columns:22px 34px minmax(0,1fr); gap:12px; align-items:center; width:100%; min-height:55px; padding:8px 4px; border:0; border-radius:4px; background:transparent; color:var(--sim-ink); text-align:left; }
+.sim-preview-order button:hover { background:#f1f7f5; }
+.sim-preview-order button[aria-pressed="true"] { background:#edf6f3; }
+.sim-order-place { color:#6a7b90; text-align:center; font-size:15px; font-variant-numeric:tabular-nums; }
+.sim-horse-number { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border:1px solid #101e301a; border-radius:6px; color:#101e30; font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; }
+.sim-horse-number--2 { color:#fff; }
+.sim-order-name { font-size:16px; font-weight:700; overflow-wrap:anywhere; line-height:1.5; }
+.sim-experience .sim-elevation { margin-top:12px; padding:13px 18px 10px; border:0; border-radius:8px; background:#132e24; }
+.sim-experience .sim-elevation-heading { flex-wrap:wrap; gap:6px 12px; }
+.sim-experience .sim-elevation-heading strong { font-size:13px; font-weight:700; }
+.sim-experience .sim-elevation-heading small { color:#b3c5b8; font-size:10px; }
+.sim-experience .sim-elevation-heading>span,.sim-experience .sim-elevation-horse { font-size:11px; }
+.sim-experience .sim-elevation svg { margin-top:0; min-height:0; }
+.sim-experience .sim-elevation svg text { font-size:11px; fill:#bfcec3; }
+.sim-experience .sim-elevation>p { margin:2px 0 0; color:#b3c5b8; font-size:10px; line-height:1.6; }
+.sim-preview-transport { display:flex; align-items:center; gap:14px; margin:16px 4px 12px; }
+.sim-experience .sim-preview-play,.sim-secondary { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:44px; padding:10px 18px; border:1px solid #cad5dd; border-radius:10px; background:#fff; color:#26394b; font-size:14px; line-height:1.4; white-space:nowrap; cursor:pointer; }
+.sim-experience .sim-preview-play { min-width:150px; border-color:#0d6e6e; background:#0d6e6e; color:#fff; font-size:16px; font-weight:700; }
+.sim-experience .sim-preview-play:hover { background:#095858; }
+.sim-secondary:hover { border-color:#0d6e6e; background:#f2f8f6; }
+.sim-preview-progress { width:0; min-width:80px; flex:1; height:24px; margin:0 6px; accent-color:#0d6e6e; cursor:pointer; }
+.sim-preview-clock { color:#26394b; font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sim-preview-note { margin:0 4px; }
+.sim-app-link { display:flex; align-items:center; gap:16px; margin-top:18px; padding:15px 18px; border-radius:8px; background:#ebf6f2; color:#0d6262; font-size:16px; font-weight:700; line-height:1.5; text-decoration:none; }
+.sim-app-link>svg { flex-shrink:0; }
+.sim-app-link>svg:last-child { margin-left:auto; }
+.sim-app-link span { display:block; margin-top:3px; font-size:12px; font-weight:400; }
+.sim-app-link:hover { background:#dcefe8; }
+.sim-preview-source { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.sim-preview-source .sim-version { font-size:11px; }
+.sim-source-refresh { min-height:32px; padding:2px 4px; border:0; background:transparent; color:#0d6e6e; font-size:12px!important; }
+.sim-source-refresh:hover { text-decoration:underline; }
+.sim-preview-finish { margin-top:12px; padding:16px; border-radius:8px; background:#f3f7f6; color:#26394b; font-size:14px; line-height:1.9; }
+.sim-preview-finish ol { padding-left:24px; }
+.sim-load-state { margin:24px 0; padding:28px; border:1px solid #e2e8ed; border-radius:12px; background:#fff; color:#26394b; line-height:1.8; }
+.sim-load-state button { margin-top:12px; }
+.sim-store-links { display:flex; gap:14px; flex-wrap:wrap; padding:20px 0; }
+.sim-store-links a { padding:14px; border-radius:8px; background:#0d6e6e; color:#fff; text-decoration:none; }
+.sim-update-notice { margin-bottom:14px; padding:12px; border-radius:8px; background:#fff3ce; color:#514426; }
+/* The native app owns its controls; its shared WebView stays compact. */
+.sim-experience--embed { margin:0; padding:0; border:0; border-radius:0; background:#f3f6f8; }
+.sim-experience--embed .sim-stage-visual { display:block; }
+.sim-experience--embed .sim-stage-heading { padding:10px 12px; font-size:10px; }
+.sim-experience--embed .sim-stage-heading strong { font-size:12px; }
+.sim-experience--embed .sim-stage-clock { gap:6px; }
+.sim-experience--embed .sim-stage-clock b { font-size:10px; font-weight:400; }
+.sim-experience--embed .sim-map-kicker { font-size:12px; }
+.sim-experience--embed .sim-map-sub { font-size:12px; }
+.sim-experience--embed .sim-track-area { padding:0; }
+.sim-experience--embed .sim-elevation { margin-top:0; border-radius:0; padding:10px 12px; }
+.sim-experience--embed .sim-elevation-heading { gap:6px; }
+.sim-experience--embed .sim-elevation-heading strong { font-size:11px; }
+.sim-experience--embed .sim-real-course { height:180px; }
+@media(max-width:1350px) and (min-width:1181px) {
+  .sim-experience .sim-stage-visual { grid-template-columns:minmax(0,1fr) 230px; gap:12px; }
+  .sim-preview-order { padding-left:10px; }
+  .sim-preview-order button { gap:8px; grid-template-columns:20px 32px minmax(0,1fr); }
+}
+@media(max-width:900px) {
+  .sim-experience .sim-stage-visual { grid-template-columns:minmax(0,1fr) 220px; gap:12px; }
+  .sim-preview-order { padding-left:10px; }
+  .sim-preview-order button { gap:8px; }
+  .sim-preview-heading { align-items:flex-start; }
+  .sim-preview-heading h2 { font-size:17px; }
+  .sim-preview-heading>.sim-version { font-size:11px; }
+}
+@media(max-width:680px) {
+  .sim-experience { margin:16px 0; padding:12px; }
+  .sim-production-title { display:block; margin-bottom:14px; }
+  .sim-production-title time { display:block; margin-top:8px; font-size:14px; }
+  .sim-preview-heading { display:block; padding:0 0 12px; }
+  .sim-preview-heading h2 { gap:6px 10px; font-size:17px; }
+  .sim-preview-heading h2>span+span { padding-left:10px; }
+  .sim-preview-heading .sim-race-conditions { width:100%; padding-left:0; border:0; font-size:14px; }
+  .sim-preview-heading>.sim-version { display:block; margin-top:5px; }
+  .sim-experience .sim-stage-visual { display:flex; flex-direction:column; gap:12px; }
+  .sim-experience .sim-stage-heading { padding:12px 10px 0; gap:6px; font-size:10px; }
+  .sim-experience .sim-stage-heading strong { font-size:14px; }
+  .sim-stage-clock { gap:6px; }
+  .sim-stage-clock b { font-size:12px; }
+  .sim-preview-order { padding:0; border-left:0; }
+  .sim-preview-order h3 { padding:8px 4px; font-size:15px; }
+  .sim-preview-order ol { display:flex; gap:0; overflow-x:auto; padding-bottom:4px; }
+  .sim-preview-order li { flex:0 0 160px; border-bottom:0; border-right:1px solid #e2e8ed; }
+  .sim-preview-order button { min-height:48px; grid-template-columns:16px 28px minmax(0,1fr); gap:6px; padding:6px; }
+  .sim-horse-number { width:28px; height:28px; border-radius:5px; font-size:16px; }
+  .sim-order-place { font-size:12px; }
+  .sim-order-name { font-size:12px; }
+  .sim-experience .sim-elevation { padding:12px 10px 8px; }
+  .sim-experience .sim-elevation-heading small { margin-left:0; width:100%; font-size:9px; }
+  .sim-preview-transport { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:14px 0 10px; }
+  .sim-experience .sim-preview-play,.sim-preview-transport .sim-secondary { min-width:0; width:100%; padding:10px; font-size:13px; }
+  .sim-preview-progress { width:100%; min-width:0; margin:0; }
+  .sim-preview-clock { justify-self:end; font-size:12px; }
+  .sim-preview-note { margin:0; font-size:11px; }
+  .sim-app-link { margin-top:14px; padding:14px 12px; gap:10px; font-size:14px; }
+  .sim-app-link span { font-size:11px; }
+  .sim-preview-source { align-items:flex-start; }
+  .sim-experience--embed { padding:0; margin:0; }
+  .sim-experience--embed .sim-stage-heading { padding:10px 12px; }
+  .sim-experience--embed .sim-elevation { padding:8px 12px; }
+  .sim-experience--embed .sim-elevation-heading small { width:auto; margin-left:auto; font-size:8px; }
+}

@@ -4,8 +4,8 @@ import App from "./App";
 import { initAnalytics } from "./lib/analytics";
 import "./styles.css";
 
-const path = window.location.pathname;
-const isSimulator = /^\/keiba\/simulator(?:\/embed)?\/?$/.test(path) || /^\/keiba\/open\/simulator\/\d{12}\/?$/.test(path);
+const path = window.location.pathname.replace(/\/+$/, "");
+const isSimulator = /^\/keiba\/simulator(?:\/embed)?$/.test(path) || /^\/keiba\/open\/simulator\/\d{12}$/.test(path);
 const isLab = import.meta.env.DEV && new URLSearchParams(window.location.search).get("lab") === "1";
 const SimulatorProductionPage = React.lazy(() => import("./components/SimulatorProductionPage"));
 const RaceSimulatorPage = React.lazy(() => import("./components/RaceSimulatorPage"));

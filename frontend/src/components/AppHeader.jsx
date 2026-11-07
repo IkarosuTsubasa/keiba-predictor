@@ -15,7 +15,7 @@ function normalizePath(pathname) {
 function isHeaderLinkActive(pathname, href) {
   const current = normalizePath(pathname);
   if (href === "/keiba") {
-    return current === "/keiba" || current.startsWith("/keiba/race/");
+    return current === "/keiba" || current.startsWith("/keiba/race/") || current === "/keiba/simulator" || current.startsWith("/keiba/open/simulator/");
   }
   if (href === "/keiba/reports") {
     return current === href || current.startsWith("/keiba/reports/");
