@@ -6,6 +6,8 @@ import warnings
 from pathlib import Path
 from unittest.mock import patch
 
+from requests import Response
+
 from keiba_llm_agent.fetchers import netkeiba_horse_fetcher
 from keiba_llm_agent.fetchers.netkeiba_horse_fetcher import (
     enrich_race_data_with_recent_runs,
@@ -18,18 +20,12 @@ FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "netkeiba_horse_sa
 FIXTURE_HTML = FIXTURE_PATH.read_text(encoding="utf-8")
 
 
-class FakeResponse:
-    def __init__(self, text: str) -> None:
-        self._text = text
-        self.apparent_encoding = "utf-8"
-        self.encoding = None
-
-    @property
-    def text(self) -> str:
-        return self._text
-
-    def raise_for_status(self) -> None:
-        return None
+def horse_response(html=FIXTURE_HTML, *, encoding="utf-8", declared="utf-8"):
+    response = Response()
+    response.status_code = 200
+    response._content = html.encode(encoding)
+    response.headers["Content-Type"] = "text/html" + (f"; charset={declared}" if declared else "")
+    return response
 
 
 class NetkeibaHorseFetcherTests(unittest.TestCase):
@@ -54,16 +50,22 @@ class NetkeibaHorseFetcherTests(unittest.TestCase):
         mock_get.assert_not_called()
 
     def test_fetch_horse_html_fetches_and_saves_cache(self) -> None:
-        response = FakeResponse(FIXTURE_HTML)
-        with patch(
-            "keiba_llm_agent.fetchers.netkeiba_horse_fetcher.requests.get",
-            return_value=response,
-        ) as mock_get:
-            html = fetch_horse_html("2021104073")
-        self.assertEqual(html, FIXTURE_HTML)
-        self.assertEqual(response.encoding, netkeiba_horse_fetcher.DB_NETKEIBA_ENCODING)
-        mock_get.assert_called_once()
-        self.assertTrue((self.horse_cache_dir / "2021104073.html").exists())
+        for actual, declared in (
+            ("utf-8", "UTF-8"),
+            ("euc_jp", "EUC-JP"),
+            ("utf-8", "EUC-JP"),
+            ("euc_jp", None),
+            ("utf-8-sig", "invalid-encoding"),
+        ):
+            with self.subTest(actual=actual, declared=declared), patch.object(
+                netkeiba_horse_fetcher.requests, "get",
+                return_value=horse_response(encoding=actual, declared=declared),
+            ) as get:
+                html = fetch_horse_html("2021104073", force_refresh=True)
+                self.assertIn("\u65e5\u4ed8", html)
+                self.assertTrue(netkeiba_horse_fetcher.has_recent_runs_table(html))
+                get.assert_called_once()
+                self.assertEqual((self.horse_cache_dir / "2021104073.html").read_text(encoding="utf-8"), html)
 
     def test_force_refresh_refetches_even_with_cache(self) -> None:
         cache_path = self.horse_cache_dir / "2021104073.html"
@@ -71,11 +73,34 @@ class NetkeibaHorseFetcherTests(unittest.TestCase):
         cache_path.write_text("old", encoding="utf-8")
         with patch(
             "keiba_llm_agent.fetchers.netkeiba_horse_fetcher.requests.get",
-            return_value=FakeResponse(FIXTURE_HTML),
+            return_value=horse_response(),
         ) as mock_get:
             html = fetch_horse_html("2021104073", force_refresh=True)
         self.assertEqual(html, FIXTURE_HTML)
         mock_get.assert_called_once()
+
+    def test_invalid_cached_page_is_refetched(self) -> None:
+        cache_path = self.horse_cache_dir / "2021104073.html"
+        cache_path.parent.mkdir(parents=True)
+        for data in (b"\xff", b"<html>no results table</html>"):
+            with self.subTest(data=data), patch.object(
+                netkeiba_horse_fetcher.requests, "get", return_value=horse_response(),
+            ) as get:
+                cache_path.write_bytes(data)
+                with self.assertWarnsRegex(UserWarning, "stale horse cache"):
+                    self.assertEqual(fetch_horse_html("2021104073"), FIXTURE_HTML)
+                get.assert_called_once()
+
+    def test_page_without_table_does_not_poison_cache(self) -> None:
+        valid = self.horse_cache_dir / "2021104073.html"
+        valid.parent.mkdir(parents=True)
+        valid.write_text(FIXTURE_HTML, encoding="utf-8")
+        unusable = "<html>no results table</html>"
+        with patch.object(netkeiba_horse_fetcher.requests, "get", return_value=horse_response(unusable)):
+            self.assertEqual(fetch_horse_html("2021104073", force_refresh=True), unusable)
+            self.assertEqual(fetch_horse_html("2022100000"), unusable)
+        self.assertEqual(valid.read_text(encoding="utf-8"), FIXTURE_HTML)
+        self.assertFalse((self.horse_cache_dir / "2022100000.html").exists())
 
     def test_enrich_race_data_with_recent_runs_updates_horses(self) -> None:
         race_data = RaceData(

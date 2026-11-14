@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from datetime import date
+from email.message import Message
 from pathlib import Path
 
 import requests
@@ -33,12 +34,37 @@ def get_horse_result_url(horse_id: str) -> str:
     return f"https://db.netkeiba.com/horse/result/{horse_id}/"
 
 
+def _decode_horse_result_page(response: requests.Response) -> tuple[str, bool]:
+    headers = Message()
+    headers["Content-Type"] = response.headers.get("Content-Type", "")
+    encodings = (headers.get_content_charset(), "utf-8-sig", DB_NETKEIBA_ENCODING)
+    first_decoded = None
+    for encoding in dict.fromkeys(encodings):
+        if not encoding:
+            continue
+        try:
+            html = response.content.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+        if has_recent_runs_table(html):
+            return html, True
+        if first_decoded is None:
+            first_decoded = html
+    # Preserve the page for missing-table diagnostics without caching it as a result page.
+    if first_decoded is None:
+        first_decoded = response.content.decode("utf-8", errors="replace")
+    return first_decoded, False
+
+
 def fetch_horse_html(horse_id: str, force_refresh: bool = False) -> str:
     cache_path = get_horse_cache_path(horse_id)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     if cache_path.exists() and not force_refresh:
-        html = cache_path.read_text(encoding="utf-8")
+        try:
+            html = cache_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            html = ""
         if has_recent_runs_table(html):
             return html
         warnings.warn(
@@ -53,9 +79,9 @@ def fetch_horse_html(horse_id: str, force_refresh: bool = False) -> str:
     except requests.RequestException as exc:
         raise RuntimeError(f"failed to fetch netkeiba horse page: {horse_id}") from exc
 
-    response.encoding = DB_NETKEIBA_ENCODING
-    html = response.text
-    cache_path.write_text(html, encoding="utf-8")
+    html, has_results = _decode_horse_result_page(response)
+    if has_results:
+        cache_path.write_text(html, encoding="utf-8")
     return html
 
 

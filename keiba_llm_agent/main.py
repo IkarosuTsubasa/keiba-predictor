@@ -73,6 +73,7 @@ from keiba_llm_agent.pedigree.pedigree_analyzer import (
     get_pedigree_cache_path,
 )
 from keiba_llm_agent.pedigree.pedigree_parser import parse_pedigree_info
+from keiba_llm_agent.scoring.recent_run_scorer import is_debut_race
 from keiba_llm_agent.daily.daily_summary_generator import (
     generate_daily_report,
     generate_daily_social_post,
@@ -806,8 +807,6 @@ def run_predict_race(
         race_data = fetch_and_parse_netkeiba_race(url, force_refresh=force_refresh)
     resolved_scoring_profile = _resolve_scoring_profile_for_race(race_data, scoring_profile)
     warning_messages: list[str] = []
-    if not race_data.horses:
-        warning_messages.append("no horses parsed from shutuba HTML")
     if race_data.horses:
         with _prediction_stage("enrich_recent_runs"):
             race_data = enrich_race_data_with_recent_runs(
@@ -815,7 +814,20 @@ def run_predict_race(
                 limit=recent_run_limit,
                 force_refresh=force_refresh,
             )
-        if all(not horse.recent_runs for horse in race_data.horses):
+    with _prediction_stage("validate_recent_runs"):
+        race_info = race_data.race_info
+        if not race_data.horses:
+            raise RuntimeError(f"empty_race_card: race_id={race_info.race_id}")
+        has_history = any(
+            run.finish is not None and run.finish > 0
+            for horse in race_data.horses
+            for run in horse.recent_runs
+        )
+        if not has_history and not (is_debut_race(race_info) or race_info.race_class == "\u65b0\u99ac"):
+            raise RuntimeError(
+                f"no_valid_recent_runs: race_id={race_info.race_id} runners={len(race_data.horses)}"
+            )
+        if not any(horse.recent_runs for horse in race_data.horses):
             warning_messages.append("recent_runs are empty for all horses")
     for warning_message in warning_messages:
         warnings.warn(warning_message, stacklevel=2)

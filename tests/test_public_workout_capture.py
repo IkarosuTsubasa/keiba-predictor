@@ -156,6 +156,7 @@ class PublicWorkoutCaptureTests(unittest.TestCase):
 
     def test_online_entrypoints_capture_and_dry_run_does_not(self):
         data = race()
+        data.race_info.race_class = "\u65b0\u99ac"
         saved = self.root / "race.json"
         observation = {"status": "restricted", "used_for_scoring": False}
         with (patch.object(main, "fetch_and_parse_netkeiba_race", return_value=data),

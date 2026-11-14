@@ -19,6 +19,7 @@ from keiba_llm_agent.fetchers import netkeiba_fetcher, netkeiba_horse_fetcher
 from keiba_llm_agent.parsers.netkeiba_race_parser import parse_netkeiba_shutuba_html
 from keiba_llm_agent.scoring import recent_run_scorer
 from tests.test_netkeiba_fetcher import FakeResponse
+from tests.test_netkeiba_horse_fetcher import horse_response
 
 RACE_ID = "202644102601"
 URL = "https://nar.netkeiba.com/race/shutuba.html?race_id=" + RACE_ID
@@ -57,7 +58,7 @@ class LocalPipelineIsolationTests(unittest.TestCase):
             if url == URL:
                 return FakeResponse(local_html())
             if url.startswith("https://db.netkeiba.com/horse/result/"):
-                return FakeResponse(horse_html)
+                return horse_response(horse_html)
             raise AssertionError("Unexpected network request: " + url)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from keiba_llm_agent.backtest.audit_snapshot import read_backtest_audit_payload
 from keiba_llm_agent import main as main_module
 from keiba_llm_agent.fetchers import netkeiba_fetcher, netkeiba_result_fetcher
-from keiba_llm_agent.schemas.race_data import RaceData, RecentRun
+from keiba_llm_agent.schemas.race_data import HorseEntry, RaceData, RecentRun
 from keiba_llm_agent.schemas.result import ResultData
 
 
@@ -103,6 +103,57 @@ class PipelineCommandTests(unittest.TestCase):
         for active_patch in reversed(self.patches):
             active_patch.stop()
         self.temp_dir.cleanup()
+
+    def test_predict_race_blocks_non_debut_races_with_no_valid_history(self) -> None:
+        old_prediction = self.predictions_dir / "sample_001.json"
+        old_prediction.write_text('{"existing": true}', encoding="utf-8")
+        for scope, surface in (("central_turf", "\u829d"), ("central_dirt", "\u30c0\u30fc\u30c8"),
+                               ("local", "\u30c0\u30fc\u30c8")):
+            for runs in ([], [RecentRun(date="2026-05-01")], [RecentRun(date="2026-05-01", finish=0)]):
+                race = RaceData(
+                    race_info=SAMPLE_RACE_DATA.race_info.model_copy(update={
+                        "scope_key": scope, "surface": surface, "race_name": "1\u52dd\u30af\u30e9\u30b9",
+                    }),
+                    horses=[HorseEntry(horse_no=1, horse_name="sample", recent_runs=runs)],
+                )
+                with (self.subTest(scope=scope, runs=runs),
+                      patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=race),
+                      patch.object(main_module, "enrich_race_data_with_recent_runs", return_value=race),
+                      patch.object(main_module, "run_analysis") as analyze,
+                      patch.object(main_module, "save_race_data") as save,
+                      patch.object(main_module, "_capture_prediction_supplements") as capture):
+                    with self.assertRaisesRegex(RuntimeError, "no_valid_recent_runs: race_id=sample_001"):
+                        main_module.run_predict_race(PREDICT_URL, lessons_path=self.lessons_path)
+                    analyze.assert_not_called()
+                    save.assert_not_called()
+                    capture.assert_not_called()
+        self.assertEqual(old_prediction.read_text(encoding="utf-8"), '{"existing": true}')
+        self.assertEqual(list(self.backtest_audit_dir.iterdir()), [])
+
+    def test_predict_race_blocks_empty_race_card(self) -> None:
+        race = SAMPLE_RACE_DATA.model_copy(update={"horses": []})
+        with (patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=race),
+              patch.object(main_module, "run_analysis") as analyze):
+            with self.assertRaisesRegex(RuntimeError, "empty_race_card"):
+                main_module.run_predict_race(PREDICT_URL, lessons_path=self.lessons_path)
+        analyze.assert_not_called()
+
+    def test_predict_race_allows_debut_and_partially_available_history(self) -> None:
+        for name, race_class, finish in (("2\u6b73\u65b0\u99ac", None, None), ("sample", "\u65b0\u99ac", None),
+                                         ("1\u52dd\u30af\u30e9\u30b9", None, 2)):
+            race = RaceData(
+                race_info=SAMPLE_RACE_DATA.race_info.model_copy(update={"race_name": name, "race_class": race_class}),
+                horses=[HorseEntry(horse_no=1, horse_name="sample1",
+                                   recent_runs=[RecentRun(date="2026-05-01", finish=finish)] if finish else []),
+                        HorseEntry(horse_no=2, horse_name="sample2")],
+            )
+            with (self.subTest(name=name, race_class=race_class),
+                  patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=race),
+                  patch.object(main_module, "enrich_race_data_with_recent_runs", return_value=race),
+                  patch.object(main_module, "_capture_prediction_supplements"),
+                  patch.object(main_module, "run_analysis", return_value=(None, self.predictions_dir / "sample_001.json")) as analyze):
+                main_module.run_predict_race(PREDICT_URL, lessons_path=self.lessons_path, skip_social=True)
+                analyze.assert_called_once()
 
     def test_predict_race_default_skips_report_and_keeps_social(self) -> None:
         enriched = _enriched_race_data()

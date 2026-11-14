@@ -123,7 +123,10 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
                 source="local",
                 scope_key="local",
             ),
-            horses=[],
+            horses=[
+                HorseEntry(horse_no=1, horse_name="sample",
+                           recent_runs=[RecentRun(date="2026-06-01", finish=2)])
+            ],
         )
         captured = {}
 
@@ -136,7 +139,7 @@ class AnalyzeUrlCommandTests(unittest.TestCase):
 
         with patch.object(main_module, "fetch_and_parse_netkeiba_race", return_value=local_race_data), patch.object(
             main_module, "run_analysis", side_effect=fake_run_analysis
-        ):
+        ), patch.object(main_module, "enrich_race_data_with_recent_runs", return_value=local_race_data):
             result = main_module.run_predict_race(
                 "https://nar.netkeiba.com/race/shutuba.html?race_id=202644031102",
                 skip_report=True,

@@ -63,7 +63,8 @@ class PedigreeParserTests(unittest.TestCase):
         pedigree_html = PEDIGREE_FIXTURE_PATH.read_text(encoding="utf-8")
         initial = parse_pedigree_info(horse_html, horse_id="2021104073", horse_name="サンプルホース")
         self.assertIsNone(initial.sire)
-        with patch("keiba_llm_agent.main.fetch_pedigree_html", return_value=pedigree_html):
+        with (patch("keiba_llm_agent.main.fetch_horse_html", return_value=horse_html),
+              patch("keiba_llm_agent.main.fetch_pedigree_html", return_value=pedigree_html)):
             result = main_module.run_parse_pedigree("2021104073", horse_name="サンプルホース")
         self.assertEqual(result["sire"], "ハーツクライ")
         self.assertEqual(result["dam"], "サンプル母")
