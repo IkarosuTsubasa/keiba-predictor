@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/custom_prediction.dart';
-import '../services/custom_prediction_access.dart';
 import '../services/custom_prediction_service.dart';
 import '../services/custom_prediction_settings.dart';
 import 'custom_prediction_settings_screen.dart';
@@ -13,18 +12,12 @@ class CustomPredictionScreen extends StatefulWidget {
   const CustomPredictionScreen({
     this.dataSource,
     this.settingsStore,
-    this.accessStore,
-    this.rewardedGateway,
-    this.now,
     this.calculationDuration,
     super.key,
   });
 
   final CustomPredictionDataSource? dataSource;
   final CustomPredictionSettingsStore? settingsStore;
-  final CustomPredictionAccessStore? accessStore;
-  final CustomPredictionRewardedGateway? rewardedGateway;
-  final DateTime Function()? now;
   final Duration Function()? calculationDuration;
 
   @override
@@ -32,7 +25,7 @@ class CustomPredictionScreen extends StatefulWidget {
 }
 
 class _CustomPredictionScreenState extends State<CustomPredictionScreen>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   static const _navy = Color(0xFF07111F);
   static const _accent = Color(0xFF0D6E6E);
   static const _muted = Color(0xFF66746F);
@@ -48,9 +41,6 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   late final CustomPredictionDataSource _dataSource;
   late final CustomPredictionSettingsStore _settingsStore;
-  late final CustomPredictionAccessStore _accessStore;
-  late final CustomPredictionRewardedGateway _rewardedGateway;
-  late final DateTime Function() _now;
   late final Duration Function() _calculationDuration;
   final math.Random _random = math.Random();
   CustomPredictionParameters _parameters = const CustomPredictionParameters();
@@ -59,17 +49,13 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   String? _selectedRaceId;
   String? _errorMessage;
   bool _settingsLoading = true;
-  bool _accessLoading = true;
   bool _configured = false;
   bool _loading = false;
-  bool _unlocking = false;
   bool _calculatingPrediction = false;
   int _calculationPhase = 0;
   int _calculationSerial = 0;
   int _lastCalculationMessageSetIndex = -1;
   List<String> _activeCalculationMessages = _calculationMessageSets.first;
-  DateTime? _unlockedUntil;
-  Timer? _accessExpiryTimer;
   Timer? _calculationPhaseTimer;
   Timer? _calculationCompleteTimer;
   late final AnimationController _calculationProgressController;
@@ -78,14 +64,9 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _dataSource = widget.dataSource ?? const CustomPredictionService();
     _settingsStore =
         widget.settingsStore ?? CustomPredictionSettingsRepository();
-    _accessStore = widget.accessStore ?? CustomPredictionAccessRepository();
-    _rewardedGateway =
-        widget.rewardedGateway ?? GoogleCustomPredictionRewardedGateway();
-    _now = widget.now ?? DateTime.now;
     _calculationDuration =
         widget.calculationDuration ??
         () => Duration(milliseconds: 3000 + _random.nextInt(2001));
@@ -95,34 +76,17 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _accessExpiryTimer?.cancel();
     _cancelPredictionCalculation();
     _calculationProgressController.dispose();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _refreshAccessState();
-    }
-  }
-
   Future<void> _initialize() async {
-    final settingsFuture = _settingsStore.load();
-    final accessFuture = _accessStore.loadUnlockedUntil();
     CustomPredictionSettingsSnapshot? savedSettings;
-    DateTime? unlockedUntil;
     try {
-      savedSettings = await settingsFuture;
+      savedSettings = await _settingsStore.load();
     } catch (_) {
       savedSettings = null;
-    }
-    try {
-      unlockedUntil = await accessFuture;
-    } catch (_) {
-      unlockedUntil = null;
     }
     if (!mounted) return;
     setState(() {
@@ -130,122 +94,14 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
           savedSettings?.parameters ?? const CustomPredictionParameters();
       _configured = savedSettings?.isConfigured ?? false;
       _settingsLoading = false;
-      _unlockedUntil = unlockedUntil?.toUtc();
-      _accessLoading = false;
     });
-    _scheduleAccessExpiry();
-    if (_configured && _hasAccess) {
+    if (_configured) {
       await _loadDay();
     }
-  }
-
-  bool get _hasAccess {
-    if (_accessLoading) return false;
-    final unlockedUntil = _unlockedUntil;
-    return unlockedUntil != null && unlockedUntil.isAfter(_now().toUtc());
-  }
-
-  String get _accessUntilLabel {
-    final local = _unlockedUntil?.toLocal();
-    if (local == null) return '';
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '$hour:$minuteまで利用できます';
-  }
-
-  void _scheduleAccessExpiry() {
-    _accessExpiryTimer?.cancel();
-    final unlockedUntil = _unlockedUntil;
-    if (unlockedUntil == null) return;
-    final remaining = unlockedUntil.difference(_now().toUtc());
-    if (remaining <= Duration.zero) {
-      _expireAccess();
-      return;
-    }
-    _accessExpiryTimer = Timer(remaining, _expireAccess);
-  }
-
-  void _refreshAccessState() {
-    if (!mounted) return;
-    final unlockedUntil = _unlockedUntil;
-    if (unlockedUntil == null) return;
-    if (!unlockedUntil.isAfter(_now().toUtc())) {
-      _expireAccess();
-      return;
-    }
-    _scheduleAccessExpiry();
-    setState(() {});
-  }
-
-  void _expireAccess() {
-    if (!mounted) return;
-    _accessExpiryTimer?.cancel();
-    _cancelPredictionCalculation();
-    _requestSerial += 1;
-    setState(() {
-      _unlockedUntil = null;
-      _day = null;
-      _selectedCourse = null;
-      _selectedRaceId = null;
-      _errorMessage = null;
-      _loading = false;
-      _calculatingPrediction = false;
-    });
-  }
-
-  Future<void> _unlockWithRewardedAd() async {
-    if (_unlocking || _hasAccess) return;
-    setState(() => _unlocking = true);
-    CustomPredictionRewardResult result;
-    try {
-      result = await _rewardedGateway.showRewardedAd();
-    } catch (_) {
-      result = CustomPredictionRewardResult.failed;
-    }
-    if (!mounted) return;
-
-    if (result == CustomPredictionRewardResult.rewarded) {
-      final unlockedUntil = _now().toUtc().add(const Duration(hours: 1));
-      try {
-        await _accessStore.saveUnlockedUntil(unlockedUntil);
-      } catch (_) {
-        // 保存に失敗しても、現在のセッションでは獲得した権利を有効にする。
-      }
-      if (!mounted) return;
-      setState(() {
-        _unlockedUntil = unlockedUntil;
-        _unlocking = false;
-      });
-      _scheduleAccessExpiry();
-      _showMessage('My予測が解放されました。1時間自由にお楽しみください。');
-      await _loadDay();
-      return;
-    }
-
-    setState(() => _unlocking = false);
-    switch (result) {
-      case CustomPredictionRewardResult.dismissed:
-        _showMessage('最後まで視聴すると、My予測を1時間解放できます。');
-        break;
-      case CustomPredictionRewardResult.unavailable:
-        _showMessage('現在、動画を準備できません。しばらくしてからお試しください。');
-        break;
-      case CustomPredictionRewardResult.failed:
-        _showMessage('動画を読み込めませんでした。もう一度お試しください。');
-        break;
-      case CustomPredictionRewardResult.rewarded:
-        break;
-    }
-  }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _loadDay() async {
-    if (!_configured || !_hasAccess) return;
+    if (!_configured) return;
     _cancelPredictionCalculation();
     final requestSerial = ++_requestSerial;
     setState(() {
@@ -430,7 +286,7 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
   Widget build(BuildContext context) {
     return RefreshIndicator(
       color: _accent,
-      onRefresh: _configured && _hasAccess ? _loadDay : () async {},
+      onRefresh: _loadDay,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
@@ -440,16 +296,14 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
             child: Column(
               children: [
-                if (_settingsLoading || _accessLoading)
+                if (_settingsLoading)
                   _buildSettingsLoadingCard()
                 else if (!_configured)
                   _buildSetupCard()
                 else ...[
                   _buildSavedSettingsCard(),
                   const SizedBox(height: 14),
-                  if (!_hasAccess)
-                    _buildLockedAccessCard()
-                  else if (_loading)
+                  if (_loading)
                     _buildLoadingCard()
                   else if (_errorMessage != null)
                     _buildErrorCard()
@@ -622,23 +476,21 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
               children: [
                 const _FeatureIcon(icon: Icons.auto_awesome_rounded),
                 const SizedBox(width: 12),
-                Expanded(
+                const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _hasAccess ? 'あなたの予測スタイル' : '予測スタイルを保存済み',
-                        style: const TextStyle(
+                        'あなたの予測スタイル',
+                        style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Text(
-                        _hasAccess
-                            ? _accessUntilLabel
-                            : '保存した基準は、次の予測にもそのまま使えます',
-                        style: const TextStyle(color: _muted, fontSize: 12),
+                        '保存した基準は、次の予測にもそのまま使えます',
+                        style: TextStyle(color: _muted, fontSize: 12),
                       ),
                     ],
                   ),
@@ -702,75 +554,6 @@ class _CustomPredictionScreenState extends State<CustomPredictionScreen>
                     ),
                   ],
                 ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLockedAccessCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                _FeatureIcon(icon: Icons.play_circle_outline_rounded),
-                SizedBox(width: 12),
-                _StatusPill(label: '1時間フリー'),
-              ],
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'My予測を解放する',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 9),
-            const Text(
-              '動画を最後まで見ると、1時間、気になるレースを自分の基準で何度でも予測できます。',
-              style: TextStyle(color: _muted, fontSize: 14, height: 1.55),
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const Key('unlock-custom-prediction'),
-                onPressed: _unlocking ? null : _unlockWithRewardedAd,
-                icon: _unlocking
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.play_arrow_rounded),
-                label: Text(
-                  _unlocking ? '動画を準備中' : '動画を見てMy予測を解放',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _accent,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: const Color(0xFF6AA5A1),
-                  disabledForegroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(50),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Center(
-              child: Text(
-                '保存した予測バランスはそのまま残ります',
-                style: TextStyle(color: _muted, fontSize: 11),
               ),
             ),
           ],

@@ -1,3 +1,2 @@
 #include "Keiba.xcconfig"
 #include "Generated.xcconfig"
-KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID = ca-app-pub-3940256099942544/1712485313

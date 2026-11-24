@@ -35,15 +35,10 @@ val releaseBaseWebUrl = "https://www.ikaimo-ai.com/keiba"
 val googleTestAdmobAppId = "ca-app-pub-3940256099942544~3347511713"
 val googleTestBannerAdUnitId = "ca-app-pub-3940256099942544/9214589741"
 val googleTestNativeAdUnitId = "ca-app-pub-3940256099942544/2247696110"
-val googleTestRewardedAdUnitId = "ca-app-pub-3940256099942544/5224354917"
-val productionCustomPredictionRewardedAdUnitId = "ca-app-pub-2154555054261960/3052858105"
 val admobAppId = localProperty("KEIBA_ADMOB_APP_ID") ?: googleTestAdmobAppId
 val debugBaseWebUrl = localProperty("KEIBA_DEBUG_BASE_WEB_URL") ?: "http://10.0.2.2:8000/keiba"
 val bannerAdUnitId = localProperty("KEIBA_BANNER_AD_UNIT_ID") ?: googleTestBannerAdUnitId
 val nativeMoreAdUnitId = localProperty("KEIBA_NATIVE_MORE_AD_UNIT_ID") ?: googleTestNativeAdUnitId
-val customPredictionRewardedAdUnitId =
-    localProperty("KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID")
-        ?: productionCustomPredictionRewardedAdUnitId
 val fcmTopic = localProperty("KEIBA_FCM_TOPIC") ?: "keiba-public-updates"
 val fcmCentralTopic = localProperty("KEIBA_FCM_CENTRAL_TOPIC") ?: "$fcmTopic-central"
 val fcmLocalTopic = localProperty("KEIBA_FCM_LOCAL_TOPIC") ?: "$fcmTopic-local"
@@ -57,9 +52,6 @@ val validateReleaseConfiguration =
             if (admobAppId == googleTestAdmobAppId) problems += "KEIBA_ADMOB_APP_ID is missing."
             if (bannerAdUnitId == googleTestBannerAdUnitId) problems += "KEIBA_BANNER_AD_UNIT_ID is missing."
             if (nativeMoreAdUnitId == googleTestNativeAdUnitId) problems += "KEIBA_NATIVE_MORE_AD_UNIT_ID is missing."
-            if (customPredictionRewardedAdUnitId == googleTestRewardedAdUnitId) {
-                problems += "KEIBA_CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID is missing."
-            }
             if (signingPropertiesFile == null) problems += "key.properties for the existing Play signing key is missing."
             if (problems.isNotEmpty()) throw GradleException(problems.joinToString("\n"))
         }
@@ -92,11 +84,6 @@ android {
         buildConfigField("String", "BASE_WEB_URL", quoted(releaseBaseWebUrl))
         buildConfigField("String", "BANNER_AD_UNIT_ID", quoted(bannerAdUnitId))
         buildConfigField("String", "NATIVE_MORE_AD_UNIT_ID", quoted(nativeMoreAdUnitId))
-        buildConfigField(
-            "String",
-            "CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID",
-            quoted(customPredictionRewardedAdUnitId),
-        )
         buildConfigField("String", "FCM_TOPIC", quoted(fcmTopic))
         buildConfigField("String", "FCM_CENTRAL_TOPIC", quoted(fcmCentralTopic))
         buildConfigField("String", "FCM_LOCAL_TOPIC", quoted(fcmLocalTopic))
@@ -129,11 +116,6 @@ android {
                 "String",
                 "NATIVE_MORE_AD_UNIT_ID",
                 quoted(googleTestNativeAdUnitId),
-            )
-            buildConfigField(
-                "String",
-                "CUSTOM_PREDICTION_REWARDED_AD_UNIT_ID",
-                quoted(googleTestRewardedAdUnitId),
             )
             manifestPlaceholders["admobAppId"] = googleTestAdmobAppId
             manifestPlaceholders["usesCleartextTraffic"] = "true"

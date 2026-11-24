@@ -2,19 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ikaimo_keiba/src/models/custom_prediction.dart';
 import 'package:ikaimo_keiba/src/screens/custom_prediction_screen.dart';
-import 'package:ikaimo_keiba/src/services/custom_prediction_access.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_service.dart';
 import 'package:ikaimo_keiba/src/services/custom_prediction_settings.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  final now = DateTime.utc(2026, 7, 20, 12);
-
-  String accessUntilLabel(DateTime value) {
-    final local = value.toLocal();
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '${local.hour}:$minuteまで利用できます';
-  }
-
   testWidgets('My予測页面只显示保存参数后的结果', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -29,10 +21,6 @@ void main() {
               isConfigured: true,
               parameters: const CustomPredictionParameters(abilityLevel: 2),
             ),
-            accessStore: _MemoryAccessStore(
-              unlockedUntil: now.add(const Duration(hours: 1)),
-            ),
-            now: () => now,
           ),
         ),
       ),
@@ -40,10 +28,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('あなたの予測スタイル'), findsOneWidget);
-    expect(
-      find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('unlock-custom-prediction')), findsNothing);
     expect(find.text('自分の読みを\n勝負の印へ'), findsOneWidget);
     expect(find.text('設定を変更'), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
@@ -74,10 +59,6 @@ void main() {
           body: CustomPredictionScreen(
             dataSource: dataSource,
             settingsStore: settingsStore,
-            accessStore: _MemoryAccessStore(
-              unlockedUntil: now.add(const Duration(hours: 1)),
-            ),
-            now: () => now,
           ),
         ),
       ),
@@ -118,10 +99,6 @@ void main() {
           body: CustomPredictionScreen(
             dataSource: _EmptyDataSource(),
             settingsStore: _MemorySettingsStore(isConfigured: true),
-            accessStore: _MemoryAccessStore(
-              unlockedUntil: now.add(const Duration(hours: 1)),
-            ),
-            now: () => now,
           ),
         ),
       ),
@@ -137,43 +114,39 @@ void main() {
     expect(find.text('レース情報を更新'), findsOneWidget);
   });
 
-  testWidgets('リワード獲得後に1時間解锁并开始获取预测', (tester) async {
+  testWidgets('旧版广告已过期时仍可直接使用保存的预测设置', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final dataSource = _FakeDataSource();
-    final accessStore = _MemoryAccessStore();
+    final preferences = _LegacyPreferences({
+      'custom_prediction.configured': true,
+      'custom_prediction.ability_level': 2,
+      'custom_prediction.rewarded_access_until_epoch_ms': 1,
+    });
+    final settingsStore = CustomPredictionSettingsRepository(
+      preferences: preferences,
+    );
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CustomPredictionScreen(
             dataSource: dataSource,
-            settingsStore: _MemorySettingsStore(isConfigured: true),
-            accessStore: accessStore,
-            rewardedGateway: const _FakeRewardedGateway(
-              CustomPredictionRewardResult.rewarded,
-            ),
-            now: () => now,
+            settingsStore: settingsStore,
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('動画を見てMy予測を解放'), findsOneWidget);
-    expect(find.text('My予測の結論'), findsNothing);
-    expect(dataSource.fetchCount, 0);
-
-    await tester.tap(find.text('動画を見てMy予測を解放'));
-    await tester.pumpAndSettle();
-
-    expect(accessStore.unlockedUntil, now.add(const Duration(hours: 1)));
-    expect(
-      find.text(accessUntilLabel(now.add(const Duration(hours: 1)))),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('unlock-custom-prediction')), findsNothing);
     expect(find.text('My予測の結論'), findsOneWidget);
     expect(dataSource.fetchCount, 1);
+    final savedSettings = await settingsStore.load();
+    expect(savedSettings.parameters.abilityLevel, 2);
+
+    await tester.pump(const Duration(hours: 1, minutes: 1));
+    expect(find.text('My予測の結論'), findsOneWidget);
   });
 
   testWidgets('レース选择后分阶段演算并在完成后显示对应结果', (tester) async {
@@ -186,10 +159,6 @@ void main() {
           body: CustomPredictionScreen(
             dataSource: _FakeDataSource(),
             settingsStore: _MemorySettingsStore(isConfigured: true),
-            accessStore: _MemoryAccessStore(
-              unlockedUntil: now.add(const Duration(hours: 1)),
-            ),
-            now: () => now,
             calculationDuration: () => const Duration(seconds: 4),
           ),
         ),
@@ -232,38 +201,6 @@ void main() {
     expect(find.text('あなたの読みを反映中'), findsNothing);
     expect(find.text('My予測の結論'), findsOneWidget);
     expect(find.text('ホースC'), findsOneWidget);
-  });
-
-  testWidgets('動画を途中で閉じた場合はアクセスを付与しない', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(430, 1100));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final dataSource = _FakeDataSource();
-    final accessStore = _MemoryAccessStore();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CustomPredictionScreen(
-            dataSource: dataSource,
-            settingsStore: _MemorySettingsStore(isConfigured: true),
-            accessStore: accessStore,
-            rewardedGateway: const _FakeRewardedGateway(
-              CustomPredictionRewardResult.dismissed,
-            ),
-            now: () => now,
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('動画を見てMy予測を解放'));
-    await tester.pumpAndSettle();
-
-    expect(accessStore.unlockedUntil, isNull);
-    expect(dataSource.fetchCount, 0);
-    expect(find.text('最後まで視聴すると、My予測を1時間解放できます。'), findsOneWidget);
-    expect(find.text('動画を見てMy予測を解放'), findsOneWidget);
   });
 }
 
@@ -383,25 +320,14 @@ class _EmptyDataSource implements CustomPredictionDataSource {
   }
 }
 
-class _MemoryAccessStore implements CustomPredictionAccessStore {
-  _MemoryAccessStore({this.unlockedUntil});
+class _LegacyPreferences extends Fake implements SharedPreferencesAsync {
+  _LegacyPreferences(this.values);
 
-  DateTime? unlockedUntil;
-
-  @override
-  Future<DateTime?> loadUnlockedUntil() async => unlockedUntil;
+  final Map<String, Object> values;
 
   @override
-  Future<void> saveUnlockedUntil(DateTime value) async {
-    unlockedUntil = value;
-  }
-}
-
-class _FakeRewardedGateway implements CustomPredictionRewardedGateway {
-  const _FakeRewardedGateway(this.result);
-
-  final CustomPredictionRewardResult result;
+  Future<bool?> getBool(String key) async => values[key] as bool?;
 
   @override
-  Future<CustomPredictionRewardResult> showRewardedAd() async => result;
+  Future<int?> getInt(String key) async => values[key] as int?;
 }
